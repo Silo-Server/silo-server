@@ -238,6 +238,10 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
+type sessionExpirationHookAdder interface {
+	AddExpirationHook(func(*playback.Session))
+}
+
 // PlaybackSessionSyncer flushes the in-memory native-session snapshot into the
 // shared admin live-session table (playback_sessions_sync). Without it, compat
 // session starts and stops only become visible on the periodic reconciler
@@ -1087,6 +1091,9 @@ func NewPlaybackHandler(
 			SegmentRetentionSeconds: h.segmentRetentionSeconds(),
 		}
 	}
+	h.tm.StartThrottler = func(ctx context.Context, session *playback.TranscodeSession) {
+		playback.StartConfiguredTranscodeThrottler(ctx, h.SettingsRepo, session)
+	}
 	if reg, ok := sessionMgr.(interface {
 		GetSession(string) (*playback.Session, error)
 		RegisterReconstructed(*playback.Session) *playback.Session
@@ -1121,7 +1128,18 @@ func NewPlaybackHandler(
 			_ = h.sessionMgr.StopSession(sessionID)
 		}
 	}
+	if adder, ok := sessionMgr.(sessionExpirationHookAdder); ok {
+		adder.AddExpirationHook(h.handleExpiredSession)
+	}
 	return h
+}
+
+func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
+	if h == nil || h.tm == nil || session == nil {
+		return
+	}
+	sessionCopy := *session
+	go h.tm.CloseTranscodeSession(sessionCopy.ID, sessionCopy.TranscodeNodeURL)
 }
 
 func (h *PlaybackHandler) segmentRetentionSeconds() int {
@@ -1487,6 +1505,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
 		TotalDuration:       float64(source.Version.Duration),
 		RequireReady:        toneMapRecipe.mode != "",
+		ThrottleSeconds:     playback.ConfiguredTranscodeThrottleSeconds(ctx, h.SettingsRepo),
 	}
 	if playback.IsAudioToAACStereoDownmixV3(reqBody.SourceAudioChannels, reqBody.TargetCodecAudio, reqBody.TargetAudioChannels) {
 		reqBody.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3
@@ -1649,6 +1668,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return err
 	}
+	if err := transcodenode.ValidateThrottleAttestation(reqBody, nodeResponse); err != nil {
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
+	}
 	if reqBody.ToneMapMode != "" && nodeResponse.ToneMapMode != reqBody.ToneMapMode {
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		err := errors.New("remote transcode node did not confirm tone-map mode")
@@ -1713,6 +1736,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SourceAudioChannels: reqBody.SourceAudioChannels,
 		TargetAudioChannels: reqBody.TargetAudioChannels,
 		TotalDuration:       reqBody.TotalDuration,
+		ThrottleSeconds:     reqBody.ThrottleSeconds,
 	}
 	toneMapRecipe.apply(&opts)
 	opts.HWAccel = strings.TrimSpace(nodeResponse.HWAccel)

@@ -120,6 +120,7 @@ type Claims struct {
 	TargetBitrateKbps          int     `json:"tbr,omitempty"`
 	TotalDuration              float64 `json:"dur,omitempty"`
 	FastStart                  bool    `json:"fs,omitempty"`
+	ThrottleSeconds            int     `json:"ths,omitempty"`
 	TargetCodecAudio           string  `json:"tca,omitempty"`
 	TargetAudioChannels        int     `json:"tac,omitempty"`
 	TargetAudioBitrateKbps     int     `json:"tabr,omitempty"`

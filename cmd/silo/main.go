@@ -986,6 +986,7 @@ func main() {
 		}()
 
 		var handler http.Handler
+		var shutdownStandalone func(context.Context) error
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
@@ -1035,11 +1036,12 @@ func main() {
 			// to appCtx so it stops on shutdown.
 			srv.StartOrphanSweeper(appCtx)
 			handler = srv.Handler()
+			shutdownStandalone = srv.Shutdown
 		}
 
 		_ = operationalWriter
 		_ = opsRepo
-		startStandaloneServer(cfg.Server.Listen, handler)
+		startStandaloneServer(cfg.Server.Listen, handler, shutdownStandalone)
 		return
 	}
 
@@ -3238,7 +3240,7 @@ func main() {
 
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
 // It listens on the given address, handles graceful shutdown on SIGTERM/SIGINT.
-func startStandaloneServer(addr string, handler http.Handler) {
+func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(context.Context) error) {
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      handler,
@@ -3269,6 +3271,11 @@ func startStandaloneServer(addr string, handler http.Handler) {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("HTTP shutdown error", "error", err)
+	}
+	if shutdownWork != nil {
+		if err := shutdownWork(shutdownCtx); err != nil {
+			slog.Error("standalone workload shutdown error", "error", err)
+		}
 	}
 	slog.Info("server stopped")
 }

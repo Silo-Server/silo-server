@@ -110,6 +110,7 @@ type RecipeCard struct {
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
 	FastStart                  bool                   `json:"fast_start,omitempty"`
+	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
 }
 
 const playMethodCopyFMP4V1 PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
@@ -203,6 +204,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		TotalDuration:              opts.TotalDuration,
 		FastStart:                  opts.FastStart,
+		ThrottleSeconds:            opts.ThrottleSeconds,
 	}
 }
 
@@ -304,6 +306,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 		NodeType:                   "integrated",
 		ExecutionMode:              "integrated",
 		FFmpegLogSink:              logSink,
@@ -401,6 +404,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 		TargetCodecAudio:           c.TargetCodecAudio,
 		TargetAudioChannels:        targetAudioChannels,
 		TargetAudioBitrateKbps:     c.TargetAudioBitrateKbps,
@@ -488,6 +492,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
+		ThrottleSeconds:            c.ThrottleSeconds,
 	}
 	if c.OriginalStartedAtUnixNano != 0 {
 		card.OriginalStartedAt = time.Unix(0, c.OriginalStartedAtUnixNano).UTC()

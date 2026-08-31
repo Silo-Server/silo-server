@@ -76,6 +76,7 @@ type TranscodeStartRequest struct {
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
 	RequireReady               bool                   `json:"require_ready,omitempty"`
+	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
 }
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
@@ -91,10 +92,14 @@ type TranscodeStartResponse struct {
 	// CopyFMP4RecipeVersion attests the copy-video HLS timestamp and bitstream
 	// recipe. Old nodes omit it and are rejected before their bytes are exposed.
 	CopyFMP4RecipeVersion string `json:"copy_fmp4_recipe_version,omitempty"`
+	// ThrottleSeconds attests that the executor understood and armed the
+	// control plane's resolved forward-buffer policy.
+	ThrottleSeconds int `json:"throttle_seconds,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
 var ErrCopyFMP4RecipeAttestationMismatch = errors.New("transcode node copy-fmp4 recipe attestation mismatch")
+var ErrThrottleAttestationMismatch = errors.New("transcode node throttle attestation mismatch")
 
 func validateAudioRecipeRequest(req TranscodeStartRequest) error {
 	if req.SourceAudioChannels == 0 && req.AudioRecipeVersion == "" {
@@ -144,6 +149,16 @@ func ValidateCopyFMP4RecipeAttestation(req TranscodeStartRequest, response Trans
 	if req.CopyFMP4RecipeVersion != "" && response.CopyFMP4RecipeVersion != req.CopyFMP4RecipeVersion {
 		return fmt.Errorf("%w: got %q, want %q",
 			ErrCopyFMP4RecipeAttestationMismatch, response.CopyFMP4RecipeVersion, req.CopyFMP4RecipeVersion)
+	}
+	return nil
+}
+
+// ValidateThrottleAttestation rejects an executor that silently ignored an
+// enabled throttle policy. Disabled requests remain compatible with older
+// nodes whose response omits the field.
+func ValidateThrottleAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.ThrottleSeconds > 0 && response.ThrottleSeconds != req.ThrottleSeconds {
+		return fmt.Errorf("%w: got %d, want %d", ErrThrottleAttestationMismatch, response.ThrottleSeconds, req.ThrottleSeconds)
 	}
 	return nil
 }
@@ -218,6 +233,11 @@ type Server struct {
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu   sync.RWMutex
 	activeJobs atomic.Int32
+	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
+	// session may register after the shutdown drain has taken its snapshot.
+	shuttingDown bool
+	// startThrottler is a test seam; production falls back to session.StartThrottler.
+	startThrottler func(*playback.TranscodeSession, int)
 
 	// reconstructGroup single-flights node-side session reconstruction per session
 	// id so a post-restart wave of concurrent manifest/segment requests for the same
@@ -420,6 +440,18 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		lastAccess:   make(map[string]time.Time),
 	}
 	return s
+}
+
+func (s *Server) armSessionThrottler(session *playback.TranscodeSession, seconds int) {
+	if session == nil || seconds <= 0 {
+		return
+	}
+	start := s.startThrottler
+	if start == nil {
+		start = func(session *playback.TranscodeSession, seconds int) { session.StartThrottler(seconds) }
+	}
+	session.SetRestartHook(func(context.Context) { start(session, seconds) })
+	start(session, seconds)
 }
 
 // StartOrphanSweeper runs the age-guarded orphan-transcode sweep immediately and
@@ -1312,6 +1344,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session_id and input_path are required", http.StatusBadRequest)
 		return
 	}
+	if req.ThrottleSeconds < 0 {
+		http.Error(w, "throttle_seconds must not be negative", http.StatusBadRequest)
+		return
+	}
 	if err := validateAudioRecipeRequest(req); err != nil {
 		http.Error(w, "invalid audio recipe", http.StatusBadRequest)
 		return
@@ -1401,6 +1437,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	s.reloadMu.RLock()
 	defer s.reloadMu.RUnlock()
+	if s.shuttingDown {
+		http.Error(w, "node is shutting down", http.StatusServiceUnavailable)
+		return
+	}
 	if s.watcher.Config() != cfg {
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
 		return
@@ -1487,6 +1527,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	unlock()
 	s.activeJobs.Add(1)
+	s.armSessionThrottler(session, req.ThrottleSeconds)
 
 	// Track session in Redis off the request path — the API server (and
 	// behind it the playback client) is blocked on this 202, and the
@@ -1514,6 +1555,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ToneMapMode:           session.Opts().ToneMapMode,
 		AudioRecipeVersion:    req.AudioRecipeVersion,
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
+		ThrottleSeconds:       req.ThrottleSeconds,
 	})
 }
 
@@ -1701,6 +1743,9 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	s.reloadMu.RLock()
 	defer s.reloadMu.RUnlock()
+	if s.shuttingDown {
+		return nil, nil
+	}
 	if s.watcher.Config() != cfg {
 		return nil, nil
 	}
@@ -1797,6 +1842,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	s.noteSessionAccessLocked(sessionID)
 	s.mu.Unlock()
 	s.activeJobs.Add(1)
+	s.armSessionThrottler(session, card.ThrottleSeconds)
 
 	trackCtx := context.WithoutCancel(r.Context())
 	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
@@ -1819,6 +1865,45 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		"session", sessionID, "playback_session_id", sessionID,
 		"requested_segment", requestedSegment, "start_segment_number", opts.StartSegmentNumber)
 	return session, nil
+}
+
+// Shutdown prevents new sessions from registering, then closes every session
+// owned by this node. Reconstruction recipes are deliberately retained: after
+// the process restarts, a still-authorized client may rebuild its session.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	if s.shuttingDown {
+		return nil
+	}
+	s.shuttingDown = true
+
+	type victim struct {
+		id      string
+		session *playback.TranscodeSession
+	}
+	s.mu.Lock()
+	victims := make([]victim, 0, len(s.sessions))
+	for id, session := range s.sessions {
+		victims = append(victims, victim{id: id, session: session})
+	}
+	clear(s.sessions)
+	clear(s.lastAccess)
+	s.mu.Unlock()
+
+	var errs []error
+	for _, victim := range victims {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+		}
+		if err := s.closeSessionOffGPU(victim.session); err != nil {
+			errs = append(errs, fmt.Errorf("close session %s: %w", victim.id, err))
+		}
+		if s.tracker != nil {
+			s.tracker.Remove(ctx, victim.id)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // acquireReconstructSlot blocks until a reconstruct slot is free or the request
@@ -1915,7 +2000,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	var manifest []byte
 	var err error
 	if r.URL.Query().Get(playback.SourceTimelineQueryParam) == "1" {
-		manifest, err = session.BuildSourceAlignedPlaybackManifest("segment/", r.URL.RawQuery)
+		manifest, err = session.BuildSourceAlignedPlaybackManifestContext(r.Context(), "segment/", r.URL.RawQuery)
 	} else {
 		manifest, err = session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	}

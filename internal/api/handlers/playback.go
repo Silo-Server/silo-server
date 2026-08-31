@@ -293,8 +293,8 @@ type PlaybackWatchScrobbler interface {
 	ScrobbleStop(ctx context.Context, event watchsync.ScrobbleEvent) error
 }
 
-type sessionExpirationHookSetter interface {
-	SetExpirationHook(func(*playback.Session))
+type sessionExpirationHookAdder interface {
+	AddExpirationHook(func(*playback.Session))
 }
 
 // NewPlaybackHandler creates a new PlaybackHandler backed by the given
@@ -367,8 +367,8 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	}); ok {
 		h.tm.Sessions = reg
 	}
-	if setter, ok := sessionMgr.(sessionExpirationHookSetter); ok {
-		setter.SetExpirationHook(h.handleExpiredSession)
+	if adder, ok := sessionMgr.(sessionExpirationHookAdder); ok {
+		adder.AddExpirationHook(h.handleExpiredSession)
 	}
 	return h
 }
@@ -2034,19 +2034,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 
 // maybeStartThrottler reads throttle settings and starts the throttler if enabled.
 func (h *PlaybackHandler) maybeStartThrottler(ctx context.Context, session *playback.TranscodeSession) {
-	if h.SettingsRepo == nil {
-		return
-	}
-	enableThrottle, _ := h.SettingsRepo.Get(ctx, "enable_transcode_throttle")
-	if enableThrottle != "true" {
-		return
-	}
-	thresholdStr, _ := h.SettingsRepo.Get(ctx, "transcode_throttle_seconds")
-	threshold := 300 // default
-	if v, err := strconv.Atoi(thresholdStr); err == nil && v > 0 {
-		threshold = v
-	}
-	session.StartThrottler(threshold)
+	playback.StartConfiguredTranscodeThrottler(ctx, h.SettingsRepo, session)
 }
 
 // findAlternateFile finds another file version for the same content. It

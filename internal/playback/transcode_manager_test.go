@@ -114,6 +114,27 @@ func TestCloseTranscodeSession_DropsLiveSession(t *testing.T) {
 	}
 }
 
+func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
+	m := NewTranscodeManager()
+	m.RegisterTranscodeSession("s1", &TranscodeSession{})
+	m.RegisterTranscodeSession("s2", &TranscodeSession{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := m.StartShutdownCleanup(ctx)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown cleanup did not finish")
+	}
+	for _, id := range []string{"s1", "s2"} {
+		if got := m.GetTranscodeSession(id); got != nil {
+			t.Fatalf("transcode %q survived shutdown cleanup", id)
+		}
+	}
+}
+
 func TestLoadOrReconstructSession(t *testing.T) {
 	ctx := context.Background()
 

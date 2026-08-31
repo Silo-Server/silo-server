@@ -2427,7 +2427,7 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 		return nil, nil
 	}
 
-	manifest, err := transcodeSession.BuildSourceAlignedPlaybackManifest("", "")
+	manifest, err := transcodeSession.BuildSourceAlignedPlaybackManifestContext(ctx, "", "")
 	if err != nil {
 		h.teardownPlaySession(ctx, playSession, nil, nil)
 		return nil, err
@@ -2676,6 +2676,15 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// Register the exit monitor and persist the reconstruction recipe (shared with
 	// the remote path). On a failed compat-store write roll back this abandoned
 	// transcode rather than leaking it.
+	transcodeSession.SetRestartHook(func(ctx context.Context) {
+		if h.tm.StartThrottler != nil {
+			h.tm.StartThrottler(ctx, transcodeSession)
+		}
+		h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
+	})
+	if h.tm.StartThrottler != nil {
+		h.tm.StartThrottler(ctx, transcodeSession)
+	}
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {

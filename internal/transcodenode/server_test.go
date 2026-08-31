@@ -1321,6 +1321,19 @@ func TestCopyFMP4RecipeCardsFailClosedBeforeNodeReconstruction(t *testing.T) {
 	}
 }
 
+func TestValidateThrottleAttestation(t *testing.T) {
+	request := TranscodeStartRequest{ThrottleSeconds: 180}
+	if err := ValidateThrottleAttestation(request, TranscodeStartResponse{ThrottleSeconds: 180}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateThrottleAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrThrottleAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrThrottleAttestationMismatch)
+	}
+	if err := ValidateThrottleAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("disabled throttle rejected legacy node response: %v", err)
+	}
+}
+
 func TestHandleStartRejectsUnversionedSourceAudioRecipeBeforeExecution(t *testing.T) {
 	server := newTestServer(t)
 	body, err := json.Marshal(TranscodeStartRequest{
@@ -2322,6 +2335,107 @@ func TestHandleStartUsesConfiguredHWDeviceList(t *testing.T) {
 	defer session.CloseProcess()
 	if got := session.Opts().HWDevice; got != "/dev/dri/renderD888" {
 		t.Fatalf("session HWDevice = %q, want one concrete device from the configured list", got)
+	}
+}
+
+func TestHandleStartAndReconstructArmRequestedThrottle(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		reconstruct bool
+	}{
+		{name: "fresh start"},
+		{name: "reconstruct", reconstruct: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+			ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
+			if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+			started := make(chan int, 1)
+			server.startThrottler = func(_ *playback.TranscodeSession, seconds int) { started <- seconds }
+
+			var session *playback.TranscodeSession
+			if test.reconstruct {
+				card := nativeTransportCard("session-1", "transport-1")
+				card.ThrottleSeconds = 180
+				var err error
+				session, err = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), "transport-1", -1, *card)
+				if err != nil {
+					t.Fatalf("spawnReconstruct: %v", err)
+				}
+			} else {
+				body, err := json.Marshal(TranscodeStartRequest{
+					SessionID: "session-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
+					TargetCodecAudio: "aac", SegmentDuration: 2, ThrottleSeconds: 180,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rr := httptest.NewRecorder()
+				server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+				if rr.Code != http.StatusAccepted {
+					t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+				}
+				server.mu.RLock()
+				session = server.sessions["session-1"]
+				server.mu.RUnlock()
+			}
+			if session == nil {
+				t.Fatal("session was not registered")
+			}
+			t.Cleanup(func() { _ = session.CloseProcess() })
+			select {
+			case got := <-started:
+				if got != 180 {
+					t.Fatalf("throttle seconds = %d, want 180", got)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("node did not arm the requested throttle")
+			}
+		})
+	}
+}
+
+func TestShutdownDrainsSessionsAndRejectsNewStarts(t *testing.T) {
+	server := newTestServer(t)
+	for _, id := range []string{"one", "two"} {
+		dir := server.sessionOutputDir(id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		server.sessions[id] = playback.NewTranscodeSessionForTest(dir)
+		server.activeJobs.Add(1)
+	}
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs = %d, want 0", got)
+	}
+	server.mu.RLock()
+	remaining := len(server.sessions)
+	server.mu.RUnlock()
+	if remaining != 0 {
+		t.Fatalf("remaining sessions = %d, want 0", remaining)
+	}
+	for _, id := range []string{"one", "two"} {
+		if _, err := os.Stat(server.sessionOutputDir(id)); !os.IsNotExist(err) {
+			t.Fatalf("session directory %q still exists (err=%v)", id, err)
+		}
+	}
+
+	body, err := json.Marshal(TranscodeStartRequest{SessionID: "late", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", SegmentDuration: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("late start status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
 	}
 }
 

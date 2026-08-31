@@ -1063,6 +1063,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			// from its token/recipe, so the worst case is a wasted rebuild. A shared
 			// active-set source across both managers would remove even that.
 			playback.StartPeriodicOrphanCleanup(deps.AppContext, "api", deps.Config.Playback.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes, playback.OrphanCleanupInterval)
+			playbackHandler.TranscodeManager().StartShutdownCleanup(deps.AppContext)
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer

@@ -113,9 +113,13 @@ type TranscodeOpts struct {
 	TargetBitrateKbps      int     // max video bitrate in kbps; 0 = CRF-only (no cap)
 	TotalDuration          float64 // total media duration in seconds (for VOD manifest)
 	FastStart              bool    // use superfast preset for faster first-segment production
-	NodeType               string
-	ExecutionMode          string
-	FFmpegLogSink          FFmpegLogSink
+	// ThrottleSeconds is the resolved forward-buffer policy for this session.
+	// Zero disables throttling. It is durable so a remote executor can preserve
+	// the API server's policy across node reconstruction without reading settings.
+	ThrottleSeconds int
+	NodeType        string
+	ExecutionMode   string
+	FFmpegLogSink   FFmpegLogSink
 }
 
 // DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
@@ -189,6 +193,13 @@ type TranscodeSession struct {
 	pruneBeforeStart     bool
 	copyDurationMu       sync.Mutex
 	copyDurationIndex    copyManifestDurationIndex
+	copyManifestMu       sync.Mutex
+	copyManifest         []byte
+	copyManifestTimeline manifestTimeline
+	copyManifestStarted  bool
+	copyManifestDone     chan struct{}
+	copyManifestCancel   context.CancelFunc
+	copyManifestProbe    copyVideoKeyframeProbe
 	segmentGeneration    uint64
 	segmentIncarnation   string
 	throttler            *TranscodeThrottler
@@ -1977,16 +1988,37 @@ func stabilizeCopyHLSRemountTimeline(manifest []byte, opts TranscodeOpts) []byte
 // HLS timeline themselves.
 const SourceTimelineQueryParam = "source_timeline"
 
-// BuildSourceAlignedPlaybackManifest builds the normal playback manifest and,
-// when it is a seeked real playlist, prepends a virtual unavailable span so the
-// first produced segment retains its source-time position. Synthetic manifests
-// already cover the full source timeline and need no adjustment.
+// BuildSourceAlignedPlaybackManifest builds a complete keyframe-aligned copy
+// playlist when possible. Otherwise, when it is a seeked real playlist, it
+// prepends a virtual unavailable span so the first produced segment retains its
+// source-time position. Encoded synthetic manifests already cover the source
+// timeline and need no adjustment.
 func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	return s.BuildSourceAlignedPlaybackManifestContext(context.Background(), segPrefix, rawQuery)
+}
+
+// BuildSourceAlignedPlaybackManifestContext is the request-cancellable form of
+// BuildSourceAlignedPlaybackManifest. Compatibility clients need a complete
+// VOD timeline for forward seeking, including while copy-video FFmpeg output is
+// throttled, so copy sessions first try to build it from source keyframes.
+func (s *TranscodeSession) BuildSourceAlignedPlaybackManifestContext(ctx context.Context, segPrefix, rawQuery string) ([]byte, error) {
+	opts := s.Opts()
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") &&
+		CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
+		if manifest := s.completeCopyVideoManifest(); len(manifest) > 0 {
+			return RewriteManifestPaths(manifest, segPrefix, rawQuery)
+		}
+		done := s.startCompleteCopyVideoManifest(ctx, opts)
+		if manifest := s.waitForCompleteCopyVideoManifest(ctx, done); len(manifest) > 0 {
+			return RewriteManifestPaths(manifest, segPrefix, rawQuery)
+		}
+	}
+
 	manifest, err := s.BuildPlaybackManifest(segPrefix, rawQuery)
 	if err != nil {
 		return nil, err
 	}
-	opts := s.Opts()
+	opts = s.Opts()
 	usesRealManifest := strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration)
 	if opts.SeekSeconds <= 0 || !usesRealManifest {
@@ -2629,6 +2661,13 @@ func (s *TranscodeSession) CloseProcess() error {
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	s.StopThrottler()
+	s.copyManifestMu.Lock()
+	cancelCopyManifest := s.copyManifestCancel
+	s.copyManifestCancel = nil
+	s.copyManifestMu.Unlock()
+	if cancelCopyManifest != nil {
+		cancelCopyManifest()
+	}
 	// Cancel the context to kill the process (no mutex needed for cancel).
 	if s.cancel != nil {
 		s.cancel()
@@ -3298,6 +3337,14 @@ func (s *TranscodeSession) SegmentStartTime(segNum int) (float64, bool, error) {
 }
 
 func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline, error) {
+	s.copyManifestMu.Lock()
+	if len(s.copyManifestTimeline.entries) > 0 {
+		timeline := cloneManifestTimeline(s.copyManifestTimeline)
+		s.copyManifestMu.Unlock()
+		return 0, timeline, nil
+	}
+	s.copyManifestMu.Unlock()
+
 	s.mu.Lock()
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
 	baseSeekSeconds := s.opts.SeekSeconds
@@ -3323,6 +3370,13 @@ func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline
 		return 0, manifestTimeline{}, ErrManifestNotReady
 	}
 	return baseSeekSeconds, timeline, nil
+}
+
+func cloneManifestTimeline(timeline manifestTimeline) manifestTimeline {
+	return manifestTimeline{
+		mediaSequence: timeline.mediaSequence,
+		entries:       append([]manifestSegmentEntry(nil), timeline.entries...),
+	}
 }
 
 const copySegmentStartMatchTolerance = 50 * time.Millisecond

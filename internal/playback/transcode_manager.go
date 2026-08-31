@@ -998,6 +998,31 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
 }
 
+// StartShutdownCleanup closes every local transcode when ctx is canceled and
+// returns a channel closed after cleanup finishes.
+func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	if m == nil || ctx == nil {
+		close(done)
+		return done
+	}
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+
+		m.transcodeMu.Lock()
+		transcodes := m.transcodes
+		m.transcodes = make(map[string]*TranscodeSession)
+		m.transcodeMu.Unlock()
+		for _, session := range transcodes {
+			if session != nil {
+				_ = session.Close()
+			}
+		}
+	}()
+	return done
+}
+
 // CloseTranscodeSessionIf tears down a transcode session only when the live map
 // still holds the exact session the caller observed dying (expected). This is
 // the crash path: between a local ffmpeg's error exit and this teardown, a
