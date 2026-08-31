@@ -102,6 +102,13 @@ body:
         - Fully AI-generated, human verified
     validations:
       required: true
+  - type: textarea
+    id: ai-review
+    attributes:
+      label: Independent or adversarial review
+      description: Summarize the scope, method, findings, and resolutions, or enter "n/a" when this issue does not require independent or adversarial review.
+    validations:
+      required: true
   - type: checkboxes
     id: confirmations
     attributes:
