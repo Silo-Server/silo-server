@@ -3,8 +3,10 @@ import type { LibraryCollection } from "@/api/types";
 
 import {
   buildAdminCollectionEditorPath,
+  buildTMDBCollectionSourceInput,
   buildTMDBPresetSourceInput,
   collectionsInAdminScope,
+  parseTMDBCollectionSourceConfig,
   parseTMDBPresetSourceConfig,
   toAdminCollectionBuilderValue,
   toAdminCollectionRequest,
@@ -171,6 +173,72 @@ describe("AdminCollections helpers", () => {
         mode: "tmdb_preset",
         preset: "now_playing",
         media_type: "movie",
+      },
+    });
+  });
+
+  it("parses a TMDB franchise collection source config from source_config or source_url", () => {
+    expect(
+      parseTMDBCollectionSourceConfig({
+        id: "c1",
+        title: "Avengers",
+        library_id: 1,
+        collection_type: "tmdb",
+        source_url: "tmdb://collection/86311",
+        source_config: {
+          mode: "tmdb_collection",
+          collection_id: 86311,
+          limit: 10,
+        },
+        visibility: "visible",
+        featured: false,
+        sort_config: { sort_by: "release_date", sort_order: "asc" },
+        created_at: "",
+        updated_at: "",
+      } as unknown as LibraryCollection),
+    ).toEqual({
+      mode: "tmdb_collection",
+      collectionId: "86311",
+      limit: "10",
+    });
+
+    // Placeholder franchise template created by bundle
+    expect(
+      parseTMDBCollectionSourceConfig({
+        id: "c2",
+        title: "TMDB Franchise",
+        library_id: 1,
+        collection_type: "tmdb",
+        source_url: "tmdb://collection/0",
+        source_config: {
+          mode: "tmdb_collection",
+          collection_id: 0,
+        },
+        visibility: "visible",
+        featured: false,
+        sort_config: { sort_by: "release_date", sort_order: "asc" },
+        created_at: "",
+        updated_at: "",
+      } as unknown as LibraryCollection),
+    ).toEqual({
+      mode: "tmdb_collection",
+      collectionId: "",
+      limit: "",
+    });
+  });
+
+  it("builds a TMDB franchise source input with deterministic URL and config", () => {
+    expect(
+      buildTMDBCollectionSourceInput({
+        collectionId: "86311",
+        limit: "4",
+      }),
+    ).toEqual({
+      source_url: "tmdb://collection/86311",
+      source_config: {
+        mode: "tmdb_collection",
+        collection_id: 86311,
+        limit: 4,
       },
     });
   });
