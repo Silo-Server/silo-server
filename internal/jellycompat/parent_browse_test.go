@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -22,7 +22,7 @@ func (f *fakeSeasonByIDRepo) GetByID(_ context.Context, id string) (*models.Seas
 	if s, ok := f.seasons[id]; ok {
 		return s, nil
 	}
-	return nil, errors.New("season not found")
+	return nil, catalog.ErrSeasonNotFound
 }
 
 // fakeSeasonEpisodeRepo implements episodeRepoForBatchLoader, serving episodes by
