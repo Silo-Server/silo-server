@@ -14,11 +14,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// fieldProductionLocations is the Fields= key for ProductionLocations,
+// shared with query.go's fieldsServedByList.
+const fieldProductionLocations = "productionlocations"
+
 // allDetailFields is a sentinel passed to itemFromList so detail views include all fields.
 var allDetailFields = map[string]bool{
 	"*": true, "overview": true, "genres": true, "premieredate": true,
 	"studios": true, "tags": true, "taglines": true, "etag": true,
-	"sortname": true, "productionlocations": true,
+	"sortname": true, fieldProductionLocations: true,
 	"providerids": true, "externalurls": true, "remotetrailers": true,
 	"datecreated": true, "mediastreams": true, "path": true,
 }
@@ -172,7 +176,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	if allFields || fields["tags"] {
 		dto.Tags = []string{}
 	}
-	if allFields || fields["productionlocations"] {
+	if allFields || fields[fieldProductionLocations] {
 		dto.ProductionLocations = append([]string{}, item.Countries...)
 	}
 	if allFields || fields["mediasourcecount"] {
