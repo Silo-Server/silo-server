@@ -2032,6 +2032,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			for i, dl := range downloaded {
 				streamIndex := baseIndex + i
 				format := subtitleRouteFormat(string(dl.Format))
+				if externalFormat, ok := profile.ExternalSubtitleFormat(string(dl.Format)); ok {
+					format = externalFormat
+				}
 				displayTitle := downloadedSubtitleDisplayTitle(dl)
 				dto.MediaStreams = append(dto.MediaStreams, mediaStreamDTO{
 					Index:                  streamIndex,

@@ -352,6 +352,29 @@ func TestHandlePlaybackInfo_DeliversExternalSRTAsProfileRequestedVTT(t *testing.
 	t.Fatal("external subtitle stream 3 not found")
 }
 
+func TestHandlePlaybackInfo_DeliversDownloadedSRTAsProfileRequestedVTT(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	resp := postPlaybackInfo(t, handler, routeID, `{
+		"SubtitleStreamIndex": 5,
+		"DeviceProfile": {
+			"SubtitleProfiles": [
+				{"Format": "vtt", "Method": "External"}
+			]
+		}
+	}`)
+
+	for _, stream := range resp.MediaSources[0].MediaStreams {
+		if stream.Type != "Subtitle" || stream.Index != 5 {
+			continue
+		}
+		if !strings.Contains(stream.DeliveryURL, "/Subtitles/5/stream.vtt?") {
+			t.Fatalf("DeliveryURL = %q, want VTT subtitle route", stream.DeliveryURL)
+		}
+		return
+	}
+	t.Fatal("downloaded subtitle stream 5 not found")
+}
+
 func TestHandlePlaybackInfo_HonorsSelectedExternalSubtitle(t *testing.T) {
 	handler, routeID := newSubtitleSelectionHandler(t)
 	resp := postPlaybackInfo(t, handler, routeID, `{"SubtitleStreamIndex":3}`)
