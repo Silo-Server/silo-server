@@ -3204,7 +3204,9 @@ func main() {
 			slog.Error("abs compat shutdown error", "error", shutdownErr)
 		}
 	}
-	if err := waitForShutdownWork(shutdownCtx, shutdownWork); err != nil {
+	if err := runShutdownWorkWithTimeout(30*time.Second, func(cleanupCtx context.Context) error {
+		return waitForShutdownWork(cleanupCtx, shutdownWork)
+	}); err != nil {
 		slog.Error("playback cleanup did not finish before shutdown deadline", "error", err)
 	}
 	if stopErr := streamTelemetryRegistry.Stop(shutdownCtx); stopErr != nil {
@@ -3262,6 +3264,17 @@ func waitForShutdownWork(ctx context.Context, work []<-chan struct{}) error {
 	return nil
 }
 
+// runShutdownWorkWithTimeout gives workload cleanup a fresh deadline after the
+// HTTP shutdown phase has consumed its own budget.
+func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context) error) error {
+	if work == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return work(ctx)
+}
+
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
 // It listens on the given address, handles graceful shutdown on SIGTERM/SIGINT.
 func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(context.Context) error) {
@@ -3297,7 +3310,7 @@ func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(
 		slog.Error("HTTP shutdown error", "error", err)
 	}
 	if shutdownWork != nil {
-		if err := shutdownWork(shutdownCtx); err != nil {
+		if err := runShutdownWorkWithTimeout(30*time.Second, shutdownWork); err != nil {
 			slog.Error("standalone workload shutdown error", "error", err)
 		}
 	}

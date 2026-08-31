@@ -98,7 +98,7 @@ type preparedTransportV3 struct {
 	routingEgress      noderouting.Egress
 	routingEgressID    int
 	routingEgressURL   string
-	commit             func()
+	commit             func() *transportErrorV3
 	rollback           func()
 	applySession       func() (func() error, error)
 	afterDurableCommit func()
@@ -1917,6 +1917,10 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to commit the live playback session.", cause: err}
 	}
+	if commitErr := transport.commit(); commitErr != nil {
+		abort()
+		return playback.DecisionResponseV3{}, commitErr
+	}
 	if err := h.PlanStoreV3.SaveAttempt(r.Context(), record); err != nil {
 		transport.rollback()
 		abort()
@@ -1937,7 +1941,6 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		}
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to persist the playback plan.", cause: err}
 	}
-	transport.commit()
 	// Start-side effects belong after both the attempt and transport commits:
 	// retries that lose the idempotency race must not emit duplicate provider
 	// scrobbles or analysis work for the short-lived session they roll back.
@@ -2495,9 +2498,9 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		routingEgress:      routingEgress,
 		routingEgressID:    egressNodeID,
 		routingEgressURL:   egressNodeURL,
-		commit: func() {
+		commit: func() *transportErrorV3 {
 			if committed {
-				return
+				return nil
 			}
 			committed = true
 			h.tm.CloseTranscodeSession(session.ID, "")
@@ -2508,6 +2511,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
 			h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
 			unlock()
+			return nil
 		},
 		rollback: func() {
 			if committed {
@@ -3297,15 +3301,19 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 		routingWorkload:  routingWorkloadV3(result),
 		routingExecution: noderouting.ExecutionAPI,
 		routingEgress:    noderouting.EgressAPI,
-		commit: func() {
+		commit: func() *transportErrorV3 {
 			if committed {
-				return
+				return nil
 			}
 			committed = true
 			previous, accepted := h.tm.SwapTranscodeSession(session.ID, ts)
 			if !accepted {
 				unlock()
-				return
+				return &transportErrorV3{
+					reason:    transcodeStartFailedReasonV3,
+					message:   "The playback transport could not be published during shutdown.",
+					retryable: true,
+				}
 			}
 			// A local transcode is never proxy-served, so an authorized-origins
 			// replan landing here has to revoke the grant it is replacing.
@@ -3325,6 +3333,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			})
 			h.maybeStartThrottler(r.Context(), ts)
 			h.tm.MonitorLocalTranscodeExit(session.ID, ts)
+			return nil
 		},
 		rollback: func() {
 			if committed {
@@ -3525,9 +3534,9 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}
 	return preparedTransportV3{url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
-		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() {
+		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() *transportErrorV3 {
 			if committed {
-				return
+				return nil
 			}
 			committed = true
 			h.tm.CloseTranscodeSession(session.ID, "")
@@ -3538,6 +3547,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 			h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
 			h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
 			unlock()
+			return nil
 		}, rollback: func() {
 			if committed {
 				return
@@ -4068,7 +4078,11 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	}
 	leaseCompleted = true
 	if transport != nil {
-		transport.commit()
+		if commitErr := transport.commit(); commitErr != nil {
+			_ = h.abortPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID)
+			writeError(w, http.StatusServiceUnavailable, commitErr.reason, commitErr.message)
+			return
+		}
 		if transport.afterDurableCommit != nil {
 			transport.afterDurableCommit()
 		}
@@ -4985,7 +4999,7 @@ func reusedHLSTransportV3(session *playback.Session, streamURL string) preparedT
 		transport.hwAccel = session.TranscodeHWAccel
 		transport.toneMapMode = session.ToneMapMode
 	}
-	transport.commit = func() {}
+	transport.commit = func() *transportErrorV3 { return nil }
 	transport.rollback = func() {}
 	return transport
 }

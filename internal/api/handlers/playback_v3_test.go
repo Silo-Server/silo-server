@@ -3649,6 +3649,38 @@ func TestPrepareLocalTransportV3RemuxOmitsToneMapOnlyDolbyVisionEvidence(t *test
 	}
 }
 
+func TestPrepareLocalTransportV3CommitRejectsPublicationDuringShutdown(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	file := v3HandlerFixtureFile(t)
+	plan := &playback.PlanV3{PlanID: "plan:shutdown-race", Delivery: playback.DeliveryTranscodeHLSV3}
+	result := playback.PlannerResultV3{
+		Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetResolution: "720p",
+		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	timeline, timelineErr := handler.prepareTransportTimelineV3(request.Context(), &playback.Session{ID: "session-shutdown-race"}, file, result)
+	if timelineErr != nil {
+		t.Fatalf("prepare timeline: %v", timelineErr)
+	}
+	transport, transportErr := handler.prepareLocalTransportV3(request, &playback.Session{ID: "session-shutdown-race", UserID: 7, ProfileID: "profile-1"}, file, result, timeline, mediaAuthModeV3{})
+	if transportErr != nil {
+		t.Fatalf("prepare local transport: %v", transportErr)
+	}
+	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
+	shutdownDone := handler.tm.StartShutdownCleanup(shutdownCtx)
+	cancelShutdown()
+	<-shutdownDone
+
+	commitErr := transport.commit()
+	if commitErr == nil || commitErr.reason != transcodeStartFailedReasonV3 || !commitErr.retryable {
+		t.Fatalf("commit error = %#v, want retryable transcode start failure", commitErr)
+	}
+	if live := handler.tm.GetTranscodeSession("session-shutdown-race"); live != nil {
+		t.Fatal("rejected transport was published during shutdown")
+	}
+}
+
 func TestHandleStartPlaybackV3SafariDolbyVisionRemuxServesHLSManifest(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	file.FilePath = writePlaybackTestMediaFile(t, "movie-dv8.mkv")
