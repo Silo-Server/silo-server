@@ -164,7 +164,14 @@ export function describePlaybackTransportError(
     };
   }
 
-  if (error.status === 401 || error.status === 403) {
+  if (error.status === 401) {
+    return {
+      title: "Authentication required",
+      message: "Your playback session has expired. Start playback again or sign in to continue.",
+    };
+  }
+
+  if (error.status === 403) {
     return {
       title: "Playback unavailable",
       message: "You do not have permission to play this item.",

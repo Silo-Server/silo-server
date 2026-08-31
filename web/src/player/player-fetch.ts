@@ -57,10 +57,27 @@ export async function playerFetch<T>(
 
   headers["X-Silo-Device-Id"] = config.getDeviceId();
 
-  const res = await fetch(`${config.apiBaseUrl}${path}`, {
+  let res = await fetch(`${config.apiBaseUrl}${path}`, {
     ...options,
     headers,
   });
+
+  if (res.status === 401 && config.refreshToken) {
+    const refreshed = await config.refreshToken();
+    if (refreshed) {
+      const refreshedToken = config.getAccessToken();
+      const refreshedHeaders = { ...headers };
+      if (refreshedToken) {
+        refreshedHeaders["Authorization"] = `Bearer ${refreshedToken}`;
+      } else {
+        delete refreshedHeaders["Authorization"];
+      }
+      res = await fetch(`${config.apiBaseUrl}${path}`, {
+        ...options,
+        headers: refreshedHeaders,
+      });
+    }
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
