@@ -18,7 +18,7 @@ import (
 var allDetailFields = map[string]bool{
 	"*": true, "overview": true, "genres": true, "premieredate": true,
 	"studios": true, "tags": true, "taglines": true, "etag": true,
-	"sortname": true, "productionlocations": true, "criticrating": true,
+	"sortname": true, "productionlocations": true,
 	"providerids": true, "externalurls": true, "remotetrailers": true,
 	"datecreated": true, "mediastreams": true, "path": true,
 }
@@ -174,9 +174,6 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	}
 	if allFields || fields["productionlocations"] {
 		dto.ProductionLocations = append([]string{}, item.Countries...)
-	}
-	if allFields || fields["criticrating"] {
-		dto.CriticRating = item.RatingTMDB
 	}
 	if allFields || fields["mediasourcecount"] {
 		// The list path has no version data, so assume matched playable items
@@ -373,7 +370,6 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 	dto.OriginalTitle = firstNonEmpty(item.OriginalTitle, item.Title)
 	dto.SortName = firstNonEmpty(item.SortTitle, item.OriginalTitle, item.Title)
 	dto.ForcedSortName = dto.SortName
-	dto.CriticRating = item.RatingTMDB
 	dto.Studios = m.namePairs(item.Studios, EncodedIDStudio)
 	dto.ProductionLocations = append([]string{}, item.Countries...)
 	if item.Tagline != "" {
