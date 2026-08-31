@@ -12,7 +12,7 @@ This applies to pull requests and issues written by a person, an agent, or both.
 > of the independent or adversarial review. "No AI used" is a complete answer
 > when it is true.
 
-The pull request template contains this block; copy it into issues that need it:
+The pull request template contains this block; copy it into every issue:
 
 ```md
 ## AI Disclosure
