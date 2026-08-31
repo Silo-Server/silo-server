@@ -20,6 +20,7 @@ Migration, compatibility, security, or operational impact, or "None identified".
 
 ## AI Disclosure
 
+- Harness: exact agent harness or application, or "none"
 - Tool(s): exact tool name(s), or "none"
 - Model(s): exact model identifier(s) reported by each tool, or "n/a"
 - Involvement: Fully AI-generated, human verified | AI-assisted | Human-written, AI-reviewed | No AI used
