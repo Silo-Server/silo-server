@@ -30,7 +30,7 @@ func TestItemListSortNamePrefersSortTitle(t *testing.T) {
 		Type:      "movie",
 		Title:     "The Matrix",
 		SortTitle: "Matrix, The",
-	}, false, nil, map[string]bool{"sortname": true})
+	}, false, nil, map[string]bool{fieldSortName: true})
 	if dto.SortName != "Matrix, The" {
 		t.Fatalf("SortName = %q, want %q", dto.SortName, "Matrix, The")
 	}

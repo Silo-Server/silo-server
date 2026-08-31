@@ -504,7 +504,7 @@ var fieldsServedByList = map[string]struct{}{
 	"overview":            {},
 	"genres":              {},
 	"etag":                {},
-	"sortname":            {},
+	fieldSortName:         {},
 	"studios":             {},
 	"taglines":            {},
 	"tags":                {},

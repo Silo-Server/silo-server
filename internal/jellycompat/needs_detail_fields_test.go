@@ -25,9 +25,9 @@ func TestRequestedFieldsNeedDetail_AllowsBrowseDerivableFields(t *testing.T) {
 		"path",
 		"premieredate",
 		"prefix",
-		"productionlocations",
+		fieldProductionLocations,
 		"productionyear",
-		"sortname",
+		fieldSortName,
 		"status",
 		"tags",
 	}

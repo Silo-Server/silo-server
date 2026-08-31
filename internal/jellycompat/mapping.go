@@ -14,15 +14,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// fieldProductionLocations is the Fields= key for ProductionLocations,
-// shared with query.go's fieldsServedByList.
-const fieldProductionLocations = "productionlocations"
+// fieldProductionLocations and fieldSortName are Fields= keys shared with
+// query.go's fieldsServedByList, extracted to satisfy goconst.
+const (
+	fieldProductionLocations = "productionlocations"
+	fieldSortName            = "sortname"
+)
 
 // allDetailFields is a sentinel passed to itemFromList so detail views include all fields.
 var allDetailFields = map[string]bool{
 	"*": true, "overview": true, "genres": true, "premieredate": true,
 	"studios": true, "tags": true, "taglines": true, "etag": true,
-	"sortname": true, fieldProductionLocations: true,
+	fieldSortName: true, fieldProductionLocations: true,
 	"providerids": true, "externalurls": true, "remotetrailers": true,
 	"datecreated": true, "mediastreams": true, "path": true,
 }
@@ -162,7 +165,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	if allFields || fields["etag"] {
 		dto.Etag = itemEtag(item)
 	}
-	if allFields || fields["sortname"] {
+	if allFields || fields[fieldSortName] {
 		dto.SortName = firstNonEmpty(item.SortTitle, item.Title)
 	}
 	if allFields || fields["studios"] {
