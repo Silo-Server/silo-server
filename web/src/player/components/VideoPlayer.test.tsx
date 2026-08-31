@@ -914,10 +914,7 @@ describe("VideoPlayer translation handoff", () => {
     const webkitEnterFullscreen = vi.fn();
     const webkitExitFullscreen = vi.fn();
 
-    const { container } = render(
-      <VideoPlayer plan={directPlan} planRevision={1} sessionId="session-1" />,
-      { wrapper },
-    );
+    const { container } = renderPlayer();
 
     const video = container.querySelector("video") as HTMLVideoElement & {
       webkitSupportsFullscreen?: boolean;
@@ -945,10 +942,7 @@ describe("VideoPlayer translation handoff", () => {
   });
 
   it("tracks WebKit fullscreen events on the video element", async () => {
-    const { container } = render(
-      <VideoPlayer plan={directPlan} planRevision={1} sessionId="session-1" />,
-      { wrapper },
-    );
+    const { container } = renderPlayer();
 
     const video = container.querySelector("video") as HTMLVideoElement & {
       webkitDisplayingFullscreen?: boolean;
