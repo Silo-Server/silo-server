@@ -3121,7 +3121,7 @@ func TestPlanPlaybackV3AudioOnlyPlansOriginalHTTP(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3WindowsWebAudioOnlyNormalizesAudio(t *testing.T) {
+func TestPlanPlaybackV3WebAudioOnlyNormalizesAudio(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		codec     string
@@ -3133,6 +3133,7 @@ func TestPlanPlaybackV3WindowsWebAudioOnlyNormalizesAudio(t *testing.T) {
 		{name: "Edge EAC3", codec: "eac3", channels: 6, container: "mkv", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/151.0.0.0", quirkID: QuirkWindowsWebAudioNormalizeV3},
 		{name: "Firefox Matroska AAC", codec: "aac", channels: 2, container: "mkv", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0", quirkID: QuirkFirefoxMatroskaAACTimingV3},
 		{name: "Firefox MP4 AAC", codec: "aac", channels: 2, container: "mp4", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0", quirkID: QuirkWindowsWebAudioNormalizeV3},
+		{name: "Android Firefox EAC3", codec: "eac3", channels: 6, container: "mkv", userAgent: "Mozilla/5.0 (Android 16; Mobile; rv:154.0) Gecko/154.0 Firefox/154.0", quirkID: QuirkAndroidFirefoxWebAudioNormalizeV3},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := audioOnlyFixtureFileV3()
@@ -3502,7 +3503,7 @@ func TestPlanPlaybackV3VideoRemuxAdaptsProgressiveWhenHLSVideoUnsupported(t *tes
 	}
 }
 
-func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
+func TestPlanPlaybackV3WebAudioNormalizationMatrix(t *testing.T) {
 	newInput := func(codec string, channels int, userAgent string) PlannerInputV3 {
 		file := detailedFixtureFileV3()
 		file.CodecVideo = "h264"
@@ -3542,6 +3543,7 @@ func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
 		"Chrome":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36",
 		"Firefox": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0",
 	}
+	androidFirefox := "Mozilla/5.0 (Android 16; Mobile; rv:154.0) Gecko/154.0 Firefox/154.0"
 	codecs := []struct {
 		name     string
 		channels int
@@ -3576,6 +3578,17 @@ func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
 			})
 		}
 	}
+	for _, codec := range codecs {
+		t.Run("Android Firefox/"+codec.name, func(t *testing.T) {
+			result := PlanPlaybackV3(newInput(codec.name, codec.channels, androidFirefox))
+			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.PlayMethod != PlayRemux || !result.TranscodeAudio || result.TargetAudioCodec != "aac" || result.TargetAudioChannels != 2 {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkAndroidFirefoxWebAudioNormalizeV3 {
+				t.Fatalf("applied quirks = %#v", result.Plan.AppliedQuirks)
+			}
+		})
+	}
 
 	t.Run("Firefox Matroska AAC", func(t *testing.T) {
 		result := PlanPlaybackV3(newInput("aac", 2, browsers["Firefox"]))
@@ -3603,6 +3616,19 @@ func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
 		}
 	})
 
+	t.Run("Android Firefox MP4 AAC remains native", func(t *testing.T) {
+		input := newInput("aac", 2, androidFirefox)
+		input.RequestedFile.FilePath = "/media/movie.mp4"
+		input.RequestedFile.Container = "mp4"
+		original := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+		original.Containers = []string{"mp4"}
+		input.Request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.AppliedQuirks) != 0 {
+			t.Fatalf("native AAC route changed = %s", ExplainPlannerResultV3(result))
+		}
+	})
+
 	t.Run("Edge AAC remains native", func(t *testing.T) {
 		result := PlanPlaybackV3(newInput("aac", 2, browsers["Edge"]))
 		if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.AppliedQuirks) != 0 {
@@ -3614,6 +3640,30 @@ func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
 		result := PlanPlaybackV3(newInput("eac3", 6, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0"))
 		if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.AppliedQuirks) != 0 {
 			t.Fatalf("non-Windows route changed = %s", ExplainPlannerResultV3(result))
+		}
+	})
+
+	t.Run("Android Chrome non-AAC remains native", func(t *testing.T) {
+		result := PlanPlaybackV3(newInput("eac3", 6, "Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 Chrome/151.0.0.0 Mobile Safari/537.36"))
+		if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.AppliedQuirks) != 0 {
+			t.Fatalf("Android Chrome route changed = %s", ExplainPlannerResultV3(result))
+		}
+	})
+
+	t.Run("Android Firefox HLS fallback keeps audio normalized", func(t *testing.T) {
+		input := newInput("eac3", 6, androidFirefox)
+		delete(input.Request.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+		hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.Containers = []string{"hls"}
+		hls.VideoCodecs = []string{"h264"}
+		hls.AudioDecodeCodecs = []string{"aac"}
+		input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" || result.TargetAudioChannels != 2 {
+			t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+		}
+		if len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkAndroidFirefoxWebAudioNormalizeV3 {
+			t.Fatalf("HLS Android Firefox quirks = %#v", result.Plan.AppliedQuirks)
 		}
 	})
 
@@ -3660,6 +3710,7 @@ func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
 		}{
 			{name: "Edge EAC3", codec: "eac3", userAgent: browsers["Edge"], quirkID: QuirkWindowsWebAudioNormalizeV3},
 			{name: "Firefox Matroska AAC", codec: "aac", userAgent: browsers["Firefox"], quirkID: QuirkFirefoxMatroskaAACTimingV3},
+			{name: "Android Firefox EAC3", codec: "eac3", userAgent: androidFirefox, quirkID: QuirkAndroidFirefoxWebAudioNormalizeV3},
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				input := newInput(test.codec, 6, test.userAgent)
@@ -3688,6 +3739,7 @@ func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
 		}{
 			{name: "Edge EAC3", codec: "eac3", userAgent: browsers["Edge"]},
 			{name: "Firefox AAC", codec: "aac", userAgent: browsers["Firefox"]},
+			{name: "Android Firefox EAC3", codec: "eac3", userAgent: androidFirefox},
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				input := newInput(test.codec, 2, test.userAgent)
