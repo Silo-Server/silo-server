@@ -1176,7 +1176,15 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
+	// Progressive remux tokens bind execution to the stable stream_nodes row.
+	// Do not let central commit work to this node until the watcher can resolve
+	// that identity; otherwise every committed GET would fail closed at serve
+	// time with no different route for a replan to choose.
+	if s.nodeRowID != nil {
+		if nodeID, ok := s.nodeRowID(); ok && nodeID > 0 {
+			info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
+		}
+	}
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }
