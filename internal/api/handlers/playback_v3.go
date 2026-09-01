@@ -2890,9 +2890,7 @@ func (h *PlaybackHandler) deleteNodeRecipeV3(ctx context.Context, transportID st
 // stop, not a best-effort cleanup: the caller must retain the session and let
 // the client retry.
 func (h *PlaybackHandler) deleteRequiredProgressiveRemuxAuthorityV3(ctx context.Context, session *playback.Session) error {
-	if session == nil || session.TranscodeTransportID == "" || session.TranscodeNodeURL == "" ||
-		session.RoutingWorkload != string(noderouting.WorkloadRemux) ||
-		session.RoutingExecution != string(noderouting.ExecutionTranscode) {
+	if !requiresProgressiveRemuxAuthorityV3(session) {
 		return nil
 	}
 	if h == nil || h.NodeRecipeStore == nil || !h.NodeRecipeStore.Enabled() {
@@ -2901,6 +2899,12 @@ func (h *PlaybackHandler) deleteRequiredProgressiveRemuxAuthorityV3(ctx context.
 	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
 	defer cancel()
 	return h.NodeRecipeStore.Delete(deleteCtx, session.TranscodeTransportID)
+}
+
+func requiresProgressiveRemuxAuthorityV3(session *playback.Session) bool {
+	return session != nil && session.TranscodeTransportID != "" && session.TranscodeNodeURL != "" &&
+		session.RoutingWorkload == string(noderouting.WorkloadRemux) &&
+		session.RoutingExecution == string(noderouting.ExecutionTranscode)
 }
 
 // resolveIdentityRouteV3 resolves direct and progressive routes through the

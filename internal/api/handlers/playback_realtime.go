@@ -38,6 +38,11 @@ func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *play
 		if err := h.deleteRequiredProgressiveRemuxAuthorityV3(ctx, session); err != nil {
 			return fmt.Errorf("persist progressive remux stop: %w", err)
 		}
+		if requiresProgressiveRemuxAuthorityV3(session) {
+			if err := h.tm.CancelRemoteTranscode(ctx, remoteTransportID(session), session.TranscodeNodeURL); err != nil {
+				return fmt.Errorf("cancel progressive remux transport: %w", err)
+			}
+		}
 	}
 
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {

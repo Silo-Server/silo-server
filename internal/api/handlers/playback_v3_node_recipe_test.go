@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -403,6 +404,71 @@ func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t
 	}
 	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("session after successful retry = %v, want not found", err)
+	}
+}
+
+func TestStopPlaybackRetainsProgressiveSessionUntilRemoteCancellationSucceeds(t *testing.T) {
+	requests := 0
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case 2:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer node.Close()
+
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(7, "profile-1", 42, playback.PlayRemux, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const transportID = "session-required-cancel-plan0001-aaaabbbb"
+	if err := manager.SetTranscodeRoute(session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: transportID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetNodeRoutingAssignment(session.ID, playback.NodeRoutingAssignment{
+		Workload: string(noderouting.WorkloadRemux), Execution: string(noderouting.ExecutionTranscode),
+		Egress: string(noderouting.EgressProxy),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session, err = manager.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewPlaybackHandler(manager)
+	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
+		transportID: {SessionID: session.ID, TranscodeTransportID: transportID},
+	}}
+	handler.NodeRecipeStore = recipes
+	stopErr := handler.stopPlaybackSession(t.Context(), session, true)
+	if stopErr == nil || !strings.Contains(stopErr.Error(), "cancel progressive remux transport") {
+		t.Fatalf("stop error = %v, want remote cancellation failure", stopErr)
+	}
+	if _, err := manager.GetSession(session.ID); err != nil {
+		t.Fatalf("failed cancellation removed the retryable playback session: %v", err)
+	}
+	if _, ok := recipes.cards[transportID]; ok {
+		t.Fatal("failed cancellation left authority that could admit another remote process")
+	}
+	if requests != 1 {
+		t.Fatalf("remote cancellation requests = %d, want 1", requests)
+	}
+
+	if err := handler.stopPlaybackSession(t.Context(), session, true); err != nil {
+		t.Fatalf("retry stop after node recovery: %v", err)
+	}
+	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("session after successful retry = %v, want not found", err)
+	}
+	if requests != 3 {
+		t.Fatalf("remote cancellation requests = %d, want required retry plus idempotent final cleanup", requests)
 	}
 }
 

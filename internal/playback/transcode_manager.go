@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -233,7 +234,16 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 // leaves the local live-map entry untouched for an atomic remote-to-local v3
 // replacement.
 func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL string) {
-	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
+		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
+	}
+}
+
+// CancelRemoteTranscode synchronously confirms that a remote process no longer
+// exists. User-visible stop paths use this before removing the playback session
+// so a node partition leaves a live session the caller can retry stopping.
+func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL)
 }
 
 // LockSessionLifecycle acquires the per-session lifecycle mutex and returns a
@@ -995,7 +1005,7 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 		_ = session.Close()
 	}
 
-	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
 }
 
 // CloseTranscodeSessionIf tears down a transcode session only when the live map
@@ -1028,36 +1038,39 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 		_ = expected.Close()
 	}
 
-	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
 	return true
 }
 
-// deleteRemoteTranscode sends DELETE to the assigned transcode node if any
-// (synchronous with timeout). A no-op for local/integrated sessions.
-func (m *TranscodeManager) deleteRemoteTranscode(sessionID, transcodeNodeURL string) {
-	if transcodeNodeURL != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		deleteURL := transcodeNodeURL + "/transcode/" + sessionID
-		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)
-		if err != nil {
-			slog.Error("remote transcode delete: build request", "error", err, "session", sessionID, "playback_session_id", sessionID)
-			return
-		}
-		req.Header.Set("Authorization", "Bearer "+m.jwtSecret())
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
-			return
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode >= http.StatusMultipleChoices {
-			slog.Warn("remote transcode delete returned non-success status",
-				"status", resp.StatusCode, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
-		}
+// deleteRemoteTranscode sends DELETE to the assigned transcode node with a
+// bounded timeout. A missing process is already canceled and therefore
+// succeeds; other transport and HTTP failures remain retryable by the caller.
+func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+	if transcodeNodeURL == "" {
+		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
+	deleteURL := transcodeNodeURL + "/transcode/" + sessionID
+	req, err := http.NewRequestWithContext(deleteCtx, http.MethodDelete, deleteURL, nil)
+	if err != nil {
+		return fmt.Errorf("build remote transcode delete request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.jwtSecret())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send remote transcode delete: %w", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("remote transcode delete returned status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // CleanupOrphanedTranscodes removes stale per-session temp directories for
