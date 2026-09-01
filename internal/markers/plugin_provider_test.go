@@ -234,3 +234,53 @@ func TestPluginProviderSubmitKeepsOtherErrorsRetryable(t *testing.T) {
 		t.Fatalf("error = %+v, want retryable provider error", conflict)
 	}
 }
+
+func TestReadOnlyPluginProviderDoesNotImplementSubmitter(t *testing.T) {
+	client := &fakePluginMarkerClient{fetchResp: &pluginv1.FetchMarkersResponse{}}
+	inner, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
+		InstallationID: 42,
+		CapabilityID:   "public-markers",
+		DisplayName:    "Public markers",
+		PluginID:       "silo.public-markers",
+	}, func(context.Context, int, string) (pluginMarkerClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
+	}
+	provider := NewReadOnlyPluginProvider(inner)
+	if _, ok := any(provider).(Submitter); ok {
+		t.Fatal("read-only plugin provider unexpectedly implements Submitter")
+	}
+	if _, err := provider.FetchMarkers(context.Background(), Request{Kind: ItemKindEpisode}); err != nil {
+		t.Fatalf("FetchMarkers: %v", err)
+	}
+	if client.fetchReq == nil {
+		t.Fatal("FetchMarkers was not delegated")
+	}
+	description := provider.ProviderDescription()
+	if description.ID != "plugin:42:public-markers" || description.DisplayName != "Public markers" {
+		t.Fatalf("description = %+v", description)
+	}
+}
+
+func TestPluginSupportsContributionFromMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		want     bool
+	}{
+		{name: "legacy default", metadata: nil, want: true},
+		{name: "explicit true", metadata: map[string]any{"supports_contribution": true}, want: true},
+		{name: "explicit false", metadata: map[string]any{"supports_contribution": false}, want: false},
+		{name: "string false", metadata: map[string]any{"supports_contribution": "false"}, want: false},
+		{name: "invalid stays compatible", metadata: map[string]any{"supports_contribution": 0}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PluginSupportsContributionFromMetadata(tt.metadata); got != tt.want {
+				t.Fatalf("PluginSupportsContributionFromMetadata() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

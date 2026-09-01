@@ -1,11 +1,51 @@
 package scanner
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestMarkerInvalidationAssignmentsCoverEveryColumnAndPreserveManualSegments(t *testing.T) {
+	assignments := markerInvalidationAssignments()
+	seen := make(map[string]struct{}, len(markerInvalidationColumns))
+	assignmentParts := strings.Split(assignments, ",\n\t\t")
+	if len(assignmentParts) != len(markerInvalidationColumns) {
+		t.Fatalf("assignment count = %d, want %d", len(assignmentParts), len(markerInvalidationColumns))
+	}
+	for i, column := range markerInvalidationColumns {
+		if _, exists := seen[column.name]; exists {
+			t.Fatalf("duplicate marker invalidation column %q", column.name)
+		}
+		seen[column.name] = struct{}{}
+		if !strings.HasPrefix(assignmentParts[i], column.name+" = CASE WHEN ") {
+			t.Fatalf("assignment %d = %q, want column %s", i, assignmentParts[i], column.name)
+		}
+		if !strings.Contains(assignmentParts[i], "media_files."+column.sourceColumn) {
+			t.Fatalf("assignment for %s does not use source column %s", column.name, column.sourceColumn)
+		}
+	}
+
+	markerBlock := strings.Split(strings.Split(fileColumns, "intro_start, ")[1], ",\n\tedition_raw")[0]
+	for _, column := range strings.Split("intro_start, "+markerBlock, ",") {
+		name := strings.TrimSpace(column)
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("fileColumns marker column %q has no invalidation rule", name)
+		}
+	}
+
+	if got, want := strings.Count(assignments, markerInvalidationPredicate), len(markerInvalidationColumns); got != want {
+		t.Fatalf("shared invalidation predicate count = %d, want %d", got, want)
+	}
+	if !strings.Contains(assignments, "COALESCE(media_files.intro_markers_source, media_files.markers_source, '') <> 'manual'") {
+		t.Fatal("intro assignments do not preserve manual segment provenance")
+	}
+	if !strings.Contains(assignments, "COALESCE(media_files.markers_source, '') <> 'manual'") {
+		t.Fatal("shared assignments do not preserve manual provenance")
+	}
+}
 
 func TestRecomputeSharedMarkerAttributionPreservesHigherPrioritySegment(t *testing.T) {
 	manual := models.MarkerSourceManual

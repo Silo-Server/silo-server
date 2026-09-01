@@ -459,6 +459,9 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (r *Registry) logProviderError(providerID string, req Request, err error) {
+	if err == nil {
+		return
+	}
 	logger := slog.Default()
 	if r != nil && r.logger != nil {
 		logger = r.logger

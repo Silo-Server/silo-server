@@ -12,7 +12,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
-const playbackLazyMarkerTimeout = 10 * time.Minute
+const (
+	playbackLazyMarkerTimeout       = 10 * time.Minute
+	playbackLazyOnlineRetryInterval = 30 * time.Minute
+)
 
 type PlaybackIntroEligibilityChecker interface {
 	IntroDetectionEligibleForPlayback(ctx context.Context, fileID int) (bool, error)
@@ -84,7 +87,10 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	hasOnline := h.hasOnlineMarkerProviders()
 	shouldRunLocal := markers.ShouldRunLocal(mode)
 	shouldRunOnline := (mode == markers.ModeOnline || mode == markers.ModeBoth) && hasOnline
-	if shouldRunOnline && hasOnlineSourcedMarkers(file) {
+	if shouldRunOnline && hasCompleteOnlinePlaybackSkipMarkers(file) {
+		shouldRunOnline = false
+	}
+	if shouldRunOnline && h.hasRecentOnlineMarkerAttempt(file, time.Now()) {
 		shouldRunOnline = false
 	}
 
@@ -172,6 +178,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 		"mode", mode)
 
 	if runOnline {
+		h.recordOnlineMarkerAttempt(file, time.Now())
 		wrote, err := h.fetchOnlineMarkersForPlayback(ctx, file)
 		if err != nil {
 			slog.Warn("playback lazy markers: online fetch failed",
@@ -320,31 +327,80 @@ func (h *PlaybackHandler) notifyPlaybackMarkers(
 		"mode", mode)
 }
 
-// hasOnlineSourcedMarkers reports whether the file already has at least one
-// marker written by a non-local source. We short-circuit lazy online fetch
-// in that case to avoid refetching every playback start — TheIntroDB often
-// returns only intro+credits and never recap/preview for a given episode, so
-// requiring all four kinds before skipping would loop forever on partial data.
-// Markers from the scanner/s3 path remain refetchable since online sources
-// outrank them.
-func hasOnlineSourcedMarkers(file *models.MediaFile) bool {
+// hasCompleteOnlinePlaybackSkipMarkers reports whether both playback skip
+// segments are populated by a source that online lookup cannot improve. Local
+// scanner and S3 ranges remain eligible because online providers outrank them.
+func hasCompleteOnlinePlaybackSkipMarkers(file *models.MediaFile) bool {
 	if file == nil {
 		return false
 	}
-	isOnlineSource := func(source *string) bool {
+	isDurableOnlineSource := func(segmentSource *string) bool {
+		source := segmentSource
+		if source == nil {
+			source = file.MarkersSource
+		}
 		if source == nil {
 			return false
 		}
 		switch *source {
 		case models.MarkerSourceOnline, models.MarkerSourcePlugin, models.MarkerSourceManual:
 			return true
+		default:
+			return false
 		}
+	}
+	return file.IntroStart != nil && file.IntroEnd != nil &&
+		file.CreditsStart != nil && file.CreditsEnd != nil &&
+		isDurableOnlineSource(file.IntroMarkersSource) &&
+		isDurableOnlineSource(file.CreditsMarkersSource)
+}
+
+type playbackLazyOnlineAttemptKey struct {
+	fileID   int
+	fileHash string
+}
+
+func playbackLazyOnlineAttemptKeyFor(file *models.MediaFile) (playbackLazyOnlineAttemptKey, bool) {
+	if file == nil || file.ID <= 0 {
+		return playbackLazyOnlineAttemptKey{}, false
+	}
+	return playbackLazyOnlineAttemptKey{fileID: file.ID, fileHash: strings.TrimSpace(file.FileHash)}, true
+}
+
+func (h *PlaybackHandler) hasRecentOnlineMarkerAttempt(file *models.MediaFile, now time.Time) bool {
+	key, ok := playbackLazyOnlineAttemptKeyFor(file)
+	if h == nil || !ok {
 		return false
 	}
-	return isOnlineSource(file.IntroMarkersSource) ||
-		isOnlineSource(file.CreditsMarkersSource) ||
-		isOnlineSource(file.RecapMarkersSource) ||
-		isOnlineSource(file.PreviewMarkersSource)
+	h.markerLazyOnlineAttemptMu.Lock()
+	defer h.markerLazyOnlineAttemptMu.Unlock()
+	attemptedAt, ok := h.markerLazyOnlineAttempts[key]
+	if !ok {
+		return false
+	}
+	if now.Sub(attemptedAt) >= playbackLazyOnlineRetryInterval {
+		delete(h.markerLazyOnlineAttempts, key)
+		return false
+	}
+	return true
+}
+
+func (h *PlaybackHandler) recordOnlineMarkerAttempt(file *models.MediaFile, attemptedAt time.Time) {
+	key, ok := playbackLazyOnlineAttemptKeyFor(file)
+	if h == nil || !ok {
+		return
+	}
+	h.markerLazyOnlineAttemptMu.Lock()
+	defer h.markerLazyOnlineAttemptMu.Unlock()
+	if h.markerLazyOnlineAttempts == nil {
+		h.markerLazyOnlineAttempts = make(map[playbackLazyOnlineAttemptKey]time.Time)
+	}
+	for cachedKey, cachedAt := range h.markerLazyOnlineAttempts {
+		if attemptedAt.Sub(cachedAt) >= playbackLazyOnlineRetryInterval {
+			delete(h.markerLazyOnlineAttempts, cachedKey)
+		}
+	}
+	h.markerLazyOnlineAttempts[key] = attemptedAt
 }
 
 // hasAnyMarker reports whether the file has at least one populated marker

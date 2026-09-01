@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -22,6 +23,14 @@ type realtimeClientMessage struct {
 type sessionRealtimeConn struct {
 	conn    *websocket.Conn
 	writeMu sync.Mutex
+}
+
+type sessionRealtimeClient struct {
+	handler       *PlaybackHandler
+	connectionCtx context.Context
+	registration  *playback.RealtimeRegistration
+	sessionID     string
+	helloReceived bool
 }
 
 func (c *sessionRealtimeConn) WriteJSON(v any) error {
@@ -84,38 +93,46 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 	}
 
 	realtimeConn := &sessionRealtimeConn{conn: conn}
-	registration := h.RealtimeHub.Register(sessionID, realtimeConn)
+	registration := h.registerSessionRealtimeConnection(sessionID, realtimeConn)
 	if registration == nil {
 		conn.Close()
 		slog.WarnContext(r.Context(), "failed to register realtime websocket", "component", "api", "session", sessionID, "playback_session_id", sessionID)
 		return
 	}
 
+	configureWebSocket(conn)
+	ctx, cancelRead := context.WithCancel(r.Context())
 	defer func() {
-		if h.setRealtimeConnectionState(sessionID, false) {
-			h.syncSessionsNow(context.Background(), "realtime_disconnect")
-		}
-		h.RealtimeHub.Unregister(registration)
+		cancelRead()
+		h.unregisterSessionRealtimeConnection(sessionID, registration)
 		_ = conn.Close()
 	}()
 
-	configureWebSocket(conn)
-	ctx, cancelRead := context.WithCancel(r.Context())
-	defer cancelRead()
 	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
+	client := &sessionRealtimeClient{
+		handler:       h,
+		connectionCtx: ctx,
+		registration:  registration,
+		sessionID:     sessionID,
+	}
 
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
-		if err := h.handleRealtimeClientMessage(sessionID, data); err != nil {
+		if err := client.handleMessage(data); err != nil {
 			slog.WarnContext(r.Context(), "invalid realtime client message", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		}
 	}
 }
 
-func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []byte) error {
+func (c *sessionRealtimeClient) handleMessage(data []byte) error {
+	if c == nil || c.handler == nil || c.sessionID == "" {
+		return playback.ErrInvalidRealtimePayload
+	}
+	h := c.handler
+	sessionID := c.sessionID
 	var base realtimeClientMessage
 	if err := json.Unmarshal(data, &base); err != nil {
 		return err
@@ -133,10 +150,13 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		if hello.SessionID != sessionID {
 			return playback.ErrInvalidRealtimePayload
 		}
-		if h.setRealtimeConnectionState(sessionID, true) {
-			h.syncSessionsNow(context.Background(), "realtime_hello")
-		}
+		firstHello := !c.helloReceived
+		c.helloReceived = true
+		h.markSessionRealtimeReady(sessionID, c.registration)
 		h.touchSessionActivity(sessionID)
+		if firstHello {
+			go h.sendCurrentMarkerSnapshot(c.connectionCtx, c.registration, sessionID)
+		}
 		return nil
 	case playback.RealtimeMessageTypeAck:
 		var ack playback.AckEnvelope
@@ -210,5 +230,90 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		return nil
 	default:
 		return playback.ErrInvalidRealtimePayload
+	}
+}
+
+func (h *PlaybackHandler) registerSessionRealtimeConnection(
+	sessionID string,
+	conn playback.RealtimeConnection,
+) *playback.RealtimeRegistration {
+	h.realtimeConnectionMu.Lock()
+	defer h.realtimeConnectionMu.Unlock()
+	registration := h.RealtimeHub.Register(sessionID, conn)
+	if registration != nil && h.setRealtimeConnectionState(sessionID, false) {
+		h.syncSessionsNow(context.Background(), "realtime_pending_hello")
+	}
+	return registration
+}
+
+func (h *PlaybackHandler) markSessionRealtimeReady(
+	sessionID string,
+	registration *playback.RealtimeRegistration,
+) {
+	h.realtimeConnectionMu.Lock()
+	defer h.realtimeConnectionMu.Unlock()
+	if !h.RealtimeHub.HasRegistration(registration) {
+		return
+	}
+	if h.setRealtimeConnectionState(sessionID, true) {
+		h.syncSessionsNow(context.Background(), "realtime_hello")
+	}
+}
+
+func (h *PlaybackHandler) unregisterSessionRealtimeConnection(
+	sessionID string,
+	registration *playback.RealtimeRegistration,
+) {
+	h.realtimeConnectionMu.Lock()
+	defer h.realtimeConnectionMu.Unlock()
+	if !h.RealtimeHub.Unregister(registration) || h.RealtimeHub.HasConnection(sessionID) {
+		return
+	}
+	if h.setRealtimeConnectionState(sessionID, false) {
+		h.syncSessionsNow(context.Background(), "realtime_disconnect")
+	}
+}
+
+type playbackMarkerSnapshotNotifier interface {
+	SendSessionSnapshotFromLoader(
+		ctx context.Context,
+		registration *playback.RealtimeRegistration,
+		fileID int,
+		loader playback.MarkerSnapshotFileLoader,
+	) (bool, error)
+}
+
+func (h *PlaybackHandler) sendCurrentMarkerSnapshot(
+	connectionCtx context.Context,
+	registration *playback.RealtimeRegistration,
+	sessionID string,
+) {
+	if h == nil || h.fileResolver == nil || h.MarkerUpdateNotifier == nil {
+		return
+	}
+	notifier, ok := h.MarkerUpdateNotifier.(playbackMarkerSnapshotNotifier)
+	if !ok {
+		slog.DebugContext(connectionCtx, "playback marker snapshot unavailable", "component", "api",
+			"session", sessionID, "playback_session_id", sessionID,
+			"reason", "notifier does not support persisted snapshots")
+		return
+	}
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil || session == nil || session.MediaFileID <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(connectionCtx, 3*time.Second)
+	defer cancel()
+	sent, err := notifier.SendSessionSnapshotFromLoader(ctx, registration, session.MediaFileID, h.fileResolver)
+	if err != nil {
+		slog.DebugContext(ctx, "playback marker snapshot unavailable", "component", "api",
+			"session", sessionID, "playback_session_id", sessionID,
+			"file_id", session.MediaFileID, "error", err)
+		return
+	}
+	if !sent {
+		slog.DebugContext(ctx, "playback marker snapshot skipped", "component", "api",
+			"session", sessionID, "playback_session_id", sessionID,
+			"file_id", session.MediaFileID)
 	}
 }

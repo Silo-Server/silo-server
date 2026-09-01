@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 type fakePlaybackMarkerProvider struct{}
@@ -19,6 +20,34 @@ func (fakePlaybackMarkerProvider) ID() string { return "fake-online" }
 
 func (fakePlaybackMarkerProvider) FetchMarkers(context.Context, markers.Request) (markers.Result, error) {
 	return markers.Result{}, nil
+}
+
+type recordingPlaybackMarkerProvider struct {
+	calls chan markers.Request
+}
+
+func (p recordingPlaybackMarkerProvider) ID() string { return "recording-online" }
+
+func (p recordingPlaybackMarkerProvider) FetchMarkers(_ context.Context, req markers.Request) (markers.Result, error) {
+	p.calls <- req
+	return markers.Result{}, nil
+}
+
+type fakePlaybackExternalIDResolver struct{}
+
+func (fakePlaybackExternalIDResolver) ResolveForFile(context.Context, *models.MediaFile) (markers.ExternalIDs, error) {
+	return markers.ExternalIDs{
+		Kind:          markers.ItemKindEpisode,
+		TmdbID:        "123",
+		SeasonNumber:  1,
+		EpisodeNumber: 2,
+	}, nil
+}
+
+type fakePlaybackMarkerUpserter struct{}
+
+func (fakePlaybackMarkerUpserter) UpsertMarkers(context.Context, int, scanner.MarkerUpdate) (bool, error) {
+	return false, nil
 }
 
 type fakePlaybackIntroAnalyzer struct {
@@ -306,6 +335,41 @@ func TestMaybeQueueLazyPlaybackMarkersOnlineModeWithProviderDoesNotRunLocalAnaly
 	}
 }
 
+func TestMaybeQueueLazyPlaybackMarkersOnlineRetriesPartialSkipMarkers(t *testing.T) {
+	start := 10.0
+	end := 60.0
+	file := lazyMarkerTestFile()
+	file.IntroStart = &start
+	file.IntroEnd = &end
+
+	calls := make(chan markers.Request, 1)
+	registry := markers.NewRegistry(slog.Default())
+	if err := registry.Register(recordingPlaybackMarkerProvider{calls: calls}); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), &fakePlaybackMarkerFileResolver{file: file})
+	handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
+		markers.SettingLazyPlayback: "true",
+		markers.SettingMode:         "online",
+	}}
+	handler.IntroRepository = fakePlaybackIntroEligibility{eligible: true}
+	handler.MarkerRegistry = registry
+	handler.MarkerResolver = fakePlaybackExternalIDResolver{}
+	handler.MarkerUpserter = fakePlaybackMarkerUpserter{}
+	handler.MarkerLazyContext = context.Background()
+
+	handler.maybeQueueLazyPlaybackMarkers(context.Background(), &playback.Session{ID: "session-1"}, file)
+
+	select {
+	case req := <-calls:
+		if req.ExternalIDs[markers.ExternalIDKeyTMDB] != "123" {
+			t.Fatalf("TMDB id = %q, want 123", req.ExternalIDs[markers.ExternalIDKeyTMDB])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("partial markers did not trigger online lookup")
+	}
+}
+
 func TestMaybeQueueLazyPlaybackMarkersAnalyzerSuccessWithoutMarkerDoesNotEmitUpdate(t *testing.T) {
 	analyzer := &fakePlaybackIntroAnalyzer{started: make(chan struct{}, 1)}
 	file := lazyMarkerTestFile()
@@ -349,5 +413,115 @@ func lazyMarkerTestFile() *models.MediaFile {
 		EpisodeID:     "episode-1",
 		MediaFolderID: 7,
 		Duration:      1800,
+	}
+}
+
+func TestHasCompleteOnlinePlaybackSkipMarkers(t *testing.T) {
+	start := 10.0
+	introEnd := 60.0
+	creditsStart := 1700.0
+	creditsEnd := 1800.0
+	online := models.MarkerSourceOnline
+	plugin := models.MarkerSourcePlugin
+	scannerSource := models.MarkerSourceScanner
+
+	tests := []struct {
+		name string
+		file *models.MediaFile
+		want bool
+	}{
+		{name: "nil file", file: nil, want: false},
+		{
+			name: "intro only remains eligible",
+			file: &models.MediaFile{IntroStart: &start, IntroEnd: &introEnd},
+			want: false,
+		},
+		{
+			name: "credits only remains eligible",
+			file: &models.MediaFile{CreditsStart: &creditsStart, CreditsEnd: &creditsEnd},
+			want: false,
+		},
+		{
+			name: "unattributed complete markers remain eligible",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+			},
+			want: false,
+		},
+		{
+			name: "scanner markers remain eligible for online upgrade",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				IntroMarkersSource: &scannerSource, CreditsMarkersSource: &scannerSource,
+			},
+			want: false,
+		},
+		{
+			name: "mixed online and scanner markers remain eligible",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				IntroMarkersSource: &online, CreditsMarkersSource: &scannerSource,
+			},
+			want: false,
+		},
+		{
+			name: "complete online and plugin markers stop lookup",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				IntroMarkersSource: &online, CreditsMarkersSource: &plugin,
+			},
+			want: true,
+		},
+		{
+			name: "legacy shared online source stops lookup",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				MarkersSource: &online,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasCompleteOnlinePlaybackSkipMarkers(tt.file); got != tt.want {
+				t.Fatalf("hasCompleteOnlinePlaybackSkipMarkers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlaybackLazyOnlineAttemptCooldown(t *testing.T) {
+	handler := &PlaybackHandler{}
+	now := time.Unix(1_700_000_000, 0)
+	file := &models.MediaFile{ID: 42, FileHash: "old-hash"}
+
+	if handler.hasRecentOnlineMarkerAttempt(file, now) {
+		t.Fatal("missing attempt reported as recent")
+	}
+	handler.recordOnlineMarkerAttempt(file, now)
+	if !handler.hasRecentOnlineMarkerAttempt(file, now.Add(playbackLazyOnlineRetryInterval-time.Second)) {
+		t.Fatal("attempt inside retry interval was not throttled")
+	}
+	replacement := &models.MediaFile{ID: file.ID, FileHash: "new-hash"}
+	if handler.hasRecentOnlineMarkerAttempt(replacement, now.Add(time.Second)) {
+		t.Fatal("replacement file version inherited the old version's cooldown")
+	}
+	if handler.hasRecentOnlineMarkerAttempt(file, now.Add(playbackLazyOnlineRetryInterval)) {
+		t.Fatal("expired attempt remained throttled")
+	}
+	if _, ok := handler.markerLazyOnlineAttempts[playbackLazyOnlineAttemptKey{fileID: file.ID, fileHash: file.FileHash}]; ok {
+		t.Fatal("expired attempt was not removed")
+	}
+	expired := &models.MediaFile{ID: 1}
+	handler.recordOnlineMarkerAttempt(expired, now.Add(-playbackLazyOnlineRetryInterval))
+	handler.recordOnlineMarkerAttempt(&models.MediaFile{ID: 2}, now)
+	if _, ok := handler.markerLazyOnlineAttempts[playbackLazyOnlineAttemptKey{fileID: expired.ID}]; ok {
+		t.Fatal("recording an attempt did not prune expired entries")
 	}
 }

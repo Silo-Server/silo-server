@@ -72,6 +72,42 @@ type PluginProvider struct {
 
 var _ Submitter = (*PluginProvider)(nil)
 
+// ReadOnlyPluginProvider exposes only the marker Provider surface for plugin
+// capabilities that declare supports_contribution=false. Keeping the submit
+// methods off this wrapper makes the existing Submitter type assertion reflect
+// the capability manifest instead of the shared gRPC service shape.
+type ReadOnlyPluginProvider struct {
+	inner *PluginProvider
+}
+
+var _ Provider = (*ReadOnlyPluginProvider)(nil)
+var _ DescribedProvider = (*ReadOnlyPluginProvider)(nil)
+
+func NewReadOnlyPluginProvider(inner *PluginProvider) *ReadOnlyPluginProvider {
+	return &ReadOnlyPluginProvider{inner: inner}
+}
+
+func (p *ReadOnlyPluginProvider) ID() string {
+	if p == nil || p.inner == nil {
+		return ""
+	}
+	return p.inner.ID()
+}
+
+func (p *ReadOnlyPluginProvider) FetchMarkers(ctx context.Context, req Request) (Result, error) {
+	if p == nil || p.inner == nil {
+		return Result{}, nil
+	}
+	return p.inner.FetchMarkers(ctx, req)
+}
+
+func (p *ReadOnlyPluginProvider) ProviderDescription() ProviderDescriptor {
+	if p == nil || p.inner == nil {
+		return ProviderDescriptor{}
+	}
+	return p.inner.ProviderDescription()
+}
+
 func NewPluginProvider(opts PluginProviderOptions, resolver pluginMarkerResolver) (*PluginProvider, error) {
 	if resolver == nil {
 		return nil, fmt.Errorf("plugin marker resolver is required")
@@ -458,5 +494,24 @@ func PluginDefaultFetchPriorityFromMetadata(metadata map[string]any) (int, bool)
 		return parsed, err == nil
 	default:
 		return 0, false
+	}
+}
+
+// PluginSupportsContributionFromMetadata preserves the historical submitter
+// behavior unless a plugin explicitly opts out. This keeps existing manifests
+// compatible while allowing anonymous, fetch-only providers.
+func PluginSupportsContributionFromMetadata(metadata map[string]any) bool {
+	raw, ok := metadata["supports_contribution"]
+	if !ok {
+		return true
+	}
+	switch typed := raw.(type) {
+	case bool:
+		return typed
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return err != nil || parsed
+	default:
+		return true
 	}
 }

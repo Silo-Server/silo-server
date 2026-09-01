@@ -219,29 +219,32 @@ type PlaybackHandler struct {
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
 	// simply stays unknown and the copy route is never withdrawn.
-	CopySafetyRacer        PlaybackCopySafetyRacer
-	ChapterThumbnailQueuer PlaybackChapterThumbnailQueuer
-	IntroAnalyzer          IntroEpisodeAnalyzer
-	IntroRepository        PlaybackIntroEligibilityChecker
-	MarkerRegistry         *markers.Registry
-	MarkerResolver         markers.ExternalIDResolver
-	MarkerUpserter         PlaybackMarkerUpserter
-	MarkerUpdateNotifier   PlaybackMarkerUpdateNotifier
-	MarkerLazyContext      context.Context
-	MarkerLazyInFlight     sync.Map
-	SubtitleRepo           subtitles.Repository // optional; enables downloaded subtitles in playback
-	RealtimeHub            *playback.RealtimeHub
-	CommandTracker         *playback.CommandTracker
-	CommandDispatcher      *playback.CommandDispatcher
+	CopySafetyRacer           PlaybackCopySafetyRacer
+	ChapterThumbnailQueuer    PlaybackChapterThumbnailQueuer
+	IntroAnalyzer             IntroEpisodeAnalyzer
+	IntroRepository           PlaybackIntroEligibilityChecker
+	MarkerRegistry            *markers.Registry
+	MarkerResolver            markers.ExternalIDResolver
+	MarkerUpserter            PlaybackMarkerUpserter
+	MarkerUpdateNotifier      PlaybackMarkerUpdateNotifier
+	MarkerLazyContext         context.Context
+	MarkerLazyInFlight        sync.Map
+	markerLazyOnlineAttemptMu sync.Mutex
+	markerLazyOnlineAttempts  map[playbackLazyOnlineAttemptKey]time.Time
+	SubtitleRepo              subtitles.Repository // optional; enables downloaded subtitles in playback
+	RealtimeHub               *playback.RealtimeHub
+	CommandTracker            *playback.CommandTracker
+	CommandDispatcher         *playback.CommandDispatcher
 	// PlaybackConfig returns the current playback config (ffmpeg path,
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig    func() config.PlaybackConfig
-	FFmpegLogSink     playback.FFmpegLogSink
-	copySeekAnchor    copySeekAnchorResolver
-	realtimeCommandMu sync.Mutex
-	realtimeCommands  map[string]playbackCommandRecord
+	PlaybackConfig       func() config.PlaybackConfig
+	FFmpegLogSink        playback.FFmpegLogSink
+	copySeekAnchor       copySeekAnchorResolver
+	realtimeConnectionMu sync.Mutex
+	realtimeCommandMu    sync.Mutex
+	realtimeCommands     map[string]playbackCommandRecord
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.

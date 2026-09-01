@@ -74,6 +74,81 @@ const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
 	codec_video, codec_audio, resolution, audio_channels, hdr, container,
 	video_tracks, audio_tracks, subtitle_tracks, external_subtitles, edition_key`
 
+type markerInvalidationColumn struct {
+	name         string
+	sourceColumn string
+}
+
+const (
+	markerSourceColumnShared  = "markers_source"
+	markerSourceColumnIntro   = "intro_markers_source"
+	markerSourceColumnCredits = "credits_markers_source"
+	markerSourceColumnRecap   = "recap_markers_source"
+	markerSourceColumnPreview = "preview_markers_source"
+)
+
+var markerInvalidationColumns = []markerInvalidationColumn{
+	{name: "intro_start", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_end", sourceColumn: markerSourceColumnIntro},
+	{name: "credits_start", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_end", sourceColumn: markerSourceColumnCredits},
+	{name: "recap_start", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_end", sourceColumn: markerSourceColumnRecap},
+	{name: "preview_start", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_end", sourceColumn: markerSourceColumnPreview},
+	{name: markerSourceColumnShared, sourceColumn: markerSourceColumnShared},
+	{name: "markers_confidence", sourceColumn: markerSourceColumnShared},
+	{name: markerSourceColumnIntro, sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_provider", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_confidence", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_algorithm", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_detected_at", sourceColumn: markerSourceColumnIntro},
+	{name: markerSourceColumnCredits, sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_provider", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_confidence", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_algorithm", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_detected_at", sourceColumn: markerSourceColumnCredits},
+	{name: markerSourceColumnRecap, sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_provider", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_confidence", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_algorithm", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_detected_at", sourceColumn: markerSourceColumnRecap},
+	{name: markerSourceColumnPreview, sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_provider", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_confidence", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_algorithm", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_detected_at", sourceColumn: markerSourceColumnPreview},
+}
+
+const markerInvalidationPredicate = `media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash`
+
+// markerInvalidationAssignments builds the conflict-update fragment in one
+// place so every range and provenance column follows the same file-generation
+// rule. Manual segments survive a remux or replacement because there is no
+// external source from which their admin-entered ranges can be restored.
+func markerInvalidationAssignments() string {
+	var b strings.Builder
+	for i, column := range markerInvalidationColumns {
+		if i > 0 {
+			b.WriteString(",\n\t\t")
+		}
+		sourceExpr := "COALESCE(media_files." + column.sourceColumn + ", '')"
+		if column.sourceColumn != markerSourceColumnShared {
+			sourceExpr = "COALESCE(media_files." + column.sourceColumn + ", media_files.markers_source, '')"
+		}
+		fmt.Fprintf(
+			&b,
+			"%s = CASE WHEN %s AND %s <> '%s' THEN NULL ELSE media_files.%s END",
+			column.name,
+			markerInvalidationPredicate,
+			sourceExpr,
+			models.MarkerSourceManual,
+			column.name,
+		)
+	}
+	return b.String()
+}
+
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
 const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.season_number, mf.episode_number,
@@ -927,6 +1002,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		file_size = EXCLUDED.file_size,
 		file_modified_at = EXCLUDED.file_modified_at,
 		file_hash = EXCLUDED.file_hash,
+		` + markerInvalidationAssignments() + `,
 		codec_video = EXCLUDED.codec_video,
 		codec_audio = EXCLUDED.codec_audio,
 		resolution = EXCLUDED.resolution,
