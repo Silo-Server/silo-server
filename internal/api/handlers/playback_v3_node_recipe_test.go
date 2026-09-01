@@ -275,6 +275,98 @@ func TestPrepareProgressiveTransportRollbackStopsAdmittedRemoteJob(t *testing.T)
 	}
 }
 
+func TestPrepareProgressiveTransportRequiredRollbackPreservesRetryableRoute(t *testing.T) {
+	deleteRequests := 0
+	predecessorDeleteRequests := 0
+	predecessor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && r.URL.Path == "/transcode/predecessor-transport" {
+			predecessorDeleteRequests++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(predecessor.Close)
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+				TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxExecutionV1},
+				Transformations: []playback.TransformationV3{{
+					Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+					RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+				}},
+			})
+		case r.Method == http.MethodDelete:
+			deleteRequests++
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(node.Close)
+	proxy := capableProxyStubV3(t)
+	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
+		"predecessor-transport": {},
+	}}
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodeRecipeStore = recipes
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{
+		TranscodeNode: &nodepool.Node{ID: 84, URL: node.URL},
+		ProxyNode:     &nodepool.Node{ID: 42, URL: proxy.URL},
+	}}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{
+		Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+	})
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{
+			ID: "session-progressive-required-rollback", UserID: 7, ProfileID: "profile-1",
+			TranscodeNodeURL: predecessor.URL, TranscodeTransportID: "predecessor-transport",
+		},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TranscodeAudio: true, SourceAudioChannels: 6, TargetAudioChannels: 2, TargetAudioCodec: "aac"},
+		mediaAuthModeV3{},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare progressive transport: %v", transportErr)
+	}
+	if transport.rollbackRequired == nil {
+		t.Fatal("remote progressive transport has no required rollback")
+	}
+
+	if err := transport.rollbackRequired(); err == nil {
+		t.Fatal("required rollback succeeded despite the node rejecting cancellation")
+	}
+	if deleteRequests != 1 {
+		t.Fatalf("delete requests = %d, want one synchronous cancellation", deleteRequests)
+	}
+	if slices.Contains(recipes.deleted, transport.transportID) {
+		t.Fatal("failed cancellation deleted the authority needed by the retryable live route")
+	}
+	if _, ok := recipes.cards[transport.transportID]; !ok {
+		t.Fatal("failed cancellation did not preserve the node recipe authority")
+	}
+	if predecessorDeleteRequests != 1 {
+		t.Fatalf("predecessor delete requests = %d, want one best-effort teardown", predecessorDeleteRequests)
+	}
+	if _, ok := recipes.cards["predecessor-transport"]; ok {
+		t.Fatal("retained successor left the displaced predecessor recipe authoritative")
+	}
+
+	// A cancellation failure must still release the lifecycle boundary so the
+	// retrying stop can acquire it instead of deadlocking behind this request.
+	unlock := handler.tm.LockSessionLifecycle("session-progressive-required-rollback")
+	unlock()
+}
+
 // A legacy attempt carries its whole recipe in the client's stream token, which
 // the relay forwards to the node. It needs no stored copy, and writing one would
 // put a media path in Redis for no reason.

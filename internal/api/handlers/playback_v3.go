@@ -105,6 +105,7 @@ type preparedTransportV3 struct {
 	routingEgressURL   string
 	commit             func()
 	rollback           func()
+	rollbackRequired   func() error
 	applySession       func() (func() error, error)
 	afterDurableCommit func()
 }
@@ -2674,6 +2675,46 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	if transcodeNode != nil {
 		nodeURL = transcodeNode.URL
 	}
+	adoptSuccessor := func() {
+		h.tm.CloseTranscodeSession(session.ID, "")
+		if previousNodeURL != "" {
+			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
+			h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+		}
+		h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
+		h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
+	}
+	rollbackTransport := func(requireCancellation bool) error {
+		if committed {
+			return nil
+		}
+		if requireCancellation && nodeURL != "" && transportID != "" {
+			if err := h.tm.CancelRemoteTranscode(r.Context(), transportID, nodeURL); err != nil {
+				// applySession has already made this the live route. Keep its
+				// authority and reservation intact so a later stop can retry the
+				// cancellation instead of orphaning an admitted remote stream.
+				committed = true
+				adoptSuccessor()
+				releaseLifecycle()
+				return err
+			}
+		}
+		committed = true
+		if !requireCancellation && nodeURL != "" && transportID != "" {
+			h.tm.StopRemoteTranscode(transportID, nodeURL)
+		}
+		// The session never reached the client, so a proxy admitted for it
+		// must not keep consuming that node's job/bandwidth budget until the
+		// reservation ages out — nor keep an egress grant for a transport
+		// that was never committed.
+		if servedByProxy && !reservationReleased {
+			releaseReservation()
+			h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
+		}
+		h.deleteNodeRecipeV3(r.Context(), transportID)
+		releaseLifecycle()
+		return nil
+	}
 	return preparedTransportV3{
 		url:                streamURL,
 		nodeURL:            nodeURL,
@@ -2690,34 +2731,13 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 				return
 			}
 			committed = true
-			h.tm.CloseTranscodeSession(session.ID, "")
-			if previousNodeURL != "" {
-				h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-				h.deleteNodeRecipeV3(r.Context(), previousTransportID)
-			}
-			h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
-			h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
+			adoptSuccessor()
 			releaseLifecycle()
 		},
 		rollback: func() {
-			if committed {
-				return
-			}
-			committed = true
-			if nodeURL != "" && transportID != "" {
-				h.tm.StopRemoteTranscode(transportID, nodeURL)
-			}
-			// The session never reached the client, so a proxy admitted for it
-			// must not keep consuming that node's job/bandwidth budget until the
-			// reservation ages out — nor keep an egress grant for a transport
-			// that was never committed.
-			if servedByProxy && !reservationReleased {
-				releaseReservation()
-				h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
-			}
-			h.deleteNodeRecipeV3(r.Context(), transportID)
-			releaseLifecycle()
+			_ = rollbackTransport(false)
 		},
+		rollbackRequired: func() error { return rollbackTransport(true) },
 	}, nil
 }
 
@@ -3780,6 +3800,52 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		egressNodeID = nodePlan.ProxyNode.ID
 		egressNodeURL = nodePlan.ProxyNode.URL
 	}
+	adoptSuccessor := func() {
+		h.tm.CloseTranscodeSession(session.ID, "")
+		if previousNodeURL != "" {
+			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
+			h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+		}
+		h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
+		h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
+	}
+	rollbackTransport := func(requireCancellation bool) error {
+		if committed {
+			return nil
+		}
+		if requireCancellation {
+			if err := h.tm.CancelRemoteTranscode(r.Context(), transportID, node.URL); err != nil {
+				// Preserve the admitted successor route for a retryable stop. Its
+				// live session, authority, and reservation must continue to agree.
+				committed = true
+				adoptSuccessor()
+				unlock()
+				return err
+			}
+		} else {
+			h.tm.StopRemoteTranscode(transportID, node.URL)
+		}
+		committed = true
+		// The node job this recipe rebuilds is gone, so the recipe must go too.
+		h.deleteNodeRecipeV3(r.Context(), transportID)
+		// The accepted node job is gone; drop the planner reservation too so
+		// repeated failed starts cannot pin the node's max-job or bandwidth
+		// budget until the reservation ages out.
+		if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
+			releaser.ReleaseSession(session.ID)
+		}
+		// An egress grant written for a transport that never committed would
+		// point a proxy at a transcode that no longer exists.
+		if servedByProxy {
+			h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
+		}
+		unlock()
+		return nil
+	}
+	var rollbackRequired func() error
+	if routingWorkloadV3(result) == noderouting.WorkloadRemux {
+		rollbackRequired = func() error { return rollbackTransport(true) }
+	}
 	return preparedTransportV3{url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
 		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() {
@@ -3787,35 +3853,11 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 				return
 			}
 			committed = true
-			h.tm.CloseTranscodeSession(session.ID, "")
-			if previousNodeURL != "" {
-				h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-				h.deleteNodeRecipeV3(r.Context(), previousTransportID)
-			}
-			h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
-			h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
+			adoptSuccessor()
 			unlock()
 		}, rollback: func() {
-			if committed {
-				return
-			}
-			committed = true
-			h.tm.StopRemoteTranscode(transportID, node.URL)
-			// The node job this recipe rebuilds is gone, so the recipe must go too.
-			h.deleteNodeRecipeV3(r.Context(), transportID)
-			// The accepted node job is gone; drop the planner reservation too so
-			// repeated failed starts cannot pin the node's max-job or bandwidth
-			// budget until the reservation ages out.
-			if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
-				releaser.ReleaseSession(session.ID)
-			}
-			// An egress grant written for a transport that never committed would
-			// point a proxy at a transcode that no longer exists.
-			if servedByProxy {
-				h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
-			}
-			unlock()
-		}}, nil
+			_ = rollbackTransport(false)
+		}, rollbackRequired: rollbackRequired}, nil
 }
 
 // remoteTranscodeRecipeCardV3 captures the byte-affecting recipe of a started
@@ -4303,17 +4345,14 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		}
 	}
 	if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, lease.LeaseToken, record.CurrentReplanRequestID, encoded, updated); err != nil {
-		rollbackFailed := false
-		if rollbackSession != nil {
-			if rollbackErr := rollbackSession(); rollbackErr != nil {
-				rollbackFailed = true
-				slog.ErrorContext(r.Context(), "protocol v3 replacement rollback failed", "session", sessionID, "error", rollbackErr)
-			}
+		transportRollbackErr, sessionRollbackErr := rollbackFailedReplanV3(transport, rollbackSession)
+		if transportRollbackErr != nil {
+			slog.ErrorContext(r.Context(), "protocol v3 replacement transport cancellation failed", "session", sessionID, "error", transportRollbackErr)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel the replacement transport")
+			return
 		}
-		if transport != nil {
-			transport.rollback()
-		}
-		if rollbackFailed {
+		if sessionRollbackErr != nil {
+			slog.ErrorContext(r.Context(), "protocol v3 replacement rollback failed", "session", sessionID, "error", sessionRollbackErr)
 			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, false)
 		}
 		if errors.Is(err, playback.ErrReplanSupersededV3) {
@@ -4332,6 +4371,25 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	}
 	h.raceCopySafetyV3(updated.EffectiveMediaFileID, response.PlaybackPlan)
 	writeJSON(w, http.StatusOK, response)
+}
+
+// rollbackFailedReplanV3 cancels a remotely admitted replacement before it
+// restores the predecessor session. If cancellation cannot be confirmed, the
+// successor remains live and authoritative so a later stop can retry it.
+func rollbackFailedReplanV3(transport *preparedTransportV3, rollbackSession func() error) (transportErr, sessionErr error) {
+	if transport != nil {
+		if transport.rollbackRequired != nil {
+			if err := transport.rollbackRequired(); err != nil {
+				return err, nil
+			}
+		} else {
+			transport.rollback()
+		}
+	}
+	if rollbackSession != nil {
+		return nil, rollbackSession()
+	}
+	return nil, nil
 }
 
 // raceCopySafetyV3 resolves an unknown H.264 copy-safety verdict behind a plan
@@ -4805,6 +4863,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	originalRollback := transport.rollback
+	originalRollbackRequired := transport.rollbackRequired
 	replacement := playback.SessionReplacement{
 		EffectiveMediaFileID: effectiveFile.ID,
 		StreamState:          h.v3SessionStreamState(r.Context(), session, effectiveFile, result, transport, mode),
@@ -4842,6 +4901,15 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	transport.rollback = func() {
 		originalRollback()
 		cancelReservation()
+	}
+	if originalRollbackRequired != nil {
+		transport.rollbackRequired = func() error {
+			if err := originalRollbackRequired(); err != nil {
+				return err
+			}
+			cancelReservation()
+			return nil
+		}
 	}
 	reservationHandedOff = true
 	return response, updated, &transport, nil

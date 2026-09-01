@@ -1654,6 +1654,33 @@ func TestHandleReplanPlaybackV3RollsBackLiveSessionWhenPersistenceFails(t *testi
 	}
 }
 
+func TestRollbackFailedReplanV3KeepsSuccessorWhenCancellationFails(t *testing.T) {
+	cancelErr := errors.New("node unavailable")
+	normalRollbackCalled := false
+	sessionRollbackCalled := false
+	transport := &preparedTransportV3{
+		rollback: func() { normalRollbackCalled = true },
+		rollbackRequired: func() error {
+			return cancelErr
+		},
+	}
+
+	transportErr, sessionErr := rollbackFailedReplanV3(transport, func() error {
+		sessionRollbackCalled = true
+		return nil
+	})
+
+	if !errors.Is(transportErr, cancelErr) || sessionErr != nil {
+		t.Fatalf("rollback errors = transport %v session %v, want cancellation failure only", transportErr, sessionErr)
+	}
+	if normalRollbackCalled {
+		t.Fatal("required rollback failure fell through to best-effort cleanup")
+	}
+	if sessionRollbackCalled {
+		t.Fatal("predecessor session was restored while the successor transport remained active")
+	}
+}
+
 func TestHandleReplanPlaybackV3SeekReanchorKeepsCurrentRecipeEligible(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "ass", Language: "eng"}}
