@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -400,6 +402,87 @@ func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t
 	}
 	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("session after successful retry = %v, want not found", err)
+	}
+}
+
+func TestStopPlaybackWaitsForReplacementAndRevokesItsCurrentAuthority(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer node.Close()
+
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(7, "profile-1", 42, playback.PlayRemux, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const oldTransportID = "session-stop-race-old-plan"
+	const newTransportID = "session-stop-race-new-plan"
+	if err := manager.SetTranscodeRoute(session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: oldTransportID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetNodeRoutingAssignment(session.ID, playback.NodeRoutingAssignment{
+		Workload: string(noderouting.WorkloadRemux), Execution: string(noderouting.ExecutionTranscode),
+		Egress: string(noderouting.EgressProxy),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	staleSession, err := manager.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewPlaybackHandler(manager)
+	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
+		oldTransportID: {SessionID: session.ID, TranscodeTransportID: oldTransportID},
+		newTransportID: {SessionID: session.ID, TranscodeTransportID: newTransportID},
+	}}
+	handler.NodeRecipeStore = recipes
+
+	// Model a replan after it has installed its successor in the session manager
+	// but before it has committed the durable plan and released the lifecycle
+	// boundary. The stop receives the intentionally stale predecessor copy.
+	unlockReplacement := handler.tm.LockSessionLifecycle(session.ID)
+	locked := true
+	defer func() {
+		if locked {
+			unlockReplacement()
+		}
+	}()
+	if _, err := manager.ApplyReplacement(session.ID, playback.SessionReplacement{
+		EffectiveMediaFileID: 42,
+		StreamState: playback.SessionStreamState{
+			PlayMethod: playback.PlayRemux, TranscodeNodeURL: node.URL, TranscodeTransportID: newTransportID, TranscodeRouteSet: true,
+			RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode), RoutingEgress: string(noderouting.EgressProxy),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- handler.stopPlaybackSession(t.Context(), staleSession, true)
+	}()
+	select {
+	case stopErr := <-stopDone:
+		t.Fatalf("stop crossed the in-flight replacement boundary: %v", stopErr)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	unlockReplacement()
+	locked = false
+	select {
+	case stopErr := <-stopDone:
+		if stopErr != nil {
+			t.Fatal(stopErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not resume after the replacement committed")
+	}
+	if !slices.Equal(recipes.deleted, []string{newTransportID, newTransportID}) {
+		t.Fatalf("deleted recipe authorities = %v, want only the current replacement transport", recipes.deleted)
+	}
+	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("session after stop = %v, want not found", err)
 	}
 }
 
