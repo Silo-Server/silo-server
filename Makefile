@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -196,6 +196,16 @@ verify-route-inventory:
 # rest of `make lint` cannot.
 lint-router-recovery:
 	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
+MIGRATION_LEDGER := contracts/api/v2/migration.json
+
+# Fail when the v2 migration ledger violates its JSON Schema or no longer
+# covers the route inventory one-to-one. Every inventory row needs exactly one
+# ledger entry and every entry needs a row, so a route added without a
+# migration decision, or a decision left behind for a route that is gone,
+# lands here.
+verify-migration-ledger:
+	@go test -count=1 -run '^TestLedgerMatchesInventory$$' ./internal/contractledger/ \
+		|| { echo "::error::$(MIGRATION_LEDGER) violates contracts/api/v2/migration.schema.json or disagrees with $(ROUTE_INVENTORY)"; exit 1; }
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

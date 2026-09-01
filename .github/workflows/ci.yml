@@ -115,6 +115,12 @@ jobs:
       - name: Verify the legacy native route inventory is current
         run: make verify-route-inventory
 
+      # Every inventoried route needs a migration decision before v2 work
+      # ports it. The ledger is schema-checked and reconciled against the
+      # inventory one-to-one, so a new route without a ledger entry, or a
+      # stale entry for a removed route, fails here.
+      - name: Verify the v2 migration ledger covers the route inventory
+        run: make verify-migration-ledger
       # The inventory's lint rule (recovering a router from a handler) has to
       # hold over the whole tree, not only the lines a branch touched: an old
       # line folded in by a rebase is as much of a hole as a new one.

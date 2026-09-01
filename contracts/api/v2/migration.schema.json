@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siloserver.org/contracts/api/v2/migration.schema.json",
+  "title": "Silo pre-1.0 native surface to /api/v2 migration ledger",
+  "description": "One entry per row of contracts/api/v2/route-inventory.json. internal/contractledger validates this schema and reconciles the ledger against the inventory in CI.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "description", "source_inventory", "consumer_method", "field_reference", "totals", "entries"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "source_inventory": { "const": "contracts/api/v2/route-inventory.json" },
+    "consumer_method": { "type": "string", "minLength": 1 },
+    "field_reference": { "type": "string", "minLength": 1 },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries"],
+      "properties": { "entries": { "type": "integer", "minimum": 0 } }
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "listener": { "enum": ["root", "api", "proxy", "transcode_node"] },
+    "namespace": { "enum": ["api_v1", "legacy_unversioned", "operational"] },
+    "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"] },
+    "path": { "type": "string", "pattern": "^/" },
+    "handlerKind": { "enum": ["method", "func", "expression", "literal", "delegation"] },
+    "authClass": { "enum": ["public", "authenticated", "profile_scoped", "acting_admin", "permission_gated", "node_bearer", "delegated"] },
+    "authTrait": {
+      "enum": [
+        "acting_admin", "authenticated", "cors", "delegated", "demo_guarded", "egress_metered",
+        "marker_edit", "metadata_curation", "node_bearer", "optional_viewer_access",
+        "profile_required", "rate_limited", "viewer_access"
+      ]
+    },
+    "requestKind": { "enum": ["none", "json", "multipart", "binary", "range", "dynamic_proxy", "unknown"] },
+    "responseMediaKind": { "enum": ["json", "multipart", "binary", "range", "redirect", "websocket", "html", "css", "dynamic_proxy", "unknown"] },
+    "consumer": { "enum": ["web", "apple", "android", "internal", "compat", "external_unknown", "unused"] },
+    "callSiteRepo": { "enum": ["web", "apple", "android", "server"] },
+    "matchKind": { "enum": ["mechanical", "manual"] },
+    "releaseFlow": {
+      "enum": [
+        "login", "setup", "profiles", "browse_search", "playback_lifecycle", "progress", "settings",
+        "notifications", "downloads", "core_admin", "other_admin", "background_refresh", "operational", "other"
+      ]
+    },
+    "disposition": { "enum": ["ported", "redesigned", "replaced", "removed", "compatibility_only", "documented_exclusion"] },
+    "dispositionRule": {
+      "enum": [
+        "default_ported",
+        "dynamic_plugin_proxy",
+        "operator_metrics",
+        "listener_delegation",
+        "frontend_shell",
+        "deprecation_headers",
+        "v1_scope_removals_table",
+        "contract_root_probes",
+        "contract_playback_start_status",
+        "contract_plugin_cookie_path",
+        "only_compat_consumer",
+        "maintainer_decision"
+      ]
+    },
+    "reviewState": { "enum": ["proposed", "ratified", "rejected"] },
+    "capabilityEndpoint": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^GET /api/v1/[A-Za-z0-9_./{}-]+$" }
+      ]
+    },
+    "callSite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "file", "line", "types", "match"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/callSiteRepo" },
+        "file": { "type": "string", "minLength": 1, "pattern": "^[^/]" },
+        "line": { "type": "integer", "minimum": 1 },
+        "types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "match": { "$ref": "#/$defs/matchKind" }
+      }
+    },
+    "v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "path", "operation_id"],
+      "properties": {
+        "method": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/method" }] },
+        "path": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^/" }] },
+        "operation_id": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }] }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "listener", "namespace", "method", "path", "registration_index",
+        "handler", "handler_kind", "source_file",
+        "route_group", "middleware_chain",
+        "auth_class", "auth_traits", "profile_required", "admin_required",
+        "conditional", "conditions", "delegates_to",
+        "request_kind", "response_media_kind", "streams", "upgrades_websocket",
+        "capability_endpoint",
+        "consumers", "consumer_call_sites",
+        "release_flow", "tier",
+        "disposition", "disposition_rule", "disposition_rationale",
+        "review_state", "v2", "notes"
+      ],
+      "properties": {
+        "listener": { "$ref": "#/$defs/listener" },
+        "namespace": { "$ref": "#/$defs/namespace" },
+        "method": { "$ref": "#/$defs/method" },
+        "path": { "$ref": "#/$defs/path" },
+        "registration_index": { "type": "integer", "minimum": 0 },
+        "handler": { "type": "string", "minLength": 1 },
+        "handler_kind": { "$ref": "#/$defs/handlerKind" },
+        "source_file": { "type": "string", "minLength": 1, "pattern": "^(cmd|internal)/" },
+        "route_group": { "$ref": "#/$defs/path" },
+        "middleware_chain": { "type": "integer", "minimum": 0 },
+        "auth_class": { "$ref": "#/$defs/authClass" },
+        "auth_traits": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/authTrait" } },
+        "profile_required": { "type": "boolean" },
+        "admin_required": { "type": "boolean" },
+        "conditional": { "type": "boolean" },
+        "conditions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "delegates_to": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/listener" }] },
+        "request_kind": { "$ref": "#/$defs/requestKind" },
+        "response_media_kind": { "$ref": "#/$defs/responseMediaKind" },
+        "streams": { "type": "boolean" },
+        "upgrades_websocket": { "type": "boolean" },
+        "capability_endpoint": { "$ref": "#/$defs/capabilityEndpoint" },
+        "consumers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/consumer" } },
+        "consumer_call_sites": { "type": "array", "items": { "$ref": "#/$defs/callSite" } },
+        "release_flow": { "$ref": "#/$defs/releaseFlow" },
+        "tier": { "enum": [1, 2] },
+        "disposition": { "$ref": "#/$defs/disposition" },
+        "disposition_rule": { "$ref": "#/$defs/dispositionRule" },
+        "disposition_rationale": { "type": "string", "minLength": 1 },
+        "review_state": { "$ref": "#/$defs/reviewState" },
+        "v2": { "$ref": "#/$defs/v2" },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "consumers": { "contains": { "const": "unused" } } } },
+          "then": { "properties": { "consumers": { "maxItems": 1 }, "consumer_call_sites": { "maxItems": 0 } } }
+        },
+        {
+          "if": { "properties": { "disposition": { "enum": ["removed", "redesigned", "replaced", "compatibility_only", "documented_exclusion"] } } },
+          "then": { "properties": { "disposition_rule": { "not": { "const": "default_ported" } } } }
+        },
+        {
+          "if": { "properties": { "disposition": { "const": "ported" } } },
+          "then": { "properties": { "disposition_rule": { "enum": ["default_ported", "maintainer_decision"] } } }
+        }
+      ]
+    }
+  }
+}
