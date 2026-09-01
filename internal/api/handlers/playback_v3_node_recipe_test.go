@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -483,6 +484,77 @@ func TestStopPlaybackWaitsForReplacementAndRevokesItsCurrentAuthority(t *testing
 	}
 	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("session after stop = %v, want not found", err)
+	}
+}
+
+func TestPrepareProgressiveTransportPublishesAuthorityInsideLifecycleBoundary(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(7, "profile-1", 42, playback.PlayRemux, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	proxy := capableProxyStubV3(t)
+	transcode := progressiveRemuxExecutionStubV3(t)
+	handler := NewPlaybackHandler(manager)
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{
+		ProxyNode:     &nodepool.Node{ID: 42, URL: proxy.URL},
+		TranscodeNode: &nodepool.Node{ID: 84, URL: transcode.URL},
+	}}
+	recipes := &recordingRecipeCardStoreV3{}
+	grants := &recordingRecipeCardStoreV3{}
+	handler.NodeRecipeStore = recipes
+	handler.ProxyGrantStore = grants
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	reachedLifecycle := make(chan struct{})
+	handler.beforeIdentityLifecycleLockV3 = sync.OnceFunc(func() { close(reachedLifecycle) })
+	unlockStop := handler.tm.LockSessionLifecycle(session.ID)
+	locked := true
+	defer func() {
+		if locked {
+			unlockStop()
+		}
+	}()
+
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3)
+	plan.SessionID = session.ID
+	result := playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetAudioCodec: "aac"}
+	prepared := make(chan *transportErrorV3, 1)
+	go func() {
+		_, transportErr := handler.prepareTransportV3(
+			httptest.NewRequest(http.MethodPost, "/", nil), session, v3HandlerFixtureFile(t), result, authorizedOriginsModeV3())
+		prepared <- transportErr
+	}()
+
+	select {
+	case <-reachedLifecycle:
+	case <-time.After(2 * time.Second):
+		t.Fatal("transport preparation did not reach the lifecycle boundary")
+	}
+	if len(recipes.cards) != 0 || len(grants.cards) != 0 {
+		t.Fatalf("authority published before lifecycle lock: recipes=%v grants=%v", recipes.cards, grants.cards)
+	}
+	// Model stop after it acquired this boundary: the session disappears before
+	// the waiting replacement can enter and publish its successor authority.
+	if err := manager.StopSession(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	unlockStop()
+	locked = false
+
+	select {
+	case transportErr := <-prepared:
+		if transportErr == nil || transportErr.reason != "session_expired" || !transportErr.retryable {
+			t.Fatalf("transport error = %#v, want retryable session_expired", transportErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("transport preparation did not resume after stop released the lifecycle boundary")
+	}
+	if len(recipes.cards) != 0 || len(grants.cards) != 0 {
+		t.Fatalf("stopped session retained successor authority: recipes=%v grants=%v", recipes.cards, grants.cards)
 	}
 }
 

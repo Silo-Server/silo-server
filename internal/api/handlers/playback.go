@@ -236,11 +236,14 @@ type PlaybackHandler struct {
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig    func() config.PlaybackConfig
-	FFmpegLogSink     playback.FFmpegLogSink
-	copySeekAnchor    copySeekAnchorResolver
-	realtimeCommandMu sync.Mutex
-	realtimeCommands  map[string]playbackCommandRecord
+	PlaybackConfig func() config.PlaybackConfig
+	FFmpegLogSink  playback.FFmpegLogSink
+	copySeekAnchor copySeekAnchorResolver
+	// beforeIdentityLifecycleLockV3 is a test seam for proving that identity
+	// route authority remains unpublished until the shared lifecycle boundary.
+	beforeIdentityLifecycleLockV3 func()
+	realtimeCommandMu             sync.Mutex
+	realtimeCommands              map[string]playbackCommandRecord
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.

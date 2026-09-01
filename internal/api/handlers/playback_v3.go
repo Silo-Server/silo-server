@@ -2424,26 +2424,6 @@ func planRequiresServerTransformationsV3(plan *playback.PlanV3) bool {
 }
 
 func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, timeline preparedTimelineV3, mode mediaAuthModeV3, policy config.PlaybackRoutingPolicy, excludedShapes map[string]struct{}) (preparedTransportV3, *transportErrorV3) {
-	routeSession := *session
-	// The URL builders below refuse to mint a stream token for a session that
-	// requires media authorization. The live session only learns the mode when
-	// its stream state is committed, so stamp the route copy the builders see.
-	routeSession.RequireMediaAuthorization = mode.headerAuth
-	routeSession.PlayMethod = result.PlayMethod
-	routeSession.BasePlayMethod = result.PlayMethod
-	routeSession.MediaFileID = result.Plan.EffectiveMediaFileID
-	routeSession.AudioTrackIndex = plannedAudioTrackIndexV3(result, session.AudioTrackIndex)
-	routeSession.TranscodeAudio = result.TranscodeAudio
-	routeSession.TargetAudioCodec = result.TargetAudioCodec
-	routeSession.SourceAudioChannels = result.SourceAudioChannels
-	routeSession.TargetAudioChannels = result.TargetAudioChannels
-	routeSession.TargetAudioBitrateKbps = result.TargetAudioBitrateKbps
-	routeSession.RemuxDVMode = remuxDVModeForPlanV3(result.Plan)
-	// A replan starts without an egress identity. Do not let the previous
-	// proxy's row or internal URL leak into an API-served replacement route.
-	routeSession.RoutingEgressNodeID = 0
-	routeSession.RoutingEgressNodeURL = ""
-
 	// The shared resolver removes proxy shapes when this client cannot address
 	// an authorized origin, then applies the same policy ordering as every HLS
 	// path. Legacy and authorized-origin attempts differ only in URL authority.
@@ -2458,7 +2438,16 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			releaser.ReleaseSession(session.ID)
 		}
 	}
+	var unlockLifecycle func()
+	releaseLifecycle := func() {
+		if unlockLifecycle == nil {
+			return
+		}
+		unlockLifecycle()
+		unlockLifecycle = nil
+	}
 	fallbackFromSelectedRoute := func(routeErr *transportErrorV3) (preparedTransportV3, *transportErrorV3) {
+		releaseLifecycle()
 		releaseReservation()
 		fallbackExclusions := maps.Clone(excludedShapes)
 		if fallbackExclusions == nil {
@@ -2508,6 +2497,56 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			})
 		}
 	}
+
+	// A stop and a replacement must agree on the exact moment a progressive
+	// authority becomes externally usable. Re-read the session after entering
+	// their shared lifecycle boundary: if stop won, fail before publishing the
+	// successor recipe or proxy grant; if replacement won, stop waits until its
+	// commit or rollback has made that authority match the live session.
+	if h.beforeIdentityLifecycleLockV3 != nil {
+		h.beforeIdentityLifecycleLockV3()
+	}
+	unlockLifecycle = h.tm.LockSessionLifecycle(session.ID)
+	// Accepted start/replan plans always carry their live session ID. Low-level
+	// transport tests deliberately omit it so they can exercise route assembly
+	// without reconstructing the surrounding request transaction.
+	if result.Plan.SessionID != "" {
+		if result.Plan.SessionID != session.ID {
+			releaseLifecycle()
+			releaseReservation()
+			return preparedTransportV3{}, &transportErrorV3{
+				reason: "internal_error", message: "The playback plan does not belong to the session being prepared.",
+			}
+		}
+		currentSession, err := h.sessionMgr.GetSession(session.ID)
+		if err != nil {
+			releaseLifecycle()
+			releaseReservation()
+			return preparedTransportV3{}, &transportErrorV3{
+				reason: "session_expired", message: "The playback session ended before its route could be prepared.", retryable: true, cause: err,
+			}
+		}
+		session = currentSession
+	}
+	routeSession := *session
+	// The URL builders below refuse to mint a stream token for a session that
+	// requires media authorization. The live session only learns the mode when
+	// its stream state is committed, so stamp the route copy the builders see.
+	routeSession.RequireMediaAuthorization = mode.headerAuth
+	routeSession.PlayMethod = result.PlayMethod
+	routeSession.BasePlayMethod = result.PlayMethod
+	routeSession.MediaFileID = result.Plan.EffectiveMediaFileID
+	routeSession.AudioTrackIndex = plannedAudioTrackIndexV3(result, session.AudioTrackIndex)
+	routeSession.TranscodeAudio = result.TranscodeAudio
+	routeSession.TargetAudioCodec = result.TargetAudioCodec
+	routeSession.SourceAudioChannels = result.SourceAudioChannels
+	routeSession.TargetAudioChannels = result.TargetAudioChannels
+	routeSession.TargetAudioBitrateKbps = result.TargetAudioBitrateKbps
+	routeSession.RemuxDVMode = remuxDVModeForPlanV3(result.Plan)
+	// A replan starts without an egress identity. Do not let the previous
+	// proxy's row or internal URL leak into an API-served replacement route.
+	routeSession.RoutingEgressNodeID = 0
+	routeSession.RoutingEgressNodeURL = ""
 	routeSession.RoutingWorkload = string(routingWorkloadV3(result))
 	routeSession.RoutingExecution = string(decision.Shape.Execution)
 	routeSession.RoutingEgress = string(decision.Shape.Egress)
@@ -2583,6 +2622,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		}
 		releaseReservation()
 		if !identityLocalFallbackAllowedV3(result, policy) || h.validateLocalProgressiveCapabilitiesV3(r.Context(), result) != nil {
+			releaseLifecycle()
 			return preparedTransportV3{}, &transportErrorV3{
 				reason:    string(noderouting.OutcomeCapacityUnavailable),
 				message:   "The proxy egress route is temporarily unavailable.",
@@ -2593,7 +2633,6 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 
 	previousNodeURL := session.TranscodeNodeURL
 	previousTransportID := remoteTransportID(session)
-	unlock := h.tm.LockSessionLifecycle(session.ID)
 	committed := false
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
 		if seek := timeline.seekSeconds; seek > 0 {
@@ -2658,7 +2697,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			}
 			h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
 			h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
-			unlock()
+			releaseLifecycle()
 		},
 		rollback: func() {
 			if committed {
@@ -2677,7 +2716,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 				h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
 			}
 			h.deleteNodeRecipeV3(r.Context(), transportID)
-			unlock()
+			releaseLifecycle()
 		},
 	}, nil
 }
