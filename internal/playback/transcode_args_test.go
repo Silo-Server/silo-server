@@ -576,8 +576,11 @@ func TestBuildFFmpegArgs_CopyVideoFromStartUsesJellyfinTimestamps(t *testing.T) 
 	if !strings.Contains(joined, "-copyts") {
 		t.Fatalf("copy-video from-start should preserve source timestamps: %s", joined)
 	}
-	if !strings.Contains(joined, "-avoid_negative_ts disabled") {
-		t.Fatalf("copy-video from-start should disable timestamp rewriting: %s", joined)
+	if !strings.Contains(joined, "-avoid_negative_ts make_non_negative") {
+		t.Fatalf("copy-video from-start must lift the AAC priming delay out of the first tfdt: %s", joined)
+	}
+	if strings.Contains(joined, "-avoid_negative_ts disabled") {
+		t.Fatalf("copy-video from-start must not write negative tfdt values: %s", joined)
 	}
 	if !strings.Contains(joined, "-start_at_zero") {
 		t.Fatalf("copy-video from-start should start its output timeline at zero: %s", joined)
@@ -641,8 +644,8 @@ func TestBuildFFmpegArgs_CopyVideoResumePreservesSourceTimestamps(t *testing.T) 
 	if !strings.Contains(joined, "-copyts") {
 		t.Fatalf("copy-video resume should preserve source timestamps: %s", joined)
 	}
-	if !strings.Contains(joined, "-avoid_negative_ts disabled") {
-		t.Fatalf("copy-video resume should disable negative-ts adjustment: %s", joined)
+	if !strings.Contains(joined, "-avoid_negative_ts make_non_negative") {
+		t.Fatalf("copy-video resume should only lift genuinely negative timestamps: %s", joined)
 	}
 	if !strings.Contains(joined, "-start_at_zero") {
 		t.Fatalf("copy-video resume should start its output timeline at zero: %s", joined)

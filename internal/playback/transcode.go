@@ -901,11 +901,21 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 // while start_at_zero makes the output presentation timeline begin at zero.
 // This keeps initial fragments decodable without losing the source-relative
 // timing required by segment-driven resume restarts.
+//
+// Negative timestamps must still be lifted. When the audio is re-encoded to
+// AAC the encoder's 1024-sample priming delay places the first audio packet
+// before zero, and with "disabled" the mov muxer writes that value straight
+// into the first fragment's tfdt (baseMediaDecodeTime -1024). ExoPlayer/Media3
+// rejects any tfdt with the sign bit set ("Top bit not zero"), so every
+// full-file copy-video start with audio adaptation failed on Android before
+// the first frame. make_non_negative shifts all streams by the same minimal
+// offset only when a timestamp is negative; resumes and audio-copy starts
+// carry no negative timestamps and are therefore unaffected.
 func appendTimestampNormalizationArgs(args []string, opts TranscodeOpts) []string {
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		return append(args,
 			"-copyts",
-			"-avoid_negative_ts", "disabled",
+			"-avoid_negative_ts", "make_non_negative",
 			"-start_at_zero",
 		)
 	}
