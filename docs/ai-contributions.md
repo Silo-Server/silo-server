@@ -7,20 +7,22 @@ This applies to pull requests and issues written by a person, an agent, or both.
 ## Required disclosure
 
 > [!IMPORTANT]
-> Every pull request and issue must say whether AI was involved: the exact tool
-> and model identifiers the tool reports, the level of involvement, and a
-> summary of the independent or adversarial review. "No AI used" is a complete
-> answer when it is true.
+> Every pull request and issue must say whether AI was involved: the exact
+> harness, tool, and model identifiers, the level of involvement, and a summary
+> of the independent or adversarial review. "No AI used" is a complete answer
+> when it is true.
 
-The pull request template contains this block; copy it into issues that need it:
+The pull request template uses this block. The required issue forms collect
+the same fields individually:
 
 ```md
 ## AI Disclosure
 
+- Harness: exact agent harness or application, or "none"
 - Tool(s): exact tool name(s), or "none"
 - Model(s): exact model identifier(s) reported by each tool, or "n/a"
 - Involvement: Fully AI-generated, human verified | AI-assisted | Human-written, AI-reviewed | No AI used
-- Adversarial review: scope, method, findings, and resolutions, or "n/a" only when no AI or implementation change was involved
+- Adversarial review: scope, method, findings, and resolutions, or "n/a" when this change does not require independent or adversarial review
 ```
 
 Disclosure is about provenance, not judgment. AI use is never by itself a reason
@@ -67,11 +69,11 @@ enforce the required fields.
 ## Prose pass
 
 Before submitting, run a final readability pass over the pull request or issue
-body using the `unslop` skill at
-[.claude/skills/unslop/SKILL.md](../.claude/skills/unslop/SKILL.md). Claude Code
-agents can invoke it directly; any other tool or a human author can read it as
-plain markdown and apply it. Cut filler and promotional framing, lead with the
-outcome, and prefer concrete claims over adjectives.
+body using the repository's [Writing policy](../AGENTS.md#writing). Lead with
+the outcome, use concrete plain language, and cut filler, repetition, stock
+framing, and promotional claims. Preserve meaning, evidence, citations,
+uncertainty, and established terminology; leave exact quotations, commands,
+logs, identifiers, API names, and contractual language unchanged.
 
 This is a readability step, not concealment. It must not alter facts, pasted
 command output, or logs, and it does not loosen the disclosure requirement

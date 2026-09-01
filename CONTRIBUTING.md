@@ -22,6 +22,13 @@ Durable architecture and contracts live under `docs/architecture/`.
 Implementation plans and working notes belong in the issue or pull request, not
 in the repository.
 
+Choose the repository that owns the behavior before implementation begins.
+This repository owns the backend, web app, native API, Jellyfin compatibility,
+and plugin host. Client-only work belongs in `silo-apple` or `silo-android`;
+plugin contracts belong in `silo-plugin-sdk`; provider behavior belongs in the
+individual plugin repository. Cross-repository changes should identify all
+affected repositories in the issue and pull request.
+
 ## Reporting a problem
 
 Use the [GitHub issue forms](https://github.com/Silo-Server/silo-server/issues/new/choose);

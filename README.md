@@ -121,6 +121,11 @@ Bugs, install problems, and performance issues: the
 [GitHub issue forms](https://github.com/Silo-Server/silo-server/issues/new/choose),
 which ask for reproduction steps and raw logs.
 
+Native clients are developed in
+[`silo-apple`](https://github.com/Silo-Server/silo-apple) and
+[`silo-android`](https://github.com/Silo-Server/silo-android). Client-visible
+API, authentication, playback, or metadata changes should consider both.
+
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Features,
 API changes, migrations, and behavior changes should start as an issue.
 

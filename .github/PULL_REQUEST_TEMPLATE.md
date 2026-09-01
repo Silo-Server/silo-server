@@ -18,14 +18,15 @@ Include screenshots or recordings for visible UI changes.
 
 Migration, compatibility, security, or operational impact, or "None identified".
 
-## AI Disclosure
-
-- Tool(s): exact tool name(s), or "none"
-- Model(s): exact model identifier(s) reported by each tool, or "n/a"
-- Involvement: Fully AI-generated, human verified | AI-assisted | Human-written, AI-reviewed | No AI used
-- Adversarial review: scope, method, findings, and resolutions, or "n/a" only when no AI or implementation change was involved
-
 ## Checklist
 
 - [ ] I read and can explain the complete diff.
 - [ ] This pull request addresses one concern.
+
+## AI Disclosure
+
+- Harness: exact agent harness or application, or "none"
+- Tool(s): exact tool name(s), or "none"
+- Model(s): exact model identifier(s) reported by each tool, or "n/a"
+- Involvement: Fully AI-generated, human verified | AI-assisted | Human-written, AI-reviewed | No AI used
+- Adversarial review: scope, method, findings, and resolutions, or "n/a" when this change does not require independent or adversarial review
