@@ -107,7 +107,10 @@ function CatalogResults({
   const isCollectionSource =
     state.source === "library_collection" || state.source === "user_collection";
   const hasSavedSortPreference =
-    isCollectionSource || state.source === "watchlist" || state.source === "favorites";
+    isCollectionSource ||
+    state.source === "watchlist" ||
+    state.source === "favorites" ||
+    state.source === "history";
   const allowPersonalizedOverlayControls = catalogSourceAllowsOverlay(state.source);
   const removeHistory = useRemoveHistory();
   const [selectionMode, setSelectionMode] = useState(false);
