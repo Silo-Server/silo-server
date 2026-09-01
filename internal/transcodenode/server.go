@@ -204,9 +204,10 @@ type sessionTracker interface {
 }
 
 type progressiveRemuxRequest struct {
-	id     uint64
-	cancel context.CancelFunc
-	done   <-chan struct{}
+	id                uint64
+	playbackSessionID string
+	cancel            context.CancelFunc
+	done              <-chan struct{}
 }
 
 // Server is the HTTP handler for transcode mode.
@@ -1965,6 +1966,10 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	requestID := s.progressiveRemuxSequence.Add(1)
+	playbackSessionID := claims.SessionID
+	if playbackSessionID == "" {
+		playbackSessionID = transportID
+	}
 	abort := make(chan struct{})
 	stop := sync.OnceFunc(func() {
 		cancel()
@@ -1991,7 +1996,9 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session already active", http.StatusConflict)
 		return
 	}
-	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: requestID, cancel: stop, done: done}
+	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{
+		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done,
+	}
 	s.mu.Unlock()
 	unlock()
 	s.reloadMu.RUnlock()
@@ -2013,11 +2020,11 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 			startedAt = time.Now().UTC()
 		}
 		s.tracker.Track(ctx, nodesessions.SessionInfo{
-			SessionID: transportID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: "remux",
+			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: "remux",
 			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
 			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
 		})
-		defer s.tracker.Remove(context.WithoutCancel(ctx), transportID)
+		defer s.tracker.Remove(context.WithoutCancel(ctx), playbackSessionID)
 	}
 
 	request := r.WithContext(ctx)
@@ -2098,16 +2105,23 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 	durableProgressive := false
 	authorityFound := false
+	playbackSessionID := sessionID
 	if s.recipeStore != nil {
 		card, ok := s.recipeStore.Get(r.Context(), sessionID)
 		authorityFound = ok && card != nil
 		durableProgressive = authorityFound && card.PlayMethod == playback.PlayRemux
+		if authorityFound && card.SessionID != "" {
+			playbackSessionID = card.SessionID
+		}
 	}
 
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStoppedProgressiveRemuxesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
+	if progressiveFound && progressive.playbackSessionID != "" {
+		playbackSessionID = progressive.playbackSessionID
+	}
 	if progressiveFound || durableProgressive {
 		if s.stoppedProgressiveRemuxes == nil {
 			s.stoppedProgressiveRemuxes = make(map[string]time.Time)
@@ -2151,10 +2165,20 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.tracker != nil {
-		s.tracker.Remove(r.Context(), sessionID)
+		s.tracker.Remove(r.Context(), playbackSessionID)
+	}
+	var shutdownErr error
+	if progressiveFound {
+		waitCtx, cancelWait := context.WithTimeout(r.Context(), progressiveRemuxShutdownTimeout)
+		shutdownErr = waitForProgressiveRemuxShutdown(waitCtx, sessionID, progressive)
+		cancelWait()
 	}
 	if authorityErr != nil {
 		http.Error(w, "transcode authority revocation unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if shutdownErr != nil {
+		http.Error(w, "progressive remux shutdown unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !found {
@@ -2568,23 +2592,34 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			}
 		}
 		if s.tracker != nil {
-			s.tracker.Remove(ctx, id)
+			trackerSessionID := request.playbackSessionID
+			if trackerSessionID == "" {
+				trackerSessionID = id
+			}
+			s.tracker.Remove(ctx, trackerSessionID)
 		}
 	}
 
 	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
 	defer cancelWait()
 	for id, request := range progressiveVictims {
-		if request.done == nil {
-			continue
-		}
-		select {
-		case <-request.done:
-		case <-waitCtx.Done():
-			return errors.Join(authorityErr, fmt.Errorf("wait for progressive remux %s shutdown: %w", id, waitCtx.Err()))
+		if err := waitForProgressiveRemuxShutdown(waitCtx, id, request); err != nil {
+			return errors.Join(authorityErr, err)
 		}
 	}
 	return authorityErr
+}
+
+func waitForProgressiveRemuxShutdown(ctx context.Context, transportID string, request progressiveRemuxRequest) error {
+	if request.done == nil {
+		return nil
+	}
+	select {
+	case <-request.done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for progressive remux %s shutdown: %w", transportID, ctx.Err())
+	}
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

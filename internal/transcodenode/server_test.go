@@ -52,6 +52,28 @@ type blockingSessionTracker struct {
 	removeHasDeadline bool
 }
 
+type recordingSessionTracker struct {
+	mu      sync.Mutex
+	tracked []nodesessions.SessionInfo
+	removed []string
+}
+
+func (t *recordingSessionTracker) Track(_ context.Context, info nodesessions.SessionInfo) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.tracked = append(t.tracked, info)
+}
+
+func (t *recordingSessionTracker) Remove(_ context.Context, sessionID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.removed = append(t.removed, sessionID)
+}
+
+func (*recordingSessionTracker) Cleanup(context.Context) {}
+func (*recordingSessionTracker) NodeURL() string         { return "http://node" }
+func (*recordingSessionTracker) NodeName() string        { return "node" }
+
 type blockingResponseWriter struct {
 	header       http.Header
 	writeStarted chan struct{}
@@ -2091,21 +2113,37 @@ func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
 func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	server := newTestServer(t)
 	ctx, cancel := context.WithCancel(t.Context())
-	server.progressiveRemuxes["transport-1"] = progressiveRemuxRequest{id: 1, cancel: cancel}
+	done := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	server.activeJobs.Add(1)
+	server.progressiveRemuxes["transport-1"] = progressiveRemuxRequest{
+		id: 1, playbackSessionID: "playback-1", cancel: cancel, done: done,
+	}
 	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("session_id", "transport-1")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
 	rr := httptest.NewRecorder()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+	go func() {
+		<-ctx.Done()
+		<-releaseHandler
+		server.activeJobs.Add(-1)
+		server.mu.Lock()
+		delete(server.progressiveRemuxes, "transport-1")
+		server.mu.Unlock()
+		close(done)
+	}()
+	stopDone := make(chan struct{})
+	go func() {
+		server.handleStop(rr, req)
+		close(stopDone)
+	}()
 
-	server.handleStop(rr, req)
-
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
 	select {
 	case <-ctx.Done():
-	default:
+	case <-waitCtx.Done():
 		t.Fatal("progressive remux was not canceled")
 	}
 	server.mu.RLock()
@@ -2114,6 +2152,65 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	if !retained {
 		t.Fatal("stop discarded the progressive remux completion handle before its handler exited")
 	}
+	select {
+	case <-stopDone:
+		t.Fatal("stop returned before the progressive remux handler exited")
+	default:
+	}
+	close(releaseHandler)
+	select {
+	case <-stopDone:
+	case <-waitCtx.Done():
+		t.Fatal("stop did not return after the progressive remux handler exited")
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after stop = %d, want 0", got)
+	}
+}
+
+func TestHandleStopReturnsUnavailableWhileProgressiveHandlerIsStuck(t *testing.T) {
+	server := newTestServer(t)
+	remuxCanceled := make(chan struct{})
+	done := make(chan struct{})
+	server.progressiveRemuxes["transport-stuck"] = progressiveRemuxRequest{
+		id: 1, playbackSessionID: "playback-stuck",
+		cancel: sync.OnceFunc(func() { close(remuxCanceled) }), done: done,
+	}
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-stuck", nil).WithContext(requestCtx)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-stuck")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+	stopDone := make(chan struct{})
+	go func() {
+		server.handleStop(rr, req)
+		close(stopDone)
+	}()
+
+	select {
+	case <-remuxCanceled:
+	case <-waitCtx.Done():
+		t.Fatal("stop did not cancel the progressive remux")
+	}
+	cancelRequest()
+	select {
+	case <-stopDone:
+	case <-waitCtx.Done():
+		t.Fatal("stop did not return after its shutdown wait was canceled")
+	}
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s; want retryable shutdown failure", rr.Code, rr.Body.String())
+	}
+	server.mu.Lock()
+	delete(server.progressiveRemuxes, "transport-stuck")
+	server.mu.Unlock()
+	close(done)
 }
 
 func TestHandleStopReturnsUnavailableWhenProgressiveAuthorityDeleteFails(t *testing.T) {
@@ -2226,6 +2323,8 @@ func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T)
 
 func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 	server := newTestServer(t)
+	tracker := &recordingSessionTracker{}
+	server.tracker = tracker
 	server.nodeRowID = func() (int, bool) { return 11, true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
@@ -2303,6 +2402,14 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 	server.mu.RUnlock()
 	if active {
 		t.Fatal("completed remux handler remained registered")
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if len(tracker.tracked) != 1 || tracker.tracked[0].SessionID != claims.SessionID {
+		t.Fatalf("tracked sessions = %#v, want viewer session %q", tracker.tracked, claims.SessionID)
+	}
+	if len(tracker.removed) != 1 || tracker.removed[0] != claims.SessionID {
+		t.Fatalf("removed sessions = %v, want viewer session %q", tracker.removed, claims.SessionID)
 	}
 }
 
