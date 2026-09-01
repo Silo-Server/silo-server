@@ -1965,6 +1965,11 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	requestID := s.progressiveRemuxSequence.Add(1)
+	abort := make(chan struct{})
+	stop := sync.OnceFunc(func() {
+		cancel()
+		close(abort)
+	})
 	done := make(chan struct{})
 	unlock := s.lockSessionLifecycle(transportID)
 	s.mu.Lock()
@@ -1986,7 +1991,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session already active", http.StatusConflict)
 		return
 	}
-	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: requestID, cancel: cancel, done: done}
+	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: requestID, cancel: stop, done: done}
 	s.mu.Unlock()
 	unlock()
 	s.reloadMu.RUnlock()
@@ -2022,6 +2027,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		ContentType: playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
 		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
 		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps,
+		Abort:                  abort,
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		slog.WarnContext(ctx, "progressive remux ended with an error", "component", "transcodenode", "error", err,
 			"session", transportID, "playback_session_id", claims.SessionID)
@@ -2108,7 +2114,6 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		}
 		s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
 	}
-	delete(s.progressiveRemuxes, sessionID)
 	session, ok := s.sessions[sessionID]
 	found := ok || progressiveFound || authorityFound
 	if ok {
@@ -2545,11 +2550,13 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStoppedProgressiveRemuxesLocked(now)
+	if s.stoppedProgressiveRemuxes == nil {
+		s.stoppedProgressiveRemuxes = make(map[string]time.Time)
+	}
 	progressiveVictims := make(map[string]progressiveRemuxRequest, len(s.progressiveRemuxes))
 	for id, request := range s.progressiveRemuxes {
 		progressiveVictims[id] = request
 		s.stoppedProgressiveRemuxes[id] = now.Add(playback.MaxTokenTTL)
-		delete(s.progressiveRemuxes, id)
 	}
 	s.mu.Unlock()
 

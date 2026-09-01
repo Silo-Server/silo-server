@@ -59,6 +59,38 @@ type blockingResponseWriter struct {
 	startOnce    sync.Once
 }
 
+type abortableBlockingResponseWriter struct {
+	header          http.Header
+	writeStarted    chan struct{}
+	deadlineExpired chan struct{}
+	startOnce       sync.Once
+	expireOnce      sync.Once
+}
+
+func newAbortableBlockingResponseWriter() *abortableBlockingResponseWriter {
+	return &abortableBlockingResponseWriter{
+		header:          make(http.Header),
+		writeStarted:    make(chan struct{}),
+		deadlineExpired: make(chan struct{}),
+	}
+}
+
+func (w *abortableBlockingResponseWriter) Header() http.Header { return w.header }
+func (*abortableBlockingResponseWriter) WriteHeader(int)       {}
+
+func (w *abortableBlockingResponseWriter) Write([]byte) (int, error) {
+	w.startOnce.Do(func() { close(w.writeStarted) })
+	<-w.deadlineExpired
+	return 0, os.ErrDeadlineExceeded
+}
+
+func (w *abortableBlockingResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.After(time.Now()) {
+		w.expireOnce.Do(func() { close(w.deadlineExpired) })
+	}
+	return nil
+}
+
 func newBlockingResponseWriter() *blockingResponseWriter {
 	return &blockingResponseWriter{
 		header:       make(http.Header),
@@ -2076,6 +2108,12 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	default:
 		t.Fatal("progressive remux was not canceled")
 	}
+	server.mu.RLock()
+	_, retained := server.progressiveRemuxes["transport-1"]
+	server.mu.RUnlock()
+	if !retained {
+		t.Fatal("stop discarded the progressive remux completion handle before its handler exited")
+	}
 }
 
 func TestHandleStopReturnsUnavailableWhenProgressiveAuthorityDeleteFails(t *testing.T) {
@@ -2257,6 +2295,15 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after remux handler return = %d, want 0", got)
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[claims.TranscodeTransportID]
+	server.mu.RUnlock()
+	if active {
+		t.Fatal("completed remux handler remained registered")
+	}
 }
 
 func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
@@ -2277,6 +2324,9 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 		<-ctx.Done()
 		<-releaseHandler
 		server.activeJobs.Add(-1)
+		server.mu.Lock()
+		delete(server.progressiveRemuxes, transportID)
+		server.mu.Unlock()
 		close(done)
 	}()
 	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
@@ -2293,6 +2343,12 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 1 {
 		t.Fatalf("active jobs before handler exit = %d, want 1", got)
+	}
+	server.mu.RLock()
+	_, draining := server.progressiveRemuxes[transportID]
+	server.mu.RUnlock()
+	if !draining {
+		t.Fatal("force reload discarded the completion handle before the remux handler exited")
 	}
 	select {
 	case err := <-teardownResult:
@@ -2324,6 +2380,155 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	}
 	if len(store.revokedNodes) != 1 || store.revokedNodes[0] != server.tracker.NodeURL() {
 		t.Fatalf("node authority revocations = %v, want [%q]", store.revokedNodes, server.tracker.NodeURL())
+	}
+}
+
+func TestForceReloadTeardownRetainsUndrainedProgressiveRemuxForRetry(t *testing.T) {
+	server := newTestServer(t)
+	const transportID = "transport-force-reload-retry"
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	cancelCalls := make(chan struct{}, 2)
+	server.progressiveRemuxes[transportID] = progressiveRemuxRequest{
+		id: 2,
+		cancel: func() {
+			cancelRequest()
+			cancelCalls <- struct{}{}
+		},
+		done: done,
+	}
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+
+	firstCtx, cancelFirst := context.WithCancel(waitCtx)
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- server.teardownForForceReload(firstCtx, "", 0)
+	}()
+	select {
+	case <-cancelCalls:
+	case <-waitCtx.Done():
+		t.Fatal("first force reload did not cancel the remux")
+	}
+	cancelFirst()
+	select {
+	case err := <-firstResult:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("first force reload error = %v, want context canceled", err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("first force reload did not return after its wait was canceled")
+	}
+	server.mu.RLock()
+	_, retained := server.progressiveRemuxes[transportID]
+	server.mu.RUnlock()
+	if !retained {
+		t.Fatal("timed-out force reload discarded the remux completion handle")
+	}
+
+	retryResult := make(chan error, 1)
+	go func() {
+		retryResult <- server.teardownForForceReload(waitCtx, "", 0)
+	}()
+	select {
+	case <-cancelCalls:
+	case <-waitCtx.Done():
+		t.Fatal("force reload retry did not recapture the draining remux")
+	}
+	select {
+	case err := <-retryResult:
+		t.Fatalf("force reload retry returned before the remux drained: %v", err)
+	default:
+	}
+	server.mu.Lock()
+	delete(server.progressiveRemuxes, transportID)
+	server.mu.Unlock()
+	close(done)
+	select {
+	case err := <-retryResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("force reload retry did not return after the remux drained")
+	}
+	select {
+	case <-requestCtx.Done():
+	default:
+		t.Fatal("force reload never canceled the remux request")
+	}
+}
+
+func TestForceReloadTeardownDrainsRealProgressiveRemuxWithBlockedClient(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	ffmpegScript := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do\n" +
+		"  if [ \"$arg\" = \"pipe:1\" ]; then\n" +
+		"    while :; do printf node-remux-bytes; sleep 0.01; done\n" +
+		"  fi\n" +
+		"done\n" +
+		"exit 0\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-force-reload", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-force-reload-real",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	writer := newAbortableBlockingResponseWriter()
+	handlerDone := make(chan struct{})
+	go func() {
+		server.handleRemux(writer, request)
+		close(handlerDone)
+	}()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancelWait()
+	select {
+	case <-writer.writeStarted:
+	case <-waitCtx.Done():
+		t.Fatal("progressive remux did not reach the blocked client write")
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs before force reload = %d, want 1", got)
+	}
+
+	if err := server.teardownForForceReload(waitCtx, "http://node", 11); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handlerDone:
+	case <-waitCtx.Done():
+		t.Fatal("force reload returned without draining the progressive remux handler")
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after force reload = %d, want 0", got)
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[claims.TranscodeTransportID]
+	server.mu.RUnlock()
+	if active {
+		t.Fatal("force reload left the drained remux registered")
 	}
 }
 
