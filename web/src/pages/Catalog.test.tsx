@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Outlet } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let appInitialEntries = ["/catalog?source=query&q=heat"];
 let latestNavigateTo: string | null = null;
+let appProfile: { id: string } | null = { id: "profile-1" };
 
 const mockUseCatalogWindow = vi.fn();
 const mockUseCatalogFilters = vi.fn();
@@ -73,7 +75,7 @@ vi.mock("@/hooks/useAuth", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useAuth: () => ({
     user: { id: 1, username: "alex", role: "admin" },
-    profile: { id: "profile-1" },
+    profile: appProfile,
     loading: false,
     setupLoading: false,
     setupRequired: false,
@@ -84,7 +86,7 @@ vi.mock("@/hooks/useAuth", () => ({
   }),
   useOptionalAuth: () => ({
     user: { id: 1, username: "alex", role: "admin" },
-    profile: { id: "profile-1" },
+    profile: appProfile,
     loading: false,
     setupLoading: false,
     setupRequired: false,
@@ -176,6 +178,7 @@ vi.mock("@/pages/SettingsLayout", () => ({
   ),
 }));
 vi.mock("@/pages/settings/PlaybackSettings", () => stubPage("Playback settings"));
+vi.mock("@/pages/settings/AccountSettings", () => stubPage("Account settings"));
 vi.mock("@/pages/settings/LibrarySettings", () => stubPage("Library settings"));
 vi.mock("@/pages/settings/HistoryImportSettings", () => stubPage("History import settings"));
 vi.mock("@/pages/settings/WebhookSyncSettings", () => stubPage("Webhook sync settings"));
@@ -190,6 +193,7 @@ describe("Catalog page", () => {
   beforeEach(() => {
     appInitialEntries = ["/catalog?source=query&q=heat"];
     latestNavigateTo = null;
+    appProfile = { id: "profile-1" };
     mockUseCatalogWindow.mockReset();
     mockUseCatalogFilters.mockReset();
     mockItemGrid.mockReset();
@@ -345,6 +349,35 @@ describe("Catalog page", () => {
 
     expect(markup).toContain('data-kind="app-layout"');
     expect(markup).toContain("Settings");
+  });
+
+  it("lets an administrator without an active profile open account settings", async () => {
+    appInitialEntries = ["/settings/account"];
+    appProfile = null;
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Account settings")).toBeInTheDocument();
+    expect(latestNavigateTo).toBeNull();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getByText("Account settings").closest('[data-kind="app-layout"]')).not.toBeNull();
+  });
+
+  it("keeps other personal settings behind profile selection", () => {
+    appInitialEntries = ["/settings/playback"];
+    appProfile = null;
+
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(latestNavigateTo).toBe("/profiles?redirect=%2Fsettings%2Fplayback");
   });
 
   it("redirects the retired user plugins settings route back to playback settings", () => {
