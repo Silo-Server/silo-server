@@ -3,7 +3,12 @@ package noderecipe
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -52,9 +57,29 @@ func TestNilStore_DeleteNoop(t *testing.T) {
 	}
 }
 
+func TestNilStore_RevokeNodeNoop(t *testing.T) {
+	var s *Store
+	if err := s.RevokeNode(t.Context(), "http://node"); err != nil {
+		t.Fatalf("nil store RevokeNode returned error: %v", err)
+	}
+	if err := NewStore(nil, 0).RevokeNode(t.Context(), "http://node"); err != nil {
+		t.Fatalf("disabled store RevokeNode returned error: %v", err)
+	}
+}
+
 func TestKeyNamespacing(t *testing.T) {
 	if got := NewStore(nil, 0).key("abc"); got != "silo:noderecipe:abc" {
 		t.Fatalf("key(abc) = %q, want silo:noderecipe:abc", got)
+	}
+}
+
+func TestNodeAuthorityGenerationKeyNormalizesNodeURL(t *testing.T) {
+	withoutSlash := nodeAuthorityGenerationKey("http://node:8070")
+	if withSlash := nodeAuthorityGenerationKey(" http://node:8070/ "); withSlash != withoutSlash {
+		t.Fatalf("generation keys differ: %q != %q", withSlash, withoutSlash)
+	}
+	if withoutSlash == nodeAuthorityGenerationKey("http://other-node:8070") {
+		t.Fatal("different nodes share an authority generation key")
 	}
 }
 
@@ -102,6 +127,107 @@ func TestDefaultTTLMatchesTokenLifetime(t *testing.T) {
 	}
 	if NewStore(nil, 0).ttl != DefaultTTL {
 		t.Fatal("NewStore with ttl<=0 did not default to DefaultTTL")
+	}
+}
+
+func TestNodeAuthorityEnvelopePreservesNestedRecipe(t *testing.T) {
+	card := playback.RecipeCard{
+		SessionID: "sid", TranscodeNodeURL: "http://node:8070", PlayMethod: playback.PlayTranscode,
+		TranscodeAudio: true, TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2,
+	}
+	inner, err := marshalCard(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(nodeAuthorityEnvelope{
+		Version: nodeAuthorityEnvelopeVersion, AuthorityGeneration: 7, Recipe: inner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded, generation, ok := unmarshalStoredCard(data, true)
+	if !ok || decoded != card || generation != 7 {
+		t.Fatalf("decode = (%+v, %d, %v), want (%+v, 7, true)", decoded, generation, ok, card)
+	}
+	if _, _, ok := unmarshalStoredCard(data, false); ok {
+		t.Fatal("proxy-grant decoder accepted a node-authority envelope")
+	}
+}
+
+func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
+	rawURL := os.Getenv("SILO_TEST_REDIS_URL")
+	if rawURL == "" {
+		t.Skip("SILO_TEST_REDIS_URL not set")
+	}
+	options, err := redis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatalf("parse SILO_TEST_REDIS_URL: %v", err)
+	}
+	client := redis.NewClient(options)
+	t.Cleanup(func() { _ = client.Close() })
+
+	unique := uuid.NewString()
+	nodeURL := "http://node-" + unique
+	store := NewStore(client, time.Minute)
+	grants := NewProxyGrantStore(client, time.Minute)
+	oldSessionID := "old-" + unique
+	newSessionID := "new-" + unique
+	legacySessionID := "legacy-" + unique
+	grantID := "grant-" + unique
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
+		defer cancel()
+		_ = client.Del(cleanupCtx,
+			store.key(oldSessionID), store.key(newSessionID), store.key(legacySessionID),
+			grants.key(grantID), nodeAuthorityGenerationKey(nodeURL),
+		).Err()
+	})
+
+	card := playback.RecipeCard{SessionID: oldSessionID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux}
+	if err := store.Put(t.Context(), oldSessionID, card); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), oldSessionID); !ok {
+		t.Fatal("fresh node recipe missed before revocation")
+	}
+	if err := store.RevokeNode(t.Context(), nodeURL); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), oldSessionID); ok {
+		t.Fatal("recipe issued before node revocation remained valid")
+	}
+
+	card.SessionID = newSessionID
+	if err := store.Put(t.Context(), newSessionID, card); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), newSessionID); !ok {
+		t.Fatal("recipe issued after node revocation was rejected")
+	}
+
+	legacyCard := card
+	legacyCard.SessionID = legacySessionID
+	legacyData, err := marshalCard(legacyCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacySessionID), legacyData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), legacySessionID); ok {
+		t.Fatal("legacy generation-zero recipe survived node revocation")
+	}
+
+	grant := playback.RecipeCard{SessionID: grantID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux}
+	if err := grants.Put(t.Context(), grantID, grant); err != nil {
+		t.Fatal(err)
+	}
+	if err := grants.RevokeNode(t.Context(), nodeURL); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := grants.Get(t.Context(), grantID); !ok {
+		t.Fatal("node authority revocation affected proxy-grant key space")
 	}
 }
 

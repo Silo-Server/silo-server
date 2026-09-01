@@ -17,6 +17,9 @@
 // remuxes also use the record as durable active authority: central writes it
 // before publishing the route, the node checks it before each remux response,
 // and deliberate teardown deletes it so a surviving token cannot restart work.
+// Each node record is stamped with a per-node authority generation; destructive
+// force reload advances that generation so even a published remux URL which has
+// not received its first request is revoked without enumerating recipe keys.
 //
 // The same central→node recipe handoff serves a second, independent purpose
 // under its own key space: a proxy grant. When an attempt negotiates
@@ -24,7 +27,8 @@
 // URL, so the proxy has no token to serve from — central writes the session's
 // recipe here at plan time and the proxy reads it after authenticating the
 // caller's own login session. NewStore and NewProxyGrantStore are the two key
-// spaces; everything else about them is identical.
+// spaces. Proxy grants deliberately do not participate in the transcode-node
+// authority generation.
 package noderecipe
 
 import (
@@ -32,6 +36,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -48,14 +53,20 @@ const KeyPrefix = "silo:noderecipe:"
 // node roles, and a lookup in one must never resolve the other's entry.
 const ProxyGrantKeyPrefix = "silo:proxygrant:"
 
+// nodeAuthorityGenerationKeyPrefix namespaces the per-node generation that
+// force reload advances to revoke every outstanding node recipe, including a
+// progressive-remux URL that has not received its first request yet.
+const nodeAuthorityGenerationKeyPrefix = "silo:noderecipe-authority-generation:"
+
 // DefaultTTL bounds how long a stored recipe survives. It matches the stream
 // token lifetime (playback.MaxTokenTTL, 24h): past it no surviving token could
 // still drive a reconstruct, so the recipe is safe to lapse.
 const DefaultTTL = playback.MaxTokenTTL
 
 const (
-	toneMapEnvelopeVersion     = 1
-	audioRecipeEnvelopeVersion = 2
+	toneMapEnvelopeVersion       = 1
+	audioRecipeEnvelopeVersion   = 2
+	nodeAuthorityEnvelopeVersion = 3
 )
 
 type toneMapEnvelope struct {
@@ -71,6 +82,26 @@ type audioRecipeEnvelope struct {
 	Version int                 `json:"version"`
 	Recipe  playback.RecipeCard `json:"audio_recipe"`
 }
+
+type nodeAuthorityEnvelope struct {
+	Version             int             `json:"version"`
+	AuthorityGeneration int64           `json:"authority_generation"`
+	Recipe              json.RawMessage `json:"node_recipe"`
+}
+
+// putNodeRecipeScript reads the node generation and writes the recipe envelope
+// in one Redis operation. It therefore orders a concurrent Put and RevokeNode:
+// a recipe written before the increment is stale, while one written after it
+// carries the new generation.
+var putNodeRecipeScript = redis.NewScript(`
+local generation = redis.call("GET", KEYS[2])
+if not generation then
+  generation = "0"
+end
+local envelope = '{"version":' .. ARGV[3] .. ',"authority_generation":' .. generation .. ',"node_recipe":' .. ARGV[1] .. '}'
+redis.call("SET", KEYS[1], envelope, "PX", ARGV[2])
+return generation
+`)
 
 // Store is the Redis-backed recipe store shared by central (writer) and the
 // nodes (readers). One instance owns exactly one key prefix; see NewStore and
@@ -110,6 +141,11 @@ func (s *Store) Enabled() bool { return s != nil && s.rdb != nil }
 
 func (s *Store) key(sessionID string) string { return s.prefix + sessionID }
 
+func nodeAuthorityGenerationKey(nodeURL string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(nodeURL), "/")
+	return nodeAuthorityGenerationKeyPrefix + normalized
+}
+
 // Put stores the reconstruction recipe for a remote transcode session. Best
 // effort: a write error is returned for the caller to log, never fatal.
 func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeCard) error {
@@ -119,6 +155,13 @@ func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeC
 	data, err := marshalCard(card)
 	if err != nil {
 		return err
+	}
+	if s.prefix == KeyPrefix && strings.TrimSpace(card.TranscodeNodeURL) != "" {
+		ttlMillis := max(s.ttl.Milliseconds(), 1)
+		return putNodeRecipeScript.Run(ctx, s.rdb, []string{
+			s.key(sessionID),
+			nodeAuthorityGenerationKey(card.TranscodeNodeURL),
+		}, data, ttlMillis, nodeAuthorityEnvelopeVersion).Err()
 	}
 	return s.rdb.Set(ctx, s.key(sessionID), data, s.ttl).Err()
 }
@@ -137,12 +180,47 @@ func (s *Store) Get(ctx context.Context, sessionID string) (*playback.RecipeCard
 		}
 		return nil, false
 	}
-	card, ok := unmarshalCard(data)
+	card, generation, ok := unmarshalStoredCard(data, s.prefix == KeyPrefix)
 	if !ok {
 		slog.WarnContext(ctx, "decode node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "playback_session_id", sessionID)
 		return nil, false
 	}
+	if s.prefix == KeyPrefix && strings.TrimSpace(card.TranscodeNodeURL) != "" {
+		currentGeneration, generationErr := s.currentNodeAuthorityGeneration(ctx, card.TranscodeNodeURL)
+		if generationErr != nil {
+			slog.WarnContext(ctx, "load node authority generation failed", "component", "noderecipe", "error", generationErr, "playback_session_id", sessionID)
+			return nil, false
+		}
+		if generation != currentGeneration {
+			return nil, false
+		}
+	}
 	return &card, true
+}
+
+func (s *Store) currentNodeAuthorityGeneration(ctx context.Context, nodeURL string) (int64, error) {
+	generation, err := s.rdb.Get(ctx, nodeAuthorityGenerationKey(nodeURL)).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	return generation, err
+}
+
+func unmarshalStoredCard(data []byte, nodeRecipe bool) (playback.RecipeCard, int64, bool) {
+	if !nodeRecipe {
+		card, ok := unmarshalCard(data)
+		return card, 0, ok
+	}
+	var envelope nodeAuthorityEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return playback.RecipeCard{}, 0, false
+	}
+	if envelope.Version != nodeAuthorityEnvelopeVersion || len(envelope.Recipe) == 0 {
+		card, ok := unmarshalCard(data)
+		return card, 0, ok
+	}
+	card, ok := unmarshalCard(envelope.Recipe)
+	return card, envelope.AuthorityGeneration, ok
 }
 
 func marshalCard(card playback.RecipeCard) ([]byte, error) {
@@ -211,4 +289,15 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 		return nil
 	}
 	return s.rdb.Del(ctx, s.key(sessionID)).Err()
+}
+
+// RevokeNode invalidates every recipe previously issued for nodeURL. The
+// generation key intentionally outlives individual recipes: it is one bounded
+// key per configured node and prevents a legacy generation-zero record from
+// becoming valid again after recipe TTLs expire.
+func (s *Store) RevokeNode(ctx context.Context, nodeURL string) error {
+	if s == nil || s.rdb == nil || s.prefix != KeyPrefix || strings.TrimSpace(nodeURL) == "" {
+		return nil
+	}
+	return s.rdb.Incr(ctx, nodeAuthorityGenerationKey(nodeURL)).Err()
 }

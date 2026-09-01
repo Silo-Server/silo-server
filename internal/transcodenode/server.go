@@ -198,6 +198,11 @@ type sessionTracker interface {
 	NodeName() string
 }
 
+type progressiveRemuxRequest struct {
+	id     uint64
+	cancel context.CancelFunc
+}
+
 // Server is the HTTP handler for transcode mode.
 type Server struct {
 	watcher                   *nodeconfig.Watcher
@@ -208,7 +213,7 @@ type Server struct {
 	artifactRoot              string
 	telemetry                 *streamtelemetry.Registry
 	sessions                  map[string]*playback.TranscodeSession
-	progressiveRemuxes        map[string]map[uint64]context.CancelFunc
+	progressiveRemuxes        map[string]progressiveRemuxRequest
 	stoppedProgressiveRemuxes map[string]time.Time
 	progressiveRemuxSequence  atomic.Uint64
 	// lastAccess records, per registered session id, when a manifest or segment
@@ -421,7 +426,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		transcodeDir:              transcodeDir,
 		artifactRoot:              artifactRoot,
 		sessions:                  make(map[string]*playback.TranscodeSession),
-		progressiveRemuxes:        make(map[string]map[uint64]context.CancelFunc),
+		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
 		stoppedProgressiveRemuxes: make(map[string]time.Time),
 		lastAccess:                make(map[string]time.Time),
 	}
@@ -675,6 +680,9 @@ type recipeStore interface {
 	// restart cannot reconstruct a brand-new ffmpeg for an already-stopped session.
 	// Called only on deliberate teardown; nil-safe and a missing key is a no-op.
 	Delete(ctx context.Context, sessionID string) error
+	// RevokeNode invalidates all recipes issued for a node before a destructive
+	// reload, including transports that have not received their first request.
+	RevokeNode(ctx context.Context, nodeURL string) error
 }
 
 // SetRecipeStore wires the control-plane recipe store so this node can rebuild a
@@ -1930,23 +1938,23 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session stopped", http.StatusGone)
 		return
 	}
-	requests := s.progressiveRemuxes[transportID]
-	if requests == nil {
-		requests = make(map[uint64]context.CancelFunc)
-		s.progressiveRemuxes[transportID] = requests
+	if _, active := s.progressiveRemuxes[transportID]; active {
+		s.mu.Unlock()
+		unlock()
+		s.reloadMu.RUnlock()
+		cancel()
+		http.Error(w, "session already active", http.StatusConflict)
+		return
 	}
-	requests[requestID] = cancel
+	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: requestID, cancel: cancel}
 	s.mu.Unlock()
 	unlock()
 	s.reloadMu.RUnlock()
 	defer func() {
 		cancel()
 		s.mu.Lock()
-		if current := s.progressiveRemuxes[transportID]; current != nil {
-			delete(current, requestID)
-			if len(current) == 0 {
-				delete(s.progressiveRemuxes, transportID)
-			}
+		if current, ok := s.progressiveRemuxes[transportID]; ok && current.id == requestID {
+			delete(s.progressiveRemuxes, transportID)
 		}
 		s.mu.Unlock()
 	}()
@@ -2034,17 +2042,17 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	s.pruneStoppedProgressiveRemuxesLocked(now)
 	s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
-	progressive := s.progressiveRemuxes[sessionID]
+	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
 	delete(s.progressiveRemuxes, sessionID)
 	session, ok := s.sessions[sessionID]
-	found := ok || len(progressive) > 0
+	found := ok || progressiveFound
 	if ok {
 		delete(s.sessions, sessionID)
 		delete(s.lastAccess, sessionID)
 	}
 	s.mu.Unlock()
-	for _, cancel := range progressive {
-		cancel()
+	if progressiveFound {
+		progressive.cancel()
 	}
 
 	if ok {
@@ -2334,13 +2342,25 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.teardownForForceReload(r.Context())
+	if err := s.teardownForForceReload(r.Context()); err != nil {
+		http.Error(w, "force reload authority revocation failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	slog.InfoContext(r.Context(), "transcode force reload completed", slog.String("component", "transcodenode"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) teardownForForceReload(ctx context.Context) {
+func (s *Server) teardownForForceReload(ctx context.Context) error {
+	var authorityErr error
+	if s.recipeStore != nil {
+		if s.tracker == nil || strings.TrimSpace(s.tracker.NodeURL()) == "" {
+			authorityErr = errors.New("transcode node URL unavailable")
+		} else {
+			authorityErr = s.recipeStore.RevokeNode(ctx, s.tracker.NodeURL())
+		}
+	}
+
 	type forceReloadVictim struct {
 		id      string
 		session *playback.TranscodeSession
@@ -2393,22 +2413,16 @@ func (s *Server) teardownForForceReload(ctx context.Context) {
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStoppedProgressiveRemuxesLocked(now)
-	progressiveVictims := make(map[string][]context.CancelFunc, len(s.progressiveRemuxes))
-	for id, requests := range s.progressiveRemuxes {
-		cancels := make([]context.CancelFunc, 0, len(requests))
-		for _, cancel := range requests {
-			cancels = append(cancels, cancel)
-		}
-		progressiveVictims[id] = cancels
+	progressiveVictims := make(map[string]context.CancelFunc, len(s.progressiveRemuxes))
+	for id, request := range s.progressiveRemuxes {
+		progressiveVictims[id] = request.cancel
 		s.stoppedProgressiveRemuxes[id] = now.Add(playback.MaxTokenTTL)
 		delete(s.progressiveRemuxes, id)
 	}
 	s.mu.Unlock()
 
-	for id, cancels := range progressiveVictims {
-		for _, cancel := range cancels {
-			cancel()
-		}
+	for id, cancel := range progressiveVictims {
+		cancel()
 		if s.recipeStore != nil {
 			if err := s.recipeStore.Delete(ctx, id); err != nil {
 				slog.WarnContext(ctx, "delete progressive remux authority on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
@@ -2418,6 +2432,7 @@ func (s *Server) teardownForForceReload(ctx context.Context) {
 			s.tracker.Remove(ctx, id)
 		}
 	}
+	return authorityErr
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

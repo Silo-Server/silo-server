@@ -126,7 +126,7 @@ func newTestServer(t *testing.T) *Server {
 		transcodeDir:              cfg.Playback.TranscodeDir,
 		artifactRoot:              filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
 		sessions:                  make(map[string]*playback.TranscodeSession),
-		progressiveRemuxes:        make(map[string]map[uint64]context.CancelFunc),
+		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
 		stoppedProgressiveRemuxes: make(map[string]time.Time),
 		lastAccess:                make(map[string]time.Time),
 	}
@@ -1865,6 +1865,86 @@ func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
 	}
 }
 
+func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
+	server := newTestServer(t)
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegLog := filepath.Join(t.TempDir(), "ffmpeg.log")
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	ffmpegScript := "#!/bin/sh\n" +
+		"case \" $* \" in *\" -i " + mediaPath + " \"*) printf 'invoked\\n' >> \"" + ffmpegLog + "\";; esac\n" +
+		"printf node-remux-bytes\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-concurrent", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-concurrent",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	firstWriter := newBlockingResponseWriter()
+	released := false
+	defer func() {
+		if !released {
+			close(firstWriter.releaseWrite)
+		}
+	}()
+	firstDone := make(chan struct{})
+	go func() {
+		server.handleRemux(firstWriter, request.Clone(request.Context()))
+		close(firstDone)
+	}()
+	waitCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	select {
+	case <-firstWriter.writeStarted:
+	case <-waitCtx.Done():
+		t.Fatal("first remux did not reach its response")
+	}
+
+	recorder := httptest.NewRecorder()
+	server.handleRemux(recorder, request.Clone(request.Context()))
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs = %d, want only the first remux", got)
+	}
+	close(firstWriter.releaseWrite)
+	released = true
+	select {
+	case <-firstDone:
+	case <-waitCtx.Done():
+		t.Fatal("first remux did not finish after response release")
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after response = %d, want 0", got)
+	}
+	invocations, err := os.ReadFile(ffmpegLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(invocations), "invoked\n"); got != 1 {
+		t.Fatalf("ffmpeg invocations = %d, want 1; log = %q", got, invocations)
+	}
+}
+
 func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
 	server := newTestServer(t)
 	claims := streamtoken.Claims{
@@ -1897,7 +1977,7 @@ func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
 func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	server := newTestServer(t)
 	ctx, cancel := context.WithCancel(t.Context())
-	server.progressiveRemuxes["transport-1"] = map[uint64]context.CancelFunc{1: cancel}
+	server.progressiveRemuxes["transport-1"] = progressiveRemuxRequest{id: 1, cancel: cancel}
 	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("session_id", "transport-1")
@@ -2037,13 +2117,16 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 
 func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	server := newTestServer(t)
+	server.tracker = newBlockingSessionTracker()
 	const transportID = "transport-force-reload"
 	ctx, cancel := context.WithCancel(t.Context())
-	server.progressiveRemuxes[transportID] = map[uint64]context.CancelFunc{1: cancel}
+	server.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: 1, cancel: cancel}
 	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: transportID}}
 	server.SetRecipeStore(store)
 
-	server.teardownForForceReload(t.Context())
+	if err := server.teardownForForceReload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -2059,6 +2142,27 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	}
 	if len(store.deletes) != 1 || store.deletes[0] != transportID {
 		t.Fatalf("durable authority deletes = %v, want [%q]", store.deletes, transportID)
+	}
+	if len(store.revokedNodes) != 1 || store.revokedNodes[0] != server.tracker.NodeURL() {
+		t.Fatalf("node authority revocations = %v, want [%q]", store.revokedNodes, server.tracker.NodeURL())
+	}
+}
+
+func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
+	server := newTestServer(t)
+	server.tracker = newBlockingSessionTracker()
+	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: "dormant-transport"}}
+	server.SetRecipeStore(store)
+
+	if err := server.teardownForForceReload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(store.revokedNodes) != 1 || store.revokedNodes[0] != server.tracker.NodeURL() {
+		t.Fatalf("node authority revocations = %v, want [%q]", store.revokedNodes, server.tracker.NodeURL())
+	}
+	if len(store.deletes) != 0 {
+		t.Fatalf("dormant authority was unexpectedly enumerated: deletes = %v", store.deletes)
 	}
 }
 
@@ -2173,12 +2277,14 @@ func TestReconstructionEndpointsClassifyExecutorDiscoveryFailure(t *testing.T) {
 
 // stubRecipeStore is a recipeStore for the jellycompat node-restart fetch path.
 type stubRecipeStore struct {
-	card    *playback.RecipeCard
-	ok      bool
-	hits    int
-	deletes []string
-	delErr  error
-	getHit  chan struct{}
+	card         *playback.RecipeCard
+	ok           bool
+	hits         int
+	deletes      []string
+	revokedNodes []string
+	delErr       error
+	revokeErr    error
+	getHit       chan struct{}
 }
 
 func (s *stubRecipeStore) Get(context.Context, string) (*playback.RecipeCard, bool) {
@@ -2200,6 +2306,11 @@ func (s *stubRecipeStore) Delete(_ context.Context, sessionID string) error {
 	s.card = nil
 	s.ok = false
 	return nil
+}
+
+func (s *stubRecipeStore) RevokeNode(_ context.Context, nodeURL string) error {
+	s.revokedNodes = append(s.revokedNodes, nodeURL)
+	return s.revokeErr
 }
 
 // When the forwarded token is recipe-less (jellycompat), the node consults the
