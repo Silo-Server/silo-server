@@ -2208,8 +2208,8 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 	}()
 	select {
 	case <-storeHit:
-	case <-waitCtx.Done():
-		t.Fatal("remux did not reach durable authority validation")
+		t.Fatal("remux validated durable authority outside the force-reload gate")
+	case <-time.After(50 * time.Millisecond):
 	}
 	select {
 	case <-done:
@@ -2218,6 +2218,11 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 	}
 	server.reloadMu.Unlock()
 	locked = false
+	select {
+	case <-storeHit:
+	case <-waitCtx.Done():
+		t.Fatal("remux did not validate durable authority after the force-reload gate opened")
+	}
 	select {
 	case <-done:
 	case <-waitCtx.Done():

@@ -1904,10 +1904,6 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
 		return
 	}
-	if !s.progressiveRemuxAuthorityActive(r.Context(), transportID, claims) {
-		http.Error(w, "session stopped", http.StatusGone)
-		return
-	}
 	if claims.PlayMethod == streamtoken.PlayMethodAudioDownmixRemux &&
 		(!claims.TranscodeAudio || claims.TargetAudioChannels != 2 ||
 			!playback.IsAudioToAACStereoDownmixV3(claims.SourceAudioChannels, claims.TargetCodecAudio, claims.TargetAudioChannels)) {
@@ -1945,6 +1941,11 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if s.watcher.Config() != cfg {
 		s.reloadMu.RUnlock()
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.progressiveRemuxAuthorityActive(r.Context(), transportID, claims) {
+		s.reloadMu.RUnlock()
+		http.Error(w, "session stopped", http.StatusGone)
 		return
 	}
 
