@@ -1,11 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import {
-  api,
-  apiWithProfileRequestContext,
-  captureProfileRequestContext,
-  StaleApiRequestContextError,
-} from "@/api/client";
+import { api, apiWithProfileRequestContext, captureProfileRequestContext } from "@/api/client";
 import type { AccountPasswordCapability } from "@/api/types";
 
 export const accountKeys = {
@@ -23,13 +18,13 @@ export function useChangeAccountPassword() {
   return useMutation({
     mutationFn: (body: { current_password: string; new_password: string }) => {
       const requestContext = captureProfileRequestContext();
-      if (!requestContext) {
-        throw new StaleApiRequestContextError();
-      }
-      return apiWithProfileRequestContext<void>("/auth/account/password", requestContext, {
+      const options = {
         method: "POST",
         body: JSON.stringify(body),
-      });
+      };
+      return requestContext
+        ? apiWithProfileRequestContext<void>("/auth/account/password", requestContext, options)
+        : api<void>("/auth/account/password", options);
     },
   });
 }
