@@ -56,7 +56,7 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 	}
 
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO playback_history_admin
+		INSERT INTO admin_playback_history
 			(session_id, user_id, profile_id, profile_name, media_item_id, media_file_id,
 			 play_method, started_at, ended_at, watched_seconds, duration_seconds, completed, client_ip)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet)

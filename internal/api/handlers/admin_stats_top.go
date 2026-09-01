@@ -243,7 +243,7 @@ func queryAdminTopActivity(ctx context.Context, pool *pgxpool.Pool, days, limit 
 			SELECT COALESCE(ep.series_id, p.media_item_id) AS item_id,
 			       SUM(LEAST(GREATEST(p.watched_seconds, 0),
 			                 GREATEST(EXTRACT(EPOCH FROM (p.ended_at - p.started_at)), 0))) AS total_seconds
-			FROM playback_history_admin p
+			FROM admin_playback_history p
 			LEFT JOIN episodes ep ON ep.content_id = p.media_item_id
 			WHERE p.ended_at >= now() - make_interval(days => $1)
 			  AND COALESCE(ep.series_id, p.media_item_id) IN (SELECT item_id FROM ranked)
@@ -309,7 +309,7 @@ func queryAdminTopActivity(ctx context.Context, pool *pgxpool.Pool, days, limit 
 			       p.profile_id,
 			       SUM(LEAST(GREATEST(p.watched_seconds, 0),
 			                 GREATEST(EXTRACT(EPOCH FROM (p.ended_at - p.started_at)), 0))) AS total_seconds
-			FROM playback_history_admin p
+			FROM admin_playback_history p
 			WHERE p.ended_at >= now() - make_interval(days => $1)
 			  AND EXISTS (
 				SELECT 1 FROM ranked r
@@ -328,7 +328,7 @@ func queryAdminTopActivity(ctx context.Context, pool *pgxpool.Pool, days, limit 
 		LEFT JOIN watched w ON w.user_id = r.user_id AND w.profile_id = r.profile_id
 		LEFT JOIN LATERAL (
 			SELECT p.profile_name
-			FROM playback_history_admin p
+			FROM admin_playback_history p
 			WHERE p.user_id = r.user_id
 			  AND p.profile_id = r.profile_id
 			  AND p.profile_name <> ''

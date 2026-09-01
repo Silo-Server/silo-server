@@ -48,7 +48,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	t.Cleanup(func() {
 		for _, table := range []string{
-			"playback_history_admin", "user_downloads", "downloads", "user_watch_history",
+			"admin_playback_history", "user_downloads", "downloads", "user_watch_history",
 			"user_watch_progress", "user_favorites", "user_watchlist", "user_ratings",
 			"user_audio_preferences", "user_subtitle_preferences", "user_series_playback_preferences",
 			"user_home_item_dismissals",
@@ -136,7 +136,7 @@ func TestRun_FileSubsetExactAndProgress(t *testing.T) {
 	// resuming on the moved file.
 	for i, fileID := range []int{movedFile, stayFile} {
 		if _, err := env.pool.Exec(ctx, `
-			INSERT INTO playback_history_admin (session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at)
+			INSERT INTO admin_playback_history (session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at)
 			VALUES ($1, $2, $3, $4, $5, 'direct', now(), now())
 		`, fmt.Sprintf("sess-%d-%d", env.suffix, i), env.userID, env.profileID, from, fileID); err != nil {
 			t.Fatalf("seed session: %v", err)
@@ -180,7 +180,7 @@ func TestRun_FileSubsetExactAndProgress(t *testing.T) {
 		t.Fatalf("progress item = %q, want %q", got, to)
 	}
 	// The session on the unmoved file stays.
-	if got := env.itemIDOf(t, "playback_history_admin", "user_id = $1 AND media_file_id = $2", env.userID, stayFile); got != from {
+	if got := env.itemIDOf(t, "admin_playback_history", "user_id = $1 AND media_file_id = $2", env.userID, stayFile); got != from {
 		t.Fatalf("stayed session item = %q, want %q", got, from)
 	}
 }
@@ -200,7 +200,7 @@ func TestRun_HistoryEvidenceClassification(t *testing.T) {
 	seedSession := func(id, profile string, fileID int) {
 		t.Helper()
 		if _, err := env.pool.Exec(ctx, `
-			INSERT INTO playback_history_admin (session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at)
+			INSERT INTO admin_playback_history (session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at)
 			VALUES ($1, $2, $3, $4, $5, 'direct', now(), now())
 		`, id, env.userID, profile, from, fileID); err != nil {
 			t.Fatalf("seed session %s: %v", id, err)

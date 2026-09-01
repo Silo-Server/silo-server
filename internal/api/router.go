@@ -1907,7 +1907,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		if authHandler != nil {
 			// OAuth handler is optional: it only stands up when PublicURL is
 			// configured (we need a stable redirect_uri origin for IdPs) and
-			// the DB is available (oauth_session storage).
+			// the DB is available (oauth_sessions storage).
 			var oauthHandler *auth.OAuthHandler
 			if deps.PublicURL != "" && deps.DB != nil && authService != nil && jwtService != nil {
 				stateSecret := auth.DeriveOAuthStateSecret([]byte(deps.Config.Auth.JWTSecret))

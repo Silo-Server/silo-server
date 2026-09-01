@@ -1141,7 +1141,7 @@ func (h *AdminHandler) HandleListPlaybackHistory(w http.ResponseWriter, r *http.
 			h.watched_seconds,
 			h.duration_seconds,
 			h.completed
-		FROM playback_history_admin h
+		FROM admin_playback_history h
 		LEFT JOIN users u ON u.id = h.user_id
 		LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
 		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id

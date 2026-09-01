@@ -6,7 +6,7 @@
 //   - Rows carrying a media_file_id are moved exactly: the file's plays belong
 //     to whichever item the file now belongs to.
 //   - user_watch_history has no file reference; rows are classified per
-//     (user, profile) against the per-session playback_history_admin log —
+//     (user, profile) against the per-session admin_playback_history log —
 //     moved when every recorded session for the source item is on moved files,
 //     kept when none are, ambiguous otherwise (including when no session
 //     evidence exists). HistoryMode controls what happens to ambiguous rows.
@@ -191,11 +191,11 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 
 	// Exact tables: no cross-user PK on media_item_id, plain remap.
 	tag, err := tx.Exec(ctx, `
-		UPDATE playback_history_admin t SET media_item_id = p.to_id
+		UPDATE admin_playback_history t SET media_item_id = p.to_id
 		FROM `+pairsCTE+` WHERE t.media_item_id = p.from_id
 	`, fromIDs, toIDs)
 	if err != nil {
-		return fmt.Errorf("reattribute: playback_history_admin pairs: %w", err)
+		return fmt.Errorf("reattribute: admin_playback_history pairs: %w", err)
 	}
 	report.PlaybackSessionLog += int(tag.RowsAffected())
 
@@ -337,7 +337,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	}
 
 	// History classification MUST run before the session log is re-pointed:
-	// its evidence query reads playback_history_admin rows still keyed to the
+	// its evidence query reads admin_playback_history rows still keyed to the
 	// source item. Moving the log first would erase exactly the evidence that
 	// proves a profile's plays were all on moved files, leaving that profile's
 	// history behind as "ambiguous".
@@ -347,12 +347,12 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 
 	// Per-session log: exact.
 	tag, err := tx.Exec(ctx, `
-		UPDATE playback_history_admin
+		UPDATE admin_playback_history
 		SET media_item_id = $3
 		WHERE media_item_id = $1 AND media_file_id = ANY($2::int[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
-		return fmt.Errorf("reattribute: playback_history_admin subset: %w", err)
+		return fmt.Errorf("reattribute: admin_playback_history subset: %w", err)
 	}
 	report.PlaybackSessionLog = int(tag.RowsAffected())
 
@@ -444,7 +444,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 }
 
 // moveHistorySubset classifies user_watch_history rows per (user, profile)
-// against the playback_history_admin session log:
+// against the admin_playback_history session log:
 //
 //	unanimous moved sessions → the profile's history rows move
 //	unanimous stayed sessions → they stay
@@ -471,7 +471,7 @@ func moveHistorySubset(ctx context.Context, tx pgx.Tx, opts Options, report *Rep
 			SELECT user_id, profile_id,
 			       bool_or(media_file_id = ANY($2::int[])) AS any_moved,
 			       bool_or(NOT (media_file_id = ANY($2::int[]))) AS any_stayed
-			FROM playback_history_admin
+			FROM admin_playback_history
 			WHERE media_item_id = $1
 			GROUP BY user_id, profile_id
 		)`

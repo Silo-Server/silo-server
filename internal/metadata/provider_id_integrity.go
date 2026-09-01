@@ -791,7 +791,7 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 	{"move webhook sync item state", `UPDATE webhook_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
 	{"move watch together rooms selected", `UPDATE watch_together_rooms SET selected_content_id = $2 WHERE selected_content_id = $1`},
 	{"move watch together suggestions", `UPDATE watch_together_suggestions SET content_id = $2 WHERE content_id = $1`},
-	{"move admin playback history", `UPDATE playback_history_admin SET media_item_id = $2 WHERE media_item_id = $1`},
+	{"move admin playback history", `UPDATE admin_playback_history SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"move user downloads", `UPDATE user_downloads SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"move downloads", `UPDATE downloads SET content_id = $2, updated_at = NOW() WHERE content_id = $1`},
 	{"merge embeddings", `

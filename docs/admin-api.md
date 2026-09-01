@@ -1053,7 +1053,7 @@ is `3600` or `86400` accordingly. A bucket's `hour` field is its start instant
 at either width — it keeps that name because it is the same fact, and
 `bucket_seconds` already says how wide the bucket is.
 
-Sessions come from `playback_history_admin` (which only gains a row when a
+Sessions come from `admin_playback_history` (which only gains a row when a
 session finalizes) unioned with the live sessions table, so the current hour is
 not under-counted. A live session cannot already be in history, so nothing is
 counted twice. Live sessions with no recorded start — reconstructed after a
@@ -1121,7 +1121,7 @@ as a play. Episodes are rolled up to their series, so a season binge reads as
 one show and a title's `media_item_id` is a series content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
-(`playback_history_admin.watched_seconds`) that *ended* inside the same window
+(`admin_playback_history.watched_seconds`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
@@ -1132,7 +1132,7 @@ session's contribution is capped at its wall-clock length; the figure is an
 estimate until playback records true elapsed viewing time.
 
 Profile display names live in the per-user stores rather than in watch history,
-so they are read back from that profile's most recent `playback_history_admin`
+so they are read back from that profile's most recent `admin_playback_history`
 row; a profile that has only ever marked things watched falls back to its
 profile id. Ties are broken on a stable key (`media_item_id`, or
 `user_id`/`profile_id`) so equal rows keep their order between refreshes. No

@@ -50,8 +50,9 @@ type WebhookInput struct {
 	NotifyRequests         *bool
 }
 
-// validateChannelName applies the shared destination-name policy (matching
-// the varchar(64) columns); invalid is the caller's sentinel to wrap.
+// validateChannelName applies the shared destination-name policy: 64
+// characters, which is now the only place that limit lives -- the columns it
+// used to mirror are plain text. invalid is the caller's sentinel to wrap.
 func validateChannelName(name string, invalid error) (string, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {

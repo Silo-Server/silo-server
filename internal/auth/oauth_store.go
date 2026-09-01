@@ -46,7 +46,7 @@ type OAuthStore interface {
 }
 
 // ErrOAuthSessionNotFound is returned by GetAndDelete when no row matches.
-var ErrOAuthSessionNotFound = errors.New("oauth_session not found")
+var ErrOAuthSessionNotFound = errors.New("oauth_sessions not found")
 
 type OAuthCompletion struct {
 	Code         string
@@ -64,7 +64,7 @@ type OAuthCompletionStore interface {
 	DeleteExpiredCompletions(ctx context.Context, now time.Time) (int, error)
 }
 
-var ErrOAuthCompletionNotFound = errors.New("oauth_completion not found")
+var ErrOAuthCompletionNotFound = errors.New("oauth_completions not found")
 
 // PGOAuthStore is the Postgres-backed OAuthStore.
 type PGOAuthStore struct {
@@ -89,18 +89,18 @@ func (s *PGOAuthStore) Insert(ctx context.Context, sess OAuthSession) error {
 		return err
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO oauth_session (state, install_id, redirect_uri, linking_user_id, provider_state, next_url, expires_at)
+		INSERT INTO oauth_sessions (state, install_id, redirect_uri, linking_user_id, provider_state, next_url, expires_at)
 		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7)
 	`, sess.State, sess.InstallID, sess.RedirectURI, sess.LinkingUserID, sess.ProviderState, sess.NextURL, sess.ExpiresAt)
 	if err != nil {
-		return fmt.Errorf("insert oauth_session: %w", err)
+		return fmt.Errorf("insert oauth_sessions: %w", err)
 	}
 	return nil
 }
 
 func (s *PGOAuthStore) GetAndDelete(ctx context.Context, state string) (OAuthSession, error) {
 	row := s.pool.QueryRow(ctx, `
-		DELETE FROM oauth_session WHERE state = $1
+		DELETE FROM oauth_sessions WHERE state = $1
 		RETURNING state, install_id, redirect_uri, COALESCE(linking_user_id, ''), provider_state, next_url, created_at, expires_at
 	`, state)
 	var out OAuthSession
@@ -108,15 +108,15 @@ func (s *PGOAuthStore) GetAndDelete(ctx context.Context, state string) (OAuthSes
 		if errors.Is(err, pgx.ErrNoRows) {
 			return OAuthSession{}, ErrOAuthSessionNotFound
 		}
-		return OAuthSession{}, fmt.Errorf("get_and_delete oauth_session: %w", err)
+		return OAuthSession{}, fmt.Errorf("get_and_delete oauth_sessions: %w", err)
 	}
 	return out, nil
 }
 
 func (s *PGOAuthStore) DeleteExpired(ctx context.Context, now time.Time) (int, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_session WHERE expires_at < $1`, now)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_sessions WHERE expires_at < $1`, now)
 	if err != nil {
-		return 0, fmt.Errorf("delete expired oauth_session: %w", err)
+		return 0, fmt.Errorf("delete expired oauth_sessions: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
 }
@@ -128,14 +128,14 @@ func (s *PGOAuthStore) InsertCompletion(ctx context.Context, c OAuthCompletion) 
 	codeHash := oauthCompletionCodeHash(c.Code)
 	tokenCiphertext, err := s.encryptCompletionTokens(c, codeHash)
 	if err != nil {
-		return fmt.Errorf("encrypt oauth_completion tokens: %w", err)
+		return fmt.Errorf("encrypt oauth_completions tokens: %w", err)
 	}
 	_, err = s.pool.Exec(ctx, `
-		INSERT INTO oauth_completion (code_hash, token_ciphertext, expires_in, next_url, expires_at)
+		INSERT INTO oauth_completions (code_hash, token_ciphertext, expires_in, next_url, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
 	`, codeHash, tokenCiphertext, c.ExpiresIn, c.NextURL, c.ExpiresAt)
 	if err != nil {
-		return fmt.Errorf("insert oauth_completion: %w", err)
+		return fmt.Errorf("insert oauth_completions: %w", err)
 	}
 	return nil
 }
@@ -143,7 +143,7 @@ func (s *PGOAuthStore) InsertCompletion(ctx context.Context, c OAuthCompletion) 
 func (s *PGOAuthStore) GetAndDeleteCompletion(ctx context.Context, code string) (OAuthCompletion, error) {
 	codeHash := oauthCompletionCodeHash(code)
 	row := s.pool.QueryRow(ctx, `
-		DELETE FROM oauth_completion WHERE code_hash = $1 AND expires_at >= now()
+		DELETE FROM oauth_completions WHERE code_hash = $1 AND expires_at >= now()
 		RETURNING token_ciphertext, expires_in, next_url, created_at, expires_at
 	`, codeHash)
 	var out OAuthCompletion
@@ -152,19 +152,19 @@ func (s *PGOAuthStore) GetAndDeleteCompletion(ctx context.Context, code string) 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return OAuthCompletion{}, ErrOAuthCompletionNotFound
 		}
-		return OAuthCompletion{}, fmt.Errorf("get_and_delete oauth_completion: %w", err)
+		return OAuthCompletion{}, fmt.Errorf("get_and_delete oauth_completions: %w", err)
 	}
 	out.Code = code
 	if err := s.decryptCompletionTokens(tokenCiphertext, codeHash, &out); err != nil {
-		return OAuthCompletion{}, fmt.Errorf("decrypt oauth_completion tokens: %w", err)
+		return OAuthCompletion{}, fmt.Errorf("decrypt oauth_completions tokens: %w", err)
 	}
 	return out, nil
 }
 
 func (s *PGOAuthStore) DeleteExpiredCompletions(ctx context.Context, now time.Time) (int, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_completion WHERE expires_at < $1`, now)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_completions WHERE expires_at < $1`, now)
 	if err != nil {
-		return 0, fmt.Errorf("delete expired oauth_completion: %w", err)
+		return 0, fmt.Errorf("delete expired oauth_completions: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
 }
@@ -254,7 +254,7 @@ func (s *InMemoryOAuthStore) Insert(_ context.Context, sess OAuthSession) error 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.rows[sess.State]; exists {
-		return fmt.Errorf("insert oauth_session: state %q already exists", sess.State)
+		return fmt.Errorf("insert oauth_sessions: state %q already exists", sess.State)
 	}
 	if sess.CreatedAt.IsZero() {
 		sess.CreatedAt = time.Now().UTC()
@@ -294,7 +294,7 @@ func (s *InMemoryOAuthStore) InsertCompletion(_ context.Context, c OAuthCompleti
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.completions[c.Code]; exists {
-		return fmt.Errorf("insert oauth_completion: code %q already exists", c.Code)
+		return fmt.Errorf("insert oauth_completions: code %q already exists", c.Code)
 	}
 	if c.CreatedAt.IsZero() {
 		c.CreatedAt = time.Now().UTC()
@@ -330,13 +330,13 @@ func (s *InMemoryOAuthStore) DeleteExpiredCompletions(_ context.Context, now tim
 
 func validateSession(sess *OAuthSession) error {
 	if sess.State == "" || sess.InstallID == "" {
-		return fmt.Errorf("oauth_session: state and install_id required")
+		return fmt.Errorf("oauth_sessions: state and install_id required")
 	}
 	if sess.ExpiresAt.IsZero() {
-		return fmt.Errorf("oauth_session: expires_at required")
+		return fmt.Errorf("oauth_sessions: expires_at required")
 	}
 	if sess.RedirectURI == "" {
-		return fmt.Errorf("oauth_session: redirect_uri required")
+		return fmt.Errorf("oauth_sessions: redirect_uri required")
 	}
 	if sess.NextURL == "" {
 		sess.NextURL = "/"
@@ -349,16 +349,16 @@ func validateSession(sess *OAuthSession) error {
 
 func validateCompletion(c *OAuthCompletion) error {
 	if c.Code == "" {
-		return fmt.Errorf("oauth_completion: code required")
+		return fmt.Errorf("oauth_completions: code required")
 	}
 	if c.AccessToken == "" || c.RefreshToken == "" {
-		return fmt.Errorf("oauth_completion: tokens required")
+		return fmt.Errorf("oauth_completions: tokens required")
 	}
 	if c.ExpiresIn <= 0 {
-		return fmt.Errorf("oauth_completion: expires_in required")
+		return fmt.Errorf("oauth_completions: expires_in required")
 	}
 	if c.ExpiresAt.IsZero() {
-		return fmt.Errorf("oauth_completion: expires_at required")
+		return fmt.Errorf("oauth_completions: expires_at required")
 	}
 	if c.NextURL == "" {
 		c.NextURL = "/"

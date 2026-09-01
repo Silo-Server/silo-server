@@ -119,8 +119,8 @@ func episodeDisplayCode(row DeliveryRow) string {
 	return ""
 }
 
-// displayBodyMaxLen bounds free-text notification bodies; matches the varchar
-// caps used elsewhere in the delivery pipeline.
+// displayBodyMaxLen bounds free-text notification bodies; it is of a piece with
+// the other length caps the delivery pipeline applies in the application layer.
 const displayBodyMaxLen = 240
 
 func truncateDisplayText(s string, max int) string {

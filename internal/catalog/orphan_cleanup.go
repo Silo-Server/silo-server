@@ -47,7 +47,7 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	WHERE d.content_id = mi.content_id
   )
   AND NOT EXISTS (
-	SELECT 1 FROM public.playback_history_admin pha
+	SELECT 1 FROM public.admin_playback_history pha
 	WHERE pha.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
