@@ -852,7 +852,8 @@ func (h *PlaybackHandler) progressiveRemuxPlanningRegistryWithInputsV3(
 			}
 		}
 	}
-	if transcodeExecutionAllowed && h.progressiveRemuxRelayAvailableV3(ctx) {
+	if transcodeExecutionAllowed && h.NodeRecipeStore != nil && h.NodeRecipeStore.Enabled() &&
+		h.progressiveRemuxRelayAvailableV3(ctx) {
 		if enumerator, ok := h.NodePlanner.(transcodeNodeEnumeratorV3); ok {
 			for _, entry := range h.pooledNodeCapabilitiesV3(ctx, enumerator.TranscodeNodeURLs()) {
 				if slices.Contains(entry.transportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
@@ -2664,6 +2665,9 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 				return
 			}
 			committed = true
+			if nodeURL != "" && transportID != "" {
+				h.tm.StopRemoteTranscode(transportID, nodeURL)
+			}
 			// The session never reached the client, so a proxy admitted for it
 			// must not keep consuming that node's job/bandwidth budget until the
 			// reservation ages out — nor keep an egress grant for a transport

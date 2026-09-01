@@ -1909,6 +1909,23 @@ func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
 	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
 		t.Fatalf("HEAD invoked ffmpeg: %v", err)
 	}
+
+	server.SetRecipeStore(&stubRecipeStore{})
+	stoppedRequest := httptest.NewRequest(http.MethodHead, "/remux/transport-head", nil)
+	stoppedRequest.Header.Set("X-Silo-Stream-Token", token)
+	stoppedRouteContext := chi.NewRouteContext()
+	stoppedRouteContext.URLParams.Add("session_id", "transport-head")
+	stoppedRequest = stoppedRequest.WithContext(context.WithValue(stoppedRequest.Context(), chi.RouteCtxKey, stoppedRouteContext))
+	stoppedRecorder := httptest.NewRecorder()
+
+	server.handleRemux(stoppedRecorder, stoppedRequest)
+
+	if stoppedRecorder.Code != http.StatusGone {
+		t.Fatalf("stopped HEAD status = %d, want 410", stoppedRecorder.Code)
+	}
+	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
+		t.Fatalf("stopped HEAD invoked ffmpeg: %v", err)
+	}
 }
 
 func TestProgressiveRemuxRunsOnThisNodeRejectsDifferentNodeID(t *testing.T) {
@@ -2287,6 +2304,33 @@ func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
 	}
 }
 
+func TestForceReloadTeardownRetriesFailedPreviousURLRevocation(t *testing.T) {
+	server := newTestServer(t)
+	server.registeredNodeURL = func() (string, bool) { return "https://new-registered-node.example", true }
+	oldURL := "https://old-registered-node.example"
+	store := &stubRecipeStore{revokeErrs: map[string]error{oldURL: errors.New("redis unavailable")}}
+	server.SetRecipeStore(store)
+
+	if err := server.teardownForForceReload(t.Context(), oldURL); err == nil {
+		t.Fatal("partial authority revocation unexpectedly succeeded")
+	}
+	delete(store.revokeErrs, oldURL)
+	if err := server.teardownForForceReload(t.Context(), "https://new-registered-node.example"); err != nil {
+		t.Fatalf("retry authority revocation: %v", err)
+	}
+
+	wantRevoked := []string{
+		oldURL, "https://new-registered-node.example",
+		oldURL, "https://new-registered-node.example",
+	}
+	if !slices.Equal(store.revokedNodes, wantRevoked) {
+		t.Fatalf("node authority revocations = %v, want %v", store.revokedNodes, wantRevoked)
+	}
+	if len(server.pendingAuthorityRevocations) != 0 {
+		t.Fatalf("pending authority revocations = %v, want none after retry", server.pendingAuthorityRevocations)
+	}
+}
+
 func requestWithToken(sessionID, token string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/transcode/"+sessionID+"/master.m3u8", nil)
 	if token != "" {
@@ -2405,6 +2449,7 @@ type stubRecipeStore struct {
 	revokedNodes []string
 	delErr       error
 	revokeErr    error
+	revokeErrs   map[string]error
 	getHit       chan struct{}
 }
 
@@ -2431,6 +2476,9 @@ func (s *stubRecipeStore) Delete(_ context.Context, sessionID string) error {
 
 func (s *stubRecipeStore) RevokeNode(_ context.Context, nodeURL string) error {
 	s.revokedNodes = append(s.revokedNodes, nodeURL)
+	if err := s.revokeErrs[nodeURL]; err != nil {
+		return err
+	}
 	return s.revokeErr
 }
 

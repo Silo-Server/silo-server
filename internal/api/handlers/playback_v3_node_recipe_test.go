@@ -213,6 +213,64 @@ func TestPrepareTransportV3HeaderAuthStoresTheNodeRecipeForRestartRecovery(t *te
 	}
 }
 
+func TestPrepareProgressiveTransportRollbackStopsAdmittedRemoteJob(t *testing.T) {
+	var stoppedPath string
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+				TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxExecutionV1},
+				Transformations: []playback.TransformationV3{{
+					Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+					RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+				}},
+			})
+		case r.Method == http.MethodDelete:
+			stoppedPath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(node.Close)
+	proxy := capableProxyStubV3(t)
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodeRecipeStore = &recordingRecipeCardStoreV3{}
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{
+		TranscodeNode: &nodepool.Node{ID: 84, URL: node.URL},
+		ProxyNode:     &nodepool.Node{ID: 42, URL: proxy.URL},
+	}}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{
+		Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+	})
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-progressive-rollback", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TranscodeAudio: true, SourceAudioChannels: 6, TargetAudioChannels: 2, TargetAudioCodec: "aac"},
+		mediaAuthModeV3{},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare progressive transport: %v", transportErr)
+	}
+	if transport.routingExecution != noderouting.ExecutionTranscode {
+		t.Fatalf("routing execution = %q, want transcode", transport.routingExecution)
+	}
+
+	transport.rollback()
+
+	if want := "/transcode/" + transport.transportID; stoppedPath != want {
+		t.Fatalf("remote stop path = %q, want %q", stoppedPath, want)
+	}
+}
+
 // A legacy attempt carries its whole recipe in the client's stream token, which
 // the relay forwards to the node. It needs no stored copy, and writing one would
 // put a media path in Redis for no reason.

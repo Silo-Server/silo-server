@@ -227,8 +227,12 @@ type Server struct {
 	mu         sync.RWMutex
 	// reloadMu keeps force-reload teardown atomic with session creation and
 	// reconstruction. It is always acquired before lifecycleMu or mu.
-	reloadMu   sync.RWMutex
-	activeJobs atomic.Int32
+	reloadMu sync.RWMutex
+	// pendingAuthorityRevocations retains normalized node URLs whose generation
+	// bump failed during a force reload. Guarded by reloadMu; the next operator
+	// retry must revisit them even if the watcher has already adopted a new URL.
+	pendingAuthorityRevocations []string
+	activeJobs                  atomic.Int32
 
 	// reconstructGroup single-flights node-side session reconstruction per session
 	// id so a post-restart wave of concurrent manifest/segment requests for the same
@@ -1913,16 +1917,6 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
 		return
 	}
-	if r.Method == http.MethodHead {
-		contentType := playback.RemuxContentType(claims.AudioOnly)
-		if contentType == "" {
-			contentType = "video/mp4"
-		}
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Cache-Control", "no-store, max-age=0")
-		w.WriteHeader(http.StatusOK)
-		return
-	}
 	seekSeconds := 0.0
 	if rawSeek := r.URL.Query().Get("seek"); rawSeek != "" {
 		parsed, parseErr := strconv.ParseFloat(rawSeek, 64)
@@ -1946,6 +1940,17 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if !s.progressiveRemuxAuthorityActive(r.Context(), transportID, claims) {
 		s.reloadMu.RUnlock()
 		http.Error(w, "session stopped", http.StatusGone)
+		return
+	}
+	if r.Method == http.MethodHead {
+		s.reloadMu.RUnlock()
+		contentType := playback.RemuxContentType(claims.AudioOnly)
+		if contentType == "" {
+			contentType = "video/mp4"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -2421,7 +2426,8 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredURL string) error {
 	var authorityErr error
 	if s.recipeStore != nil {
-		nodeURLs := []string{previousRegisteredURL}
+		nodeURLs := append([]string(nil), s.pendingAuthorityRevocations...)
+		nodeURLs = append(nodeURLs, previousRegisteredURL)
 		registeredURLResolved := false
 		if s.registeredNodeURL != nil {
 			registeredURL, ok := s.registeredNodeURL()
@@ -2435,6 +2441,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 		}
 		seen := make(map[string]struct{}, len(nodeURLs))
 		var revokeErrs []error
+		failedURLs := make([]string, 0, len(s.pendingAuthorityRevocations))
 		for _, nodeURL := range nodeURLs {
 			nodeURL = strings.TrimRight(strings.TrimSpace(nodeURL), "/")
 			if nodeURL == "" {
@@ -2445,9 +2452,11 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			}
 			seen[nodeURL] = struct{}{}
 			if err := s.recipeStore.RevokeNode(ctx, nodeURL); err != nil {
+				failedURLs = append(failedURLs, nodeURL)
 				revokeErrs = append(revokeErrs, fmt.Errorf("revoke %s: %w", nodeURL, err))
 			}
 		}
+		s.pendingAuthorityRevocations = failedURLs
 		if len(seen) == 0 {
 			authorityErr = errors.New("transcode node URL unavailable")
 		} else {
