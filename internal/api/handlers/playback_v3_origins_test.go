@@ -21,10 +21,11 @@ import (
 // restarted transcode node would rebuild from, so a test can assert on the
 // authority the URL depends on rather than only on the URL's shape.
 type recordingRecipeCardStoreV3 struct {
-	disabled bool
-	putErr   error
-	cards    map[string]playback.RecipeCard
-	deleted  []string
+	disabled  bool
+	putErr    error
+	deleteErr error
+	cards     map[string]playback.RecipeCard
+	deleted   []string
 	// ops is the ordered call log ("get", "put", "delete"), so a test can
 	// assert that a replan read the grant it displaced before overwriting it.
 	ops []string
@@ -56,6 +57,9 @@ func (s *recordingRecipeCardStoreV3) Put(_ context.Context, sessionID string, ca
 func (s *recordingRecipeCardStoreV3) Delete(_ context.Context, sessionID string) error {
 	s.ops = append(s.ops, "delete")
 	s.deleted = append(s.deleted, sessionID)
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	delete(s.cards, sessionID)
 	return nil
 }

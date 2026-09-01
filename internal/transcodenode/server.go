@@ -2045,17 +2045,27 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
 
-	s.mu.Lock()
-	if s.stoppedProgressiveRemuxes == nil {
-		s.stoppedProgressiveRemuxes = make(map[string]time.Time)
+	durableProgressive := false
+	authorityFound := false
+	if s.recipeStore != nil {
+		card, ok := s.recipeStore.Get(r.Context(), sessionID)
+		authorityFound = ok && card != nil
+		durableProgressive = authorityFound && card.PlayMethod == playback.PlayRemux
 	}
+
+	s.mu.Lock()
 	now := time.Now()
 	s.pruneStoppedProgressiveRemuxesLocked(now)
-	s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
+	if progressiveFound || durableProgressive {
+		if s.stoppedProgressiveRemuxes == nil {
+			s.stoppedProgressiveRemuxes = make(map[string]time.Time)
+		}
+		s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
+	}
 	delete(s.progressiveRemuxes, sessionID)
 	session, ok := s.sessions[sessionID]
-	found := ok || progressiveFound
+	found := ok || progressiveFound || authorityFound
 	if ok {
 		delete(s.sessions, sessionID)
 		delete(s.lastAccess, sessionID)
@@ -2078,16 +2088,24 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drop the recipe so a buffered/retrying request after a node restart cannot
-	// reconstruct a new ffmpeg for this now-stopped session. Best-effort: a stop
-	// must still succeed even if the recipe store is briefly unavailable.
+	// reconstruct a new ffmpeg for this now-stopped session. A failed deletion
+	// must be visible to the caller: the in-memory fence cannot survive a node
+	// replacement, so reporting success would make the stop revocable only until
+	// this process exits.
+	var authorityErr error
 	if s.recipeStore != nil {
-		if err := s.recipeStore.Delete(r.Context(), sessionID); err != nil {
-			slog.WarnContext(r.Context(), "delete transcode recipe on stop", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
+		authorityErr = s.recipeStore.Delete(r.Context(), sessionID)
+		if authorityErr != nil {
+			slog.WarnContext(r.Context(), "delete transcode recipe on stop", "component", "transcodenode", "error", authorityErr, "session", sessionID, "playback_session_id", sessionID)
 		}
 	}
 
 	if s.tracker != nil {
 		s.tracker.Remove(r.Context(), sessionID)
+	}
+	if authorityErr != nil {
+		http.Error(w, "transcode authority revocation unavailable", http.StatusServiceUnavailable)
+		return
 	}
 	if !found {
 		http.Error(w, "session not found", http.StatusNotFound)

@@ -2844,6 +2844,25 @@ func (h *PlaybackHandler) deleteNodeRecipeV3(ctx context.Context, transportID st
 	}
 }
 
+// deleteRequiredProgressiveRemuxAuthorityV3 makes a user-visible stop durable
+// before the session and its retry path disappear. A progressive remux token
+// can remain valid for 24 hours, so an unavailable authority store is a failed
+// stop, not a best-effort cleanup: the caller must retain the session and let
+// the client retry.
+func (h *PlaybackHandler) deleteRequiredProgressiveRemuxAuthorityV3(ctx context.Context, session *playback.Session) error {
+	if session == nil || session.TranscodeTransportID == "" || session.TranscodeNodeURL == "" ||
+		session.RoutingWorkload != string(noderouting.WorkloadRemux) ||
+		session.RoutingExecution != string(noderouting.ExecutionTranscode) {
+		return nil
+	}
+	if h == nil || h.NodeRecipeStore == nil || !h.NodeRecipeStore.Enabled() {
+		return errors.New("node recipe store unavailable")
+	}
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
+	defer cancel()
+	return h.NodeRecipeStore.Delete(deleteCtx, session.TranscodeTransportID)
+}
+
 // resolveIdentityRouteV3 resolves direct and progressive routes through the
 // same policy compiler as HLS, including the transcode-execution/proxy-egress
 // progressive route.

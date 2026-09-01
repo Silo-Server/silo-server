@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -20,6 +21,11 @@ type playbackCommandRecord struct {
 func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, userInitiated bool) error {
 	if h == nil || session == nil || session.ID == "" {
 		return playback.ErrSessionNotFound
+	}
+	if userInitiated {
+		if err := h.deleteRequiredProgressiveRemuxAuthorityV3(ctx, session); err != nil {
+			return fmt.Errorf("persist progressive remux stop: %w", err)
+		}
 	}
 
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {

@@ -2040,6 +2040,60 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	}
 }
 
+func TestHandleStopReturnsUnavailableWhenProgressiveAuthorityDeleteFails(t *testing.T) {
+	const transportID = "transport-delete-failure"
+	server := newTestServer(t)
+	server.SetRecipeStore(&stubRecipeStore{
+		card: &playback.RecipeCard{SessionID: "playback-1", TranscodeTransportID: transportID, PlayMethod: playback.PlayRemux},
+		ok:   true, delErr: errors.New("redis is down"),
+	})
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/"+transportID, nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", transportID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleStop(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s; want durable revocation failure", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	fenced := server.stoppedProgressiveRemuxes[transportID].After(time.Now())
+	server.mu.RUnlock()
+	if !fenced {
+		t.Fatal("failed durable revocation did not retain the process-local stop fence")
+	}
+}
+
+func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
+	const sessionID = "hls-session"
+	server := newTestServer(t)
+	server.sessions[sessionID] = &playback.TranscodeSession{}
+	server.activeJobs.Store(1)
+	server.SetRecipeStore(&stubRecipeStore{
+		card: &playback.RecipeCard{SessionID: sessionID, PlayMethod: playback.PlayTranscode},
+		ok:   true,
+	})
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/"+sessionID, nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", sessionID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleStop(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	_, fenced := server.stoppedProgressiveRemuxes[sessionID]
+	server.mu.RUnlock()
+	if fenced {
+		t.Fatal("ordinary HLS teardown was retained in the progressive-remux fence map")
+	}
+}
+
 func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T) {
 	server := newTestServer(t)
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")

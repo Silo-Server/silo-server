@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -293,6 +294,54 @@ func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 
 	if len(recipes.deleted) != 1 || recipes.deleted[0] != transportID {
 		t.Fatalf("recipes deleted on stop = %v, want the session's transport recipe dropped", recipes.deleted)
+	}
+}
+
+func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer node.Close()
+
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(7, "profile-1", 42, playback.PlayRemux, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const transportID = "session-required-stop-plan0001-aaaabbbb"
+	if err := manager.SetTranscodeRoute(session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: transportID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetNodeRoutingAssignment(session.ID, playback.NodeRoutingAssignment{
+		Workload: string(noderouting.WorkloadRemux), Execution: string(noderouting.ExecutionTranscode),
+		Egress: string(noderouting.EgressProxy),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session, err = manager.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewPlaybackHandler(manager)
+	recipes := &recordingRecipeCardStoreV3{deleteErr: errors.New("redis is down")}
+	handler.NodeRecipeStore = recipes
+	if err := handler.stopPlaybackSession(t.Context(), session, true); err == nil {
+		t.Fatal("stop succeeded without durable progressive authority revocation")
+	}
+	if _, err := manager.GetSession(session.ID); err != nil {
+		t.Fatalf("failed stop removed the retryable playback session: %v", err)
+	}
+	if len(recipes.deleted) != 1 || recipes.deleted[0] != transportID {
+		t.Fatalf("authority deletion attempts = %v, want [%q]", recipes.deleted, transportID)
+	}
+
+	recipes.deleteErr = nil
+	if err := handler.stopPlaybackSession(t.Context(), session, true); err != nil {
+		t.Fatalf("retry stop after authority recovery: %v", err)
+	}
+	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("session after successful retry = %v, want not found", err)
 	}
 }
 
