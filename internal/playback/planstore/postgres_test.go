@@ -92,7 +92,7 @@ func newPlanstoreFixture(t *testing.T) *planstoreFixture {
 		t.Fatalf("insert fixture media folder: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO users (username) VALUES ($1) RETURNING id`, unique).Scan(&f.userID); err != nil {
+		INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, unique).Scan(&f.userID); err != nil {
 		t.Fatalf("insert fixture user: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
