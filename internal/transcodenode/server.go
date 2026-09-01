@@ -190,6 +190,11 @@ const sessionTrackingOperationTimeout = 2 * time.Second
 // TranscodeStartReadinessTimeout is the node-side RequireReady manifest budget.
 const TranscodeStartReadinessTimeout = 8 * time.Second
 
+// progressiveRemuxShutdownTimeout bounds a destructive reload when a canceled
+// FFmpeg process does not exit. A timed-out reload must fail rather than report
+// completion while the old-config process is still live.
+const progressiveRemuxShutdownTimeout = 10 * time.Second
+
 type sessionTracker interface {
 	Track(context.Context, nodesessions.SessionInfo)
 	Remove(context.Context, string)
@@ -201,6 +206,7 @@ type sessionTracker interface {
 type progressiveRemuxRequest struct {
 	id     uint64
 	cancel context.CancelFunc
+	done   <-chan struct{}
 }
 
 // Server is the HTTP handler for transcode mode.
@@ -1959,6 +1965,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	requestID := s.progressiveRemuxSequence.Add(1)
+	done := make(chan struct{})
 	unlock := s.lockSessionLifecycle(transportID)
 	s.mu.Lock()
 	now := time.Now()
@@ -1979,7 +1986,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session already active", http.StatusConflict)
 		return
 	}
-	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: requestID, cancel: cancel}
+	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: requestID, cancel: cancel, done: done}
 	s.mu.Unlock()
 	unlock()
 	s.reloadMu.RUnlock()
@@ -1990,6 +1997,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 			delete(s.progressiveRemuxes, transportID)
 		}
 		s.mu.Unlock()
+		close(done)
 	}()
 
 	s.activeJobs.Add(1)
@@ -2416,7 +2424,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.teardownForForceReload(r.Context(), previousRegisteredURL, previousNodeID); err != nil {
-		http.Error(w, "force reload authority revocation failed: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "force reload teardown failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -2537,16 +2545,16 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStoppedProgressiveRemuxesLocked(now)
-	progressiveVictims := make(map[string]context.CancelFunc, len(s.progressiveRemuxes))
+	progressiveVictims := make(map[string]progressiveRemuxRequest, len(s.progressiveRemuxes))
 	for id, request := range s.progressiveRemuxes {
-		progressiveVictims[id] = request.cancel
+		progressiveVictims[id] = request
 		s.stoppedProgressiveRemuxes[id] = now.Add(playback.MaxTokenTTL)
 		delete(s.progressiveRemuxes, id)
 	}
 	s.mu.Unlock()
 
-	for id, cancel := range progressiveVictims {
-		cancel()
+	for id, request := range progressiveVictims {
+		request.cancel()
 		if s.recipeStore != nil {
 			if err := s.recipeStore.Delete(ctx, id); err != nil {
 				slog.WarnContext(ctx, "delete progressive remux authority on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
@@ -2554,6 +2562,19 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 		}
 		if s.tracker != nil {
 			s.tracker.Remove(ctx, id)
+		}
+	}
+
+	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
+	defer cancelWait()
+	for id, request := range progressiveVictims {
+		if request.done == nil {
+			continue
+		}
+		select {
+		case <-request.done:
+		case <-waitCtx.Done():
+			return errors.Join(authorityErr, fmt.Errorf("wait for progressive remux %s shutdown: %w", id, waitCtx.Err()))
 		}
 	}
 	return authorityErr

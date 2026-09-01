@@ -2265,18 +2265,52 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	server.registeredNodeURL = func() (string, bool) { return "", false }
 	const transportID = "transport-force-reload"
 	ctx, cancel := context.WithCancel(t.Context())
-	server.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: 1, cancel: cancel}
+	done := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	server.activeJobs.Add(1)
+	server.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: 1, cancel: cancel, done: done}
 	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: transportID}}
 	server.SetRecipeStore(store)
-
-	if err := server.teardownForForceReload(t.Context(), "", 0); err != nil {
-		t.Fatal(err)
-	}
+	handlerExited := make(chan struct{})
+	go func() {
+		defer close(handlerExited)
+		<-ctx.Done()
+		<-releaseHandler
+		server.activeJobs.Add(-1)
+		close(done)
+	}()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+	teardownResult := make(chan error, 1)
+	go func() {
+		teardownResult <- server.teardownForForceReload(waitCtx, "", 0)
+	}()
 
 	select {
 	case <-ctx.Done():
-	default:
+	case <-waitCtx.Done():
 		t.Fatal("force reload did not cancel the progressive remux")
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs before handler exit = %d, want 1", got)
+	}
+	select {
+	case err := <-teardownResult:
+		t.Fatalf("force reload returned before the progressive remux handler exited: %v", err)
+	default:
+	}
+	close(releaseHandler)
+	select {
+	case err := <-teardownResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("force reload did not return after the progressive remux handler exited")
+	}
+	<-handlerExited
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after force reload = %d, want 0", got)
 	}
 	server.mu.RLock()
 	_, active := server.progressiveRemuxes[transportID]
