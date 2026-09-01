@@ -22,6 +22,7 @@ type User struct {
 	LibraryIDs                []int   // nil = inherit; non-nil = explicit library list (empty = none)
 	MaxPlaybackQuality        *string // nil = inherit; "" = explicit "no ceiling"
 	AccessPolicyRevision      int64
+	AuthRevision              int64
 	MaxStreams                *int  // nil = inherit; 0 = explicit unlimited
 	MaxTranscodes             *int  // nil = inherit; 0 = explicit unlimited
 	TranscodeAllowed          *bool // nil = inherit

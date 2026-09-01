@@ -38,7 +38,15 @@ func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.Update
 	return nil
 }
 
+func (r *scopedKeyUserRepo) UpdateAndRevokeAuthority(ctx context.Context, id int, input models.UpdateUserInput) error {
+	return r.Update(ctx, id, input)
+}
+
 func (r *scopedKeyUserRepo) Delete(context.Context, int) error { return nil }
+
+func (r *scopedKeyUserRepo) DeleteAndRevokeAuthority(ctx context.Context, id int) error {
+	return r.Delete(ctx, id)
+}
 
 func (r *scopedKeyUserRepo) GetByID(context.Context, int) (*models.User, error) {
 	if r.getErr != nil {

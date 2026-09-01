@@ -18,7 +18,7 @@ import (
 // APIKeyStore is the storage the API key endpoints need. It is an interface
 // so the handlers can be exercised without a database.
 type APIKeyStore interface {
-	Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error)
+	CreateAuthorized(ctx context.Context, userID int, label string, scopes []string, authorization auth.SessionAuthorization) (*models.APIKey, error)
 	ListByUser(ctx context.Context, userID int) ([]*models.APIKey, error)
 	ListByUserAdmin(ctx context.Context, userID int) ([]*models.APIKey, error)
 	ListAll(ctx context.Context) ([]*models.APIKeyWithUser, error)
@@ -96,7 +96,8 @@ type adminCreateAPIKeyRequest struct {
 	Scopes []string `json:"scopes,omitempty"`
 }
 
-// requireJWTAuth checks that the request was authenticated with a JWT, not an API key.
+// requireJWTAuth checks that the request was authenticated with an ordinary,
+// non-impersonated native session rather than a delegated credential.
 // Returns the claims if valid, or writes a 403 and returns nil.
 func requireJWTAuth(w http.ResponseWriter, r *http.Request) *auth.Claims {
 	claims := apimw.GetClaims(r.Context())
@@ -104,8 +105,8 @@ func requireJWTAuth(w http.ResponseWriter, r *http.Request) *auth.Claims {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return nil
 	}
-	if claims.TokenType == auth.TokenTypeAPIKey {
-		writeError(w, http.StatusForbidden, "forbidden", "API key management is not accessible via API key authentication")
+	if claims.TokenType == auth.TokenTypeAPIKey || claims.SessionID == "" || claims.ImpersonatorUserID != nil {
+		writeError(w, http.StatusForbidden, "forbidden", "API key management requires an ordinary native session")
 		return nil
 	}
 	return claims
@@ -135,8 +136,18 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	key, err := h.repo.Create(r.Context(), claims.UserID, req.Label, scopes)
+	key, err := h.repo.CreateAuthorized(
+		r.Context(),
+		claims.UserID,
+		req.Label,
+		scopes,
+		auth.SessionAuthorization{UserID: claims.UserID, SessionID: claims.SessionID},
+	)
 	if err != nil {
+		if errors.Is(err, auth.ErrSessionNotFound) {
+			writeError(w, http.StatusForbidden, "authorization_changed", "Authorization changed before the API key was created")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
 		return
 	}
@@ -310,9 +321,8 @@ func (h *APIKeyHandler) HandleAdminUpdateTier(w http.ResponseWriter, r *http.Req
 
 // HandleAdminCreateAPIKey handles POST /admin/api-keys.
 func (h *APIKeyHandler) HandleAdminCreateAPIKey(w http.ResponseWriter, r *http.Request) {
-	claims := apimw.GetClaims(r.Context())
+	claims := requireJWTAuth(w, r)
 	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
 
@@ -338,8 +348,18 @@ func (h *APIKeyHandler) HandleAdminCreateAPIKey(w http.ResponseWriter, r *http.R
 		targetUserID = *req.UserID
 	}
 
-	key, err := h.repo.Create(r.Context(), targetUserID, req.Label, scopes)
+	key, err := h.repo.CreateAuthorized(
+		r.Context(),
+		targetUserID,
+		req.Label,
+		scopes,
+		auth.SessionAuthorization{UserID: claims.UserID, SessionID: claims.SessionID, RequireAdmin: true},
+	)
 	if err != nil {
+		if errors.Is(err, auth.ErrSessionNotFound) {
+			writeError(w, http.StatusForbidden, "authorization_changed", "Authorization changed before the API key was created")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
 		return
 	}

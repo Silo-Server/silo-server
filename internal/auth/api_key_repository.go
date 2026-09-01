@@ -108,6 +108,60 @@ func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string,
 	return scanAPIKey(row)
 }
 
+// CreateAuthorized creates a key only while the supplied native session still
+// has authority to do so. The authorizer and target user rows are locked in
+// the same transaction, ordering this grant against concurrent authority
+// resets without changing the lifetime semantics of existing API keys.
+func (r *APIKeyRepository) CreateAuthorized(
+	ctx context.Context,
+	userID int,
+	label string,
+	scopes []string,
+	authorization SessionAuthorization,
+) (*models.APIKey, error) {
+	key, err := generateAPIKey()
+	if err != nil {
+		return nil, err
+	}
+	if scopes == nil {
+		scopes = []string{}
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin authorized API key creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var targetAuthRevision int64
+	if err := tx.QueryRow(ctx, `SELECT auth_revision FROM users WHERE id = $1`, userID).Scan(&targetAuthRevision); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("load API key target authority: %w", err)
+	}
+	if err := validateSessionAuthorization(ctx, tx, authorization, userID, targetAuthRevision); err != nil {
+		return nil, err
+	}
+
+	created, err := scanAPIKey(tx.QueryRow(ctx, `
+		INSERT INTO api_keys (user_id, label, api_key, scopes)
+		VALUES ($1, $2, $3, $4)
+		RETURNING `+apiKeyColumns,
+		userID,
+		label,
+		key,
+		scopes,
+	))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit authorized API key creation: %w", err)
+	}
+	return created, nil
+}
+
 // ListByUser returns all API keys belonging to the given user, ordered by creation time.
 func (r *APIKeyRepository) ListByUser(ctx context.Context, userID int) ([]*models.APIKey, error) {
 	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`

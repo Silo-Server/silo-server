@@ -184,6 +184,10 @@ func (h *AuthHandler) HandleDevicePoll(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "Device login request not found")
 			return
 		}
+		if errors.Is(err, auth.ErrDeviceLoginApproverInvalid) {
+			writeError(w, http.StatusForbidden, "approver_invalid", "The approving session is no longer valid")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to poll device login")
 		return
 	}
@@ -216,8 +220,8 @@ func (h *AuthHandler) HandleDeviceApprove(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil || claims.SessionID == "" || claims.TokenType == auth.TokenTypeAPIKey {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
@@ -231,7 +235,7 @@ func (h *AuthHandler) HandleDeviceApprove(w http.ResponseWriter, r *http.Request
 	err := h.device.Approve(r.Context(), auth.DeviceLoginLookupInput{
 		BrowserCode: req.Token,
 		UserCode:    req.Code,
-	}, userID)
+	}, auth.DeviceLoginApproval{UserID: claims.UserID, SessionID: claims.SessionID})
 	if err != nil {
 		h.writeDeviceDecisionError(w, err)
 		return
@@ -251,6 +255,11 @@ func (h *AuthHandler) HandleDeviceApproveHandoff(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusForbidden, "profile_required", "An active verified profile is required")
 		return
 	}
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil || claims.UserID != scope.UserID || claims.SessionID == "" || claims.TokenType == auth.TokenTypeAPIKey {
+		writeError(w, http.StatusForbidden, "approver_invalid", "An active non-impersonated session is required")
+		return
+	}
 
 	var req deviceDecisionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -261,7 +270,7 @@ func (h *AuthHandler) HandleDeviceApproveHandoff(w http.ResponseWriter, r *http.
 	err := h.device.ApproveRemotePlayback(r.Context(), auth.DeviceLoginLookupInput{
 		BrowserCode: req.Token,
 		UserCode:    req.Code,
-	}, scope.UserID, scope.ProfileID)
+	}, auth.DeviceLoginApproval{UserID: scope.UserID, SessionID: claims.SessionID}, scope.ProfileID)
 	if err != nil {
 		h.writeDeviceDecisionError(w, err)
 		return
@@ -318,6 +327,8 @@ func (h *AuthHandler) writeDeviceDecisionError(w http.ResponseWriter, err error)
 		writeError(w, http.StatusConflict, "approval_conflict", "Device login request was approved by another identity")
 	case errors.Is(err, auth.ErrDeviceLoginNoProfile):
 		writeError(w, http.StatusNotFound, "profile_not_found", "Profile not found")
+	case errors.Is(err, auth.ErrDeviceLoginApproverInvalid):
+		writeError(w, http.StatusForbidden, "approver_invalid", "The approving session is no longer valid")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Device login request failed")
 	}

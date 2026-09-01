@@ -44,18 +44,23 @@ func TestSameApprovedIdentityIncludesProfile(t *testing.T) {
 
 	userID := 7
 	profileID := "profile-a"
+	sessionID := "session-a"
 	record := &deviceLoginRecord{
-		ApprovedByUserID:  &userID,
-		ApprovedProfileID: &profileID,
+		ApprovedByUserID:    &userID,
+		ApprovedBySessionID: &sessionID,
+		ApprovedProfileID:   &profileID,
 	}
-	if !sameApprovedIdentity(record, userID, profileID) {
+	if !sameApprovedIdentity(record, userID, profileID, sessionID) {
 		t.Fatal("matching user/profile was not idempotent")
 	}
-	if sameApprovedIdentity(record, userID, "profile-b") {
+	if sameApprovedIdentity(record, userID, "profile-b", sessionID) {
 		t.Fatal("different profile was treated as the same identity")
 	}
-	if sameApprovedIdentity(record, 8, profileID) {
+	if sameApprovedIdentity(record, 8, profileID, sessionID) {
 		t.Fatal("different user was treated as the same identity")
+	}
+	if sameApprovedIdentity(record, userID, profileID, "session-b") {
+		t.Fatal("different authorizing session was treated as the same identity")
 	}
 }
 

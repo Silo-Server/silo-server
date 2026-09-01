@@ -13,7 +13,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
-const jellycompatSessionColumns = `token, username, account_username, profile_id, profile_name, pseudo_user_id, streamapp_user_id, streamapp_access_token, streamapp_refresh_token, streamapp_token_expiry, created_at, expires_at`
+const jellycompatSessionColumns = `compat_session.token, compat_session.username, compat_session.account_username,
+	compat_session.profile_id, compat_session.profile_name, compat_session.pseudo_user_id,
+	compat_session.streamapp_user_id, compat_session.streamapp_session_id, compat_session.auth_revision,
+	compat_session.streamapp_access_token, compat_session.streamapp_refresh_token,
+	compat_session.streamapp_token_expiry, compat_session.created_at, compat_session.expires_at`
 
 // SessionRepository persists compat sessions in PostgreSQL.
 type SessionRepository struct {
@@ -44,6 +48,8 @@ func (r *SessionRepository) scanCompatSession(row pgx.Row) (*Session, error) {
 		&session.ProfileName,
 		&session.PseudoUserID,
 		&session.StreamAppUserID,
+		&session.StreamAppSessionID,
+		&session.AuthRevision,
 		&session.StreamAppAccessToken,
 		&session.StreamAppRefreshToken,
 		&session.StreamAppTokenExpiry,
@@ -81,24 +87,44 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 		return fmt.Errorf("encrypt streamapp refresh token: %w", err)
 	}
 
-	_, err = r.pool.Exec(ctx, `
-		INSERT INTO jellycompat_sessions (
-			token, username, account_username, profile_id, profile_name, pseudo_user_id,
-			streamapp_user_id, streamapp_access_token, streamapp_refresh_token,
-			streamapp_token_expiry, created_at, expires_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9,
-			$10, $11, $12
-		)
-		ON CONFLICT (token) DO UPDATE SET
+	tag, err := r.pool.Exec(ctx, `
+			INSERT INTO jellycompat_sessions (
+				token, username, account_username, profile_id, profile_name, pseudo_user_id,
+				streamapp_user_id, streamapp_session_id, auth_revision,
+				streamapp_access_token, streamapp_refresh_token,
+				streamapp_token_expiry, created_at, expires_at
+			) SELECT
+				$1, $2, $3, $4, $5, $6,
+				$7, $8, $9,
+				$10, $11,
+				$12, $13, $14
+			FROM auth_sessions AS native_session
+			JOIN users AS account ON account.id = native_session.user_id
+			LEFT JOIN users AS impersonator ON impersonator.id = native_session.impersonator_user_id
+			WHERE native_session.id = $8
+			  AND native_session.user_id = $7
+			  AND native_session.revoked_at IS NULL
+			  AND native_session.expires_at > NOW()
+			  AND native_session.auth_revision = $9
+			  AND account.enabled
+			  AND account.auth_revision = $9
+			  AND (
+				native_session.impersonator_user_id IS NULL OR (
+					impersonator.enabled
+					AND impersonator.role = 'admin'
+					AND impersonator.auth_revision = native_session.impersonator_auth_revision
+				)
+			  )
+			ON CONFLICT (token) DO UPDATE SET
 			username = EXCLUDED.username,
 			account_username = EXCLUDED.account_username,
 			profile_id = EXCLUDED.profile_id,
 			profile_name = EXCLUDED.profile_name,
-			pseudo_user_id = EXCLUDED.pseudo_user_id,
-			streamapp_user_id = EXCLUDED.streamapp_user_id,
-			streamapp_access_token = EXCLUDED.streamapp_access_token,
+				pseudo_user_id = EXCLUDED.pseudo_user_id,
+				streamapp_user_id = EXCLUDED.streamapp_user_id,
+				streamapp_session_id = EXCLUDED.streamapp_session_id,
+				auth_revision = EXCLUDED.auth_revision,
+				streamapp_access_token = EXCLUDED.streamapp_access_token,
 			streamapp_refresh_token = EXCLUDED.streamapp_refresh_token,
 			streamapp_token_expiry = EXCLUDED.streamapp_token_expiry,
 			created_at = EXCLUDED.created_at,
@@ -111,6 +137,8 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 		session.ProfileName,
 		session.PseudoUserID,
 		session.StreamAppUserID,
+		session.StreamAppSessionID,
+		session.AuthRevision,
 		accessToken,
 		refreshToken,
 		session.StreamAppTokenExpiry,
@@ -120,6 +148,9 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 	if err != nil {
 		return fmt.Errorf("upsert compat session: %w", err)
 	}
+	if tag.RowsAffected() == 0 {
+		return ErrSessionNotFound
+	}
 	return nil
 }
 
@@ -127,10 +158,58 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 func (r *SessionRepository) GetByToken(ctx context.Context, token string, now time.Time) (*Session, error) {
 	return r.scanCompatSession(r.pool.QueryRow(ctx,
 		`SELECT `+jellycompatSessionColumns+`
-		FROM jellycompat_sessions
-		WHERE token = $1 AND expires_at > $2`,
+			FROM jellycompat_sessions AS compat_session
+			JOIN auth_sessions AS native_session ON native_session.id = compat_session.streamapp_session_id
+			JOIN users AS account ON account.id = compat_session.streamapp_user_id
+			LEFT JOIN users AS impersonator ON impersonator.id = native_session.impersonator_user_id
+			WHERE compat_session.token = $1
+			  AND compat_session.expires_at > $2
+			  AND native_session.revoked_at IS NULL
+			  AND native_session.expires_at > $2
+			  AND native_session.user_id = compat_session.streamapp_user_id
+			  AND native_session.auth_revision = compat_session.auth_revision
+			  AND account.enabled
+			  AND account.auth_revision = compat_session.auth_revision
+			  AND (
+				native_session.impersonator_user_id IS NULL OR (
+					impersonator.enabled
+					AND impersonator.role = 'admin'
+					AND impersonator.auth_revision = native_session.impersonator_auth_revision
+				)
+			  )`,
 		token, now,
 	))
+}
+
+// IsActive checks shared durable authority for a cached compat session.
+func (r *SessionRepository) IsActive(ctx context.Context, token string, now time.Time) (bool, error) {
+	var active bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1
+		FROM jellycompat_sessions AS compat_session
+		JOIN auth_sessions AS native_session ON native_session.id = compat_session.streamapp_session_id
+		JOIN users AS account ON account.id = compat_session.streamapp_user_id
+		LEFT JOIN users AS impersonator ON impersonator.id = native_session.impersonator_user_id
+		WHERE compat_session.token = $1
+		  AND compat_session.expires_at > $2
+		  AND native_session.revoked_at IS NULL
+		  AND native_session.expires_at > $2
+		  AND native_session.user_id = compat_session.streamapp_user_id
+		  AND native_session.auth_revision = compat_session.auth_revision
+		  AND account.enabled
+		  AND account.auth_revision = compat_session.auth_revision
+		  AND (
+			native_session.impersonator_user_id IS NULL OR (
+				impersonator.enabled
+				AND impersonator.role = 'admin'
+				AND impersonator.auth_revision = native_session.impersonator_auth_revision
+			)
+		  )
+	)`, token, now).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("check compat session authority: %w", err)
+	}
+	return active, nil
 }
 
 // DeleteByToken removes a compat session by token.

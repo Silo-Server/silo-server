@@ -27,6 +27,7 @@ type TokenPair struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresIn    int // seconds until access token expires
+	SessionID    string
 }
 
 // SettingsGetter retrieves server settings by key.
@@ -198,11 +199,12 @@ func (s *Service) CompleteOAuthLogin(ctx context.Context, in OAuthLoginInput) (*
 
 	sessionID := uuid.New().String()
 	session := models.AuthSession{
-		ID:         sessionID,
-		UserID:     user.ID,
-		DeviceName: in.DeviceName,
-		IPAddress:  in.IP,
-		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
+		ID:           sessionID,
+		UserID:       user.ID,
+		DeviceName:   in.DeviceName,
+		IPAddress:    in.IP,
+		ExpiresAt:    time.Now().Add(s.jwt.RefreshExpiry()),
+		AuthRevision: user.AuthRevision,
 	}
 	if err := s.sessions.Create(ctx, session); err != nil {
 		return nil, nil, fmt.Errorf("creating session: %w", err)
@@ -258,11 +260,12 @@ func (s *Service) loginWithProvider(
 	// of looking up the session after creation.
 	sessionID := uuid.New().String()
 	session := models.AuthSession{
-		ID:         sessionID,
-		UserID:     user.ID,
-		DeviceName: deviceName,
-		IPAddress:  ip,
-		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
+		ID:           sessionID,
+		UserID:       user.ID,
+		DeviceName:   deviceName,
+		IPAddress:    ip,
+		ExpiresAt:    time.Now().Add(s.jwt.RefreshExpiry()),
+		AuthRevision: user.AuthRevision,
 	}
 
 	if err := s.sessions.Create(ctx, session); err != nil {
@@ -391,18 +394,12 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 
 // StartImpersonation creates a new target-user session with admin provenance.
 func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUserID int, deviceName, ip string) (*TokenPair, *models.User, *models.User, error) {
-	if claims := ClaimsFromContext(ctx); claims != nil {
-		if claims.TokenType == TokenTypeAPIKey || claims.SessionID == "" {
-			return nil, nil, nil, ErrImpersonationNotAllowed
-		}
-		currentSession, err := s.sessions.GetByID(ctx, claims.SessionID)
-		if err != nil {
-			if !IsSessionNotFound(err) {
-				return nil, nil, nil, fmt.Errorf("getting current session: %w", err)
-			}
-		} else if currentSession.ImpersonatorUserID != nil {
-			return nil, nil, nil, ErrAlreadyImpersonating
-		}
+	claims := ClaimsFromContext(ctx)
+	if claims == nil || claims.UserID != adminUserID || claims.TokenType == TokenTypeAPIKey || claims.SessionID == "" {
+		return nil, nil, nil, ErrImpersonationNotAllowed
+	}
+	if claims.ImpersonatorUserID != nil {
+		return nil, nil, nil, ErrAlreadyImpersonating
 	}
 
 	admin, err := s.users.GetByID(ctx, adminUserID)
@@ -431,16 +428,25 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 	impersonatorUserID := admin.ID
 	startedAt := time.Now()
 	session := models.AuthSession{
-		ID:                     sessionID,
-		UserID:                 target.ID,
-		DeviceName:             deviceName,
-		IPAddress:              ip,
-		ExpiresAt:              startedAt.Add(s.jwt.RefreshExpiry()),
-		ImpersonatorUserID:     &impersonatorUserID,
-		ImpersonationStartedAt: &startedAt,
+		ID:                       sessionID,
+		UserID:                   target.ID,
+		DeviceName:               deviceName,
+		IPAddress:                ip,
+		ExpiresAt:                startedAt.Add(s.jwt.RefreshExpiry()),
+		AuthRevision:             target.AuthRevision,
+		ImpersonatorUserID:       &impersonatorUserID,
+		ImpersonatorAuthRevision: &admin.AuthRevision,
+		ImpersonationStartedAt:   &startedAt,
 	}
 
-	if err := s.sessions.Create(ctx, session); err != nil {
+	if err := s.sessions.CreateAuthorized(ctx, session, SessionAuthorization{
+		UserID:       admin.ID,
+		SessionID:    claims.SessionID,
+		RequireAdmin: true,
+	}); err != nil {
+		if IsSessionNotFound(err) {
+			return nil, nil, nil, ErrImpersonationNotAllowed
+		}
 		return nil, nil, nil, fmt.Errorf("creating session: %w", err)
 	}
 
@@ -505,15 +511,21 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if !user.Enabled {
 		return nil, ErrSessionRevoked
 	}
-	if err := s.validateImpersonator(ctx, session.ImpersonatorUserID); err != nil {
+	if user.AuthRevision != session.AuthRevision {
+		return nil, ErrSessionRevoked
+	}
+	if err := s.validateImpersonator(ctx, session.ImpersonatorUserID, session.ImpersonatorAuthRevision); err != nil {
 		return nil, err
 	}
 
-	// Slide the session window forward so an active client never hits the
-	// hard expires_at set at login. A failure here is non-fatal: the refresh
-	// still returns fresh tokens; the session just keeps its prior expiry.
+	// Slide the session window forward so an active client never hits the hard
+	// expires_at set at login. A zero-row update means revocation or an authority
+	// revision change won the race, so refresh must fail closed.
 	newExpiry := time.Now().Add(s.jwt.RefreshExpiry())
-	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil && !IsSessionNotFound(err) {
+	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil {
+		if IsSessionNotFound(err) {
+			return nil, ErrSessionRevoked
+		}
 		return nil, fmt.Errorf("extending session: %w", err)
 	}
 
@@ -525,7 +537,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	})
 }
 
-func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *int) error {
+func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *int, authRevision *int64) error {
 	if impersonatorUserID == nil {
 		return nil
 	}
@@ -537,7 +549,7 @@ func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *
 		}
 		return fmt.Errorf("getting impersonator user: %w", err)
 	}
-	if !impersonator.Enabled || impersonator.Role != "admin" {
+	if !impersonator.Enabled || impersonator.Role != "admin" || authRevision == nil || impersonator.AuthRevision != *authRevision {
 		return ErrSessionRevoked
 	}
 	return nil
@@ -589,5 +601,6 @@ func (s *Service) generateTokenPair(claims Claims) (*TokenPair, error) {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    int(s.jwt.AccessExpiry().Seconds()),
+		SessionID:    claims.SessionID,
 	}, nil
 }

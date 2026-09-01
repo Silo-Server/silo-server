@@ -43,6 +43,11 @@ type UserRepository struct {
 	pool *pgxpool.Pool
 }
 
+type userExecQuerier interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // NewUserRepository creates a new UserRepository backed by the given pool.
 func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
@@ -51,7 +56,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 // allColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanUser stays in sync.
 const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, permissions, enabled,
-	library_ids, max_playback_quality, access_policy_revision,
+	library_ids, max_playback_quality, access_policy_revision, auth_revision,
 	max_streams, max_transcodes, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
 	download_transcode_allowed, requests_allowed, access_group_id, created_at, updated_at`
 
@@ -70,6 +75,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.LibraryIDs,
 		&u.MaxPlaybackQuality,
 		&u.AccessPolicyRevision,
+		&u.AuthRevision,
 		&u.MaxStreams,
 		&u.MaxTranscodes,
 		&u.TranscodeAllowed,
@@ -108,6 +114,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.LibraryIDs,
 			&u.MaxPlaybackQuality,
 			&u.AccessPolicyRevision,
+			&u.AuthRevision,
 			&u.MaxStreams,
 			&u.MaxTranscodes,
 			&u.TranscodeAllowed,
@@ -253,6 +260,7 @@ type userUpdateColumn struct {
 	set               bool
 	value             any
 	bumpsAccessPolicy bool
+	bumpsAuth         bool
 }
 
 // accessGroupSetClause builds the SET clause and access-policy predicate for
@@ -314,6 +322,10 @@ func accessGroupSetClause(input models.UpdateUserInput, argIndex int) (setClause
 // Update modifies a user's fields. Only non-nil fields in the input are updated.
 // If the input contains a Password, it is bcrypt-hashed before storage.
 func (r *UserRepository) Update(ctx context.Context, id int, input models.UpdateUserInput) error {
+	return r.updateWithQuerier(ctx, r.pool, id, input)
+}
+
+func (r *UserRepository) updateWithQuerier(ctx context.Context, db userExecQuerier, id int, input models.UpdateUserInput) error {
 	var email *string
 	if input.Email != nil {
 		normalized := NormalizeEmail(*input.Email)
@@ -348,17 +360,18 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	columns := []userUpdateColumn{
 		{column: "email", set: email != nil, value: email},
 		{column: "username", set: username != nil, value: username},
-		{column: "password_hash", set: passwordHash != nil, value: passwordHash},
-		{column: "local_password_login_enabled", set: input.LocalPasswordLoginEnabled != nil, value: input.LocalPasswordLoginEnabled},
-		{column: "role", set: input.Role != nil, value: input.Role, bumpsAccessPolicy: true},
-		{column: "permissions", set: input.Permissions != nil, value: permissions, bumpsAccessPolicy: true},
-		{column: "enabled", set: input.Enabled != nil, value: input.Enabled, bumpsAccessPolicy: true},
+		{column: "password_hash", set: passwordHash != nil, value: passwordHash, bumpsAuth: true},
+		{column: "local_password_login_enabled", set: input.LocalPasswordLoginEnabled != nil, value: input.LocalPasswordLoginEnabled, bumpsAuth: true},
+		{column: "role", set: input.Role != nil, value: input.Role, bumpsAccessPolicy: true, bumpsAuth: true},
+		{column: "permissions", set: input.Permissions != nil, value: permissions, bumpsAccessPolicy: true, bumpsAuth: true},
+		{column: "enabled", set: input.Enabled != nil, value: input.Enabled, bumpsAccessPolicy: true, bumpsAuth: true},
 		{column: "library_ids", set: input.LibraryIDs.Set, value: derefSlice(input.LibraryIDs.Value)},
 		{
 			column:            "max_playback_quality",
 			set:               input.MaxPlaybackQuality.Set,
 			value:             normalizeQualityOverride(input.MaxPlaybackQuality.Value),
 			bumpsAccessPolicy: true,
+			bumpsAuth:         true,
 		},
 		{column: "max_streams", set: input.MaxStreams.Set, value: input.MaxStreams.Value},
 		{column: "max_transcodes", set: input.MaxTranscodes.Set, value: input.MaxTranscodes.Value},
@@ -372,6 +385,7 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 
 	setClauses := []string{}
 	accessPolicyPredicates := []string{}
+	authPredicates := []string{}
 	args := []any{}
 	argIndex := 1
 	for _, col := range columns {
@@ -386,6 +400,9 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 				fmt.Sprintf("%s IS DISTINCT FROM %s", col.column, placeholder),
 			)
 		}
+		if col.bumpsAuth {
+			authPredicates = append(authPredicates, fmt.Sprintf("%s IS DISTINCT FROM %s", col.column, placeholder))
+		}
 		args = append(args, col.value)
 		argIndex++
 	}
@@ -397,6 +414,7 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	if setClause, predicate, cte, groupArgs, nextArgIndex := accessGroupSetClause(input, argIndex); setClause != "" {
 		setClauses = append(setClauses, setClause)
 		accessPolicyPredicates = append(accessPolicyPredicates, predicate)
+		authPredicates = append(authPredicates, predicate)
 		defaultGroupCTE = cte
 		args = append(args, groupArgs...)
 		argIndex = nextArgIndex
@@ -404,7 +422,7 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 
 	if len(setClauses) == 0 {
 		// Nothing to update; still verify the user exists.
-		_, err := r.GetByID(ctx, id)
+		_, err := scanUser(db.QueryRow(ctx, `SELECT `+allColumns+` FROM users WHERE id = $1`, id))
 		return err
 	}
 
@@ -412,6 +430,12 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 		setClauses = append(setClauses, fmt.Sprintf(
 			"access_policy_revision = CASE WHEN %s THEN access_policy_revision + 1 ELSE access_policy_revision END",
 			strings.Join(accessPolicyPredicates, " OR "),
+		))
+	}
+	if len(authPredicates) > 0 {
+		setClauses = append(setClauses, fmt.Sprintf(
+			"auth_revision = CASE WHEN %s THEN auth_revision + 1 ELSE auth_revision END",
+			strings.Join(authPredicates, " OR "),
 		))
 	}
 
@@ -428,7 +452,7 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	}
 	args = append(args, id)
 
-	tag, err := r.pool.Exec(ctx, query, args...)
+	tag, err := db.Exec(ctx, query, args...)
 	if err != nil {
 		if isDuplicateKeyError(err) {
 			return fmt.Errorf("%w: %s", ErrDuplicate, extractConstraint(err))
@@ -440,6 +464,67 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 		return ErrNotFound
 	}
 
+	return nil
+}
+
+// UpdateAndRevokeAuthority atomically applies a security-sensitive account
+// update and invalidates every durable session whose authority comes from the
+// account, either as the subject or as an impersonator.
+func (r *UserRepository) UpdateAndRevokeAuthority(ctx context.Context, id int, input models.UpdateUserInput) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning user authority update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := r.updateWithQuerier(ctx, tx, id, input); err != nil {
+		return err
+	}
+	if err := revokeUserAuthority(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM jellycompat_sessions WHERE streamapp_user_id = $1`, id); err != nil {
+		return fmt.Errorf("revoking compat sessions for user %d: %w", id, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing user authority update: %w", err)
+	}
+	return nil
+}
+
+// DeleteAndRevokeAuthority atomically revokes sessions created by an account
+// as an impersonator and deletes the account. Owned native, API-key, and
+// Jellyfin sessions are removed by foreign-key cascades.
+func (r *UserRepository) DeleteAndRevokeAuthority(ctx context.Context, id int) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning user authority deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := revokeUserAuthority(ctx, tx, id); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
+	if err != nil {
+		return fmt.Errorf("deleting user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing user authority deletion: %w", err)
+	}
+	return nil
+}
+
+func revokeUserAuthority(ctx context.Context, db sessionExecQuerier, userID int) error {
+	_, err := db.Exec(ctx, `UPDATE auth_sessions
+		SET revoked_at = NOW()
+		WHERE revoked_at IS NULL AND (user_id = $1 OR impersonator_user_id = $1)`, userID)
+	if err != nil {
+		return fmt.Errorf("revoking authority sessions for user %d: %w", userID, err)
+	}
 	return nil
 }
 

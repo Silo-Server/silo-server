@@ -18,12 +18,24 @@ import (
 // fakeAPIKeyStore records what the handler asked to store.
 type fakeAPIKeyStore struct {
 	createdScopes []string
+	authorization auth.SessionAuthorization
+	createErr     error
 	created       bool
 }
 
-func (s *fakeAPIKeyStore) Create(_ context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
+func (s *fakeAPIKeyStore) CreateAuthorized(
+	_ context.Context,
+	userID int,
+	label string,
+	scopes []string,
+	authorization auth.SessionAuthorization,
+) (*models.APIKey, error) {
 	s.created = true
 	s.createdScopes = scopes
+	s.authorization = authorization
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
 	return &models.APIKey{ID: 1, UserID: userID, Label: label, Key: "sa_generated", RateTier: "standard", Scopes: scopes}, nil
 }
 
@@ -69,6 +81,10 @@ func TestHandleCreateAPIKeyHonorsRequestedScopes(t *testing.T) {
 	if !reflect.DeepEqual(store.createdScopes, want) {
 		t.Fatalf("stored scopes = %v, want %v (normalized: deduplicated and sorted)", store.createdScopes, want)
 	}
+	wantAuthorization := auth.SessionAuthorization{UserID: 7, SessionID: "s1"}
+	if store.authorization != wantAuthorization {
+		t.Fatalf("authorization = %+v, want %+v", store.authorization, wantAuthorization)
+	}
 
 	var resp apiKeyResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -96,6 +112,47 @@ func TestHandleCreateAPIKeyRejectsUnknownScope(t *testing.T) {
 	}
 	if store.created {
 		t.Fatal("an unknown scope must not create a key")
+	}
+}
+
+func TestHandleCreateAPIKeyRejectsImpersonatedSession(t *testing.T) {
+	store := &fakeAPIKeyStore{}
+	h := NewAPIKeyHandler(store)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(`{"label":"ci"}`))
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
+		UserID:             7,
+		Role:               "user",
+		TokenType:          auth.TokenTypeAccess,
+		SessionID:          "impersonated-session",
+		ImpersonatorUserID: new(1),
+	}))
+	rec := httptest.NewRecorder()
+	h.HandleCreateAPIKey(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
+	}
+	if store.created {
+		t.Fatal("impersonated session created an API key")
+	}
+}
+
+func TestHandleCreateAPIKeyRejectsAuthorityChangeAfterMiddleware(t *testing.T) {
+	store := &fakeAPIKeyStore{createErr: auth.ErrSessionNotFound}
+	h := NewAPIKeyHandler(store)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(`{"label":"ci"}`))
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
+		UserID:    7,
+		Role:      "user",
+		TokenType: auth.TokenTypeAccess,
+		SessionID: "revoked-after-middleware",
+	}))
+	rec := httptest.NewRecorder()
+	h.HandleCreateAPIKey(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
+	}
+	if !store.created {
+		t.Fatal("test did not reach the storage authorization guard")
 	}
 }
 

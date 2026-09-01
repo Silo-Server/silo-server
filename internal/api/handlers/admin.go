@@ -58,6 +58,11 @@ type UserRepository interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
 
+type AtomicUserAuthorityRepository interface {
+	UpdateAndRevokeAuthority(ctx context.Context, id int, input models.UpdateUserInput) error
+	DeleteAndRevokeAuthority(ctx context.Context, id int) error
+}
+
 type AccessGroupValidator interface {
 	Get(ctx context.Context, id int64) (*access.Group, error)
 	List(ctx context.Context) ([]access.Group, error)
@@ -947,7 +952,17 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	err = h.userRepo.Update(r.Context(), id, updateInput)
+	revokeAuthority := updateRequiresSessionRevocation(currentUser, updateInput)
+	if revokeAuthority {
+		authorityRepo, ok := h.userRepo.(AtomicUserAuthorityRepository)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Atomic user authority updates are not configured")
+			return
+		}
+		err = authorityRepo.UpdateAndRevokeAuthority(r.Context(), id, updateInput)
+	} else {
+		err = h.userRepo.Update(r.Context(), id, updateInput)
+	}
 	if err != nil {
 		if auth.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, "not_found", "User not found")
@@ -956,11 +971,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
-	if updateRequiresSessionRevocation(currentUser, updateInput) {
-		if err := h.revokeUserSessions(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
-			return
-		}
+	if revokeAuthority && h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
@@ -986,7 +998,12 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err = h.userRepo.Delete(r.Context(), id)
+	authorityRepo, ok := h.userRepo.(AtomicUserAuthorityRepository)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Atomic user authority deletion is not configured")
+		return
+	}
+	err = authorityRepo.DeleteAndRevokeAuthority(r.Context(), id)
 	if err != nil {
 		if auth.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, "not_found", "User not found")
@@ -995,9 +1012,8 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
 		return
 	}
-	if err := h.revokeUserSessions(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke deleted user sessions")
-		return
+	if h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
@@ -1279,23 +1295,6 @@ func accessGroupIDEqual(a, b *int64) bool {
 		return a == b
 	}
 	return *a == *b
-}
-
-func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
-	if h.pool == nil {
-		return nil
-	}
-	sessionRepo := auth.NewSessionRepository(h.pool)
-	if err := sessionRepo.RevokeAllByUser(ctx, userID); err != nil {
-		return err
-	}
-	if err := sessionRepo.RevokeAllByImpersonator(ctx, userID); err != nil {
-		return err
-	}
-	if h.OnUserSessionsRevoked != nil {
-		h.OnUserSessionsRevoked(ctx, userID)
-	}
-	return nil
 }
 
 // HandleListUnmatched handles GET /admin/unmatched.

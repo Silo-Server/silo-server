@@ -1,9 +1,73 @@
 package jellycompat
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 )
+
+type sharedSessionPersistence struct {
+	mu           sync.Mutex
+	sessions     map[string]Session
+	nativeActive bool
+}
+
+func newSharedSessionPersistence() *sharedSessionPersistence {
+	return &sharedSessionPersistence{sessions: make(map[string]Session), nativeActive: true}
+}
+
+func (p *sharedSessionPersistence) Upsert(_ context.Context, session Session) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.nativeActive {
+		return ErrSessionNotFound
+	}
+	p.sessions[session.Token] = session
+	return nil
+}
+
+func (p *sharedSessionPersistence) GetByToken(_ context.Context, token string, now time.Time) (*Session, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	session, ok := p.sessions[token]
+	if !ok || !p.nativeActive || !session.ExpiresAt.After(now) {
+		return nil, ErrSessionNotFound
+	}
+	return new(session), nil
+}
+
+func (p *sharedSessionPersistence) IsActive(_ context.Context, token string, now time.Time) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	session, ok := p.sessions[token]
+	return ok && p.nativeActive && session.ExpiresAt.After(now), nil
+}
+
+func (p *sharedSessionPersistence) DeleteByToken(_ context.Context, token string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.sessions[token]; !ok {
+		return ErrSessionNotFound
+	}
+	delete(p.sessions, token)
+	return nil
+}
+
+func (p *sharedSessionPersistence) DeleteByUserID(_ context.Context, userID int) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	deleted := 0
+	for token, session := range p.sessions {
+		if session.StreamAppUserID == userID {
+			delete(p.sessions, token)
+			deleted++
+		}
+	}
+	p.nativeActive = false
+	return deleted, nil
+}
 
 func fixedNow() time.Time {
 	return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -27,6 +91,36 @@ func TestDeleteByUserID(t *testing.T) {
 	}
 	if _, ok := store.Get("ccc"); !ok {
 		t.Error("expected session ccc to still exist")
+	}
+}
+
+func TestPersistentSessionStoreRejectsRevocationFromAnotherReplica(t *testing.T) {
+	repo := newSharedSessionPersistence()
+	replicaA := NewPersistentSessionStore(time.Hour, fixedNow, repo)
+	replicaB := NewPersistentSessionStore(time.Hour, fixedNow, repo)
+	session := Session{
+		Token:              "shared-token",
+		StreamAppUserID:    7,
+		StreamAppSessionID: "native-session",
+		AuthRevision:       3,
+	}
+	if err := replicaA.Put(session); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	if _, ok := replicaB.Get(session.Token); !ok {
+		t.Fatal("second replica did not load the shared session")
+	}
+
+	replicaA.DeleteByUserID(session.StreamAppUserID)
+
+	if err := replicaB.Update(session.Token, func(session *Session) error {
+		session.ProfileName = "stale update"
+		return nil
+	}); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("stale replica update error = %v, want ErrSessionNotFound", err)
+	}
+	if _, ok := replicaB.Get(session.Token); ok {
+		t.Fatal("second replica accepted a cached session after shared revocation")
 	}
 }
 

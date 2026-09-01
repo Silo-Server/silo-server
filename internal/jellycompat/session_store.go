@@ -16,7 +16,9 @@ var ErrSessionNotFound = errors.New("compat session not found")
 type sessionPersistence interface {
 	Upsert(ctx context.Context, session Session) error
 	GetByToken(ctx context.Context, token string, now time.Time) (*Session, error)
+	IsActive(ctx context.Context, token string, now time.Time) (bool, error)
 	DeleteByToken(ctx context.Context, token string) error
+	DeleteByUserID(ctx context.Context, userID int) (int, error)
 }
 
 // Session stores a compat login plus upstream Silo credentials.
@@ -28,6 +30,8 @@ type Session struct {
 	ProfileName           string
 	PseudoUserID          uuid.UUID
 	StreamAppUserID       int
+	StreamAppSessionID    string
+	AuthRevision          int64
 	StreamAppAccessToken  string
 	StreamAppRefreshToken string
 	StreamAppTokenExpiry  time.Time
@@ -95,6 +99,18 @@ func (s *SessionStore) Get(token string) (*Session, bool) {
 	session, ok := s.sessions[token]
 	s.mu.RUnlock()
 	if ok {
+		if s.repo != nil {
+			active, err := s.repo.IsActive(context.Background(), token, s.now())
+			if err != nil || !active {
+				s.mu.Lock()
+				delete(s.sessions, token)
+				s.mu.Unlock()
+				if err != nil {
+					slog.Warn("jellycompat session store validation failed", "token", token, "error", err)
+				}
+				return nil, false
+			}
+		}
 		if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
 			s.Delete(token)
 			return nil, false
@@ -170,10 +186,8 @@ func (s *SessionStore) DeleteByUserID(userID int) {
 	}
 	s.mu.Unlock()
 	if s.repo != nil {
-		if repo, ok := s.repo.(*SessionRepository); ok {
-			if _, err := repo.DeleteByUserID(context.Background(), userID); err != nil {
-				slog.Warn("jellycompat session store delete by user failed", "user_id", userID, "error", err)
-			}
+		if _, err := s.repo.DeleteByUserID(context.Background(), userID); err != nil {
+			slog.Warn("jellycompat session store delete by user failed", "user_id", userID, "error", err)
 		}
 	}
 }
