@@ -2263,6 +2263,7 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
 	server := newTestServer(t)
 	server.tracker = newBlockingSessionTracker()
+	server.registeredNodeURL = func() (string, bool) { return "https://registered-node.example", true }
 	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: "dormant-transport"}}
 	server.SetRecipeStore(store)
 
@@ -2270,8 +2271,8 @@ func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(store.revokedNodes) != 1 || store.revokedNodes[0] != server.tracker.NodeURL() {
-		t.Fatalf("node authority revocations = %v, want [%q]", store.revokedNodes, server.tracker.NodeURL())
+	if len(store.revokedNodes) != 1 || store.revokedNodes[0] != "https://registered-node.example" {
+		t.Fatalf("node authority revocations = %v, want registered route URL", store.revokedNodes)
 	}
 	if len(store.deletes) != 0 {
 		t.Fatalf("dormant authority was unexpectedly enumerated: deletes = %v", store.deletes)

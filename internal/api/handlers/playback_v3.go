@@ -2457,24 +2457,35 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			releaser.ReleaseSession(session.ID)
 		}
 	}
+	fallbackFromSelectedRoute := func(routeErr *transportErrorV3) (preparedTransportV3, *transportErrorV3) {
+		releaseReservation()
+		fallbackExclusions := maps.Clone(excludedShapes)
+		if fallbackExclusions == nil {
+			fallbackExclusions = make(map[string]struct{})
+		}
+		fallbackExclusions[decision.Shape.ID] = struct{}{}
+		fallback, fallbackErr := h.prepareIdentityTransportV3(r, session, file, result, timeline, mode, policy, fallbackExclusions)
+		if fallbackErr == nil {
+			return fallback, nil
+		}
+		return preparedTransportV3{}, combineTransportErrorsV3(routeErr, fallbackErr)
+	}
 	if transcodeNode != nil {
 		transcodeCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), transcodeNode.URL, false)
 		if capabilityErr != nil || !slices.Contains(transcodeCapabilities.transportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
-			releaseReservation()
-			return preparedTransportV3{}, &transportErrorV3{
+			return fallbackFromSelectedRoute(&transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected transcode node cannot execute a progressive remux.",
 				retryable: true, cause: capabilityErr,
-			}
+			})
 		}
 	}
 	if transcodeNode != nil && proxyNode != nil {
 		proxyCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), proxyNode.URL, false)
 		if capabilityErr != nil || !slices.Contains(proxyCapabilities.transportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) {
-			releaseReservation()
-			return preparedTransportV3{}, &transportErrorV3{
+			return fallbackFromSelectedRoute(&transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected proxy cannot relay a progressive remux from a transcode node.",
 				retryable: true, cause: capabilityErr,
-			}
+			})
 		}
 	}
 	var executorNode *nodepool.Node
@@ -2490,11 +2501,10 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			capabilityErr = validateAdvertisedTransformationsV3(result.Plan, advertised)
 		}
 		if capabilityErr != nil {
-			releaseReservation()
-			return preparedTransportV3{}, &transportErrorV3{
+			return fallbackFromSelectedRoute(&transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected node cannot execute the progressive-remux recipe.",
 				retryable: true, cause: capabilityErr,
-			}
+			})
 		}
 	}
 	routeSession.RoutingWorkload = string(routingWorkloadV3(result))
@@ -2524,21 +2534,11 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		card.DVProfile = file.PrimaryDVProfile()
 		card.AudioOnly = file.IsAudioOnly()
 		if err := h.putRequiredNodeRecipeV3(r.Context(), transportID, card); err != nil {
-			releaseReservation()
 			h.deleteNodeRecipeV3(r.Context(), transportID)
 			authorityErr := &transportErrorV3{
 				reason: string(noderouting.OutcomeCapacityUnavailable), message: "The transcode remux authority is temporarily unavailable.", retryable: true, cause: err,
 			}
-			fallbackExclusions := maps.Clone(excludedShapes)
-			if fallbackExclusions == nil {
-				fallbackExclusions = make(map[string]struct{})
-			}
-			fallbackExclusions[decision.Shape.ID] = struct{}{}
-			fallback, fallbackErr := h.prepareIdentityTransportV3(r, session, file, result, timeline, mode, policy, fallbackExclusions)
-			if fallbackErr == nil {
-				return fallback, nil
-			}
-			return fallback, combineTransportErrorsV3(authorityErr, fallbackErr)
+			return fallbackFromSelectedRoute(authorityErr)
 		}
 	}
 	streamURL := fmt.Sprintf("/stream/%s", routeSession.ID)
@@ -2572,24 +2572,15 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		// it is reported as such: the HLS path classifies the identical
 		// proxy-authority failure retryable, and a non-retryable answer would
 		// make a client give up on a route the next attempt can take.
-		releaseReservation()
 		reservationReleased = true
 		if transcodeNode != nil {
 			h.deleteNodeRecipeV3(r.Context(), transportID)
 			grantErr := &transportErrorV3{
 				reason: string(noderouting.OutcomeCapacityUnavailable), message: "The transcode-to-proxy remux route is temporarily unavailable.", retryable: true,
 			}
-			fallbackExclusions := maps.Clone(excludedShapes)
-			if fallbackExclusions == nil {
-				fallbackExclusions = make(map[string]struct{})
-			}
-			fallbackExclusions[decision.Shape.ID] = struct{}{}
-			fallback, fallbackErr := h.prepareIdentityTransportV3(r, session, file, result, timeline, mode, policy, fallbackExclusions)
-			if fallbackErr == nil {
-				return fallback, nil
-			}
-			return preparedTransportV3{}, combineTransportErrorsV3(grantErr, fallbackErr)
+			return fallbackFromSelectedRoute(grantErr)
 		}
+		releaseReservation()
 		if !identityLocalFallbackAllowedV3(result, policy) || h.validateLocalProgressiveCapabilitiesV3(r.Context(), result) != nil {
 			return preparedTransportV3{}, &transportErrorV3{
 				reason:    string(noderouting.OutcomeCapacityUnavailable),

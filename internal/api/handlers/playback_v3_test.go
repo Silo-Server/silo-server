@@ -5038,6 +5038,7 @@ type progressiveFallbackPlannerV3 struct {
 	proxy     *nodepool.Node
 	requests  []nodepool.RouteRequest
 	released  []string
+	onPlan    func(nodepool.RouteRequest)
 }
 
 func (*progressiveFallbackPlannerV3) PlanSession(string, string, bool, int) nodepool.Plan {
@@ -5046,6 +5047,9 @@ func (*progressiveFallbackPlannerV3) PlanSession(string, string, bool, int) node
 
 func (p *progressiveFallbackPlannerV3) PlanRoute(request nodepool.RouteRequest) nodepool.Plan {
 	p.requests = append(p.requests, request)
+	if p.onPlan != nil {
+		p.onPlan(request)
+	}
 	if request.NeedsTranscode && (p.transcode == nil || request.TranscodeEligible != nil && !request.TranscodeEligible(p.transcode)) {
 		return nodepool.Plan{}
 	}
@@ -5317,6 +5321,65 @@ func TestPrepareTransportV3FallsBackWhenTranscodeRemuxAuthorityWriteFails(t *tes
 	}
 	if len(recipes.deleted) != 1 {
 		t.Fatalf("ambiguous authority cleanup = %v, want failed transport deleted", recipes.deleted)
+	}
+}
+
+func TestPrepareTransportV3FallsBackWhenSelectedRemuxNodeLosesCapability(t *testing.T) {
+	var transcodeCapable atomic.Bool
+	transcodeCapable.Store(true)
+	transcodeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hw-capabilities" || !transcodeCapable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+			TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxExecutionV1},
+		})
+	}))
+	defer transcodeServer.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	stubCopySeekAnchorV3(handler)
+	proxyServer := capableProxyStubV3(t)
+	planner := &progressiveFallbackPlannerV3{
+		proxy:     &nodepool.Node{ID: 42, URL: proxyServer.URL},
+		transcode: &nodepool.Node{ID: 84, URL: transcodeServer.URL},
+	}
+	planner.onPlan = func(request nodepool.RouteRequest) {
+		if !request.NeedsTranscode || !transcodeCapable.Swap(false) {
+			return
+		}
+		handler.v3NodeCapabilitiesMu.Lock()
+		delete(handler.v3NodeCapabilities, transcodeServer.URL)
+		handler.v3NodeCapabilitiesMu.Unlock()
+	}
+	handler.NodePlanner = planner
+	handler.NodeRecipeStore = &recordingRecipeCardStoreV3{}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-capability-fallback", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3), PlayMethod: playback.PlayRemux},
+		mediaAuthModeV3{})
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	if !strings.HasPrefix(transport.url, proxyServer.URL+"/stream/remux/") ||
+		transport.routingExecution != noderouting.ExecutionProxy || transport.nodeURL != "" {
+		t.Fatalf("fallback transport = %#v, want proxy-executed remux", transport)
+	}
+	if len(planner.requests) != 2 || !planner.requests[0].NeedsTranscode || planner.requests[1].NeedsTranscode {
+		t.Fatalf("route requests = %#v, want failed transcode route followed by proxy-only fallback", planner.requests)
+	}
+	if len(planner.released) != 1 || planner.released[0] != "session-capability-fallback" {
+		t.Fatalf("released reservations = %v, want failed transcode route released", planner.released)
 	}
 }
 

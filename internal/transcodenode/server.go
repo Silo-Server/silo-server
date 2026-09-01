@@ -207,6 +207,7 @@ type progressiveRemuxRequest struct {
 type Server struct {
 	watcher                   *nodeconfig.Watcher
 	nodeRowID                 func() (int, bool)
+	registeredNodeURL         func() (string, bool)
 	tracker                   sessionTracker
 	ffmpegSink                playback.FFmpegLogSink
 	inputPaths                InputPathAuthorizer
@@ -433,6 +434,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 	}
 	if watcher != nil {
 		s.nodeRowID = watcher.NodeRowID
+		s.registeredNodeURL = watcher.NodeRegisteredURL
 	}
 	return s
 }
@@ -2406,10 +2408,19 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) teardownForForceReload(ctx context.Context) error {
 	var authorityErr error
 	if s.recipeStore != nil {
-		if s.tracker == nil || strings.TrimSpace(s.tracker.NodeURL()) == "" {
+		nodeURL := ""
+		if s.registeredNodeURL != nil {
+			registeredURL, ok := s.registeredNodeURL()
+			if ok {
+				nodeURL = registeredURL
+			}
+		} else if s.tracker != nil {
+			nodeURL = s.tracker.NodeURL()
+		}
+		if strings.TrimSpace(nodeURL) == "" {
 			authorityErr = errors.New("transcode node URL unavailable")
 		} else {
-			authorityErr = s.recipeStore.RevokeNode(ctx, s.tracker.NodeURL())
+			authorityErr = s.recipeStore.RevokeNode(ctx, nodeURL)
 		}
 	}
 

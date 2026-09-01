@@ -79,9 +79,11 @@ type Watcher struct {
 	missingRowLogged    bool
 	duplicateRowLogged  bool
 	ambiguousNameLogged bool
-	// nodeRowID is the row this worker has resolved to, kept so a later rename
-	// or repoint cannot sever the association. Zero until a lookup succeeds.
-	nodeRowID int
+	// nodeRowID and nodeRegisteredURL are the row this worker has resolved to,
+	// kept so a later rename or repoint cannot sever the association. Zero and
+	// empty until a lookup succeeds.
+	nodeRowID         int
+	nodeRegisteredURL string
 
 	// reloadMu makes one reload atomic from the read of server_settings through
 	// the config swap and its callbacks; see reload.
@@ -92,13 +94,13 @@ type Watcher struct {
 	fetchSettingsFn func(context.Context) (map[string]string, error)
 }
 
-// rememberNodeRowID records the row a lookup resolved to.
-func (w *Watcher) rememberNodeRowID(id int) {
-	if id <= 0 {
+func (w *Watcher) rememberNodeRegistration(id int, registeredURL string) {
+	if id <= 0 || registeredURL == "" {
 		return
 	}
 	w.mu.Lock()
 	w.nodeRowID = id
+	w.nodeRegisteredURL = registeredURL
 	w.mu.Unlock()
 }
 
@@ -119,10 +121,23 @@ func (w *Watcher) NodeRowID() (int, bool) {
 	return w.rememberedNodeRowID()
 }
 
+// NodeRegisteredURL returns the route URL stored on the stream_nodes row this
+// worker resolved. It may differ from the process-local NODE_URL in a
+// split-horizon deployment.
+func (w *Watcher) NodeRegisteredURL() (string, bool) {
+	if w == nil {
+		return "", false
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.nodeRegisteredURL, w.nodeRowID > 0 && w.nodeRegisteredURL != ""
+}
+
 // forgetNodeRowID drops a remembered row that no longer exists.
 func (w *Watcher) forgetNodeRowID() {
 	w.mu.Lock()
 	w.nodeRowID = 0
+	w.nodeRegisteredURL = ""
 	w.mu.Unlock()
 }
 
@@ -445,6 +460,7 @@ func (w *Watcher) queryNodeHWOverrides(ctx context.Context, nodeURL, nodeName st
 			return nodeHWOverrides{}, false, err
 		}
 		if len(matched) > 0 {
+			w.rememberNodeRegistration(id, matched[0])
 			return overrides, true, nil
 		}
 		// The row was deleted. Forget it and fall back to the identities, which
@@ -462,7 +478,7 @@ func (w *Watcher) queryNodeHWOverrides(ctx context.Context, nodeURL, nodeName st
 		w.logDuplicateNodeRows(ctx, nodeURL, matched)
 	}
 	if len(matched) > 0 {
-		w.rememberNodeRowID(id)
+		w.rememberNodeRegistration(id, matched[0])
 		return overrides, true, nil
 	}
 
@@ -484,7 +500,7 @@ func (w *Watcher) queryNodeHWOverrides(ctx context.Context, nodeURL, nodeName st
 	case 0:
 		return nodeHWOverrides{}, false, nil
 	case 1:
-		w.rememberNodeRowID(id)
+		w.rememberNodeRegistration(id, matched[0])
 		return overrides, true, nil
 	default:
 		w.logAmbiguousNodeName(ctx, nodeName, matched)
