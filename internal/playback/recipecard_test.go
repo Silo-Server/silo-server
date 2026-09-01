@@ -154,19 +154,24 @@ func TestRecipeCardPreservesCopyVideoMPEGTS(t *testing.T) {
 	}
 }
 
-func TestRecipeCardPreservesRoutingEgressNodeID(t *testing.T) {
+func TestRecipeCardPreservesRoutingNodeIDs(t *testing.T) {
 	card := NewDirectRecipeCard("route-bound", 42, "profile-1", 77)
 	card.RoutingWorkload = "direct_play"
 	card.RoutingExecution = "none"
+	card.RoutingExecutionNodeID = 7
 	card.RoutingEgress = "proxy"
 	card.RoutingEgressNodeID = 11
 
 	claims := card.ToClaims()
+	if claims.RoutingExecutionNodeID != 7 {
+		t.Fatalf("claims execution node ID = %d, want 7", claims.RoutingExecutionNodeID)
+	}
 	if claims.RoutingEgressNodeID != 11 {
 		t.Fatalf("claims egress node ID = %d, want 11", claims.RoutingEgressNodeID)
 	}
-	if back := RecipeCardFromClaims(&claims); back.RoutingEgressNodeID != 11 {
-		t.Fatalf("round-trip egress node ID = %d, want 11", back.RoutingEgressNodeID)
+	back := RecipeCardFromClaims(&claims)
+	if back.RoutingExecutionNodeID != 7 || back.RoutingEgressNodeID != 11 {
+		t.Fatalf("round-trip node IDs = execution %d, egress %d; want 7 and 11", back.RoutingExecutionNodeID, back.RoutingEgressNodeID)
 	}
 }
 

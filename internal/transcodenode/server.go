@@ -206,6 +206,7 @@ type progressiveRemuxRequest struct {
 // Server is the HTTP handler for transcode mode.
 type Server struct {
 	watcher                   *nodeconfig.Watcher
+	nodeRowID                 func() (int, bool)
 	tracker                   sessionTracker
 	ffmpegSink                playback.FFmpegLogSink
 	inputPaths                InputPathAuthorizer
@@ -429,6 +430,9 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
 		stoppedProgressiveRemuxes: make(map[string]time.Time),
 		lastAccess:                make(map[string]time.Time),
+	}
+	if watcher != nil {
+		s.nodeRowID = watcher.NodeRowID
 	}
 	return s
 }
@@ -1886,7 +1890,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
 		return
 	}
-	if s.tracker != nil && strings.TrimRight(claims.TranscodeNode, "/") != strings.TrimRight(s.tracker.NodeURL(), "/") {
+	if !s.progressiveRemuxRunsOnThisNode(claims) {
 		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
 		return
 	}
@@ -1997,6 +2001,25 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// progressiveRemuxRunsOnThisNode binds a routed remux to the stable database
+// identity selected by the planner. NODE_URL is only the worker's local
+// address and may intentionally differ from the registered route URL in a
+// split-horizon deployment. The URL check remains for bounded tokens minted by
+// an earlier API that did not carry the additive node ID.
+func (s *Server) progressiveRemuxRunsOnThisNode(claims *streamtoken.Claims) bool {
+	if s == nil || claims == nil {
+		return false
+	}
+	if claims.RoutingExecutionNodeID > 0 {
+		if s.nodeRowID == nil {
+			return false
+		}
+		nodeID, ok := s.nodeRowID()
+		return ok && nodeID == claims.RoutingExecutionNodeID
+	}
+	return s.tracker == nil || strings.TrimRight(claims.TranscodeNode, "/") == strings.TrimRight(s.tracker.NodeURL(), "/")
+}
+
 func transcodeNodeRemuxPlayMethod(method string) bool {
 	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux
 }
@@ -2021,6 +2044,7 @@ func (s *Server) progressiveRemuxAuthorityActive(ctx context.Context, transportI
 		stored.TranscodeTransportID == transportID &&
 		stored.RoutingWorkload == claims.RoutingWorkload &&
 		stored.RoutingExecution == claims.RoutingExecution &&
+		stored.RoutingExecutionNodeID == claims.RoutingExecutionNodeID &&
 		stored.RoutingEgress == claims.RoutingEgress &&
 		stored.RoutingEgressNodeID == claims.RoutingEgressNodeID
 }

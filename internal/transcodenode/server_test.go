@@ -1867,6 +1867,7 @@ func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
 
 func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
 	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1879,9 +1880,9 @@ func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 	claims := streamtoken.Claims{
 		SessionID: "playback-head", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-head",
+		TranscodeNode: "http://registered-node", TranscodeTransportID: "transport-head",
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingEgress: string(noderouting.EgressProxy),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
 	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
@@ -1906,6 +1907,19 @@ func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
 	}
 	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
 		t.Fatalf("HEAD invoked ffmpeg: %v", err)
+	}
+}
+
+func TestProgressiveRemuxRunsOnThisNodeRejectsDifferentNodeID(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 12, true }
+
+	claims := &streamtoken.Claims{
+		TranscodeNode:          "http://same-node-url",
+		RoutingExecutionNodeID: 11,
+	}
+	if server.progressiveRemuxRunsOnThisNode(claims) {
+		t.Fatal("progressive remux accepted a token bound to a different node ID")
 	}
 }
 

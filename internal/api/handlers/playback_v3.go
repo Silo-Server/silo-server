@@ -2500,6 +2500,12 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	routeSession.RoutingWorkload = string(routingWorkloadV3(result))
 	routeSession.RoutingExecution = string(decision.Shape.Execution)
 	routeSession.RoutingEgress = string(decision.Shape.Egress)
+	routeSession.RoutingExecutionNodeID = 0
+	routeSession.RoutingExecutionNodeURL = ""
+	if executorNode != nil {
+		routeSession.RoutingExecutionNodeID = executorNode.ID
+		routeSession.RoutingExecutionNodeURL = executorNode.URL
+	}
 	if proxyNode != nil {
 		routeSession.RoutingEgressNodeID = proxyNode.ID
 		routeSession.RoutingEgressNodeURL = proxyNode.URL

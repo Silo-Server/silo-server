@@ -5266,11 +5266,12 @@ func TestPrepareTransportV3RunsProgressiveRemuxOnTranscodeNodeThroughProxy(t *te
 		t.Fatal(err)
 	}
 	if claims.TranscodeNode != transcode.URL || claims.TranscodeTransportID != transport.transportID ||
-		claims.RoutingExecution != string(noderouting.ExecutionTranscode) || claims.RoutingEgressNodeID != proxy.ID {
+		claims.RoutingExecution != string(noderouting.ExecutionTranscode) || claims.RoutingExecutionNodeID != transcode.ID ||
+		claims.RoutingEgressNodeID != proxy.ID {
 		t.Fatalf("claims = %#v, want bound transcode-to-proxy route", claims)
 	}
 	stored, ok := recipes.cards[transport.transportID]
-	if !ok || stored.TranscodeTransportID != transport.transportID || stored.InputPath == "" {
+	if !ok || stored.TranscodeTransportID != transport.transportID || stored.RoutingExecutionNodeID != transcode.ID || stored.InputPath == "" {
 		t.Fatalf("durable remux authority = %#v, want active transport %q", stored, transport.transportID)
 	}
 }

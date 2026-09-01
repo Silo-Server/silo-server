@@ -780,6 +780,7 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	card.OriginalStartedAt = s.StartedAt
 	card.RoutingWorkload = s.RoutingWorkload
 	card.RoutingExecution = s.RoutingExecution
+	card.RoutingExecutionNodeID = s.RoutingExecutionNodeID
 	card.RoutingEgress = s.RoutingEgress
 	card.RoutingEgressNodeID = s.RoutingEgressNodeID
 	card.TranscodeNodeURL = s.TranscodeNodeURL
