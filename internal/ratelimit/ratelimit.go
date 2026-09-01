@@ -79,12 +79,13 @@ func DefaultConfig() Config {
 		IPReqPerMinute: 6000,
 		IPBurst:        120,
 		AuthEndpoints: map[string]AuthEndpointConfig{
-			"login":         {RequestsPerMinute: 20, Burst: 10},
-			"signup":        {RequestsPerMinute: 10, Burst: 6},
-			"setup":         {RequestsPerMinute: 10, Burst: 6},
-			"device_start":  {RequestsPerMinute: 20, Burst: 10},
-			"device_lookup": {RequestsPerMinute: 60, Burst: 20},
-			"device_poll":   {RequestsPerMinute: 120, Burst: 30},
+			"login":           {RequestsPerMinute: 20, Burst: 10},
+			"signup":          {RequestsPerMinute: 10, Burst: 6},
+			"setup":           {RequestsPerMinute: 10, Burst: 6},
+			"password_change": {RequestsPerMinute: 10, Burst: 5},
+			"device_start":    {RequestsPerMinute: 20, Burst: 10},
+			"device_lookup":   {RequestsPerMinute: 60, Burst: 20},
+			"device_poll":     {RequestsPerMinute: 120, Burst: 30},
 			// Invitation claim lookups and accepts: single-use tokens with
 			// 256-bit entropy, so this is anti-probe hygiene, not the guard.
 			"invitation": {RequestsPerMinute: 20, Burst: 10},

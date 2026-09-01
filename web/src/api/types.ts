@@ -57,6 +57,14 @@ export interface RefreshResponse {
   expires_in: number;
 }
 
+export interface AccountPasswordCapability {
+  schema_version: number;
+  change_password: boolean;
+  requires_current_password: boolean;
+  minimum_password_length: number;
+  maximum_password_bytes: number;
+}
+
 export interface AuthProviderOption {
   id: string;
   display_name: string;

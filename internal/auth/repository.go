@@ -443,6 +443,32 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	return nil
 }
 
+// CompareAndSwapPassword replaces the bcrypt hash only if it is still the one
+// the caller verified. Concurrent password changes using the same old password
+// therefore cannot both succeed with different replacements.
+func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hashing password: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE users
+		SET password_hash = $1, updated_at = NOW()
+		WHERE id = $2 AND password_hash = $3`, string(hash), id, expectedHash)
+	if err != nil {
+		return fmt.Errorf("updating password: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+
+	if _, err := r.GetByID(ctx, id); err != nil {
+		return err
+	}
+	return ErrCurrentPasswordInvalid
+}
+
 // Delete removes a user by their ID.
 func (r *UserRepository) Delete(ctx context.Context, id int) error {
 	tag, err := r.pool.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
