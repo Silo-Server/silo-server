@@ -33,6 +33,7 @@ package noderecipe
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,6 +66,12 @@ const nodeAuthorityGenerationKeyPrefix = "silo:noderecipe-authority-generation:"
 // previous wire format for older transcode nodes during rolling upgrades.
 const nodeAuthorityRecordGenerationKeyPrefix = "silo:noderecipe-authority-record:"
 
+// nodeAuthorityRecordDigestKeyPrefix binds the generation sidecar to the
+// recipe bytes it stamped. An older API may overwrite only the legacy recipe
+// key; the digest lets a current node recognize that the surviving generation
+// belongs to different bytes and validate the overwrite as a legacy write.
+const nodeAuthorityRecordDigestKeyPrefix = "silo:noderecipe-authority-digest:"
+
 // DefaultTTL bounds how long a stored recipe survives. It matches the stream
 // token lifetime (playback.MaxTokenTTL, 24h): past it no surviving token could
 // still drive a reconstruct, so the recipe is safe to lapse.
@@ -89,8 +96,8 @@ type audioRecipeEnvelope struct {
 	Recipe  playback.RecipeCard `json:"audio_recipe"`
 }
 
-// putNodeRecipeScript reads the node generation and writes both the
-// legacy-readable recipe and its generation sidecar in one Redis operation. It
+// putNodeRecipeScript reads the node generation and writes the legacy-readable
+// recipe plus generation and digest sidecars in one Redis operation. It
 // therefore orders a concurrent Put and RevokeNode: a recipe written before
 // the increment is stale, while one written after it carries the new generation.
 var putNodeRecipeScript = redis.NewScript(`
@@ -100,19 +107,27 @@ if not generation then
 end
 redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
 redis.call("SET", KEYS[2], generation, "PX", ARGV[2])
+redis.call("SET", KEYS[4], ARGV[3], "PX", ARGV[2])
 return generation
 `)
 
-// validateLegacyNodeRecipeScript accepts a sidecar-less record only when its
-// Redis expiry proves that an older writer issued it after the latest reload.
-// The exact recipe comparison makes the decision apply to the bytes Get
-// decoded even if another writer updates the key concurrently.
+// validateLegacyNodeRecipeScript accepts a record with missing or mismatched
+// sidecars only when its Redis expiry proves that an older writer issued it
+// after the latest reload. The exact recipe comparison makes the decision
+// apply to the bytes Get decoded even if another writer updates the key
+// concurrently.
 var validateLegacyNodeRecipeScript = redis.NewScript(`
 local recipe = redis.call("GET", KEYS[1])
 if not recipe or recipe ~= ARGV[1] then
   return 0
 end
-if redis.call("EXISTS", KEYS[2]) ~= 0 then
+local binding = redis.call("GET", KEYS[4])
+if binding and binding == ARGV[3] then
+  local stamped_generation = tonumber(redis.call("GET", KEYS[2]))
+  local current_generation = tonumber(redis.call("GET", KEYS[3])) or 0
+  if stamped_generation and stamped_generation == current_generation then
+    return 1
+  end
   return 0
 end
 local generation = tonumber(redis.call("GET", KEYS[3]))
@@ -190,6 +205,14 @@ func nodeAuthorityRecordGenerationKey(sessionID string) string {
 	return nodeAuthorityRecordGenerationKeyPrefix + sessionID
 }
 
+func nodeAuthorityRecordDigestKey(sessionID string) string {
+	return nodeAuthorityRecordDigestKeyPrefix + sessionID
+}
+
+func nodeAuthorityRecordDigest(data []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
 // Put stores the reconstruction recipe for a remote transcode session. Best
 // effort: a write error is returned for the caller to log, never fatal.
 func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeCard) error {
@@ -206,7 +229,8 @@ func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeC
 			s.key(sessionID),
 			nodeAuthorityRecordGenerationKey(sessionID),
 			nodeAuthorityGenerationKey(card.TranscodeNodeURL),
-		}, data, ttlMillis).Err()
+			nodeAuthorityRecordDigestKey(sessionID),
+		}, data, ttlMillis, nodeAuthorityRecordDigest(data)).Err()
 	}
 	return s.rdb.Set(ctx, s.key(sessionID), data, s.ttl).Err()
 }
@@ -259,7 +283,11 @@ func (s *Store) loadStoredCard(ctx context.Context, sessionID string) ([]byte, i
 		data, err := s.rdb.Get(ctx, s.key(sessionID)).Bytes()
 		return data, 0, false, err
 	}
-	values, err := s.rdb.MGet(ctx, s.key(sessionID), nodeAuthorityRecordGenerationKey(sessionID)).Result()
+	values, err := s.rdb.MGet(ctx,
+		s.key(sessionID),
+		nodeAuthorityRecordGenerationKey(sessionID),
+		nodeAuthorityRecordDigestKey(sessionID),
+	).Result()
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -267,7 +295,11 @@ func (s *Store) loadStoredCard(ctx context.Context, sessionID string) ([]byte, i
 	if !ok {
 		return nil, 0, false, redis.Nil
 	}
-	if values[1] == nil {
+	if values[1] == nil || values[2] == nil {
+		return []byte(recipe), 0, false, nil
+	}
+	recordDigest, ok := values[2].(string)
+	if !ok || recordDigest != nodeAuthorityRecordDigest([]byte(recipe)) {
 		return []byte(recipe), 0, false, nil
 	}
 	rawGeneration, ok := values[1].(string)
@@ -287,7 +319,8 @@ func (s *Store) legacyRecipeIssuedAfterRevocation(ctx context.Context, sessionID
 		s.key(sessionID),
 		nodeAuthorityRecordGenerationKey(sessionID),
 		nodeAuthorityGenerationKey(nodeURL),
-	}, data, ttlMillis).Int()
+		nodeAuthorityRecordDigestKey(sessionID),
+	}, data, ttlMillis, nodeAuthorityRecordDigest(data)).Int()
 	return valid == 1, err
 }
 
@@ -366,7 +399,7 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 	}
 	keys := []string{s.key(sessionID)}
 	if s.prefix == KeyPrefix {
-		keys = append(keys, nodeAuthorityRecordGenerationKey(sessionID))
+		keys = append(keys, nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID))
 	}
 	return s.rdb.Del(ctx, keys...).Err()
 }

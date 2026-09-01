@@ -2392,11 +2392,15 @@ func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
+	previousRegisteredURL := ""
+	if s.registeredNodeURL != nil {
+		previousRegisteredURL, _ = s.registeredNodeURL()
+	}
 	if err := s.watcher.ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.teardownForForceReload(r.Context()); err != nil {
+	if err := s.teardownForForceReload(r.Context(), previousRegisteredURL); err != nil {
 		http.Error(w, "force reload authority revocation failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2405,22 +2409,37 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) teardownForForceReload(ctx context.Context) error {
+func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredURL string) error {
 	var authorityErr error
 	if s.recipeStore != nil {
-		nodeURL := ""
+		nodeURLs := []string{previousRegisteredURL}
 		if s.registeredNodeURL != nil {
 			registeredURL, ok := s.registeredNodeURL()
 			if ok {
-				nodeURL = registeredURL
+				nodeURLs = append(nodeURLs, registeredURL)
 			}
 		} else if s.tracker != nil {
-			nodeURL = s.tracker.NodeURL()
+			nodeURLs = append(nodeURLs, s.tracker.NodeURL())
 		}
-		if strings.TrimSpace(nodeURL) == "" {
+		seen := make(map[string]struct{}, len(nodeURLs))
+		var revokeErrs []error
+		for _, nodeURL := range nodeURLs {
+			nodeURL = strings.TrimRight(strings.TrimSpace(nodeURL), "/")
+			if nodeURL == "" {
+				continue
+			}
+			if _, duplicate := seen[nodeURL]; duplicate {
+				continue
+			}
+			seen[nodeURL] = struct{}{}
+			if err := s.recipeStore.RevokeNode(ctx, nodeURL); err != nil {
+				revokeErrs = append(revokeErrs, fmt.Errorf("revoke %s: %w", nodeURL, err))
+			}
+		}
+		if len(seen) == 0 {
 			authorityErr = errors.New("transcode node URL unavailable")
 		} else {
-			authorityErr = s.recipeStore.RevokeNode(ctx, nodeURL)
+			authorityErr = errors.Join(revokeErrs...)
 		}
 	}
 

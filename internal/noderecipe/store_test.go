@@ -83,10 +83,13 @@ func TestNodeAuthorityGenerationKeyNormalizesNodeURL(t *testing.T) {
 	}
 }
 
-func TestNodeAuthorityRecordGenerationKeyIsSeparateFromRecipe(t *testing.T) {
+func TestNodeAuthorityRecordSidecarKeysAreSeparate(t *testing.T) {
 	store := NewStore(nil, 0)
 	if got := nodeAuthorityRecordGenerationKey("abc"); got == store.key("abc") {
 		t.Fatalf("record generation key %q collides with recipe key", got)
+	}
+	if got := nodeAuthorityRecordDigestKey("abc"); got == store.key("abc") || got == nodeAuthorityRecordGenerationKey("abc") {
+		t.Fatalf("record digest key %q collides with another authority key", got)
 	}
 }
 
@@ -172,14 +175,18 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	newSessionID := "new-" + unique
 	legacyBeforeSessionID := "legacy-before-" + unique
 	legacyAfterSessionID := "legacy-after-" + unique
+	legacyOverwriteBeforeSessionID := "legacy-overwrite-before-" + unique
+	legacyOverwriteSessionID := "legacy-overwrite-" + unique
 	grantID := "grant-" + unique
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
 		defer cancel()
 		_ = client.Del(cleanupCtx,
-			store.key(oldSessionID), store.key(newSessionID), store.key(legacyBeforeSessionID), store.key(legacyAfterSessionID),
+			store.key(oldSessionID), store.key(newSessionID), store.key(legacyBeforeSessionID), store.key(legacyAfterSessionID), store.key(legacyOverwriteBeforeSessionID), store.key(legacyOverwriteSessionID),
 			nodeAuthorityRecordGenerationKey(oldSessionID), nodeAuthorityRecordGenerationKey(newSessionID),
-			nodeAuthorityRecordGenerationKey(legacyBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyAfterSessionID),
+			nodeAuthorityRecordGenerationKey(legacyBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyAfterSessionID), nodeAuthorityRecordGenerationKey(legacyOverwriteBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyOverwriteSessionID),
+			nodeAuthorityRecordDigestKey(oldSessionID), nodeAuthorityRecordDigestKey(newSessionID),
+			nodeAuthorityRecordDigestKey(legacyBeforeSessionID), nodeAuthorityRecordDigestKey(legacyAfterSessionID), nodeAuthorityRecordDigestKey(legacyOverwriteBeforeSessionID), nodeAuthorityRecordDigestKey(legacyOverwriteSessionID),
 			grants.key(grantID), nodeAuthorityGenerationKey(nodeURL),
 		).Err()
 	})
@@ -207,6 +214,24 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	if err := client.Set(t.Context(), store.key(legacyBeforeSessionID), legacyBeforeData, time.Minute).Err(); err != nil {
 		t.Fatal(err)
 	}
+	legacyOverwriteCard := card
+	legacyOverwriteCard.SessionID = legacyOverwriteSessionID
+	if err := store.Put(t.Context(), legacyOverwriteSessionID, legacyOverwriteCard); err != nil {
+		t.Fatal(err)
+	}
+	legacyOverwriteBeforeCard := card
+	legacyOverwriteBeforeCard.SessionID = legacyOverwriteBeforeSessionID
+	if err := store.Put(t.Context(), legacyOverwriteBeforeSessionID, legacyOverwriteBeforeCard); err != nil {
+		t.Fatal(err)
+	}
+	legacyOverwriteBeforeCard.InputPath = "/media/stale-legacy-overwrite.mkv"
+	legacyOverwriteBeforeData, err := marshalCard(legacyOverwriteBeforeCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacyOverwriteBeforeSessionID), legacyOverwriteBeforeData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.RevokeNode(t.Context(), nodeURL); err != nil {
 		t.Fatal(err)
 	}
@@ -224,6 +249,9 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 
 	if _, ok := store.Get(t.Context(), legacyBeforeSessionID); ok {
 		t.Fatal("legacy generation-zero recipe survived node revocation")
+	}
+	if _, ok := store.Get(t.Context(), legacyOverwriteBeforeSessionID); ok {
+		t.Fatal("pre-reload legacy overwrite with stale sidecars survived node revocation")
 	}
 
 	revokedAt, err := client.Get(t.Context(), nodeAuthorityGenerationKey(nodeURL)).Int64()
@@ -251,6 +279,17 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	if _, ok := store.Get(t.Context(), legacyAfterSessionID); !ok {
 		t.Fatal("legacy recipe issued after node revocation was rejected")
 	}
+	legacyOverwriteCard.InputPath = "/media/updated-by-legacy-api.mkv"
+	legacyOverwriteData, err := marshalCard(legacyOverwriteCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacyOverwriteSessionID), legacyOverwriteData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := store.Get(t.Context(), legacyOverwriteSessionID); !ok || got.InputPath != legacyOverwriteCard.InputPath {
+		t.Fatalf("legacy overwrite with stale sidecars = (%+v, %t), want updated recipe", got, ok)
+	}
 
 	grant := playback.RecipeCard{SessionID: grantID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux}
 	if err := grants.Put(t.Context(), grantID, grant); err != nil {
@@ -266,12 +305,16 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	if err := store.Delete(t.Context(), newSessionID); err != nil {
 		t.Fatal(err)
 	}
-	remaining, err := client.Exists(t.Context(), store.key(newSessionID), nodeAuthorityRecordGenerationKey(newSessionID)).Result()
+	remaining, err := client.Exists(t.Context(),
+		store.key(newSessionID),
+		nodeAuthorityRecordGenerationKey(newSessionID),
+		nodeAuthorityRecordDigestKey(newSessionID),
+	).Result()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if remaining != 0 {
-		t.Fatal("node recipe delete left its generation sidecar behind")
+		t.Fatal("node recipe delete left an authority sidecar behind")
 	}
 }
 

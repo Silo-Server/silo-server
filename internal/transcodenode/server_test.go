@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2236,7 +2237,7 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: transportID}}
 	server.SetRecipeStore(store)
 
-	if err := server.teardownForForceReload(t.Context()); err != nil {
+	if err := server.teardownForForceReload(t.Context(), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2263,16 +2264,17 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
 	server := newTestServer(t)
 	server.tracker = newBlockingSessionTracker()
-	server.registeredNodeURL = func() (string, bool) { return "https://registered-node.example", true }
+	server.registeredNodeURL = func() (string, bool) { return "https://new-registered-node.example", true }
 	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: "dormant-transport"}}
 	server.SetRecipeStore(store)
 
-	if err := server.teardownForForceReload(t.Context()); err != nil {
+	if err := server.teardownForForceReload(t.Context(), "https://old-registered-node.example"); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(store.revokedNodes) != 1 || store.revokedNodes[0] != "https://registered-node.example" {
-		t.Fatalf("node authority revocations = %v, want registered route URL", store.revokedNodes)
+	wantRevoked := []string{"https://old-registered-node.example", "https://new-registered-node.example"}
+	if !slices.Equal(store.revokedNodes, wantRevoked) {
+		t.Fatalf("node authority revocations = %v, want %v", store.revokedNodes, wantRevoked)
 	}
 	if len(store.deletes) != 0 {
 		t.Fatalf("dormant authority was unexpectedly enumerated: deletes = %v", store.deletes)
