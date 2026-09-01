@@ -2570,9 +2570,19 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		reservationReleased = true
 		if transcodeNode != nil {
 			h.deleteNodeRecipeV3(r.Context(), transportID)
-			return preparedTransportV3{}, &transportErrorV3{
+			grantErr := &transportErrorV3{
 				reason: string(noderouting.OutcomeCapacityUnavailable), message: "The transcode-to-proxy remux route is temporarily unavailable.", retryable: true,
 			}
+			fallbackExclusions := maps.Clone(excludedShapes)
+			if fallbackExclusions == nil {
+				fallbackExclusions = make(map[string]struct{})
+			}
+			fallbackExclusions[decision.Shape.ID] = struct{}{}
+			fallback, fallbackErr := h.prepareIdentityTransportV3(r, session, file, result, timeline, mode, policy, fallbackExclusions)
+			if fallbackErr == nil {
+				return fallback, nil
+			}
+			return preparedTransportV3{}, combineTransportErrorsV3(grantErr, fallbackErr)
 		}
 		if !identityLocalFallbackAllowedV3(result, policy) || h.validateLocalProgressiveCapabilitiesV3(r.Context(), result) != nil {
 			return preparedTransportV3{}, &transportErrorV3{

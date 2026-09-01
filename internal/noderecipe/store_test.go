@@ -170,15 +170,16 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	grants := NewProxyGrantStore(client, time.Minute)
 	oldSessionID := "old-" + unique
 	newSessionID := "new-" + unique
-	legacySessionID := "legacy-" + unique
+	legacyBeforeSessionID := "legacy-before-" + unique
+	legacyAfterSessionID := "legacy-after-" + unique
 	grantID := "grant-" + unique
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
 		defer cancel()
 		_ = client.Del(cleanupCtx,
-			store.key(oldSessionID), store.key(newSessionID), store.key(legacySessionID),
+			store.key(oldSessionID), store.key(newSessionID), store.key(legacyBeforeSessionID), store.key(legacyAfterSessionID),
 			nodeAuthorityRecordGenerationKey(oldSessionID), nodeAuthorityRecordGenerationKey(newSessionID),
-			nodeAuthorityRecordGenerationKey(legacySessionID),
+			nodeAuthorityRecordGenerationKey(legacyBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyAfterSessionID),
 			grants.key(grantID), nodeAuthorityGenerationKey(nodeURL),
 		).Err()
 	})
@@ -197,6 +198,15 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	if decoded, ok := unmarshalCard(rawRecipe); !ok || decoded != card {
 		t.Fatalf("stored recipe is not readable by the previous node: (%+v, %v)", decoded, ok)
 	}
+	legacyBeforeCard := card
+	legacyBeforeCard.SessionID = legacyBeforeSessionID
+	legacyBeforeData, err := marshalCard(legacyBeforeCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacyBeforeSessionID), legacyBeforeData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.RevokeNode(t.Context(), nodeURL); err != nil {
 		t.Fatal(err)
 	}
@@ -212,17 +222,34 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 		t.Fatal("recipe issued after node revocation was rejected")
 	}
 
-	legacyCard := card
-	legacyCard.SessionID = legacySessionID
-	legacyData, err := marshalCard(legacyCard)
+	if _, ok := store.Get(t.Context(), legacyBeforeSessionID); ok {
+		t.Fatal("legacy generation-zero recipe survived node revocation")
+	}
+
+	revokedAt, err := client.Get(t.Context(), nodeAuthorityGenerationKey(nodeURL)).Int64()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Set(t.Context(), store.key(legacySessionID), legacyData, time.Minute).Err(); err != nil {
+	for {
+		redisTime, timeErr := client.Time(t.Context()).Result()
+		if timeErr != nil {
+			t.Fatal(timeErr)
+		}
+		if redisTime.UnixMilli() > revokedAt {
+			break
+		}
+	}
+	legacyAfterCard := card
+	legacyAfterCard.SessionID = legacyAfterSessionID
+	legacyAfterData, err := marshalCard(legacyAfterCard)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.Get(t.Context(), legacySessionID); ok {
-		t.Fatal("legacy generation-zero recipe survived node revocation")
+	if err := client.Set(t.Context(), store.key(legacyAfterSessionID), legacyAfterData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), legacyAfterSessionID); !ok {
+		t.Fatal("legacy recipe issued after node revocation was rejected")
 	}
 
 	grant := playback.RecipeCard{SessionID: grantID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux}

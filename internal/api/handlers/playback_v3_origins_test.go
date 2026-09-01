@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -311,6 +312,51 @@ func TestPrepareTransportV3AuthorizedOriginsRefuseLocalRemuxWhenTheGrantFails(t 
 	}
 	if len(planner.released) != 1 {
 		t.Fatalf("planner releases = %v, want the unusable proxy reservation released", planner.released)
+	}
+}
+
+func TestPrepareTransportV3AuthorizedOriginsFallsBackWhenTranscodeProxyGrantFails(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	stubCopySeekAnchorV3(handler)
+	proxyServer := capableProxyStubV3(t)
+	transcodeServer := progressiveRemuxExecutionStubV3(t)
+	planner := &progressiveFallbackPlannerV3{
+		proxy:     &nodepool.Node{ID: 42, URL: proxyServer.URL},
+		transcode: &nodepool.Node{ID: 84, URL: transcodeServer.URL},
+	}
+	handler.NodePlanner = planner
+	recipes := &recordingRecipeCardStoreV3{}
+	handler.NodeRecipeStore = recipes
+	handler.ProxyGrantStore = &recordingRecipeCardStoreV3{putErr: errors.New("redis is down")}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-origin-grant-fallback", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3), PlayMethod: playback.PlayRemux},
+		authorizedOriginsModeV3())
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	if transport.url != "/stream/session-origin-grant-fallback" ||
+		transport.routingExecution != noderouting.ExecutionAPI || transport.nodeURL != "" {
+		t.Fatalf("fallback transport = %#v, want API-executed remux", transport)
+	}
+	if len(planner.requests) != 2 || !planner.requests[0].NeedsTranscode || !planner.requests[0].NeedsProxy ||
+		planner.requests[1].NeedsTranscode || !planner.requests[1].NeedsProxy {
+		t.Fatalf("route requests = %#v, want transcode+proxy then proxy-only", planner.requests)
+	}
+	if len(planner.released) != 2 {
+		t.Fatalf("released reservations = %v, want both unusable proxy routes released", planner.released)
+	}
+	if len(recipes.deleted) != 1 {
+		t.Fatalf("node authority cleanup = %v, want failed transport deleted", recipes.deleted)
 	}
 }
 
