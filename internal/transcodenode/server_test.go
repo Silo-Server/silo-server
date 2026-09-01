@@ -2236,6 +2236,7 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	server := newTestServer(t)
 	server.tracker = newBlockingSessionTracker()
+	server.registeredNodeURL = func() (string, bool) { return "", false }
 	const transportID = "transport-force-reload"
 	ctx, cancel := context.WithCancel(t.Context())
 	server.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: 1, cancel: cancel}

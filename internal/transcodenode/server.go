@@ -2422,12 +2422,15 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 	var authorityErr error
 	if s.recipeStore != nil {
 		nodeURLs := []string{previousRegisteredURL}
+		registeredURLResolved := false
 		if s.registeredNodeURL != nil {
 			registeredURL, ok := s.registeredNodeURL()
 			if ok {
 				nodeURLs = append(nodeURLs, registeredURL)
+				registeredURLResolved = true
 			}
-		} else if s.tracker != nil {
+		}
+		if !registeredURLResolved && s.tracker != nil {
 			nodeURLs = append(nodeURLs, s.tracker.NodeURL())
 		}
 		seen := make(map[string]struct{}, len(nodeURLs))
