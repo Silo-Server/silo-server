@@ -131,45 +131,84 @@ An inventory built from that walk would be short by half and would not say so. T
 `totals` and per-listener `route_count` are the authoritative numbers; any count quoted in prose is
 a point-in-time illustration.
 
-Completeness is structural rather than diligent. A route can only be registered on a router value;
-such a value can only originate from `chi.NewRouter()`, `chi.NewMux()`, `http.NewServeMux()`, a
-`chi.Router`-typed parameter, or a type assertion that recovers one of those from an interface; and
-the generator fails, rather than emitting a smaller artifact, when it meets any of:
+Completeness is structural rather than diligent. A route can only be registered on a router value,
+so the generator refuses to run — rather than emitting a smaller artifact — whenever it meets a
+router value it did not model. The rules split into two layers. The **walk** enumerates the four
+entry functions; a router value inside one may only be bound as `name := chi.NewRouter()`,
+`name := chi.NewMux()` or `name := http.NewServeMux()`, as a `chi.Router` parameter of an inline
+`Route`/`Group` closure or of a helper the walk follows, or recovered by a type assertion that is
+itself refused. The **sweep** parses every non-test Go file in the repository (hidden directories,
+`vendor`, `node_modules` and `testdata` excluded) and refuses the shapes below wherever they appear.
 
-- a router constructed anywhere in the repository outside a declared listener entry function or a
-  recorded exclusion. The sweep covers every Go tree in the module, and both allowances name one
-  function, so a router added beside an excluded one is still a failure. A construction at package
-  scope belongs to no function and is refused outright;
-- a second router or mux constructed inside one entry function, whose attachment the walk cannot
-  prove. Constructions are recognized by the call, not by the binding: `r := chi.NewRouter()`,
-  `var r = chi.NewRouter()`, `a, b := chi.NewRouter(), chi.NewRouter()` and
-  `r := (chi.NewRouter())` are all the same construction, and a construction the walk cannot tie to
-  exactly one name is refused rather than approximated;
-- a registration made on a listener's handler after its entry function returned it, whether the
-  handler is the receiver of the registration method or is passed as an argument. A handler value
-  may be passed only to a declared listener entry function, to `http.ListenAndServe` and its three
-  siblings, or into a parameter declared `http.Handler`; every other call is opaque to the audit and
-  refused. This tracking follows local variables within one file, including through a
-  `h.(chi.Router)` assertion; a handler carried between files through package state is outside it;
-- a call to `http.Handle` or `http.HandleFunc`, which registers on `http.DefaultServeMux`;
-- a function or closure taking a `chi.Router` that no declared listener reaches;
-- a router value flowing into a construct the generator does not model — a loop, a `switch`, a
-  struct field, a handler argument, or a call it cannot follow — and any router or mux value
+Refused by the walk, inside an entry function or a helper it follows:
+
+- a second router or mux, whose attachment the walk cannot prove. The construction is recognized
+  by the call, not the binding: `r := chi.NewRouter()`, `var r = chi.NewRouter()`,
+  `a, b := chi.NewRouter(), chi.NewRouter()` and `r := (chi.NewRouter())` are the same
+  construction, and one the walk cannot tie to exactly one name is refused rather than
+  approximated;
+- a router or mux built by any spelling other than its constructor call: `new(http.ServeMux)`,
+  `&http.ServeMux{}`, `http.ServeMux{}`, a `var m http.ServeMux` declaration, and the `chi.Mux`
+  equivalents. A zero `http.ServeMux` is fully functional, so these are constructions;
+- a reference to `chi.NewRouter`, `chi.NewMux` or `http.NewServeMux` as a function value rather
+  than a call;
+- a router value flowing into a construct the walk does not model — a loop, a `switch`, a struct
+  field, a handler argument, a `Mount`, or a call it cannot follow — and any router or mux value
   constructed or type-asserted inside such a construct;
-- a value from a chi constructor the generator does not model, once a method is called on it;
+- a value from a chi constructor the walk does not model, once a method is called on it;
 - a path template or HTTP method that is not a literal or a resolvable constant;
-- an `http.ServeMux` pattern that names a method. Go answers `HEAD` on a `GET /path` pattern and
-  turns other methods into `405`, so one `GET` row would understate it. Nothing registers such a
-  pattern today; modeling it is a prerequisite for the first one.
+- an `http.ServeMux` pattern that names a method or a host. Go answers `HEAD` on a `GET /path`
+  pattern and turns other methods into `405`, so one `GET` row would understate it. Nothing
+  registers such a pattern today; modeling it is a prerequisite for the first one.
+
+Refused by the sweep, anywhere in the repository:
+
+- a router or mux constructed outside a declared listener entry function or a recorded exclusion,
+  by constructor call, `new()`, composite literal, or a variable declared with the router type.
+  Both allowances name one function, so a router added beside an excluded one is still a failure,
+  and a construction at package scope belongs to no function and is refused outright;
+- a constructor used as a function value, at package scope or in a function; and a dot-import of
+  `github.com/go-chi/chi/v5` or `net/http`, which would let a constructor be called unqualified;
+- a type declaration that gives a router type a second name: an alias or defined type of
+  `chi.Router`, `chi.Routes`, `chi.Mux` or `http.ServeMux`, a struct field, an interface
+  embedding, or an array, slice, map, channel or function type mentioning one. Method signatures
+  inside interfaces are the one exception; they name a router only as a parameter;
+- anything that would serve `http.DefaultServeMux`: `http.Handle` and `http.HandleFunc`, any
+  reference to `http.DefaultServeMux`, a `nil` handler passed to `http.ListenAndServe` or its
+  three siblings, an `http.Server` literal without a non-nil `Handler`, an `http.Server` value
+  (not pointer) declared anywhere, and an import of `net/http/pprof` or `expvar`;
+- any use of a listener's handler after its entry function returned it other than: binding it to
+  a single name with `:=`, `=` or `var`; passing it to a declared listener entry function; passing
+  it to `http.ListenAndServe` and its three siblings; setting it as the `Handler` of an
+  `http.Server` literal; calling `ServeHTTP` or a read-only router method on it; or passing it to
+  a package-level function in the same directory whose parameter is declared `http.Handler` or
+  `http.HandlerFunc`. That callee is then audited with the parameter treated as the handler, so
+  asserting it back to a router type or registering on it inside the callee is refused. A
+  registration method call, a type assertion, a method value, a multi-value binding, a
+  `return`, a store into a field or index, a composite literal element, or any other call
+  argument is refused. Handler names are tracked per function; a package-level variable assigned
+  a handler in any function of a package is a handler in every function of that package,
+  across files;
+- a call to a listener entry function in any position other than those bindings and arguments.
+
+Refused within the audited listener packages only (`cmd/silo`, `internal/api`,
+`internal/api/handlers`, `internal/proxy`, `internal/transcodenode`): a function or closure taking
+a `chi.Router` that no declared listener reaches. Outside those packages such a function is not
+itself refused — `internal/streamtelemetry.WalkRoutes(chi.Routes)` exists today — because it can
+only register on a router that reaches it, and every path a router could take to reach it is
+refused by the sweep rules above.
 
 `make verify-route-inventory` regenerates and byte-compares the artifact in CI, and the generator
-fails on any of the above, so that gate is the guarantee. Listener packages additionally reconcile a
-real router against the artifact at test time as a backstop against an analyzer bug, limited to what
-a test fixture can construct. For the proxy and transcode node listeners, whose rows are all
-unconditional, that comparison is an equality: every observed route has a row, and every row is
-observed. For the API listener, whose rows are mostly conditional, it runs one way — every route the
-fixtures register must have a row — because routes behind dependencies the fixtures do not construct
-are covered by the generator rather than by the runtime walk.
+fails on any of the above, so that gate is the guarantee. Each listener package additionally
+reconciles a real handler against the artifact at test time as a backstop against an analyzer bug,
+limited to what a test fixture can construct. The root listener (`cmd/silo`), the proxy node and
+the transcode node listeners have only unconditional rows, so one wiring is the whole surface and
+the comparison is an equality: every observed route has a row, and every row is observed. The
+root comparison reads the real `http.ServeMux` routing tree through reflection and fails if the
+tree's shape changes rather than reporting nothing. For the API listener, whose rows are mostly
+conditional, it runs one way — every route the fixtures register must have a row — because
+routes behind dependencies the fixtures do not construct are covered by the generator rather than
+by the runtime walk.
 
 Jellyfin and Audiobookshelf are external wire contracts rather than Silo's native API, so their
 router constructions are recorded as named exclusions in the artifact rather than left unlisted. A

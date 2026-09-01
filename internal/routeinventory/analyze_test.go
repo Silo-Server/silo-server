@@ -1,6 +1,8 @@
 package routeinventory
 
 import (
+	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -256,7 +258,7 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 		{fixture: "package_scope_router", want: "constructed at package scope"},
 		// A listener handler passed to a call the audit cannot see into could
 		// have anything registered on it, receiver or not.
-		{fixture: "carrier_helper", want: "which the route inventory cannot see into"},
+		{fixture: "carrier_helper", want: "type-asserts a listener handler after its entry point returned it"},
 		// A method-aware ServeMux pattern means more than the row it spells.
 		{
 			fixture: "servemux_method",
@@ -270,6 +272,43 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 		{fixture: "entrypoint_escape", want: "on a listener handler after its entry point returned it"},
 		// The mux of a root listener escapes into a helper.
 		{fixture: "servemux_escape", cfg: rootOnlyFixtureConfig, want: "does not model"},
+		// A ServeMux built without http.NewServeMux() is a working router the
+		// walk never bound: the root listener's own rows would vanish.
+		{fixture: "servemux_new", cfg: rootOnlyFixtureConfig, want: "built by literal or new()"},
+		{fixture: "servemux_literal", cfg: rootOnlyFixtureConfig, want: "built by literal or new()"},
+		{fixture: "second_mux_new", want: "built by literal or new()"},
+		{fixture: "chi_mux_literal", want: "built by literal or new()"},
+		// A zero http.ServeMux at package scope is live with no constructor.
+		{fixture: "package_scope_servemux_var", want: "declared with http.ServeMux at package scope"},
+		// A constructor reached through a function value builds a router
+		// nothing recognizes as a construction.
+		{fixture: "ctor_value_local", want: "is referenced as a function value"},
+		{fixture: "ctor_value_package", want: "is used as a function value rather than called"},
+		{fixture: "ctor_value_arg", want: "is referenced as a function value"},
+		{fixture: "dot_import", want: "dot-imports"},
+		// The http.Handler vouch is backed by an audit of the callee body with
+		// the parameter seeded as a carrier, so asserting it back is refused.
+		{fixture: "handler_param_assert", want: "wire: type-asserts a listener handler"},
+		// Every binding form the walk understands is a carrier binding too.
+		{fixture: "carrier_var", want: "calls Get on a listener handler after its entry point returned it"},
+		{fixture: "carrier_multi", want: "calls Get on a listener handler after its entry point returned it"},
+		{fixture: "carrier_struct", want: "in a position the route inventory does not follow"},
+		{fixture: "carrier_field_store", want: "stores a listener handler into field h"},
+		{fixture: "carrier_slice", want: "escapes into a construct the route inventory does not model"},
+		{fixture: "carrier_wrapper_return", want: "returns a listener handler"},
+		{fixture: "carrier_method_value", want: "takes Get of a listener handler as a value"},
+		// A package-level carrier is one everywhere in its package, whatever
+		// the declaration order of the files and functions involved.
+		{fixture: "carrier_package_var", want: "lateRegister: type-asserts a listener handler"},
+		// Everything that would serve http.DefaultServeMux.
+		{fixture: "default_servemux", want: "refers to http.DefaultServeMux"},
+		{fixture: "pprof_import", want: "imports net/http/pprof"},
+		{fixture: "listen_nil", want: "serves a nil handler"},
+		{fixture: "server_no_handler", want: "built without a Handler"},
+		// A second name for a router type, and a router-typed field outside
+		// the audited packages.
+		{fixture: "type_alias_chi", want: "type Router is declared with a chi router type"},
+		{fixture: "struct_field_chi", want: "type Holder is declared with a chi router type"},
 		// An exclusion covers one function, not the file it lives in.
 		{
 			fixture: "excluded_construct",
@@ -299,6 +338,17 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 				t.Fatalf("error = %q, want it to mention %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// TestAnalyzeAcceptsScopedCarriers is the other half of the carrier rules:
+// carrier names are scoped per function, so an unrelated local that happens to
+// share a name with a listener handler is not refused, and a same-directory
+// function that takes the handler as http.Handler and only serves it is
+// accepted after its body has been audited.
+func TestAnalyzeAcceptsScopedCarriers(t *testing.T) {
+	if _, err := Analyze(fixtureConfig("carrier_scoped_ok")); err != nil {
+		t.Fatalf("scoped carriers should pass: %v", err)
 	}
 }
 
@@ -424,4 +474,46 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// TestObservedServeMuxWalksRoutingTree pins the reflective ServeMux walk to the
+// current net/http routing tree: every pattern registered has to come back,
+// expanded to the nine methods a method-less pattern answers.
+func TestObservedServeMuxWalksRoutingTree(t *testing.T) {
+	mux := http.NewServeMux()
+	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	patterns := []string{"/metrics", "/api/", "/", "/items/{id}/detail"}
+	// Enough siblings to push the tree's child mapping from its slice form to
+	// its map form, so both branches of the walk are exercised.
+	for i := 0; i < 12; i++ {
+		patterns = append(patterns, fmt.Sprintf("/many/%d", i))
+	}
+	for _, pattern := range patterns {
+		mux.Handle(pattern, noop)
+	}
+	observed, err := ObservedServeMux(mux)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := len(patterns) * len(handleAllMethods); len(observed) != want {
+		t.Fatalf("observed %d variants, want %d: %v", len(observed), want, observed)
+	}
+	seen := map[string]bool{}
+	for _, entry := range observed {
+		seen[entry] = true
+	}
+	for _, pattern := range patterns {
+		for _, method := range handleAllMethods {
+			if !seen[method+" "+pattern] {
+				t.Errorf("missing %s %s", method, pattern)
+			}
+		}
+	}
+
+	// A method-aware pattern is refused by the walk for the same reason the
+	// generator refuses it: one row would understate it.
+	mux.Handle("GET /only", noop)
+	if _, err := ObservedServeMux(mux); err == nil {
+		t.Fatal("method-aware pattern should be refused")
+	}
 }

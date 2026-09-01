@@ -1,14 +1,10 @@
 package routeinventory
 
 import (
-	"errors"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"net/http"
-	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -42,7 +38,14 @@ const (
 	methodHandleFunc = "HandleFunc"
 	methodWith       = "With"
 	methodServeHTTP  = "ServeHTTP"
+	methodRoutes     = "Routes"
+	// methodHandler is http.ServeMux's read-only Handler lookup; it is also the
+	// name of the http.Server field a listener handler may be assigned to.
+	methodHandler = "Handler"
 )
+
+// metricsPath is the one operational path the namespace classifier singles out.
+const metricsPath = "/metrics"
 
 // MethodOrigin values: how a row's method variant was produced.
 const (
@@ -129,6 +132,46 @@ func callCtorKind(expr ast.Expr, file *ast.File) ctorKind {
 	return ctorNone
 }
 
+// literalCtorKind classifies the non-call spellings of a router construction:
+// `new(http.ServeMux)`, `&http.ServeMux{}`, `http.ServeMux{}` and the chi.Mux
+// equivalents. A zero http.ServeMux is fully functional, so these build a
+// router as surely as the constructor does. They are recognized only to be
+// refused: the inventory models one construction shape, and a second spelling
+// would be a second place for a router to come from.
+func literalCtorKind(expr ast.Expr, file *ast.File) ctorKind {
+	if expr == nil {
+		return ctorNone
+	}
+	switch typed := unwrapParen(expr).(type) {
+	case *ast.UnaryExpr:
+		if typed.Op == token.AND {
+			return literalCtorKind(typed.X, file)
+		}
+	case *ast.CompositeLit:
+		return routerTypeKind(typed.Type, file)
+	case *ast.CallExpr:
+		if ident, ok := unwrapParen(typed.Fun).(*ast.Ident); ok && ident.Name == "new" && len(typed.Args) == 1 &&
+			importPathFor(file, "new") == "" {
+			return routerTypeKind(typed.Args[0], file)
+		}
+	}
+	return ctorNone
+}
+
+// routerTypeKind maps a router type expression to the constructor kind that
+// builds it.
+func routerTypeKind(typ ast.Expr, file *ast.File) ctorKind {
+	switch {
+	case typ == nil:
+		return ctorNone
+	case isChiRouterType(typ, file):
+		return ctorChiRouter
+	case isServeMuxType(typ, file):
+		return ctorServeMux
+	}
+	return ctorNone
+}
+
 // Listener IDs. They are the join key between the artifact and the
 // per-listener reconciliation tests.
 const (
@@ -169,7 +212,7 @@ var verbMethods = map[string]string{
 // registering anything. They are listed so the analyzer can accept them
 // explicitly rather than by falling through to a permissive default.
 var readOnlyRouterMethods = map[string]bool{
-	"Routes": true, "Middlewares": true, "Match": true, methodServeHTTP: true, "Find": true,
+	methodRoutes: true, "Middlewares": true, "Match": true, methodServeHTTP: true, "Find": true,
 }
 
 // ListenerSpec names one HTTP listener and the function that builds its router.
@@ -641,7 +684,7 @@ func (a *Analyzer) walkMuxStmt(stmt ast.Stmt, env *walkEnv) error {
 }
 
 // serveMuxReadOnlyMethods inspect a mux without registering anything.
-var serveMuxReadOnlyMethods = map[string]bool{methodServeHTTP: true, "Handler": true}
+var serveMuxReadOnlyMethods = map[string]bool{methodServeHTTP: true, methodHandler: true}
 
 func (a *Analyzer) handleMuxMethod(call *ast.CallExpr, sel *ast.SelectorExpr, env *walkEnv) error {
 	name := sel.Sel.Name
@@ -912,7 +955,8 @@ func identName(expr ast.Expr) string {
 func (a *Analyzer) walkBinding(stmt ast.Stmt, bindings []valueBinding, env *walkEnv, kind string) error {
 	interesting := false
 	for _, binding := range bindings {
-		if callCtorKind(binding.value, env.file) != ctorNone || a.routerTypeName(binding.typ, env) != "" {
+		if callCtorKind(binding.value, env.file) != ctorNone || literalCtorKind(binding.value, env.file) != ctorNone ||
+			a.routerTypeName(binding.typ, env) != "" {
 			interesting = true
 			break
 		}
@@ -944,6 +988,11 @@ func (a *Analyzer) routerTypeName(typ ast.Expr, env *walkEnv) string {
 func (a *Analyzer) bindOne(stmt ast.Stmt, binding valueBinding, env *walkEnv, kind string) error {
 	ctor := callCtorKind(binding.value, env.file)
 	declared := a.routerTypeName(binding.typ, env)
+	if literal := literalCtorKind(binding.value, env.file); literal != ctorNone {
+		return a.errorf(stmt, "%s is built by literal or new() in the %s listener entry point; "+
+			"the route inventory recognizes only chi.NewRouter(), chi.NewMux() and http.NewServeMux(), "+
+			"so this value would carry registrations it never sees", literal, env.listener.ID)
+	}
 	if ctor == ctorNone && declared == "" {
 		// A neighboring binding in the same statement; it still must not carry
 		// an already-bound router into an unmodeled construct.
@@ -1374,7 +1423,7 @@ func namespaceFor(path string) string {
 	switch {
 	case path == "/api/v1" || strings.HasPrefix(path, "/api/v1/"):
 		return NamespaceAPIV1
-	case path == "/metrics":
+	case path == metricsPath:
 		return NamespaceOperational
 	default:
 		return NamespaceUnversioned
@@ -1420,10 +1469,18 @@ func (a *Analyzer) leakCheck(node ast.Node, env *walkEnv) error {
 				found, foundName = typed, typed.Name
 			}
 			return
-		case *ast.CallExpr:
+		case *ast.CallExpr, *ast.CompositeLit:
 			// A construction the walk never bound: whatever is registered on the
 			// result cannot reach the inventory.
-			switch callCtorKind(typed, env.file) {
+			expr, isExpr := n.(ast.Expr)
+			if !isExpr {
+				return
+			}
+			kind := callCtorKind(expr, env.file)
+			if kind == ctorNone {
+				kind = literalCtorKind(expr, env.file)
+			}
+			switch kind {
 			case ctorChiRouter:
 				found, foundReason = typed, "a chi router is constructed"
 				return
@@ -1437,6 +1494,12 @@ func (a *Analyzer) leakCheck(node ast.Node, env *walkEnv) error {
 				return
 			}
 		case *ast.SelectorExpr:
+			// A constructor referenced as a function value builds a router
+			// wherever it is eventually called, which is nowhere the walk looks.
+			if kind := ctorFunctionValue(typed, env.file); kind != "" {
+				found, foundReason = typed, kind+" is referenced as a function value"
+				return
+			}
 			// Only the base of a selector can be a router value.
 			visit(typed.X, shadowed)
 			return
@@ -1523,7 +1586,9 @@ func cloneShadow(in map[string]bool) map[string]bool {
 
 // audit proves that no chi router value in the analyzed packages escaped the
 // walk. Without it, adding a route-registering helper that nothing calls from
-// an enumerated entry point would leave the inventory quietly short.
+// an enumerated entry point would leave the inventory quietly short. The
+// unreached-helper rule below applies to the audited packages only; the
+// repository-wide rules live in the sweep (see sweep.go).
 func (a *Analyzer) audit() error {
 	for _, dir := range sortedKeys(a.set.packages) {
 		pkg := a.set.packages[dir]
@@ -1556,455 +1621,10 @@ func (a *Analyzer) auditFile(pkg *pkgSource, file *ast.File) error {
 			}
 			err = a.errorf(typed, "a closure taking chi.Router in %s is never reached from a declared listener entry point", pkg.Name)
 			return false
-		case *ast.StructType:
-			for _, field := range typed.Fields.List {
-				if isChiRouterType(field.Type, file) {
-					err = a.errorf(field, "a struct field of chi router type in %s would let a router escape enumeration", pkg.Name)
-					return false
-				}
-			}
-		case *ast.ValueSpec:
-			if typed.Type != nil && isChiRouterType(typed.Type, file) {
-				// A declared-but-unassigned local is harmless only if nothing
-				// registers on it, which the walk cannot prove.
-				err = a.errorf(typed, "a variable of chi router type in %s is declared outside the modeled walk", pkg.Name)
-				return false
-			}
 		}
 		return true
 	})
 	return err
-}
-
-// registrationMethods are the router methods that can add a route. A call to
-// one of them on a value the walk did not enumerate is a registration the
-// inventory cannot see.
-func isRegistrationMethod(name string) bool {
-	switch name {
-	case methodHandle, methodHandleFunc, "Method", "MethodFunc", "Route", "Group", "Mount", "Use", methodWith,
-		"NotFound", "MethodNotAllowed":
-		return true
-	}
-	return verbMethods[name] != ""
-}
-
-// auditScannedTrees sweeps every Go file in the scanned trees for the two ways
-// a route can exist outside the enumerated walk: a router constructed somewhere
-// the walk never visits, and a registration made on a listener's handler after
-// the entry point returned it.
-func (a *Analyzer) auditScannedTrees() error {
-	excluded := map[string]bool{}
-	for _, exclusion := range a.cfg.Exclusions {
-		excluded[exclusion.key()] = true
-	}
-	// A construction is allowed inside its own listener's entry declaration,
-	// wherever in the listener package that declaration lives. Directory-wide
-	// or file-wide allowances are deliberately not offered: they would cover
-	// routers a later change adds beside the entry point.
-	entryDecls := map[string]bool{}
-	listenerImports := map[string]ListenerSpec{}
-	for _, listener := range a.cfg.Listeners {
-		entryDecls[listener.Dir+"#"+listener.declName()] = true
-		listenerImports[path.Join(a.cfg.ModulePath, listener.Dir)] = listener
-	}
-
-	// Pass one records which parameters can receive a listener handler without
-	// being able to register on it. Pass two does the audit, so a call in one
-	// file can be judged against a signature declared in another.
-	handlerOnlyParams := map[string][]bool{}
-	err := a.eachSweptFile(func(rel string, _ *token.FileSet, file *ast.File) error {
-		dir := path.Dir(rel)
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil {
-				continue
-			}
-			handlerOnlyParams[dir+"#"+fn.Name.Name] = handlerOnlyPositions(fn, file)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	var findings []string
-	err = a.eachSweptFile(func(rel string, fset *token.FileSet, file *ast.File) error {
-		findings = append(findings, auditParsedFile(auditFileInput{
-			rel:               rel,
-			dir:               path.Dir(rel),
-			fset:              fset,
-			file:              file,
-			excluded:          excluded,
-			entryDecls:        entryDecls,
-			listenerImports:   listenerImports,
-			modulePath:        a.cfg.ModulePath,
-			scannedListeners:  a.cfg.Listeners,
-			handlerOnlyParams: handlerOnlyParams,
-		})...)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if len(findings) > 0 {
-		sort.Strings(findings)
-		return errors.New(strings.Join(findings, "; "))
-	}
-	return nil
-}
-
-// eachSweptFile parses every non-test Go file in the scan roots and hands it to
-// fn. Both audit passes go through it so they cannot drift apart on which files
-// the sweep covers.
-func (a *Analyzer) eachSweptFile(fn func(rel string, fset *token.FileSet, file *ast.File) error) error {
-	for _, root := range a.cfg.ScanRoots {
-		walkRoot := filepath.Join(a.cfg.Root, filepath.FromSlash(root))
-		err := filepath.WalkDir(walkRoot, func(target string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				if target != walkRoot && skipScanDir(entry.Name()) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(target, ".go") || strings.HasSuffix(target, "_test.go") {
-				return nil
-			}
-			rel, relErr := filepath.Rel(a.cfg.Root, target)
-			if relErr != nil {
-				return relErr
-			}
-			rel = filepath.ToSlash(rel)
-
-			fset := token.NewFileSet()
-			file, parseErr := parser.ParseFile(fset, target, nil, parser.SkipObjectResolution)
-			if parseErr != nil {
-				return fmt.Errorf("parse %s: %w", rel, parseErr)
-			}
-			return fn(rel, fset, file)
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// handlerOnlyPositions marks the parameters declared http.Handler or
-// http.HandlerFunc. Those are the only positions a listener handler may be
-// passed into without the audit following the call: the interface exposes
-// nothing but ServeHTTP, so no route can be registered through it. A variadic
-// or otherwise unrecognized parameter is not marked, and the call is refused.
-func handlerOnlyPositions(fn *ast.FuncDecl, file *ast.File) []bool {
-	params := flattenParams(fn.Type.Params)
-	out := make([]bool, len(params))
-	for i, p := range params {
-		out[i] = isHTTPHandlerType(p.typ, file)
-	}
-	return out
-}
-
-func isHTTPHandlerType(expr ast.Expr, file *ast.File) bool {
-	sel, ok := unwrapParen(expr).(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	ident, ok := unwrapParen(sel.X).(*ast.Ident)
-	if !ok || importPathFor(file, ident.Name) != httpImportPath {
-		return false
-	}
-	return sel.Sel.Name == "Handler" || sel.Sel.Name == "HandlerFunc"
-}
-
-// skipScanDir keeps the sweep inside the module's own source. Hidden trees hold
-// tooling and nested git worktrees, node_modules and vendor are other people's
-// code, and testdata is not built.
-func skipScanDir(name string) bool {
-	return strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "testdata"
-}
-
-type auditFileInput struct {
-	rel              string
-	dir              string
-	fset             *token.FileSet
-	file             *ast.File
-	excluded         map[string]bool
-	entryDecls       map[string]bool
-	listenerImports  map[string]ListenerSpec
-	modulePath       string
-	scannedListeners []ListenerSpec
-	// handlerOnlyParams maps "dir#Func" to the parameter positions that are
-	// declared http.Handler or http.HandlerFunc, collected across the sweep.
-	handlerOnlyParams map[string][]bool
-}
-
-// auditParsedFile reports every unaccounted-for router construction and every
-// post-construction registration in one file.
-func auditParsedFile(in auditFileInput) []string {
-	var findings []string
-	at := func(node ast.Node) string {
-		return fmt.Sprintf("%s:%d", in.rel, in.fset.Position(node.Pos()).Line)
-	}
-
-	// Locals that carry a listener's handler, and therefore its route tree.
-	entrypointValues := map[string]bool{}
-	// Locals that carry a value from a listener package, so `x.Handler()` on
-	// one of them is that listener's entry point.
-	listenerPkgValues := map[string]bool{}
-
-	isEntrypointCall := func(call *ast.CallExpr) bool {
-		fun := unwrapParen(call.Fun)
-		// An unqualified call to a listener entry function declared in this same
-		// package, e.g. `newRootHandler(router)` inside cmd/silo.
-		if ident, ok := fun.(*ast.Ident); ok {
-			for _, listener := range in.scannedListeners {
-				if listener.Recv == "" && listener.Func == ident.Name && listener.Dir == in.dir {
-					return true
-				}
-			}
-			return false
-		}
-		sel, ok := fun.(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		for _, listener := range in.scannedListeners {
-			if sel.Sel.Name != listener.Func {
-				continue
-			}
-			if ident, ok := unwrapParen(sel.X).(*ast.Ident); ok {
-				if listener.Recv == "" && importPathFor(in.file, ident.Name) == path.Join(in.modulePath, listener.Dir) {
-					return true
-				}
-				if listener.Recv != "" && listenerPkgValues[ident.Name] {
-					return true
-				}
-			}
-			if listener.Recv != "" && callsListenerPackage(sel.X, in) {
-				return true
-			}
-		}
-		return false
-	}
-	// carriesEntrypoint reports whether an expression evaluates to a listener
-	// handler, through a call, a parenthesis, or a type assertion that recovers
-	// the concrete router type.
-	var carriesEntrypoint func(ast.Expr) bool
-	carriesEntrypoint = func(expr ast.Expr) bool {
-		switch typed := expr.(type) {
-		case *ast.Ident:
-			return entrypointValues[typed.Name]
-		case *ast.ParenExpr:
-			return carriesEntrypoint(typed.X)
-		case *ast.TypeAssertExpr:
-			return carriesEntrypoint(typed.X)
-		case *ast.CallExpr:
-			return isEntrypointCall(typed)
-		}
-		return false
-	}
-	// bindsCarrier records the names an assignment binds to a listener handler.
-	// A two-value type assertion binds the handler to its first name only; the
-	// `ok` beside it is a bool, and treating it as a carrier would report calls
-	// that cannot register anything.
-	carrierTargets := func(stmt *ast.AssignStmt) []ast.Expr {
-		if len(stmt.Lhs) > 1 && len(stmt.Rhs) == 1 {
-			if _, isAssert := unwrapParen(stmt.Rhs[0]).(*ast.TypeAssertExpr); isAssert {
-				return stmt.Lhs[:1]
-			}
-		}
-		return stmt.Lhs
-	}
-
-	// Package-scope declarations first. A router built there belongs to no
-	// function, so no entry-point or exclusion allowance can apply to it, and
-	// every registration made on it happens somewhere the walk never looks.
-	for _, decl := range in.file.Decls {
-		gen, ok := decl.(*ast.GenDecl)
-		if !ok {
-			continue
-		}
-		ast.Inspect(gen, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if kind := constructorKind(call, in.file); kind != "" {
-				findings = append(findings, fmt.Sprintf(
-					"%s: %s constructed at package scope, which belongs to no listener entry point; "+
-						"build it inside a declared listener entry function", at(call), kind))
-			}
-			return true
-		})
-	}
-
-	for _, decl := range in.file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		name := fn.Name.Name
-		if fn.Recv != nil && len(fn.Recv.List) > 0 {
-			name = recvTypeName(fn.Recv.List[0].Type) + "." + name
-		}
-		allowed := in.entryDecls[in.dir+"#"+name] || in.excluded[in.rel+"#"+name]
-
-		ast.Inspect(fn, func(node ast.Node) bool {
-			switch typed := node.(type) {
-			case *ast.AssignStmt:
-				if len(typed.Rhs) != 1 {
-					return true
-				}
-				// `h := api.NewRouter(deps)` and the two-value
-				// `r, ok := h.(chi.Router)` both carry the handler forward.
-				carries := carriesEntrypoint(typed.Rhs[0])
-				call, isCall := unwrapParen(typed.Rhs[0]).(*ast.CallExpr)
-				fromListenerPkg := isCall && !carries && callsListenerPackage(call.Fun, in)
-				for _, lhs := range carrierTargets(typed) {
-					ident, ok := unwrapParen(lhs).(*ast.Ident)
-					if !ok {
-						continue
-					}
-					switch {
-					case carries:
-						entrypointValues[ident.Name] = true
-					case fromListenerPkg:
-						listenerPkgValues[ident.Name] = true
-					}
-				}
-			case *ast.CallExpr:
-				if kind := constructorKind(typed, in.file); kind != "" && !allowed {
-					findings = append(findings, fmt.Sprintf(
-						"%s: %s constructed in %s outside the inventoried listeners; "+
-							"add it as a listener or record it as an explicit exclusion for that function",
-						at(typed), kind, name))
-				}
-				qualified := qualifiedCallee(typed.Fun, in.file)
-				switch qualified {
-				case "net/http.Handle", "net/http.HandleFunc":
-					findings = append(findings, fmt.Sprintf(
-						"%s: %s registers on http.DefaultServeMux, which no listener enumerates",
-						at(typed), name))
-				}
-				// A listener handler handed to a call the audit cannot see into
-				// could have anything registered on it — being the receiver of a
-				// registration method is only the most obvious way. The audit
-				// follows no calls, so it vouches for exactly three shapes: a
-				// listener entry point the analyzer walks, a standard-library
-				// server that only serves the handler, and a parameter declared
-				// http.Handler, through which nothing can be registered.
-				if !isEntrypointCall(typed) && !handlerConsumingCalls[qualified] {
-					for index, arg := range typed.Args {
-						if !carriesEntrypoint(arg) || takesHandlerOnly(typed.Fun, index, in) {
-							continue
-						}
-						findings = append(findings, fmt.Sprintf(
-							"%s: %s passes a listener handler to %s, which the route inventory cannot see into; "+
-								"any route registered through it would exist with no inventory row. "+
-								"Register it inside the listener entry point, or take the value as an http.Handler",
-							at(typed), name, renderCallee(typed.Fun)))
-						break
-					}
-				}
-				sel, ok := unwrapParen(typed.Fun).(*ast.SelectorExpr)
-				if !ok || !isRegistrationMethod(sel.Sel.Name) {
-					return true
-				}
-				if carriesEntrypoint(sel.X) {
-					findings = append(findings, fmt.Sprintf(
-						"%s: %s calls %s on a listener handler after its entry point returned it; "+
-							"the route would exist with no inventory row. Register it inside the listener entry point",
-						at(typed), name, sel.Sel.Name))
-				}
-			}
-			return true
-		})
-	}
-	return findings
-}
-
-// handlerConsumingCalls are the standard-library calls a listener handler may
-// be passed to. Each takes an http.Handler, and http.Handler exposes nothing
-// but ServeHTTP: no route can be registered through one. Every other callee is
-// opaque to the audit and therefore refused.
-var handlerConsumingCalls = map[string]bool{
-	"net/http.ListenAndServe":    true,
-	"net/http.ListenAndServeTLS": true,
-	"net/http.Serve":             true,
-	"net/http.ServeTLS":          true,
-}
-
-// takesHandlerOnly reports whether the callee is a package-level function in
-// the same directory whose parameter at this position is declared http.Handler.
-// A cross-package or method callee is deliberately not resolved: the audit
-// would be guessing, and the point of the rule is to stop guessing.
-func takesHandlerOnly(fun ast.Expr, index int, in auditFileInput) bool {
-	ident, ok := unwrapParen(fun).(*ast.Ident)
-	if !ok {
-		return false
-	}
-	positions, known := in.handlerOnlyParams[in.dir+"#"+ident.Name]
-	return known && index < len(positions) && positions[index]
-}
-
-// renderCallee names a call target for a finding without needing the analyzer's
-// shared printer, which is scoped to the parsed listener packages rather than
-// to the swept trees.
-func renderCallee(fun ast.Expr) string {
-	switch typed := unwrapParen(fun).(type) {
-	case *ast.Ident:
-		return typed.Name + "()"
-	case *ast.SelectorExpr:
-		if ident, ok := unwrapParen(typed.X).(*ast.Ident); ok {
-			return ident.Name + "." + typed.Sel.Name + "()"
-		}
-		return typed.Sel.Name + "()"
-	}
-	return "an unnamed call"
-}
-
-// callsListenerPackage reports whether an expression calls into one of the
-// listener packages, e.g. `proxy.NewServer(...)`.
-func callsListenerPackage(expr ast.Expr, in auditFileInput) bool {
-	found := false
-	ast.Inspect(expr, func(node ast.Node) bool {
-		if found {
-			return false
-		}
-		sel, ok := node.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		if _, isListener := in.listenerImports[importPathFor(in.file, ident.Name)]; isListener {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
-}
-
-// constructorKind names the router a call constructs, or "" when the call
-// builds no router. It resolves the package identifier through the file's
-// imports, so a comment or a same-named method cannot trigger it.
-func constructorKind(call *ast.CallExpr, file *ast.File) string {
-	sel, ok := unwrapParen(call.Fun).(*ast.SelectorExpr)
-	if !ok {
-		return ""
-	}
-	switch callCtorKind(call, file) {
-	case ctorChiRouter:
-		return "chi." + sel.Sel.Name + "()"
-	case ctorServeMux:
-		return "http.NewServeMux()"
-	}
-	return ""
 }
 
 func sortedKeys[V any](in map[string]V) []string {
@@ -2045,7 +1665,7 @@ func isChiRouterType(expr ast.Expr, file *ast.File) bool {
 			return false
 		}
 		switch typed.Sel.Name {
-		case "Router", "Routes", "Mux":
+		case "Router", methodRoutes, "Mux":
 			return true
 		}
 	}
