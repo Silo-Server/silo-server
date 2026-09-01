@@ -4339,7 +4339,11 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		var err error
 		rollbackSession, err = transport.applySession()
 		if err != nil {
-			transport.rollback()
+			if rollbackErr, _ := rollbackFailedReplanV3(transport, nil); rollbackErr != nil {
+				slog.ErrorContext(r.Context(), "protocol v3 unapplied replacement transport cancellation failed", "session", sessionID, "error", rollbackErr)
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel the unapplied replacement transport")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit the live replacement session")
 			return
 		}
@@ -4773,6 +4777,28 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		artifactRecipe = frozenRecipe
 	}
+	// Resolve every fallible subtitle and frozen-route check before transport
+	// preparation publishes a stable proxy grant. An existing client can issue
+	// a GET against that grant immediately, even though this replan response has
+	// not returned yet, so errors after publication would require canceling an
+	// already admitted successor.
+	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &artifactRecipe); err != nil {
+		return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
+	}
+	if seekReanchor {
+		if err := validateSeekReanchorPlanV3(record, result.Plan); err != nil {
+			changedFields := seekReanchorIdentityChangesV3(record, result.Plan)
+			slog.ErrorContext(r.Context(), "protocol v3 seek reanchor changed route identity",
+				"session", record.SessionID,
+				"playback_attempt_id", record.PlaybackAttemptID,
+				"changed_fields", changedFields,
+			)
+			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{
+				reason:  "seek_reanchor_route_changed",
+				message: err.Error(),
+			}
+		}
+	}
 	transportReused := false
 	if trackChange && h.hasActiveHLSTransportV3(session) {
 		proxyAllowed := mode.proxyEgress || (!mode.headerAuth && h.JWTSecret != "")
@@ -4812,35 +4838,13 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			return playback.DecisionResponseV3{}, *record, nil, transportErr
 		}
 		applyTransportToneMapModeV3(&result, transport)
-		if !seekReanchor {
-			frozenRecipe, frozenErr := h.freezeExecutableRecipeV3(r.Context(), effectiveFile, result)
-			if frozenErr != nil {
-				transport.rollback()
-				return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Failed to freeze the selected subtitle identity.", frozenErr)
-			}
-			artifactRecipe = frozenRecipe
-		}
+		// Transport preparation can only attest the executor's tone-map mode;
+		// every other frozen identity field was validated above. Copy that one
+		// receipt into the already validated recipe instead of rerunning a
+		// fallible subtitle-identity freeze after authority publication.
+		artifactRecipe.ToneMapMode = result.ToneMapMode
 	}
 	result.Plan.Stream.URL = transport.url
-	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &artifactRecipe); err != nil {
-		transport.rollback()
-		return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
-	}
-	if seekReanchor {
-		if err := validateSeekReanchorPlanV3(record, result.Plan); err != nil {
-			changedFields := seekReanchorIdentityChangesV3(record, result.Plan)
-			slog.ErrorContext(r.Context(), "protocol v3 seek reanchor changed route identity",
-				"session", record.SessionID,
-				"playback_attempt_id", record.PlaybackAttemptID,
-				"changed_fields", changedFields,
-			)
-			transport.rollback()
-			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{
-				reason:  "seek_reanchor_route_changed",
-				message: err.Error(),
-			}
-		}
-	}
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	updated := *record
 	updated.CurrentPlanID = result.Plan.PlanID
