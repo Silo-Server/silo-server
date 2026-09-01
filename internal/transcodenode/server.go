@@ -691,8 +691,11 @@ type recipeStore interface {
 	// Called only on deliberate teardown; nil-safe and a missing key is a no-op.
 	Delete(ctx context.Context, sessionID string) error
 	// RevokeNode invalidates all recipes issued for a node before a destructive
-	// reload, including transports that have not received their first request.
+	// reload under its legacy URL identity.
 	RevokeNode(ctx context.Context, nodeURL string) error
+	// RevokeNodeID invalidates current progressive-remux authority under the
+	// stable stream_nodes identity, which survives URL repoints and restarts.
+	RevokeNodeID(ctx context.Context, nodeID int) error
 }
 
 // SetRecipeStore wires the control-plane recipe store so this node can rebuild a
@@ -2020,20 +2023,14 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 // progressiveRemuxRunsOnThisNode binds a routed remux to the stable database
 // identity selected by the planner. NODE_URL is only the worker's local
 // address and may intentionally differ from the registered route URL in a
-// split-horizon deployment. The URL check remains for bounded tokens minted by
-// an earlier API that did not carry the additive node ID.
+// split-horizon deployment. A transcode-executed progressive route has never
+// shipped without the additive row ID, so an ID-less token fails closed.
 func (s *Server) progressiveRemuxRunsOnThisNode(claims *streamtoken.Claims) bool {
-	if s == nil || claims == nil {
+	if s == nil || claims == nil || claims.RoutingExecutionNodeID <= 0 || s.nodeRowID == nil {
 		return false
 	}
-	if claims.RoutingExecutionNodeID > 0 {
-		if s.nodeRowID == nil {
-			return false
-		}
-		nodeID, ok := s.nodeRowID()
-		return ok && nodeID == claims.RoutingExecutionNodeID
-	}
-	return s.tracker == nil || strings.TrimRight(claims.TranscodeNode, "/") == strings.TrimRight(s.tracker.NodeURL(), "/")
+	nodeID, ok := s.nodeRowID()
+	return ok && nodeID == claims.RoutingExecutionNodeID
 }
 
 func transcodeNodeRemuxPlayMethod(method string) bool {
@@ -2407,14 +2404,18 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
 	previousRegisteredURL := ""
+	previousNodeID := 0
 	if s.registeredNodeURL != nil {
 		previousRegisteredURL, _ = s.registeredNodeURL()
+	}
+	if s.nodeRowID != nil {
+		previousNodeID, _ = s.nodeRowID()
 	}
 	if err := s.watcher.ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.teardownForForceReload(r.Context(), previousRegisteredURL); err != nil {
+	if err := s.teardownForForceReload(r.Context(), previousRegisteredURL, previousNodeID); err != nil {
 		http.Error(w, "force reload authority revocation failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2423,9 +2424,30 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredURL string) error {
+func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredURL string, previousNodeID int) error {
 	var authorityErr error
 	if s.recipeStore != nil {
+		var revokeErrs []error
+		nodeIDs := []int{previousNodeID}
+		if s.nodeRowID != nil {
+			if nodeID, ok := s.nodeRowID(); ok {
+				nodeIDs = append(nodeIDs, nodeID)
+			}
+		}
+		seenNodeIDs := make(map[int]struct{}, len(nodeIDs))
+		for _, nodeID := range nodeIDs {
+			if nodeID <= 0 {
+				continue
+			}
+			if _, duplicate := seenNodeIDs[nodeID]; duplicate {
+				continue
+			}
+			seenNodeIDs[nodeID] = struct{}{}
+			if err := s.recipeStore.RevokeNodeID(ctx, nodeID); err != nil {
+				revokeErrs = append(revokeErrs, fmt.Errorf("revoke node id %d: %w", nodeID, err))
+			}
+		}
+
 		nodeURLs := append([]string(nil), s.pendingAuthorityRevocations...)
 		nodeURLs = append(nodeURLs, previousRegisteredURL)
 		registeredURLResolved := false
@@ -2440,7 +2462,6 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			nodeURLs = append(nodeURLs, s.tracker.NodeURL())
 		}
 		seen := make(map[string]struct{}, len(nodeURLs))
-		var revokeErrs []error
 		failedURLs := make([]string, 0, len(s.pendingAuthorityRevocations))
 		for _, nodeURL := range nodeURLs {
 			nodeURL = strings.TrimRight(strings.TrimSpace(nodeURL), "/")
@@ -2457,7 +2478,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			}
 		}
 		s.pendingAuthorityRevocations = failedURLs
-		if len(seen) == 0 {
+		if len(seenNodeIDs) == 0 && len(seen) == 0 {
 			authorityErr = errors.New("transcode node URL unavailable")
 		} else {
 			authorityErr = errors.Join(revokeErrs...)

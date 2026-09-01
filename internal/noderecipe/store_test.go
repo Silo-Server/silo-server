@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -65,6 +66,12 @@ func TestNilStore_RevokeNodeNoop(t *testing.T) {
 	if err := NewStore(nil, 0).RevokeNode(t.Context(), "http://node"); err != nil {
 		t.Fatalf("disabled store RevokeNode returned error: %v", err)
 	}
+	if err := s.RevokeNodeID(t.Context(), 42); err != nil {
+		t.Fatalf("nil store RevokeNodeID returned error: %v", err)
+	}
+	if err := NewStore(nil, 0).RevokeNodeID(t.Context(), 42); err != nil {
+		t.Fatalf("disabled store RevokeNodeID returned error: %v", err)
+	}
 }
 
 func TestKeyNamespacing(t *testing.T) {
@@ -80,6 +87,16 @@ func TestNodeAuthorityGenerationKeyNormalizesNodeURL(t *testing.T) {
 	}
 	if withoutSlash == nodeAuthorityGenerationKey("http://other-node:8070") {
 		t.Fatal("different nodes share an authority generation key")
+	}
+}
+
+func TestNodeAuthorityGenerationKeyUsesStableNodeIDWhenAvailable(t *testing.T) {
+	card := playback.RecipeCard{TranscodeNodeURL: "http://node:8070", RoutingExecutionNodeID: 42}
+	if got, want := nodeAuthorityGenerationKeyForCard(card), nodeAuthorityGenerationKeyForNodeID(42); got != want {
+		t.Fatalf("card authority key = %q, want stable ID key %q", got, want)
+	}
+	if nodeAuthorityGenerationKeyForNodeID(42) == nodeAuthorityGenerationKey("http://node-id:42") {
+		t.Fatal("stable node ID and route URL share an authority key")
 	}
 }
 
@@ -168,6 +185,11 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	unique := uuid.NewString()
+	parsedNodeID, err := strconv.ParseInt(unique[:8], 16, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeID := int(parsedNodeID%2_000_000_000) + 1
 	nodeURL := "http://node-" + unique
 	store := NewStore(client, time.Minute)
 	grants := NewProxyGrantStore(client, time.Minute)
@@ -187,11 +209,14 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 			nodeAuthorityRecordGenerationKey(legacyBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyAfterSessionID), nodeAuthorityRecordGenerationKey(legacyOverwriteBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyOverwriteSessionID),
 			nodeAuthorityRecordDigestKey(oldSessionID), nodeAuthorityRecordDigestKey(newSessionID),
 			nodeAuthorityRecordDigestKey(legacyBeforeSessionID), nodeAuthorityRecordDigestKey(legacyAfterSessionID), nodeAuthorityRecordDigestKey(legacyOverwriteBeforeSessionID), nodeAuthorityRecordDigestKey(legacyOverwriteSessionID),
-			grants.key(grantID), nodeAuthorityGenerationKey(nodeURL),
+			grants.key(grantID), nodeAuthorityGenerationKey(nodeURL), nodeAuthorityGenerationKeyForNodeID(nodeID),
 		).Err()
 	})
 
-	card := playback.RecipeCard{SessionID: oldSessionID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux}
+	card := playback.RecipeCard{
+		SessionID: oldSessionID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux,
+		RoutingExecutionNodeID: nodeID,
+	}
 	if err := store.Put(t.Context(), oldSessionID, card); err != nil {
 		t.Fatal(err)
 	}
@@ -232,11 +257,14 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	if err := client.Set(t.Context(), store.key(legacyOverwriteBeforeSessionID), legacyOverwriteBeforeData, time.Minute).Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RevokeNode(t.Context(), nodeURL); err != nil {
+	if err := store.RevokeNodeID(t.Context(), nodeID); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := store.Get(t.Context(), oldSessionID); ok {
 		t.Fatal("recipe issued before node revocation remained valid")
+	}
+	if _, ok := NewStore(client, time.Minute).Get(t.Context(), oldSessionID); ok {
+		t.Fatal("fresh store instance forgot the stable node revocation")
 	}
 
 	card.SessionID = newSessionID
@@ -254,7 +282,7 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 		t.Fatal("pre-reload legacy overwrite with stale sidecars survived node revocation")
 	}
 
-	revokedAt, err := client.Get(t.Context(), nodeAuthorityGenerationKey(nodeURL)).Int64()
+	revokedAt, err := client.Get(t.Context(), nodeAuthorityGenerationKeyForNodeID(nodeID)).Int64()
 	if err != nil {
 		t.Fatal(err)
 	}

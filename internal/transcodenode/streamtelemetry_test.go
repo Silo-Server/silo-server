@@ -109,6 +109,7 @@ func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 
 func TestMountedTranscodeNodeProgressiveRemuxTelemetry(t *testing.T) {
 	srv, registry, server := telemetryNodeServer(t)
+	srv.nodeRowID = func() (int, bool) { return 11, true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -121,9 +122,10 @@ func TestMountedTranscodeNodeProgressiveRemuxTelemetry(t *testing.T) {
 	claims := streamtoken.Claims{
 		SessionID: "viewer-session", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
 		TranscodeNode: "http://node", TranscodeTransportID: "transport-session",
-		RoutingWorkload:  string(noderouting.WorkloadRemux),
-		RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingEgress:    string(noderouting.EgressProxy),
+		RoutingWorkload:        string(noderouting.WorkloadRemux),
+		RoutingExecution:       string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11,
+		RoutingEgress:          string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
 	srv.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})

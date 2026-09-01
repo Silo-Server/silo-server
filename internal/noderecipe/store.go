@@ -201,6 +201,20 @@ func nodeAuthorityGenerationKey(nodeURL string) string {
 	return nodeAuthorityGenerationKeyPrefix + normalized
 }
 
+func nodeAuthorityGenerationKeyForNodeID(nodeID int) string {
+	return nodeAuthorityGenerationKeyPrefix + "node-id:" + strconv.Itoa(nodeID)
+}
+
+func nodeAuthorityGenerationKeyForCard(card playback.RecipeCard) string {
+	if card.RoutingExecutionNodeID > 0 {
+		return nodeAuthorityGenerationKeyForNodeID(card.RoutingExecutionNodeID)
+	}
+	if strings.TrimSpace(card.TranscodeNodeURL) != "" {
+		return nodeAuthorityGenerationKey(card.TranscodeNodeURL)
+	}
+	return ""
+}
+
 func nodeAuthorityRecordGenerationKey(sessionID string) string {
 	return nodeAuthorityRecordGenerationKeyPrefix + sessionID
 }
@@ -223,12 +237,12 @@ func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeC
 	if err != nil {
 		return err
 	}
-	if s.prefix == KeyPrefix && strings.TrimSpace(card.TranscodeNodeURL) != "" {
+	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
 		ttlMillis := max(s.ttl.Milliseconds(), 1)
 		return putNodeRecipeScript.Run(ctx, s.rdb, []string{
 			s.key(sessionID),
 			nodeAuthorityRecordGenerationKey(sessionID),
-			nodeAuthorityGenerationKey(card.TranscodeNodeURL),
+			authorityKey,
 			nodeAuthorityRecordDigestKey(sessionID),
 		}, data, ttlMillis, nodeAuthorityRecordDigest(data)).Err()
 	}
@@ -254,9 +268,9 @@ func (s *Store) Get(ctx context.Context, sessionID string) (*playback.RecipeCard
 		slog.WarnContext(ctx, "decode node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "playback_session_id", sessionID)
 		return nil, false
 	}
-	if s.prefix == KeyPrefix && strings.TrimSpace(card.TranscodeNodeURL) != "" {
+	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
 		if stamped {
-			currentGeneration, generationErr := s.currentNodeAuthorityGeneration(ctx, card.TranscodeNodeURL)
+			currentGeneration, generationErr := s.currentNodeAuthorityGeneration(ctx, authorityKey)
 			if generationErr != nil {
 				slog.WarnContext(ctx, "load node authority generation failed", "component", "noderecipe", "error", generationErr, "playback_session_id", sessionID)
 				return nil, false
@@ -265,7 +279,7 @@ func (s *Store) Get(ctx context.Context, sessionID string) (*playback.RecipeCard
 				return nil, false
 			}
 		} else {
-			valid, validationErr := s.legacyRecipeIssuedAfterRevocation(ctx, sessionID, data, card.TranscodeNodeURL)
+			valid, validationErr := s.legacyRecipeIssuedAfterRevocation(ctx, sessionID, data, authorityKey)
 			if validationErr != nil {
 				slog.WarnContext(ctx, "validate legacy node recipe authority failed", "component", "noderecipe", "error", validationErr, "playback_session_id", sessionID)
 				return nil, false
@@ -313,19 +327,19 @@ func (s *Store) loadStoredCard(ctx context.Context, sessionID string) ([]byte, i
 	return []byte(recipe), generation, true, nil
 }
 
-func (s *Store) legacyRecipeIssuedAfterRevocation(ctx context.Context, sessionID string, data []byte, nodeURL string) (bool, error) {
+func (s *Store) legacyRecipeIssuedAfterRevocation(ctx context.Context, sessionID string, data []byte, authorityKey string) (bool, error) {
 	ttlMillis := max(s.ttl.Milliseconds(), 1)
 	valid, err := validateLegacyNodeRecipeScript.Run(ctx, s.rdb, []string{
 		s.key(sessionID),
 		nodeAuthorityRecordGenerationKey(sessionID),
-		nodeAuthorityGenerationKey(nodeURL),
+		authorityKey,
 		nodeAuthorityRecordDigestKey(sessionID),
 	}, data, ttlMillis, nodeAuthorityRecordDigest(data)).Int()
 	return valid == 1, err
 }
 
-func (s *Store) currentNodeAuthorityGeneration(ctx context.Context, nodeURL string) (int64, error) {
-	generation, err := s.rdb.Get(ctx, nodeAuthorityGenerationKey(nodeURL)).Int64()
+func (s *Store) currentNodeAuthorityGeneration(ctx context.Context, authorityKey string) (int64, error) {
+	generation, err := s.rdb.Get(ctx, authorityKey).Int64()
 	if errors.Is(err, redis.Nil) {
 		return 0, nil
 	}
@@ -405,7 +419,7 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 }
 
 // RevokeNode invalidates every recipe previously issued for nodeURL. The
-// The generation intentionally outlives individual recipes: the Redis-server
+// generation intentionally outlives individual recipes: the Redis-server
 // timestamp is bounded per configured node and distinguishes a pre-reload
 // legacy record from one issued later by an old API.
 func (s *Store) RevokeNode(ctx context.Context, nodeURL string) error {
@@ -414,5 +428,17 @@ func (s *Store) RevokeNode(ctx context.Context, nodeURL string) error {
 	}
 	return revokeNodeScript.Run(ctx, s.rdb, []string{
 		nodeAuthorityGenerationKey(nodeURL),
+	}).Err()
+}
+
+// RevokeNodeID invalidates current progressive-remux recipes for the stable
+// stream_nodes row. Unlike a route URL, the row identity survives URL repoints
+// and process replacement, so a failed reload can always retry it.
+func (s *Store) RevokeNodeID(ctx context.Context, nodeID int) error {
+	if s == nil || s.rdb == nil || s.prefix != KeyPrefix || nodeID <= 0 {
+		return nil
+	}
+	return revokeNodeScript.Run(ctx, s.rdb, []string{
+		nodeAuthorityGenerationKeyForNodeID(nodeID),
 	}).Err()
 }

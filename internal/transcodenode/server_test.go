@@ -1828,6 +1828,7 @@ func signCard(t *testing.T, card playback.RecipeCard) string {
 
 func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
 	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1841,7 +1842,7 @@ func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
 		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
 		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingEgress: string(noderouting.EgressProxy),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
 	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
@@ -1939,10 +1940,15 @@ func TestProgressiveRemuxRunsOnThisNodeRejectsDifferentNodeID(t *testing.T) {
 	if server.progressiveRemuxRunsOnThisNode(claims) {
 		t.Fatal("progressive remux accepted a token bound to a different node ID")
 	}
+	claims.RoutingExecutionNodeID = 0
+	if server.progressiveRemuxRunsOnThisNode(claims) {
+		t.Fatal("progressive remux accepted a token without a stable node ID")
+	}
 }
 
 func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
 	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1960,7 +1966,7 @@ func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
 		SessionID: "playback-concurrent", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
 		TranscodeNode: "http://node", TranscodeTransportID: "transport-concurrent",
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingEgress: string(noderouting.EgressProxy),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
 	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
@@ -2128,6 +2134,7 @@ func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
 
 func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T) {
 	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2141,7 +2148,7 @@ func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T)
 		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
 		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingEgress: string(noderouting.EgressProxy),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
 	store := &stubRecipeStore{card: &card, ok: true}
@@ -2155,6 +2162,7 @@ func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T)
 	// A replacement process has no in-memory stop fence. The deleted durable
 	// authority must still reject the old token before FFmpeg can start.
 	restarted := newTestServer(t)
+	restarted.nodeRowID = func() (int, bool) { return 11, true }
 	restarted.watcher.Config().Playback.FFmpegPath = ffmpegPath
 	restarted.SetRecipeStore(store)
 	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
@@ -2180,6 +2188,7 @@ func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T)
 
 func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2193,7 +2202,7 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 		SessionID: "playback-reload-gate", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
 		TranscodeNode: "http://node", TranscodeTransportID: "transport-reload-gate",
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingEgress: string(noderouting.EgressProxy),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
 	storeHit := make(chan struct{}, 1)
@@ -2260,7 +2269,7 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: transportID}}
 	server.SetRecipeStore(store)
 
-	if err := server.teardownForForceReload(t.Context(), ""); err != nil {
+	if err := server.teardownForForceReload(t.Context(), "", 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2287,12 +2296,16 @@ func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
 func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
 	server := newTestServer(t)
 	server.tracker = newBlockingSessionTracker()
+	server.nodeRowID = func() (int, bool) { return 84, true }
 	server.registeredNodeURL = func() (string, bool) { return "https://new-registered-node.example", true }
 	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: "dormant-transport"}}
 	server.SetRecipeStore(store)
 
-	if err := server.teardownForForceReload(t.Context(), "https://old-registered-node.example"); err != nil {
+	if err := server.teardownForForceReload(t.Context(), "https://old-registered-node.example", 84); err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Equal(store.revokedNodeIDs, []int{84}) {
+		t.Fatalf("stable node authority revocations = %v, want [84]", store.revokedNodeIDs)
 	}
 
 	wantRevoked := []string{"https://old-registered-node.example", "https://new-registered-node.example"}
@@ -2311,11 +2324,11 @@ func TestForceReloadTeardownRetriesFailedPreviousURLRevocation(t *testing.T) {
 	store := &stubRecipeStore{revokeErrs: map[string]error{oldURL: errors.New("redis unavailable")}}
 	server.SetRecipeStore(store)
 
-	if err := server.teardownForForceReload(t.Context(), oldURL); err == nil {
+	if err := server.teardownForForceReload(t.Context(), oldURL, 0); err == nil {
 		t.Fatal("partial authority revocation unexpectedly succeeded")
 	}
 	delete(store.revokeErrs, oldURL)
-	if err := server.teardownForForceReload(t.Context(), "https://new-registered-node.example"); err != nil {
+	if err := server.teardownForForceReload(t.Context(), "https://new-registered-node.example", 0); err != nil {
 		t.Fatalf("retry authority revocation: %v", err)
 	}
 
@@ -2328,6 +2341,31 @@ func TestForceReloadTeardownRetriesFailedPreviousURLRevocation(t *testing.T) {
 	}
 	if len(server.pendingAuthorityRevocations) != 0 {
 		t.Fatalf("pending authority revocations = %v, want none after retry", server.pendingAuthorityRevocations)
+	}
+}
+
+func TestForceReloadTeardownRetriesStableNodeIDAfterProcessRestart(t *testing.T) {
+	const nodeID = 84
+	store := &stubRecipeStore{revokeNodeIDErr: errors.New("redis unavailable")}
+	first := newTestServer(t)
+	first.nodeRowID = func() (int, bool) { return nodeID, true }
+	first.SetRecipeStore(store)
+
+	if err := first.teardownForForceReload(t.Context(), "", nodeID); err == nil {
+		t.Fatal("failed stable authority revocation unexpectedly succeeded")
+	}
+
+	// A replacement process has no pending in-memory revocations. Resolving the
+	// same stream_nodes row must nevertheless retry the durable generation.
+	store.revokeNodeIDErr = nil
+	restarted := newTestServer(t)
+	restarted.nodeRowID = func() (int, bool) { return nodeID, true }
+	restarted.SetRecipeStore(store)
+	if err := restarted.teardownForForceReload(t.Context(), "", nodeID); err != nil {
+		t.Fatalf("retry stable authority revocation after restart: %v", err)
+	}
+	if !slices.Equal(store.revokedNodeIDs, []int{nodeID, nodeID}) {
+		t.Fatalf("stable node authority revocations = %v, want [%d %d]", store.revokedNodeIDs, nodeID, nodeID)
 	}
 }
 
@@ -2442,15 +2480,17 @@ func TestReconstructionEndpointsClassifyExecutorDiscoveryFailure(t *testing.T) {
 
 // stubRecipeStore is a recipeStore for the jellycompat node-restart fetch path.
 type stubRecipeStore struct {
-	card         *playback.RecipeCard
-	ok           bool
-	hits         int
-	deletes      []string
-	revokedNodes []string
-	delErr       error
-	revokeErr    error
-	revokeErrs   map[string]error
-	getHit       chan struct{}
+	card            *playback.RecipeCard
+	ok              bool
+	hits            int
+	deletes         []string
+	revokedNodes    []string
+	revokedNodeIDs  []int
+	delErr          error
+	revokeErr       error
+	revokeErrs      map[string]error
+	revokeNodeIDErr error
+	getHit          chan struct{}
 }
 
 func (s *stubRecipeStore) Get(context.Context, string) (*playback.RecipeCard, bool) {
@@ -2480,6 +2520,11 @@ func (s *stubRecipeStore) RevokeNode(_ context.Context, nodeURL string) error {
 		return err
 	}
 	return s.revokeErr
+}
+
+func (s *stubRecipeStore) RevokeNodeID(_ context.Context, nodeID int) error {
+	s.revokedNodeIDs = append(s.revokedNodeIDs, nodeID)
+	return s.revokeNodeIDErr
 }
 
 // When the forwarded token is recipe-less (jellycompat), the node consults the
