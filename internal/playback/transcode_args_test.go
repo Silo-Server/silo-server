@@ -703,6 +703,28 @@ func TestBuildFFmpegArgs_CopyVideoSeekPreservesCodecCopy(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgs_MPEGTSCopyVideoKeepsSourceTimestamps(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:        "/media/movie.mkv",
+		OutputDir:        "/tmp/out",
+		SessionID:        "session-copy-ts",
+		SourceVideoCodec: "hevc",
+		TargetCodecVideo: "copy",
+		TargetCodecAudio: "aac",
+		CopyVideoMPEGTS:  true,
+		SegmentDuration:  2,
+	})
+
+	joined := strings.Join(args, " ")
+	// MPEG-TS has no tfdt, so the fMP4 negative-timestamp lift does not apply.
+	if !strings.Contains(joined, "-copyts -avoid_negative_ts disabled -start_at_zero") {
+		t.Fatalf("MPEG-TS copy-video should keep source timestamps untouched: %s", joined)
+	}
+	if strings.Contains(joined, "make_non_negative") {
+		t.Fatalf("MPEG-TS copy-video must not apply the fMP4 timestamp lift: %s", joined)
+	}
+}
+
 func TestBuildFFmpegArgs_MPEG2CopyVideoUsesMPEGTS(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:        "/media/movie.mkv",

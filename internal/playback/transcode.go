@@ -776,7 +776,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// race with fMP4 (hls.js #6337).
 	var segmentPattern string
 	segmentType := "mpegts"
-	copyVideoUsesFMP4 := isVideoCopy && !opts.CopyVideoMPEGTS && !IsMPEG2VideoCodec(opts.SourceVideoCodec)
+	copyVideoUsesFMP4 := copyVideoUsesFMP4(opts)
 	if copyVideoUsesFMP4 {
 		segmentType = "fmp4"
 		segmentPattern = filepath.Join(opts.OutputDir, "seg_%05d.m4s")
@@ -896,6 +896,15 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 	return args
 }
 
+// copyVideoUsesFMP4 reports whether copied video is packaged as fragmented MP4
+// rather than MPEG-TS. Shared by segment-type selection and timestamp policy
+// so the two cannot disagree.
+func copyVideoUsesFMP4(opts TranscodeOpts) bool {
+	return strings.EqualFold(opts.TargetCodecVideo, "copy") &&
+		!opts.CopyVideoMPEGTS &&
+		!IsMPEG2VideoCodec(opts.SourceVideoCodec)
+}
+
 // appendTimestampNormalizationArgs selects timestamp handling based on the
 // playback mode. Jellyfin-compatible copy-video fMP4 preserves source timing
 // while start_at_zero makes the output presentation timeline begin at zero.
@@ -910,12 +919,17 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 // full-file copy-video start with audio adaptation failed on Android before
 // the first frame. make_non_negative shifts all streams by the same minimal
 // offset only when a timestamp is negative; resumes and audio-copy starts
-// carry no negative timestamps and are therefore unaffected.
+// carry no negative timestamps and are therefore unaffected. MPEG-TS copy
+// output has no tfdt and keeps the source timestamps untouched.
 func appendTimestampNormalizationArgs(args []string, opts TranscodeOpts) []string {
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
+		negativeTS := "disabled"
+		if copyVideoUsesFMP4(opts) {
+			negativeTS = "make_non_negative"
+		}
 		return append(args,
 			"-copyts",
-			"-avoid_negative_ts", "make_non_negative",
+			"-avoid_negative_ts", negativeTS,
 			"-start_at_zero",
 		)
 	}
