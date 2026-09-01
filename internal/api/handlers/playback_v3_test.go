@@ -5033,6 +5033,47 @@ type recordingNodePlannerV3 struct {
 	releasedProxy []string
 }
 
+type progressiveFallbackPlannerV3 struct {
+	transcode *nodepool.Node
+	proxy     *nodepool.Node
+	requests  []nodepool.RouteRequest
+	released  []string
+}
+
+func (*progressiveFallbackPlannerV3) PlanSession(string, string, bool, int) nodepool.Plan {
+	return nodepool.Plan{}
+}
+
+func (p *progressiveFallbackPlannerV3) PlanRoute(request nodepool.RouteRequest) nodepool.Plan {
+	p.requests = append(p.requests, request)
+	if request.NeedsTranscode && (p.transcode == nil || request.TranscodeEligible != nil && !request.TranscodeEligible(p.transcode)) {
+		return nodepool.Plan{}
+	}
+	if request.NeedsProxy && (p.proxy == nil || request.ProxyEligible != nil && !request.ProxyEligible(p.proxy)) {
+		return nodepool.Plan{}
+	}
+	plan := nodepool.Plan{}
+	if request.NeedsTranscode {
+		plan.TranscodeNode = p.transcode
+	}
+	if request.NeedsProxy {
+		plan.ProxyNode = p.proxy
+	}
+	return plan
+}
+
+func (p *progressiveFallbackPlannerV3) ReleaseSession(sessionID string) {
+	p.released = append(p.released, sessionID)
+}
+
+func (p *progressiveFallbackPlannerV3) ProxyNodeURLs() []string {
+	return []string{p.proxy.URL}
+}
+
+func (p *progressiveFallbackPlannerV3) TranscodeNodeURLs() []string {
+	return []string{p.transcode.URL}
+}
+
 func (p *recordingNodePlannerV3) PlanSession(sessionID, _ string, needsTranscode bool, estBitrateKbps int) nodepool.Plan {
 	p.plannedSessionID = sessionID
 	p.needsTranscode = needsTranscode
@@ -5231,6 +5272,50 @@ func TestPrepareTransportV3RunsProgressiveRemuxOnTranscodeNodeThroughProxy(t *te
 	stored, ok := recipes.cards[transport.transportID]
 	if !ok || stored.TranscodeTransportID != transport.transportID || stored.InputPath == "" {
 		t.Fatalf("durable remux authority = %#v, want active transport %q", stored, transport.transportID)
+	}
+}
+
+func TestPrepareTransportV3FallsBackWhenTranscodeRemuxAuthorityWriteFails(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	stubCopySeekAnchorV3(handler)
+	proxyServer := capableProxyStubV3(t)
+	transcodeServer := progressiveRemuxExecutionStubV3(t)
+	planner := &progressiveFallbackPlannerV3{
+		proxy:     &nodepool.Node{ID: 42, URL: proxyServer.URL},
+		transcode: &nodepool.Node{ID: 84, URL: transcodeServer.URL},
+	}
+	handler.NodePlanner = planner
+	recipes := &recordingRecipeCardStoreV3{putErr: errors.New("redis is down")}
+	handler.NodeRecipeStore = recipes
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-authority-fallback", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3), PlayMethod: playback.PlayRemux},
+		mediaAuthModeV3{})
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	if !strings.HasPrefix(transport.url, proxyServer.URL+"/stream/remux/") ||
+		transport.routingExecution != noderouting.ExecutionProxy || transport.nodeURL != "" {
+		t.Fatalf("fallback transport = %#v, want proxy-executed remux", transport)
+	}
+	if len(planner.requests) != 2 || !planner.requests[0].NeedsTranscode || !planner.requests[0].NeedsProxy ||
+		planner.requests[1].NeedsTranscode || !planner.requests[1].NeedsProxy {
+		t.Fatalf("route requests = %#v, want transcode+proxy then proxy-only", planner.requests)
+	}
+	if len(planner.released) != 1 || planner.released[0] != "session-authority-fallback" {
+		t.Fatalf("released reservations = %v, want failed transcode route released", planner.released)
+	}
+	if len(recipes.deleted) != 1 {
+		t.Fatalf("ambiguous authority cleanup = %v, want failed transport deleted", recipes.deleted)
 	}
 }
 

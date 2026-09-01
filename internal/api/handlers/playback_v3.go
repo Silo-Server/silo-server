@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -2168,7 +2169,7 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 		return preparedTransportV3{}, timelineErr
 	}
 	if result.Plan.Delivery != playback.DeliveryTranscodeHLSV3 && result.Plan.Delivery != playback.DeliveryRemuxHLSV3 {
-		return h.prepareIdentityTransportV3(r, session, file, result, timeline, mode, policy)
+		return h.prepareIdentityTransportV3(r, session, file, result, timeline, mode, policy, initialExcludedShapes)
 	}
 	proxyAllowed := mode.proxyEgress || (!mode.headerAuth && h.JWTSecret != "")
 	excludedNodes := make(map[string]struct{})
@@ -2421,7 +2422,7 @@ func planRequiresServerTransformationsV3(plan *playback.PlanV3) bool {
 	return false
 }
 
-func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, timeline preparedTimelineV3, mode mediaAuthModeV3, policy config.PlaybackRoutingPolicy) (preparedTransportV3, *transportErrorV3) {
+func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, timeline preparedTimelineV3, mode mediaAuthModeV3, policy config.PlaybackRoutingPolicy, excludedShapes map[string]struct{}) (preparedTransportV3, *transportErrorV3) {
 	routeSession := *session
 	// The URL builders below refuse to mint a stream token for a session that
 	// requires media authorization. The live session only learns the mode when
@@ -2445,7 +2446,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	// The shared resolver removes proxy shapes when this client cannot address
 	// an authorized origin, then applies the same policy ordering as every HLS
 	// path. Legacy and authorized-origin attempts differ only in URL authority.
-	decision, routeErr := h.resolveIdentityRouteV3(r, session.ID, result, mode, policy)
+	decision, routeErr := h.resolveIdentityRouteV3(r, session.ID, result, mode, policy, excludedShapes)
 	if routeErr != nil {
 		return preparedTransportV3{}, routeErr
 	}
@@ -2518,9 +2519,20 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		card.AudioOnly = file.IsAudioOnly()
 		if err := h.putRequiredNodeRecipeV3(r.Context(), transportID, card); err != nil {
 			releaseReservation()
-			return preparedTransportV3{}, &transportErrorV3{
+			h.deleteNodeRecipeV3(r.Context(), transportID)
+			authorityErr := &transportErrorV3{
 				reason: string(noderouting.OutcomeCapacityUnavailable), message: "The transcode remux authority is temporarily unavailable.", retryable: true, cause: err,
 			}
+			fallbackExclusions := maps.Clone(excludedShapes)
+			if fallbackExclusions == nil {
+				fallbackExclusions = make(map[string]struct{})
+			}
+			fallbackExclusions[decision.Shape.ID] = struct{}{}
+			fallback, fallbackErr := h.prepareIdentityTransportV3(r, session, file, result, timeline, mode, policy, fallbackExclusions)
+			if fallbackErr == nil {
+				return fallback, nil
+			}
+			return fallback, combineTransportErrorsV3(authorityErr, fallbackErr)
 		}
 	}
 	streamURL := fmt.Sprintf("/stream/%s", routeSession.ID)
@@ -2825,13 +2837,16 @@ func (h *PlaybackHandler) deleteNodeRecipeV3(ctx context.Context, transportID st
 // resolveIdentityRouteV3 resolves direct and progressive routes through the
 // same policy compiler as HLS, including the transcode-execution/proxy-egress
 // progressive route.
-func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID string, result playback.PlannerResultV3, mode mediaAuthModeV3, policy config.PlaybackRoutingPolicy) (noderouting.Decision, *transportErrorV3) {
+func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID string, result playback.PlannerResultV3, mode mediaAuthModeV3, policy config.PlaybackRoutingPolicy, initialExcludedShapes map[string]struct{}) (noderouting.Decision, *transportErrorV3) {
 	workload, delivery, ok := routingClassV3(result)
 	if !ok {
 		return noderouting.Decision{}, &transportErrorV3{reason: string(noderouting.OutcomePolicyUnsatisfied), message: "The playback delivery has no legal node route.", retryable: false}
 	}
 	proxyAllowed := mode.proxyEgress || (!mode.headerAuth && h.JWTSecret != "")
-	excludedShapes := make(map[string]struct{})
+	excludedShapes := maps.Clone(initialExcludedShapes)
+	if excludedShapes == nil {
+		excludedShapes = make(map[string]struct{})
+	}
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 &&
 		h.validateLocalProgressiveCapabilitiesV3(r.Context(), result) != nil {
 		excludedShapes[noderouting.ShapeProgressiveRemuxAPI] = struct{}{}

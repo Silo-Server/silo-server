@@ -83,6 +83,13 @@ func TestNodeAuthorityGenerationKeyNormalizesNodeURL(t *testing.T) {
 	}
 }
 
+func TestNodeAuthorityRecordGenerationKeyIsSeparateFromRecipe(t *testing.T) {
+	store := NewStore(nil, 0)
+	if got := nodeAuthorityRecordGenerationKey("abc"); got == store.key("abc") {
+		t.Fatalf("record generation key %q collides with recipe key", got)
+	}
+}
+
 // The two key spaces share one implementation, so nothing but the prefix may
 // distinguish them: a proxy grant must never resolve a node recipe, and the
 // transcode node's reconstruct lookup must never resolve a grant.
@@ -130,28 +137,18 @@ func TestDefaultTTLMatchesTokenLifetime(t *testing.T) {
 	}
 }
 
-func TestNodeAuthorityEnvelopePreservesNestedRecipe(t *testing.T) {
+func TestNodeAuthorityKeepsPreviousRecipeWireFormat(t *testing.T) {
 	card := playback.RecipeCard{
 		SessionID: "sid", TranscodeNodeURL: "http://node:8070", PlayMethod: playback.PlayTranscode,
 		TranscodeAudio: true, TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2,
 	}
-	inner, err := marshalCard(card)
+	data, err := marshalCard(card)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := json.Marshal(nodeAuthorityEnvelope{
-		Version: nodeAuthorityEnvelopeVersion, AuthorityGeneration: 7, Recipe: inner,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	decoded, generation, ok := unmarshalStoredCard(data, true)
-	if !ok || decoded != card || generation != 7 {
-		t.Fatalf("decode = (%+v, %d, %v), want (%+v, 7, true)", decoded, generation, ok, card)
-	}
-	if _, _, ok := unmarshalStoredCard(data, false); ok {
-		t.Fatal("proxy-grant decoder accepted a node-authority envelope")
+	decoded, ok := unmarshalCard(data)
+	if !ok || decoded != card {
+		t.Fatalf("previous node decode = (%+v, %v), want (%+v, true)", decoded, ok, card)
 	}
 }
 
@@ -180,6 +177,8 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 		defer cancel()
 		_ = client.Del(cleanupCtx,
 			store.key(oldSessionID), store.key(newSessionID), store.key(legacySessionID),
+			nodeAuthorityRecordGenerationKey(oldSessionID), nodeAuthorityRecordGenerationKey(newSessionID),
+			nodeAuthorityRecordGenerationKey(legacySessionID),
 			grants.key(grantID), nodeAuthorityGenerationKey(nodeURL),
 		).Err()
 	})
@@ -190,6 +189,13 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	}
 	if _, ok := store.Get(t.Context(), oldSessionID); !ok {
 		t.Fatal("fresh node recipe missed before revocation")
+	}
+	rawRecipe, err := client.Get(t.Context(), store.key(oldSessionID)).Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, ok := unmarshalCard(rawRecipe); !ok || decoded != card {
+		t.Fatalf("stored recipe is not readable by the previous node: (%+v, %v)", decoded, ok)
 	}
 	if err := store.RevokeNode(t.Context(), nodeURL); err != nil {
 		t.Fatal(err)
@@ -228,6 +234,17 @@ func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	}
 	if _, ok := grants.Get(t.Context(), grantID); !ok {
 		t.Fatal("node authority revocation affected proxy-grant key space")
+	}
+
+	if err := store.Delete(t.Context(), newSessionID); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := client.Exists(t.Context(), store.key(newSessionID), nodeAuthorityRecordGenerationKey(newSessionID)).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatal("node recipe delete left its generation sidecar behind")
 	}
 }
 

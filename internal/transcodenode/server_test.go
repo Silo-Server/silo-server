@@ -1865,6 +1865,50 @@ func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
 	}
 }
 
+func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
+	server := newTestServer(t)
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegMarker := filepath.Join(t.TempDir(), "ffmpeg-ran")
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\ntouch \""+ffmpegMarker+"\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-head", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-head",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodHead, "/remux/transport-head", nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-head")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	recorder := httptest.NewRecorder()
+
+	server.handleRemux(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "video/mp4" {
+		t.Fatalf("response = %d content-type %q", recorder.Code, recorder.Header().Get("Content-Type"))
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs = %d, want no FFmpeg start", got)
+	}
+	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
+		t.Fatalf("HEAD invoked ffmpeg: %v", err)
+	}
+}
+
 func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
 	server := newTestServer(t)
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")

@@ -1903,6 +1903,16 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
 		return
 	}
+	if r.Method == http.MethodHead {
+		contentType := playback.RemuxContentType(claims.AudioOnly)
+		if contentType == "" {
+			contentType = "video/mp4"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	seekSeconds := 0.0
 	if rawSeek := r.URL.Query().Get("seek"); rawSeek != "" {
 		parsed, parseErr := strconv.ParseFloat(rawSeek, 64)
