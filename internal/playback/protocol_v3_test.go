@@ -3291,7 +3291,7 @@ func TestPlanPlaybackV3AndroidMedia3AudioConstraintsFallBackToAAC(t *testing.T) 
 				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
 				Registry: testTransformationRegistryV3(),
 			})
-			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.PlayMethod != PlayRemux || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.PlayMethod != PlayRemux || result.TargetVideoCodec != "copy" || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
 				t.Fatalf("constrained Android audio result = %s", ExplainPlannerResultV3(result))
 			}
 			if result.TargetAudioChannels <= 0 || result.TargetAudioChannels > test.wantChannels {
