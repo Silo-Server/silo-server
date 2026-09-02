@@ -1003,6 +1003,16 @@ func is4KResolution(res string) bool {
 	return access.CompareQuality(res, "2160p") >= 0
 }
 
+// Resolution labels shared by compatResolutionCeilingHeight and
+// compatMaxResolutionForBitrateKbps.
+const (
+	compatResolutionLabel480p  = "480p"
+	compatResolutionLabel720p  = "720p"
+	compatResolutionLabel1080p = "1080p"
+	compatResolutionLabel2160p = "2160p"
+	compatResolutionLabel4320p = "4320p"
+)
+
 // compatSourceVideoHeight resolves a version's pixel height from its probed
 // video track, falling back to the catalog resolution label when no track
 // carries a usable value.
@@ -1058,15 +1068,15 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 // genuine 1080p one and let it slip past a 1080p cap unflagged.
 func compatResolutionCeilingHeight(label string) int {
 	switch label {
-	case "480p":
+	case compatResolutionLabel480p:
 		return 480
-	case "720p":
+	case compatResolutionLabel720p:
 		return 720
-	case "1080p":
+	case compatResolutionLabel1080p:
 		return 1080
-	case "2160p":
+	case compatResolutionLabel2160p:
 		return 2160
-	case "4320p":
+	case compatResolutionLabel4320p:
 		return 4320
 	default:
 		return 0
@@ -1084,11 +1094,11 @@ func compatMaxResolutionForBitrateKbps(kbps int) string {
 	case kbps <= 0:
 		return ""
 	case kbps < 2_000:
-		return "480p"
+		return compatResolutionLabel480p
 	case kbps < 6_000:
-		return "720p"
+		return compatResolutionLabel720p
 	case kbps < 20_000:
-		return "1080p"
+		return compatResolutionLabel1080p
 	default:
 		return ""
 	}
