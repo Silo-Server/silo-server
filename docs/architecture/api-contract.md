@@ -936,7 +936,14 @@ row; CI runs it beside the ledger gate.
 The executor (`internal/scenariocatalog/executor`) runs the scenarios through the real router
 and middleware in an in-process `httptest` server. Scenarios that only need the router — public
 discovery, readiness failure, validation, and auth refusals on routes that register without a
-user store — run in plain CI. Anything that sends a credential, applies a server setting, or
+user store — run in plain CI. Whether a public scenario's row exists on the offline router
+is read from `contracts/api/v2/offline-routes.txt`, not from the router: `api.NewRouter` returns
+a sealed handler (see the route inventory contract above), so `TestOfflineRouteSet` in
+`internal/api` builds the executor's offline wiring through the unexported constructor, walks
+it, and pins the result; `make verify-offline-routes` fails in CI when the file is stale and
+`make offline-routes` regenerates it. The file records the `api.Dependencies` fields it was
+generated with, and the executor refuses it if its own offline wiring sets a different field
+set. Anything that sends a credential, applies a server setting, or
 declares `requires: [database]` runs only when `SILO_SCENARIO_DATABASE_URL` points at an empty
 database the executor owns, and skips otherwise. The variable is deliberately not
 `SILO_TEST_DATABASE_URL`: the executor truncates accounts, access groups, invite codes, and

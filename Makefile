@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -220,6 +220,21 @@ SCENARIO_CATALOG_DIR := contracts/api/v2/scenarios
 verify-scenario-catalogs:
 	@go test -count=1 -run '^TestCatalogsPassGate$$' ./internal/scenariocatalog/ \
 		|| { echo "::error::$(SCENARIO_CATALOG_DIR) violates scenario-catalog.schema.json or leaves a tier-1 row uncovered"; exit 1; }
+
+OFFLINE_ROUTES := contracts/api/v2/offline-routes.txt
+
+# The scenario executor decides run-vs-skip for a public scenario by whether
+# the offline (no-database) API router registers its row. api.NewRouter returns
+# a sealed handler nothing outside internal/api's tests can walk, so the answer
+# is pinned in $(OFFLINE_ROUTES) by an in-package test that builds the same
+# wiring through the unexported constructor. offline-routes regenerates the
+# file; verify-offline-routes fails when it is stale.
+offline-routes:
+	go test -count=1 -run '^TestOfflineRouteSet$$' ./internal/api/ -update-offline-routes
+
+verify-offline-routes:
+	@go test -count=1 -run '^TestOfflineRouteSet$$' ./internal/api/ \
+		|| { echo "::error::$(OFFLINE_ROUTES) disagrees with the offline API router; run make offline-routes"; exit 1; }
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

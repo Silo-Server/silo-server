@@ -32,17 +32,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	apiv2 "github.com/Silo-Server/silo-server/contracts/api/v2"
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -160,7 +160,7 @@ type Env struct {
 	// the method+pattern set it registered: a row absent from it can only be
 	// exercised on the live router.
 	offline       *httptest.Server
-	offlineRoutes map[string]bool
+	offlineRoutes *scenariocatalog.OfflineRouteSet
 	// ledger tells the executor which rows are the rate-limited
 	// registration variant, so their scenarios run on liveLimited.
 	ledger map[contractledger.Key]scenariocatalog.LedgerEntry
@@ -189,30 +189,15 @@ func (e *Env) HasDatabase() bool { return e.pool != nil }
 // Rows behind a user store, policy system, or auth middleware do not exist
 // there, so their public scenarios (missing bearer, and so on) still need
 // the live router.
+//
+// The answer comes from contracts/api/v2/offline-routes.txt rather than a
+// walk: api.NewRouter returns a sealed handler that no caller can recover a
+// router from, so TestOfflineRouteSet in internal/api walks the same wiring
+// through the unexported constructor and commits the result. New checks the
+// file's wiring line against the Dependencies it builds, so a golden from a
+// different wiring is refused rather than trusted.
 func (e *Env) OfflineHas(method, pattern string) bool {
-	return e.offlineRoutes[method+" "+pattern]
-}
-
-// registeredRoutes walks the chi tree and returns "METHOD pattern" keys in
-// the same spelling the route inventory records.
-func registeredRoutes(t testing.TB, h http.Handler) map[string]bool {
-	t.Helper()
-	routes, ok := h.(chi.Routes)
-	if !ok {
-		t.Fatalf("scenario executor: router does not expose chi.Routes")
-	}
-	out := map[string]bool{}
-	walk := func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		// chi reports mounted subrouter roots as "/*"; the inventory keeps
-		// the registration form, which has no such suffix.
-		route = strings.TrimSuffix(route, "/*")
-		out[method+" "+route] = true
-		return nil
-	}
-	if err := chi.Walk(routes, walk); err != nil {
-		t.Fatalf("scenario executor: walk offline router: %v", err)
-	}
-	return out
+	return e.offlineRoutes.Has(method, pattern)
 }
 
 // New builds the environment. Database wiring happens only when
@@ -240,7 +225,7 @@ func New(t testing.TB) *Env {
 	if err != nil {
 		t.Fatalf("scenario executor: cipher: %v", err)
 	}
-	offlineRouter := api.NewRouter(api.Dependencies{
+	offlineDeps := api.Dependencies{
 		Config:           cfg,
 		AppContext:       ctx,
 		DB:               deadPool,
@@ -248,10 +233,18 @@ func New(t testing.TB) *Env {
 		ClientIPResolver: clientip.NewResolver(nil),
 		NodeID:           "fixture-node",
 		PublicURL:        publicURL,
-	})
-	e.offline = httptest.NewServer(offlineRouter)
+	}
+	e.offline = httptest.NewServer(api.NewRouter(offlineDeps))
 	t.Cleanup(e.offline.Close)
-	e.offlineRoutes = registeredRoutes(t, offlineRouter)
+	e.offlineRoutes, err = scenariocatalog.LoadOfflineRoutes()
+	if err != nil {
+		t.Fatalf("scenario executor: %v", err)
+	}
+	if got := scenariocatalog.WiringFields(offlineDeps); !slices.Equal(got, e.offlineRoutes.Wiring) {
+		t.Fatalf("scenario executor: %s was generated for wiring %v but the offline router is built with %v; "+
+			"align TestOfflineRouteSet (internal/api) with this constructor and run make offline-routes",
+			apiv2.OfflineRoutesPath, e.offlineRoutes.Wiring, got)
+	}
 
 	dsn := os.Getenv(DatabaseEnv)
 	if dsn == "" {

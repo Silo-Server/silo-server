@@ -137,6 +137,13 @@ jobs:
       - name: Verify the tier-1 scenario catalogs cover their waves
         run: make verify-scenario-catalogs
 
+      # The executor's offline run-vs-skip decision reads a committed list of
+      # the routes the no-database API router registers, because the sealed
+      # router cannot be walked from outside internal/api. This regenerates
+      # that list from the real router and fails if the committed file drifted.
+      - name: Verify the offline route set matches the API router
+        run: make verify-offline-routes
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and
