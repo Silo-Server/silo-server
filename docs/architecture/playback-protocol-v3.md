@@ -99,7 +99,7 @@ the document is always the full one:
   "enabled": true,
   "protocol_versions": [3],
   "features": ["playback_plan_v3", "neutral_playback_v3_contract_v1", "layout_aware_passthrough", "playback_route_diagnostics",
-               "device_quirks_v1", "seek_reanchor_v1", "output_change_v1", "direct_stream_resume_v1",
+               "device_quirks_v1", "seek_reanchor_v1", "output_change_v1", "output_display_evidence_v1", "direct_stream_resume_v1",
                "header_authenticated_media_v1", "authorized_media_origins_v1", "software_video_decode_v1",
                "plan_invalidated_v1", "plan_source_duration_v1"],
   "deliveries": ["original_http", "server_remux_progressive", "server_remux_hls", "server_transcode_hls"],
@@ -118,6 +118,7 @@ The thirteen feature strings above are the full set this server version advertis
 | `device_quirks_v1` | Plans may carry `applied_quirks` and `runtime_corrections` (§9) |
 | `seek_reanchor_v1` | The `seek_reanchor` replan operation is available (§6) |
 | `output_change_v1` | The `output_change` intent replan is available; clients must keep the active route when this feature is absent |
+| `output_display_evidence_v1` | The server honours `output.display` and its `hdr_evidence` tier; without it a client must still send `output.hdr_details` so the legacy fallback stays correct |
 | `direct_stream_resume_v1` | A direct route may resume mid-file rather than restarting |
 | `header_authenticated_media_v1` | An opted-in client receives media URLs without signed credentials in their query or path, and authenticates every media request with its normal Authorization header (§4.1) |
 | `authorized_media_origins_v1` | Meaningful only with the token above: the client also honors credential-free absolute media URLs on server-designated proxy origins, which restores distributed egress for a header-authenticated attempt (§4.1) |
@@ -429,9 +430,15 @@ platform answered (an empty `hdr_types` is then a confirmed SDR panel) or
 `unknown` when it could not (no display, unsupported API, null capabilities,
 probe failure). When `display` is present at all, the server never falls back
 from a missing `output.hdr_details` to `client_capabilities.hdr_details`, and
-`unknown` disables every native HDR and Dolby Vision output claim. Clients that
-have separated decoder facts from output facts must send `display` so a decoder
-capability can never be promoted to a native-output promise.
+`unknown` disables every native HDR and Dolby Vision output claim, and an exact
+record narrows `hdr_details` to the ranges the panel actually carries (a
+contradiction is rejected at validation). Clients that have separated decoder
+facts from output facts must send `display` so a decoder capability can never
+be promoted to a native-output promise. A client that sends `display` must
+always send `output.hdr_details` too, because a server without
+`output_display_evidence_v1` ignores `display` and would otherwise fall back to
+`client_capabilities.hdr_details`; the feature token tells the client whether
+the evidence tier is being honoured.
 
 There are two delivery-scoped exceptions. An `original_http` capability
 carrying the validated claim `client_managed_dynamic_range_v1` asserts that its
@@ -446,7 +453,9 @@ stream through an ordinary HEVC decoder and presents its standards-compatible
 base layer when the output lacks native Dolby Vision. The server keeps every
 other gate: the source must be Profile 8 with no enhancement layer and a
 compatibility id that names a base range (`1` and `6` are HDR10, `4` is HLG,
-`2` is BT.709 SDR; `0`, `3`, `5`, and unknown ids fail closed), the active
+`2` is BT.709 SDR; `0`, `3`, `5`, and unknown ids fail closed), scan-proven
+base-layer metadata (a DV configuration record, an explicit compatibility id,
+and a present base layer, matching the tone-map path), the active
 output must carry that base range, and the HEVC stream must fit the client's
 decode bounds. The plan is then `validated_original_playback` bytes with
 `decision_reason: client_dv8_base_layer`, `effective_recipe.dynamic_range` set
@@ -1005,6 +1014,7 @@ The plan will play, but something the user might notice was given up.
 | `dolby_vision_removed` | DV metadata stripped |
 | `dolby_vision_strip_unsupported_by_source` | DV could not be stripped |
 | `dolby_vision_enhancement_layer_discarded` | FEL/MEL dropped, base layer kept |
+| `dolby_vision_base_layer_only` | Profile 8 played unchanged through an HEVC decoder as its HDR10/HLG/SDR base layer; DV metadata not presented |
 | `hdr_tone_mapped` | HDR video converted to limited-range BT.709 SDR |
 | `audio_converted` | Audio re-encoded rather than copied |
 | `subtitle_burn_in` | Subtitles rendered into the video |

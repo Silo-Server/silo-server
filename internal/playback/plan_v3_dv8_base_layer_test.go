@@ -158,8 +158,9 @@ func TestPlanPlaybackV3UnknownDisplayEvidenceFailsClosedForNativeHDR(t *testing.
 		t.Fatalf("unknown display evidence must not earn a native HDR10 claim: %#v", result.Plan)
 	}
 
-	// The same request with exact evidence keeps the native route.
-	req.ClientPlaybackContext.Output.Display.HDREvidence = OutputHDREvidenceExactV3
+	// The same request with exact evidence and matching panel facts keeps
+	// the native route.
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true}}
 	result = planDV8V3(t, file, req)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
 		t.Fatalf("exact display evidence should keep native HDR10 direct play: %s", ExplainPlannerResultV3(result))
@@ -199,5 +200,48 @@ func TestStartRequestV3RejectsInvalidDisplayEvidence(t *testing.T) {
 	}
 	if req.ClientPlaybackContext.Output.Display.HDREvidence != OutputHDREvidenceExactV3 {
 		t.Fatalf("evidence was not normalized: %q", req.ClientPlaybackContext.Output.Display.HDREvidence)
+	}
+}
+
+func TestPlanPlaybackV3DV8BaseLayerRequiresProvenBaseLayerMetadata(t *testing.T) {
+	file := dv8BaseLayerFixtureV3(1)
+	file.VideoTracks[0].DVBLCompatIDPresent = false
+	result := planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true}))
+	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
+		t.Fatalf("an unproven compatibility id must not take the base-layer route: %#v", result.Plan)
+	}
+	file = dv8BaseLayerFixtureV3(1)
+	file.VideoTracks[0].DVBLPresent = false
+	result = planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true}))
+	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
+		t.Fatalf("an absent base layer must not take the base-layer route: %#v", result.Plan)
+	}
+}
+
+func TestPlanPlaybackV3ExactSDRDisplayNarrowsContradictoryOutputHDR(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{}}
+	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	direct.Containers = []string{"mkv"}
+	direct.VideoCodecs = []string{"hevc"}
+	direct.AudioDecodeCodecs = []string{"aac"}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+
+	if _, err := req.NormalizeAndValidate(); err == nil {
+		t.Fatal("a contradiction between exact display and output hdr_details must be rejected at validation")
+	}
+	result := planDV8V3(t, file, req)
+	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10 {
+		t.Fatalf("an exact SDR panel must not authorize native HDR10 through hdr_details: %#v", result.Plan)
+	}
+}
+
+func TestServerFeaturesV3AdvertiseOutputDisplayEvidence(t *testing.T) {
+	if !HasFeatureV3(ServerFeaturesV3(), FeatureOutputDisplayEvidenceV3) {
+		t.Fatal("output_display_evidence_v1 must be advertised so clients can gate output.display")
 	}
 }

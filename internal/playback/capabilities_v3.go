@@ -59,6 +59,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 			source.DVLevel = track.DVLevel
 		}
 		source.DVBLCompatID = track.DVBLCompatID
+		source.DVBaseLayerProven = track.DVConfigPresent && track.DVBLCompatIDPresent && track.DVBLPresent
 		source.VideoCopyUnsafe = videoCopyUnsafeFile(file)
 		switch EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer)) {
 		case EnhancementNoneV3, EnhancementMELV3, EnhancementFELV3, EnhancementUnknownV3:
@@ -229,10 +230,31 @@ func routeVideoMetadataCompleteV3(source SourceDescriptorV3) bool {
 func nativeOutputHDRV3(request StartRequestV3) *HDRCapabilitiesV3 {
 	output := request.ClientPlaybackContext.Output
 	if output.Display != nil {
-		if output.Display.HDREvidence != OutputHDREvidenceExactV3 {
+		if output.Display.HDREvidence != OutputHDREvidenceExactV3 || output.HDRDetails == nil {
 			return nil
 		}
-		return output.HDRDetails
+		// Validation rejects a contradiction, but planning still narrows to
+		// the safe intersection so an exact SDR panel can never authorize a
+		// native range through hdr_details alone.
+		panel := output.Display.HDRTypes
+		if panel == nil {
+			panel = &HDRCapabilitiesV3{}
+		}
+		narrowed := *output.HDRDetails
+		narrowed.HDR10 = narrowed.HDR10 && panel.HDR10
+		narrowed.HDR10Plus = narrowed.HDR10Plus && panel.HDR10Plus
+		narrowed.HLG = narrowed.HLG && panel.HLG
+		profiles := make([]int, 0, len(narrowed.DolbyVisionProfiles))
+		for _, profile := range narrowed.DolbyVisionProfiles {
+			if containsIntV3(panel.DolbyVisionProfiles, profile) {
+				profiles = append(profiles, profile)
+			}
+		}
+		narrowed.DolbyVisionProfiles = profiles
+		if !narrowed.HDR10 {
+			narrowed.HDR10MaxWidth, narrowed.HDR10MaxHeight, narrowed.HDR10MaxFrameRate, narrowed.HDR10MaxBitrateKbps = 0, 0, 0, 0
+		}
+		return &narrowed
 	}
 	if output.HDRDetails != nil {
 		return output.HDRDetails
@@ -323,7 +345,7 @@ func clientSupportsHLGV3(request StartRequestV3) bool {
 // source (checked by videoEligibleV3 on the caller's side).
 func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartRequestV3) (bool, string) {
 	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 8 ||
-		source.DVEnhancementLayer != EnhancementNoneV3 {
+		source.DVEnhancementLayer != EnhancementNoneV3 || !source.DVBaseLayerProven {
 		return false, ""
 	}
 	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]

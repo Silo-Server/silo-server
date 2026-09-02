@@ -20,8 +20,16 @@ const (
 	FeatureDeviceQuirksV3        = "device_quirks_v1"
 	FeatureSeekReanchorV3        = "seek_reanchor_v1"
 	FeatureOutputChangeV3        = "output_change_v1"
-	FeatureDirectStreamResumeV3  = "direct_stream_resume_v1"
-	FeaturePlanSourceDurationV3  = "plan_source_duration_v1"
+	// FeatureOutputDisplayEvidenceV3 tells a client this server understands
+	// output.display and its hdr_evidence tier. A pre-feature server ignores
+	// the field and falls back from a missing output.hdr_details to the
+	// device-level HDR facts, so a client that sends output.display must
+	// always send output.hdr_details (decoder ∩ display) as well; it may
+	// rely on the evidence tier being honoured only when this token is
+	// advertised.
+	FeatureOutputDisplayEvidenceV3 = "output_display_evidence_v1"
+	FeatureDirectStreamResumeV3    = "direct_stream_resume_v1"
+	FeaturePlanSourceDurationV3    = "plan_source_duration_v1"
 	// FeatureSoftwareVideoDecodeV3 lets a strict evidence-tier client opt into
 	// bounded hardware:false video_decode entries. Without the feature, exact
 	// and platform_attested retain their historical hardware-only direct-play
@@ -108,6 +116,7 @@ func ServerFeaturesV3() []string {
 		FeatureDeviceQuirksV3,
 		FeatureSeekReanchorV3,
 		FeatureOutputChangeV3,
+		FeatureOutputDisplayEvidenceV3,
 		FeatureDirectStreamResumeV3,
 		FeatureHeaderAuthenticatedMediaV3,
 		FeatureAuthorizedMediaOriginsV3,
@@ -687,22 +696,27 @@ type SourceDescriptorV3 struct {
 	// inventing. A client must not substitute the playback engine's reported
 	// duration for it — on an HLS copy remux the engine reports the length
 	// produced so far, not the runtime.
-	DurationSeconds    *float64           `json:"duration_seconds,omitempty"`
-	Container          string             `json:"container,omitempty"`
-	VideoCodec         string             `json:"video_codec,omitempty"`
-	VideoProfile       string             `json:"video_profile,omitempty"`
-	VideoLevel         int                `json:"video_level,omitempty"`
-	BitDepth           int                `json:"bit_depth,omitempty"`
-	ColorRange         string             `json:"color_range,omitempty"`
-	Width              int                `json:"width,omitempty"`
-	Height             int                `json:"height,omitempty"`
-	FrameRate          float64            `json:"frame_rate,omitempty"`
-	BitrateKbps        int                `json:"bitrate_kbps,omitempty"`
-	DynamicRange       string             `json:"dynamic_range,omitempty"`
-	HDR10Plus          bool               `json:"hdr10_plus"`
-	DVProfile          int                `json:"dolby_vision_profile,omitempty"`
-	DVLevel            int                `json:"dolby_vision_level,omitempty"`
-	DVBLCompatID       int                `json:"dv_bl_compat_id,omitempty"`
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+	Container       string   `json:"container,omitempty"`
+	VideoCodec      string   `json:"video_codec,omitempty"`
+	VideoProfile    string   `json:"video_profile,omitempty"`
+	VideoLevel      int      `json:"video_level,omitempty"`
+	BitDepth        int      `json:"bit_depth,omitempty"`
+	ColorRange      string   `json:"color_range,omitempty"`
+	Width           int      `json:"width,omitempty"`
+	Height          int      `json:"height,omitempty"`
+	FrameRate       float64  `json:"frame_rate,omitempty"`
+	BitrateKbps     int      `json:"bitrate_kbps,omitempty"`
+	DynamicRange    string   `json:"dynamic_range,omitempty"`
+	HDR10Plus       bool     `json:"hdr10_plus"`
+	DVProfile       int      `json:"dolby_vision_profile,omitempty"`
+	DVLevel         int      `json:"dolby_vision_level,omitempty"`
+	DVBLCompatID    int      `json:"dv_bl_compat_id,omitempty"`
+	// DVBaseLayerProven is true only when the scan recorded a Dolby Vision
+	// configuration record, an explicit compatibility id, and a present base
+	// layer. A legacy or contradictory row keeps the numeric id but cannot
+	// prove a decodable compatible base signal.
+	DVBaseLayerProven  bool               `json:"dv_base_layer_proven,omitempty"`
 	DVEnhancementLayer EnhancementLayerV3 `json:"dv_enhancement_layer"`
 	AudioCodec         string             `json:"audio_codec,omitempty"`
 	AudioChannels      int                `json:"audio_channels,omitempty"`
@@ -1112,6 +1126,25 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 		}
 		if err := validateHDRCapabilitiesV3(display.HDRTypes); err != nil {
 			return err
+		}
+		// An exact display record is the raw panel fact; output.hdr_details
+		// is supposed to be its intersection with the decoder. Reject a
+		// contradiction where hdr_details claims a range the panel does not
+		// carry rather than let planning pick whichever one it reads first.
+		if display.HDREvidence == OutputHDREvidenceExactV3 && ctx.Output.HDRDetails != nil {
+			panel := display.HDRTypes
+			if panel == nil {
+				panel = &HDRCapabilitiesV3{}
+			}
+			out := ctx.Output.HDRDetails
+			if out.HDR10 && !panel.HDR10 || out.HDR10Plus && !panel.HDR10Plus || out.HLG && !panel.HLG {
+				return errors.New("output hdr_details claims a range the exact display record does not carry")
+			}
+			for _, profile := range out.DolbyVisionProfiles {
+				if !containsIntV3(panel.DolbyVisionProfiles, profile) {
+					return errors.New("output hdr_details claims a dolby vision profile the exact display record does not carry")
+				}
+			}
 		}
 	}
 	for name, delivery := range ctx.Deliveries {
