@@ -781,6 +781,10 @@
         "dv_bl_compat_id": {
           "type": "integer"
         },
+        "dv_base_layer_proven": {
+          "type": "boolean",
+          "description": "True only when the scan recorded a Dolby Vision configuration record, an explicit compatibility id, and a present base layer."
+        },
         "dv_enhancement_layer": {
           "type": "string",
           "enum": [

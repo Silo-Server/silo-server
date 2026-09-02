@@ -261,25 +261,79 @@ func nativeOutputHDRV3(request StartRequestV3) *HDRCapabilitiesV3 {
 			narrowed.HDR10MaxFrameRate = tighterBoundFloatV3(narrowed.HDR10MaxFrameRate, panel.HDR10MaxFrameRate)
 			narrowed.HDR10MaxBitrateKbps = tighterBoundV3(narrowed.HDR10MaxBitrateKbps, panel.HDR10MaxBitrateKbps)
 		}
-		levels := make([]DolbyVisionProfileCapabilityV3, 0, len(narrowed.DolbyVisionProfileLevels))
-		for _, capability := range narrowed.DolbyVisionProfileLevels {
-			if !containsIntV3(profiles, capability.Profile) {
-				continue
-			}
-			for _, panelCapability := range panel.DolbyVisionProfileLevels {
-				if panelCapability.Profile == capability.Profile && panelCapability.MaxLevel > 0 && panelCapability.MaxLevel < capability.MaxLevel {
-					capability.MaxLevel = panelCapability.MaxLevel
-				}
-			}
-			levels = append(levels, capability)
-		}
-		narrowed.DolbyVisionProfileLevels = levels
+		narrowed.DolbyVisionProfileLevels = intersectDolbyVisionProfileLevelsV3(profiles, narrowed.DolbyVisionProfileLevels, panel.DolbyVisionProfileLevels)
 		return &narrowed
 	}
 	if output.HDRDetails != nil {
 		return output.HDRDetails
 	}
 	return request.Capabilities.HDRDetails
+}
+
+// intersectDolbyVisionProfileLevelsV3 keeps one bounded record per surviving
+// profile. When both sides bound a profile the tighter level wins and the
+// compatibility-id sets intersect (an empty set on one side means "any");
+// a record present on only one side is kept as-is so a panel-only bound is
+// never dropped.
+func intersectDolbyVisionProfileLevelsV3(profiles []int, output, panel []DolbyVisionProfileCapabilityV3) []DolbyVisionProfileCapabilityV3 {
+	byProfile := make(map[int]DolbyVisionProfileCapabilityV3, len(output)+len(panel))
+	for _, capability := range output {
+		if containsIntV3(profiles, capability.Profile) {
+			byProfile[capability.Profile] = capability
+		}
+	}
+	for _, panelCapability := range panel {
+		if !containsIntV3(profiles, panelCapability.Profile) {
+			continue
+		}
+		existing, ok := byProfile[panelCapability.Profile]
+		if !ok {
+			byProfile[panelCapability.Profile] = panelCapability
+			continue
+		}
+		if panelCapability.MaxLevel > 0 && (existing.MaxLevel == 0 || panelCapability.MaxLevel < existing.MaxLevel) {
+			existing.MaxLevel = panelCapability.MaxLevel
+		}
+		switch {
+		case len(panelCapability.BLCompatibilityIDs) == 0:
+		case len(existing.BLCompatibilityIDs) == 0:
+			existing.BLCompatibilityIDs = append([]int(nil), panelCapability.BLCompatibilityIDs...)
+		default:
+			ids := make([]int, 0, len(existing.BLCompatibilityIDs))
+			for _, id := range existing.BLCompatibilityIDs {
+				if containsIntV3(panelCapability.BLCompatibilityIDs, id) {
+					ids = append(ids, id)
+				}
+			}
+			if len(ids) == 0 {
+				// Disjoint compatibility sets: nothing this profile can carry.
+				ids = []int{-1}
+			}
+			existing.BLCompatibilityIDs = ids
+		}
+		byProfile[panelCapability.Profile] = existing
+	}
+	result := make([]DolbyVisionProfileCapabilityV3, 0, len(byProfile))
+	for _, profile := range profiles {
+		if capability, ok := byProfile[profile]; ok {
+			result = append(result, capability)
+		}
+	}
+	return result
+}
+
+// hdr10OutputFitsSourceV3 applies the resolved output's HDR10 ceilings to the
+// source. The per-delivery hdr_details gate re-checks the same ceilings later,
+// but a delivery that omits hdr_details would otherwise never see the panel's
+// limits at all.
+func hdr10OutputFitsSourceV3(hdr *HDRCapabilitiesV3, source SourceDescriptorV3) bool {
+	if hdr == nil || !hdr.HDR10 {
+		return false
+	}
+	return !(hdr.HDR10MaxWidth > 0 && source.Width > hdr.HDR10MaxWidth ||
+		hdr.HDR10MaxHeight > 0 && source.Height > hdr.HDR10MaxHeight ||
+		hdr.HDR10MaxFrameRate > 0 && source.FrameRate > hdr.HDR10MaxFrameRate ||
+		hdr.HDR10MaxBitrateKbps > 0 && source.BitrateKbps > hdr.HDR10MaxBitrateKbps)
 }
 
 func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, VideoClaimsV3) {
@@ -289,7 +343,7 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 	case "", "sdr":
 		return true, claims
 	case "hdr10":
-		claims.HDR10 = hdr != nil && hdr.HDR10
+		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
 		return claims.HDR10, claims
 	case DynamicRangeHDRUnknownV3:
 		// Legacy rows only recorded a file-level HDR flag without per-track
@@ -297,7 +351,7 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 		// an HDR10-capable output treats the source as HDR10 instead of
 		// refusing playback outright; the planner attaches a degradation
 		// warning for these assumed-range plans.
-		claims.HDR10 = hdr != nil && hdr.HDR10
+		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
 		return claims.HDR10, claims
 	case DynamicRangeHDR10PlusV3:
 		claims.HDR10Plus = hdr != nil && hdr.HDR10Plus
@@ -379,7 +433,7 @@ func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartReques
 	}
 	switch baseRange {
 	case DynamicRangeHDR10V3:
-		if !clientSupportsHDR10V3(request) {
+		if !hdr10OutputFitsSourceV3(nativeOutputHDRV3(request), source) {
 			return false, ""
 		}
 	case DynamicRangeHLGV3:

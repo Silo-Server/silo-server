@@ -299,3 +299,45 @@ func TestPlanPlaybackV3BaseLayerUsedWhenDeliveryRefusesNativeDolbyVision(t *test
 		t.Fatalf("expected the base-layer route when the delivery cannot carry native DV: %s", ExplainPlannerResultV3(result))
 	}
 }
+
+func TestNativeOutputHDRV3IntersectsDolbyVisionCompatibilityIDs(t *testing.T) {
+	req := validStartRequestV3()
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{
+		HDR10: true, DolbyVisionProfiles: []int{8},
+		DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 9, BLCompatibilityIDs: []int{1, 4}}},
+	}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{
+		HDR10: true, DolbyVisionProfiles: []int{8},
+		DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 9, BLCompatibilityIDs: []int{1}}},
+	}}
+	got := nativeOutputHDRV3(req)
+	if got == nil || len(got.DolbyVisionProfileLevels) != 1 || len(got.DolbyVisionProfileLevels[0].BLCompatibilityIDs) != 1 || got.DolbyVisionProfileLevels[0].BLCompatibilityIDs[0] != 1 {
+		t.Fatalf("compatibility ids were not intersected with the panel: %#v", got)
+	}
+	// A panel-only bounded record survives a legacy profile-only output.
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
+	got = nativeOutputHDRV3(req)
+	if got == nil || len(got.DolbyVisionProfileLevels) != 1 || got.DolbyVisionProfileLevels[0].MaxLevel != 9 {
+		t.Fatalf("panel-only profile bound was dropped: %#v", got)
+	}
+}
+
+func TestPlanPlaybackV3ExactPanelHDR10CeilingGatesNativeRouteWithoutDeliveryBounds(t *testing.T) {
+	file := detailedFixtureFileV3() // 4K HDR10
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080}}
+	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	direct.Containers = []string{"mkv"}
+	direct.VideoCodecs = []string{"hevc"}
+	direct.AudioDecodeCodecs = []string{"aac"}
+	direct.HDRDetails = nil // delivery omits its own bounds
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+
+	result := planDV8V3(t, file, req)
+	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10 {
+		t.Fatalf("a 4K HDR10 source must not be planned natively on a panel capped at 1080p HDR10: %#v", result.Plan)
+	}
+}
