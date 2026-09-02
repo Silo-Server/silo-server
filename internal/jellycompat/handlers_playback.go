@@ -1050,22 +1050,26 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 	}
 }
 
-// compatResolutionLabelForHeight buckets a probed pixel height into the
-// resolution labels access.CompareQuality understands.
-func compatResolutionLabelForHeight(height int) string {
-	switch {
-	case height >= 4320:
-		return "4320p"
-	case height >= 2160:
-		return "2160p"
-	case height >= 1080:
-		return "1080p"
-	case height >= 720:
-		return "720p"
-	case height > 0:
-		return "480p"
+// compatResolutionCeilingHeight returns the maximum pixel height a resolution
+// label (as returned by compatMaxResolutionForBitrateKbps) permits. Cap
+// enforcement compares a source's actual, unbucketed height against this
+// number rather than against a bucketed label: flooring the source height
+// into the same coarse labels first would equate, say, a 1440p source with a
+// genuine 1080p one and let it slip past a 1080p cap unflagged.
+func compatResolutionCeilingHeight(label string) int {
+	switch label {
+	case "480p":
+		return 480
+	case "720p":
+		return 720
+	case "1080p":
+		return 1080
+	case "2160p":
+		return 2160
+	case "4320p":
+		return 4320
 	default:
-		return ""
+		return 0
 	}
 }
 
@@ -2208,8 +2212,8 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	qualityCapExceeded := maxStreamingBitrateKbps > 0 && version.Bitrate > maxStreamingBitrateKbps
 	if !qualityCapExceeded && maxStreamingBitrateKbps > 0 {
 		if resCap := compatMaxResolutionForBitrateKbps(maxStreamingBitrateKbps); resCap != "" {
-			if sourceLabel := compatResolutionLabelForHeight(compatSourceVideoHeight(version)); sourceLabel != "" {
-				qualityCapExceeded = access.CompareQuality(sourceLabel, resCap) > 0
+			if sourceHeight := compatSourceVideoHeight(version); sourceHeight > 0 {
+				qualityCapExceeded = sourceHeight > compatResolutionCeilingHeight(resCap)
 			}
 		}
 	}

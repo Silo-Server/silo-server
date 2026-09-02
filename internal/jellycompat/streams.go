@@ -21,7 +21,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -2584,8 +2583,8 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// recipe already pinned above.
 	if opts.TargetResolution == "" {
 		if resCap := compatMaxResolutionForBitrateKbps(source.MaxStreamingBitrateKbps); resCap != "" {
-			if sourceLabel := compatResolutionLabelForHeight(compatSourceVideoHeight(source.Version)); sourceLabel != "" &&
-				access.CompareQuality(sourceLabel, resCap) > 0 {
+			if sourceHeight := compatSourceVideoHeight(source.Version); sourceHeight > 0 &&
+				sourceHeight > compatResolutionCeilingHeight(resCap) {
 				opts.TargetResolution = resCap
 			}
 		}

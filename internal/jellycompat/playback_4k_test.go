@@ -326,27 +326,51 @@ func TestBuildPlaybackSourceMaxStreamingBitrateGateResolutionImplied(t *testing.
 			{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"},
 		},
 	}
-	// An unusually efficient 1080p encode: its bitrate alone fits under a
-	// "720p - 4 Mbps" cap, but its resolution does not.
-	version := catalog.FileVersion{
-		FileID:     1,
-		Resolution: "1080p",
-		CodecVideo: "h264",
-		CodecAudio: "aac",
-		Container:  "mp4",
-		Bitrate:    3_000,
+
+	tests := []struct {
+		name    string
+		version catalog.FileVersion
+		req     playbackInfoRequest
+	}{
+		{
+			// An unusually efficient 1080p encode: its bitrate alone fits under
+			// a "720p - 4 Mbps" cap, but its resolution does not.
+			name: "1080p source under a 720p cap's bitrate",
+			version: catalog.FileVersion{
+				FileID: 1, Resolution: "1080p", CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
+				Bitrate: 3_000,
+			},
+			req: playbackInfoRequest{MaxStreamingBitrate: 4_000_000},
+		},
+		{
+			// Regression: 1440p sits strictly between the 1080p and 2160p
+			// buckets. Flooring it into the coarser "1080p" label before
+			// comparing would equate it with a genuine 1080p source and let
+			// it slip past a 10 Mbps ("1080p") cap unflagged.
+			name: "1440p source under a 1080p cap",
+			version: catalog.FileVersion{
+				FileID: 1, CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
+				VideoTracks: []models.VideoTrack{{Height: 1440}},
+				Bitrate:     3_000,
+			},
+			req: playbackInfoRequest{MaxStreamingBitrate: 10_000_000},
+		},
 	}
 
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	source := h.buildPlaybackSource("item", "ps", version, permissive, playbackInfoRequest{MaxStreamingBitrate: 4_000_000}, false)
-	if source.SupportsDirectPlay {
-		t.Error("SupportsDirectPlay = true, want false: source resolution exceeds the cap's implied 720p ceiling")
-	}
-	if source.SupportsDirectStream {
-		t.Error("SupportsDirectStream = true, want false: source resolution exceeds the cap's implied 720p ceiling")
-	}
-	if !source.SupportsTranscoding {
-		t.Error("expected a full transcode to remain available")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := h.buildPlaybackSource("item", "ps", tt.version, permissive, tt.req, false)
+			if source.SupportsDirectPlay {
+				t.Error("SupportsDirectPlay = true, want false: source resolution exceeds the cap's implied ceiling")
+			}
+			if source.SupportsDirectStream {
+				t.Error("SupportsDirectStream = true, want false: source resolution exceeds the cap's implied ceiling")
+			}
+			if !source.SupportsTranscoding {
+				t.Error("expected a full transcode to remain available")
+			}
+		})
 	}
 }
 
@@ -368,22 +392,21 @@ func TestCompatMaxResolutionForBitrateKbps(t *testing.T) {
 	}
 }
 
-func TestCompatResolutionLabelForHeight(t *testing.T) {
+func TestCompatResolutionCeilingHeight(t *testing.T) {
 	tests := []struct {
-		height int
-		want   string
+		label string
+		want  int
 	}{
-		{height: 0, want: ""},
-		{height: 480, want: "480p"},
-		{height: 576, want: "480p"},
-		{height: 720, want: "720p"},
-		{height: 1080, want: "1080p"},
-		{height: 2160, want: "2160p"},
-		{height: 4320, want: "4320p"},
+		{label: "", want: 0},
+		{label: "480p", want: 480},
+		{label: "720p", want: 720},
+		{label: "1080p", want: 1080},
+		{label: "2160p", want: 2160},
+		{label: "4320p", want: 4320},
 	}
 	for _, tt := range tests {
-		if got := compatResolutionLabelForHeight(tt.height); got != tt.want {
-			t.Errorf("compatResolutionLabelForHeight(%d) = %q, want %q", tt.height, got, tt.want)
+		if got := compatResolutionCeilingHeight(tt.label); got != tt.want {
+			t.Errorf("compatResolutionCeilingHeight(%q) = %d, want %d", tt.label, got, tt.want)
 		}
 	}
 }
