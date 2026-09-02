@@ -210,10 +210,13 @@ verify-migration-ledger:
 SCENARIO_CATALOG_DIR := contracts/api/v2/scenarios
 
 # Fail when a tier-1 scenario catalog violates its JSON Schema, names a row
-# the migration ledger does not carry at tier 1, or leaves a tier-1 row of a
-# declared wave without a scenario per applicable category. The executor that
-# runs the scenarios against the router is a separate go test
-# (./internal/scenariocatalog/executor); only its public subset runs in CI.
+# the migration ledger does not carry at tier 1, files a row outside its route
+# group's catalog, or leaves a tier-1 row of a declared wave without a scenario
+# per applicable category. The executor that runs the scenarios against the
+# router is a separate go test (./internal/scenariocatalog/executor); only its
+# public subset runs in CI. The rest runs when SILO_SCENARIO_DATABASE_URL names
+# an empty database the executor owns (not SILO_TEST_DATABASE_URL: it
+# truncates).
 verify-scenario-catalogs:
 	@go test -count=1 -run '^TestCatalogsPassGate$$' ./internal/scenariocatalog/ \
 		|| { echo "::error::$(SCENARIO_CATALOG_DIR) violates scenario-catalog.schema.json or leaves a tier-1 row uncovered"; exit 1; }

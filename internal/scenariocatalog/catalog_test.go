@@ -50,6 +50,115 @@ func TestGateFailsWhenARowIsMissing(t *testing.T) {
 	}
 }
 
+// TestGateRejectsMisfiledRow moves POST /auth/login into the devices catalog
+// and expects the gate to name the row and the catalog it belongs to.
+func TestGateRejectsMisfiledRow(t *testing.T) {
+	catalogs, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := LoadLedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var auth, devices *Catalog
+	for _, c := range catalogs {
+		switch c.RouteGroup {
+		case GroupAuth:
+			auth = c
+		case GroupDevices:
+			devices = c
+		}
+	}
+	if auth == nil || devices == nil {
+		t.Fatal("auth or devices catalog not found")
+	}
+	var moved *Row
+	for i := range auth.Rows {
+		if auth.Rows[i].Method == "POST" && auth.Rows[i].Path == "/api/v1/auth/login" && auth.Rows[i].RegistrationIndex == 0 {
+			moved = &auth.Rows[i]
+			auth.Rows = append(auth.Rows[:i:i], auth.Rows[i+1:]...)
+			break
+		}
+	}
+	if moved == nil {
+		t.Fatal("login row not found")
+	}
+	devices.Rows = append(devices.Rows, *moved)
+	err = verify(catalogs, ledger)
+	if err == nil {
+		t.Fatal("gate accepted a row filed under the wrong route group")
+	}
+	want := moved.Key().String() + " belongs to ledger route group /api/v1/auth, not /api/v1/devices"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("gate did not report the misfiled row; want %q in:\n%v", want, err)
+	}
+}
+
+// TestGateRejectsRowWithoutExecutableAssertion empties a tier-1 row and
+// marks every category not_applicable; the gate must still refuse it.
+func TestGateRejectsRowWithoutExecutableAssertion(t *testing.T) {
+	catalogs, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := LoadLedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var victim *Row
+	for _, c := range catalogs {
+		if c.RouteGroup == GroupDevices && len(c.Rows) > 1 {
+			victim = &c.Rows[1]
+		}
+	}
+	if victim == nil {
+		t.Fatal("devices catalog row not found")
+	}
+	victim.Scenarios = nil
+	victim.NotApplicable = map[Category]string{}
+	for _, cat := range Categories {
+		victim.NotApplicable[cat] = "not applicable to this row"
+	}
+	err = verify(catalogs, ledger)
+	if err == nil || !strings.Contains(err.Error(), "has no status_headers or authorization scenario") {
+		t.Fatalf("gate accepted a tier-1 row with zero scenarios: %v", err)
+	}
+}
+
+// TestSchemaRejectsEmptyScenarios pins minItems: 1 on row.scenarios.
+func TestSchemaRejectsEmptyScenarios(t *testing.T) {
+	schemaBytes, err := scenarios.FS.ReadFile(scenarios.SchemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	na := map[string]any{}
+	for _, cat := range Categories {
+		na[string(cat)] = "not applicable to this row"
+	}
+	catalog := map[string]any{
+		"schema_version": 1,
+		"listener":       "api",
+		"route_group":    GroupAuth,
+		"wave":           1,
+		"description":    "test",
+		"rows": []any{map[string]any{
+			"listener": "api", "method": "GET", "path": "/api/v1/auth/me", "registration_index": 0,
+			"not_applicable": na,
+			"scenarios":      []any{},
+		}},
+	}
+	raw, _ := json.Marshal(catalog)
+	fsys := fstest.MapFS{
+		scenarios.SchemaPath:   {Data: schemaBytes},
+		"api/api-v1-auth.json": {Data: raw},
+	}
+	_, err = load(fsys)
+	if err == nil || !strings.Contains(err.Error(), "minItems") {
+		t.Fatalf("expected a minItems violation, got %v", err)
+	}
+}
+
 func TestSchemaRejectsUncoveredCategory(t *testing.T) {
 	schemaBytes, err := scenarios.FS.ReadFile(scenarios.SchemaPath)
 	if err != nil {

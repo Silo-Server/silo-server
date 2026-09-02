@@ -123,6 +123,7 @@ def profiles():
            {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 2}]}),
         sc("profiles_list.api_key", "authorization", "An unscoped API key lists its owner's profiles (PIN verification is skipped for keys).", {"class": "api_key"}, {"path": "/api/v1/profiles/"},
            {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 2}]}),
+        other_account_profile("profiles_list", "/api/v1/profiles/"),
         unauth("profiles_list", "GET", "/api/v1/profiles/"),
         sc("profiles_list.error_shape", "error", "Refusal envelope shape.", "public", {"path": "/api/v1/profiles/"}, {"status": 401, "body": ERR_SHAPE}),
     ], not_applicable=na({"filtering": "No filter parameters; the whole household is returned.", "pagination": "Unpaged; a household is small by policy (max_profiles)."}, NA_RAW))
@@ -159,6 +160,7 @@ def profiles():
            {"path": "/api/v1/profiles/", "body": {"name": "Fixture Restricted", "library_restrictions_enabled": True, "allowed_library_ids": [7, 3]}},
            err(500, "internal_error", "Failed to store profile preferences"), fresh_state=True,
            notes="Unknown library ids are rejected by the database rather than validated (500 instead of 400/422). Flagged for the section PR; a fixture with real libraries lives in the catalog wave."),
+        other_account_profile("profiles_create", "/api/v1/profiles/", body=create_body),
         unauth("profiles_create", "POST", "/api/v1/profiles/", body=create_body),
     ], not_applicable=na({"sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     upd = "/api/v1/profiles/${profile_secondary}"
@@ -183,6 +185,7 @@ def profiles():
            {"path": upd, "body": {"max_playback_quality": "STANDARD"}}, {"status": 200, "body": [{"pointer": "/max_playback_quality", "op": "equals", "value": "1080p"}]}, fresh_state=True),
         sc("profiles_update.shape", "field_presence_nullability", "Response is the full profile shape, not a delta.", "primary_profile",
            {"path": upd, "body": {"auto_skip_recap": True}}, {"status": 200, "body": [PROFILE_REQUIRED]}, fresh_state=True),
+        other_account_profile("profiles_update", upd, body={"name": "X"}),
         unauth("profiles_update", "PUT", upd, body={"name": "X"}),
     ], not_applicable=na({"sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     delete_row = row("DELETE", "/api/v1/profiles/{id}", [
@@ -194,6 +197,7 @@ def profiles():
            {"path": "/api/v1/profiles/${profile_missing}"}, err(403, "forbidden", "Profile management requires the primary profile or admin access")),
         sc("profiles_delete.not_found", "error", "Unknown id is 404.", "primary_profile", {"path": "/api/v1/profiles/${profile_missing}"}, err(404, "not_found")),
         sc("profiles_delete.shape", "field_presence_nullability", "Success has no body.", "primary_profile", {"path": "/api/v1/profiles/${profile_child}"}, {"status": 204, "body_kind": "empty"}, fresh_state=True),
+        other_account_profile("profiles_delete", upd),
         unauth("profiles_delete", "DELETE", upd),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     pin_path = "/api/v1/profiles/${profile_locked}/verify-pin"
@@ -212,6 +216,7 @@ def profiles():
            {"path": pin_path, "body": {"pin": "${locked_pin}"}}, err(404, "not_found")),
         sc("verify_pin.missing", "error", "An empty pin is 400.", "authenticated", {"path": pin_path, "body": {"pin": ""}}, err(400, "bad_request", "PIN is required")),
         sc("verify_pin.malformed", "error", "A non-JSON body is 400.", "authenticated", {"path": pin_path, "raw_body": "x"}, err(400, "bad_request", "Invalid request body")),
+        other_account_profile("verify_pin", pin_path, body={"pin": "1"}),
         unauth("verify_pin", "POST", pin_path, body={"pin": "1"}),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     avatar_path = "/api/v1/profiles/${profile_secondary}/avatar"
@@ -234,6 +239,7 @@ def profiles():
         sc("avatar_upload.any_profile", "authorization", "Any profile of the account reaches the upload path for any sibling; there is no household gate (the request then fails on validation).", "profile",
            {"path": "/api/v1/profiles/${profile_primary}/avatar"}, err(400, "bad_request", "Invalid multipart form"),
            notes="No primary/admin check on avatar upload, unlike profile update. Flagged for the section PR."),
+        other_account_profile("avatar_upload", avatar_path),
         unauth("avatar_upload", "PUT", avatar_path),
     ], not_applicable=na(NA_SINGLE))
     delete_avatar_row = row("DELETE", "/api/v1/profiles/{id}/avatar", [
@@ -246,6 +252,7 @@ def profiles():
            notes="Avatar delete has no primary/admin gate, unlike profile update. Flagged for the section PR."),
         sc("avatar_delete.not_found", "error", "Unknown profile is 404.", "primary_profile", {"path": "/api/v1/profiles/${profile_missing}/avatar"}, err(404, "not_found")),
         sc("avatar_delete.shape", "field_presence_nullability", "Response is the profile shape.", "primary_profile", {"path": avatar_path}, {"status": 200, "body": [PROFILE_REQUIRED]}),
+        other_account_profile("avatar_delete", avatar_path),
         unauth("avatar_delete", "DELETE", avatar_path),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     household_row = row("GET", "/api/v1/profiles/household/sessions", [
@@ -257,6 +264,7 @@ def profiles():
            {"status": 200, "body": [{"pointer": "", "op": "type", "value": "array"}]}, notes="Bare-array top level unlike the wrapped {profiles:[]} sibling; flagged for the section PR."),
         sc("household.secondary_forbidden", "authorization", "A non-primary profile is 403.", "profile", {"path": "/api/v1/profiles/household/sessions"}, err(403, "forbidden")),
         sc("household.admin", "authorization", "An admin sees its own household regardless of profile.", "admin", {"path": "/api/v1/profiles/household/sessions"}, {"status": 200}),
+        other_account_profile("household", "/api/v1/profiles/household/sessions"),
         unauth("household", "GET", "/api/v1/profiles/household/sessions"),
         sc("household.error_shape", "error", "Refusal envelope shape.", "profile", {"path": "/api/v1/profiles/household/sessions"}, {"status": 403, "body": ERR_SHAPE}),
     ], not_applicable=na({"sorting": "Session rows are unordered in the fixture (empty); ordering is asserted in the playback wave.", "filtering": "Scoped to the caller's account only.", "pagination": "Unpaged live-session list."}, NA_RAW))
@@ -277,6 +285,7 @@ def profile_sections():
            {"status": 200, "body": [{"pointer": "", "op": "keys_equal", "value": ["overrides"]}]}),
         profile_required_400("overrides_get", "GET", base),
         unknown_profile_404("overrides_get", base),
+        other_account_profile("overrides_get", base),
         unauth("overrides_get", "GET", base),
     ], not_applicable=na({"sorting": "Overrides carry their own position field; the list is returned in store order.", "pagination": "Unpaged per-profile list.", "error": "Only the profile/auth refusals apply; the read has no validation branch."}, NA_RAW))
     save_ok = {"scope": "home", "overrides": [{"id": "00000000-0000-4000-8000-0000000000s1".replace("s", "e"), "section_id": "home-recently-added", "hidden": True, "position": 2}]}
@@ -302,6 +311,7 @@ def profile_sections():
            {"path": base, "body": {"overrides": [{"section_id": "", "section_type": "admin_curated_list", "config": {"item_ids": ["x"]}}]}}, err(403, "custom_disabled")),
         sc("overrides_put.shape", "field_presence_nullability", "Success has no body.", "profile", {"path": base, "body": {"overrides": []}}, {"status": 204, "body_kind": "empty"}, fresh_state=True),
         profile_required_400("overrides_put", "PUT", base, body={"overrides": []}),
+        other_account_profile("overrides_put", base, body={"overrides": []}),
         unauth("overrides_put", "PUT", base, body={"overrides": []}),
     ], not_applicable=na({"sorting": "Positions are client-supplied; no server ordering.", "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     reset_row = row("DELETE", "/api/v1/profile/sections/reset", [
@@ -310,6 +320,7 @@ def profile_sections():
         sc("overrides_reset.scope", "filtering", "scope and library_id select which override set is cleared.", "profile", {"path": base + "reset", "query": {"scope": "library", "library_id": "7"}}, {"status": 204, "body_kind": "empty"}),
         sc("overrides_reset.shape", "field_presence_nullability", "Success has no body.", "profile", {"path": base + "reset"}, {"status": 204, "body_kind": "empty"}),
         profile_required_400("overrides_reset", "DELETE", base + "reset"),
+        other_account_profile("overrides_reset", base + "reset"),
         unauth("overrides_reset", "DELETE", base + "reset"),
         sc("overrides_reset.error_shape", "error", "Refusal envelope shape.", "authenticated", {"path": base + "reset"}, {"status": 400, "body": ERR_SHAPE}),
     ], not_applicable=na({"sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
@@ -323,6 +334,7 @@ def profile_sections():
            {"status": 200, "body": [{"pointer": "/sections", "op": "empty"}]}),
         sc("section_settings.shape", "field_presence_nullability", "The wrapper has exactly sections.", "profile", {"path": base + "settings"}, {"status": 200, "body": [{"pointer": "", "op": "keys_equal", "value": ["sections"]}]}),
         profile_required_400("section_settings", "GET", base + "settings"),
+        other_account_profile("section_settings", base + "settings"),
         unauth("section_settings", "GET", base + "settings"),
     ], not_applicable=na({"sorting": "Ordered by resolved position; not observable on an empty fixture (see notes).", "pagination": "Unpaged settings list."}, NA_RAW))
     flags_row = row("GET", "/api/v1/profile/sections/flags", [
@@ -333,6 +345,7 @@ def profile_sections():
            settings={"sections.allow_profile_custom_sections": "true"}),
         sc("section_flags.shape", "field_presence_nullability", "Always a boolean.", "profile", {"path": base + "flags"}, {"status": 200, "body": [{"pointer": "/allow_profile_custom_sections", "op": "type", "value": "boolean"}]}),
         profile_required_400("section_flags", "GET", base + "flags"),
+        other_account_profile("section_flags", base + "flags"),
         unauth("section_flags", "GET", base + "flags"),
         sc("section_flags.error_shape", "error", "Refusal envelope shape.", "public", {"path": base + "flags"}, {"status": 401, "body": ERR_SHAPE}),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
@@ -355,6 +368,7 @@ def onboarding():
         sc("flow.child_filter", "filtering", "A child profile receives a flow without the requests step.", "child_profile", {"path": flow}, {"status": 200, "body": [{"pointer": "/steps", "op": "non_empty"}]}),
         sc("flow.shape", "field_presence_nullability", "steps is an array; optional step fields are omitted when empty.", "profile", {"path": flow}, {"status": 200, "body": [{"pointer": "/steps", "op": "type", "value": "array"}]}),
         profile_required_400("flow", "GET", flow),
+        other_account_profile("flow", flow),
         unauth("flow", "GET", flow),
     ], not_applicable=na({"sorting": "Steps are in authored tour order, not sortable.", "pagination": "Single manifest."}, NA_RAW))
     state_row = row("GET", "/api/v1/onboarding/state", [
@@ -364,6 +378,7 @@ def onboarding():
         sc("state.shape", "field_presence_nullability", "last_step, completed_at, skipped_at are omitted (not null) until written.", "profile", {"path": state},
            {"status": 200, "body": [{"pointer": "/last_step", "op": "absent"}, {"pointer": "/completed_at", "op": "absent"}, {"pointer": "/skipped_at", "op": "absent"}]}),
         profile_required_400("state", "GET", state),
+        other_account_profile("state", state),
         unauth("state", "GET", state),
         sc("state.error_shape", "error", "Refusal envelope shape.", "authenticated", {"path": state}, {"status": 400, "body": ERR_SHAPE}),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
@@ -377,6 +392,7 @@ def onboarding():
         sc("progress.empty_tour_id", "filtering", "An omitted tour_id means the current tour.", "profile", {"path": progress, "body": {"last_step": "welcome"}}, {"status": 204, "body_kind": "empty"}),
         sc("progress.shape", "field_presence_nullability", "Success has no body.", "profile", {"path": progress, "body": {"last_step": "welcome"}}, {"status": 204, "body_kind": "empty"}),
         profile_required_400("progress", "POST", progress, body={"last_step": "x"}),
+        other_account_profile("progress", progress, body={"last_step": "x"}),
         unauth("progress", "POST", progress, body={"last_step": "x"}),
     ], not_applicable=na({"sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     return catalog("/api/v1/onboarding", "First-run tour manifest and per-profile progress.", [flow_row, state_row, progress_row])
@@ -404,6 +420,7 @@ def devices():
         sc("devices_list.shape_fields", "field_presence_nullability", "Every device row has exactly the eight fields.", "primary_profile", {"path": base},
            {"status": 200, "body": [{"pointer": "/devices", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": DEVICE_KEYS}}]}),
         profile_required_400("devices_list", "GET", base),
+        other_account_profile("devices_list", base),
         unauth("devices_list", "GET", base),
         sc("devices_list.error_shape", "error", "Refusal envelope shape.", "profile", {"path": base, "query": {"scope": "household"}}, {"status": 403, "body": ERR_SHAPE}),
     ], not_applicable=na({"pagination": "Unpaged per-profile device list."}, NA_RAW))
@@ -420,6 +437,7 @@ def devices():
            {"path": forget, "query": {"profile_id": "${profile_missing}"}}, err(404, "not_found", "Profile not found")),
         sc("device_forget.shape", "field_presence_nullability", "Success has no body.", "primary_profile", {"path": base + "${device_b}"}, {"status": 204, "body_kind": "empty"}, fresh_state=True),
         profile_required_400("device_forget", "DELETE", forget),
+        other_account_profile("device_forget", forget),
         unauth("device_forget", "DELETE", forget),
     ], not_applicable=na({"sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     clear = forget + "/settings"
@@ -432,6 +450,7 @@ def devices():
            {"path": base + "fixture-device-c/settings", "query": {"profile_id": "${profile_secondary}"}}, {"status": 204, "body_kind": "empty"}),
         sc("device_clear.shape", "field_presence_nullability", "Success has no body.", "primary_profile", {"path": clear}, {"status": 204, "body_kind": "empty"}),
         profile_required_400("device_clear", "DELETE", clear),
+        other_account_profile("device_clear", clear),
         unauth("device_clear", "DELETE", clear),
     ], not_applicable=na({"sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     return catalog("/api/v1/devices", "The viewer's own device registry: list, forget, and clear device-scoped settings.", [list_row, forget_row, clear_row])

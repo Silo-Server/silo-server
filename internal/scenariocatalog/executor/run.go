@@ -84,7 +84,7 @@ func (e *Env) Run(t *testing.T, c *scenariocatalog.Catalog, row scenariocatalog.
 		needsDB = true
 	}
 	if needsDB && !e.HasDatabase() {
-		res.Skipped = "SILO_TEST_DATABASE_URL is not set"
+		res.Skipped = DatabaseEnv + " is not set"
 		t.Skip(res.Skipped)
 		return
 	}

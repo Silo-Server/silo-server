@@ -255,6 +255,60 @@
           "v2_expectation": null
         },
         {
+          "id": "profiles_list.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "profiles_list.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -1077,6 +1131,63 @@
           "v2_expectation": null
         },
         {
+          "id": "profiles_create.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "profiles_create.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -1628,6 +1739,63 @@
           "v2_expectation": null
         },
         {
+          "id": "profiles_update.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "name": "X"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "profiles_update.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -1928,6 +2096,60 @@
             "body_kind": "empty"
           },
           "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
           "v2_expectation": null
         },
         {
@@ -2300,6 +2522,63 @@
               }
             ]
           },
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": "1"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
           "v2_expectation": null
         },
         {
@@ -2732,6 +3011,60 @@
           "v2_expectation": null
         },
         {
+          "id": "avatar_upload.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "avatar_upload.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -2970,6 +3303,60 @@
           "v2_expectation": null
         },
         {
+          "id": "avatar_delete.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "avatar_delete.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -3168,6 +3555,60 @@
           "expect": {
             "status": 200
           },
+          "v2_expectation": null
+        },
+        {
+          "id": "household.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
           "v2_expectation": null
         },
         {

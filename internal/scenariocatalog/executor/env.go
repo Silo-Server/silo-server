@@ -6,9 +6,18 @@
 //   - offline: no database pool that can connect, so only the routes that
 //     register without one exist. Public discovery, health, and readiness
 //     failure cases run here in plain CI.
-//   - live: a real Postgres (SILO_TEST_DATABASE_URL) migrated and seeded with
-//     a deterministic synthetic household. Everything else runs here and is
-//     skipped when the variable is unset.
+//   - live: a real Postgres named by SILO_SCENARIO_DATABASE_URL, migrated and
+//     seeded with a deterministic synthetic household. Everything else runs
+//     here and is skipped when the variable is unset.
+//
+// SILO_SCENARIO_DATABASE_URL is deliberately not SILO_TEST_DATABASE_URL: the
+// executor TRUNCATEs users, access groups, invite codes, and invitations on
+// every reseed, which would break the other DB-gated packages sharing the
+// test database (and two executors sharing one database collide). Point it at
+// an empty database the executor owns. Before touching anything, including
+// running migrations, the executor inspects the database and refuses one
+// that holds media, libraries, accounts it did not seed (a NULL or empty
+// email counts as foreign), or server settings it did not write.
 //
 // Principals are minted from the synthetic fixture set at run time; catalogs
 // never carry credentials. Scenario bodies reference minted values through
@@ -47,6 +56,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/migrations"
 )
+
+// DatabaseEnv names the environment variable that points the executor at
+// its own scratch database. See the package documentation for why it is not
+// SILO_TEST_DATABASE_URL.
+const DatabaseEnv = "SILO_SCENARIO_DATABASE_URL"
 
 // Fixture account names, as catalogs reference them in principal.user.
 const (
@@ -175,7 +189,7 @@ func registeredRoutes(t testing.TB, h http.Handler) map[string]bool {
 }
 
 // New builds the environment. Database wiring happens only when
-// SILO_TEST_DATABASE_URL is set; the offline router always exists.
+// SILO_SCENARIO_DATABASE_URL is set; the offline router always exists.
 func New(t testing.TB) *Env {
 	t.Helper()
 	ctx := context.Background()
@@ -207,19 +221,22 @@ func New(t testing.TB) *Env {
 	t.Cleanup(e.offline.Close)
 	e.offlineRoutes = registeredRoutes(t, offlineRouter)
 
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	dsn := os.Getenv(DatabaseEnv)
 	if dsn == "" {
 		return e
 	}
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Fatalf("scenario executor: connect %s: %v", "SILO_TEST_DATABASE_URL", err)
+		t.Fatalf("scenario executor: connect %s: %v", DatabaseEnv, err)
 	}
 	t.Cleanup(pool.Close)
+	e.pool = pool
+	// Inspect before migrating: a mistargeted DSN must not be moved forward
+	// to this branch's schema, let alone truncated.
+	e.guardScratchDatabase()
 	if err := database.RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
 		t.Fatalf("scenario executor: migrate: %v", err)
 	}
-	e.pool = pool
 	e.settings = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
 	e.stores = pgstore.NewPostgresProvider(pool)
 	e.jwt = auth.NewJWTService(cfg.Auth.JWTSecret, cfg.Auth.AccessTokenExpiry, cfg.Auth.RefreshTokenExpiry)
@@ -483,20 +500,65 @@ func (e *Env) Reseed() {
 }
 
 // guardScratchDatabase refuses to touch a database that looks like anything
-// other than the executor's own scratch space: media rows or accounts the
-// seeder did not create.
+// other than the executor's own scratch space. It runs before migrations
+// (so it tolerates tables that do not exist yet) and before every reseed.
+// Foreign signals: any media item, file, or library folder; any account
+// whose email is not a fixture address (NULL and empty count as foreign,
+// since real deployments allow both); any server setting that carries a
+// secret-looking value the seeder never writes, or a branding name that is
+// not the fixture's.
 func (e *Env) guardScratchDatabase() {
-	var media int
-	if err := e.pool.QueryRow(e.ctx, `SELECT count(*) FROM media_items`).Scan(&media); err != nil {
-		e.t.Fatalf("scenario executor: inspect database: %v", err)
+	e.t.Helper()
+	const fixtureEmailPattern = "%@silo.example.test"
+	checks := []struct {
+		what  string
+		table string
+		where string
+		args  []any
+	}{
+		{"media items", "media_items", "", nil},
+		{"media files", "media_files", "", nil},
+		{"library folders", "media_folders", "", nil},
+		{"non-fixture users", "users", "email IS NULL OR btrim(email::text) = '' OR email::text NOT ILIKE $1", []any{fixtureEmailPattern}},
+		{"non-fixture server settings", "server_settings",
+			"(key ~ '(secret|password|api_key|access_key|token_secret|jwt)' AND value <> '') OR (key = 'branding.server_name' AND value <> $1)",
+			[]any{serverName}},
 	}
-	var foreign int
-	if err := e.pool.QueryRow(e.ctx, `SELECT count(*) FROM users WHERE email NOT LIKE '%@silo.example.test'`).Scan(&foreign); err != nil {
-		e.t.Fatalf("scenario executor: inspect users: %v", err)
+	var found []string
+	for _, c := range checks {
+		n, err := e.countIfTableExists(c.table, c.where, c.args...)
+		if err != nil {
+			e.t.Fatalf("scenario executor: inspect %s: %v", c.table, err)
+		}
+		if n > 0 {
+			found = append(found, fmt.Sprintf("%d %s", n, c.what))
+		}
 	}
-	if media > 0 || foreign > 0 {
-		e.t.Fatalf("scenario executor: SILO_TEST_DATABASE_URL points at a database with %d media items and %d non-fixture users; refusing to reseed a database with data", media, foreign)
+	if len(found) > 0 {
+		e.t.Fatalf("scenario executor: %s points at a database with %s; refusing to migrate or reseed a database that holds data the executor did not create",
+			DatabaseEnv, strings.Join(found, ", "))
 	}
+}
+
+// countIfTableExists counts rows matching where in table, or returns 0 when
+// the table has not been created yet (a fresh database before migrations).
+func (e *Env) countIfTableExists(table, where string, args ...any) (int, error) {
+	var exists bool
+	if err := e.pool.QueryRow(e.ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, nil
+	}
+	q := `SELECT count(*) FROM ` + table
+	if where != "" {
+		q += ` WHERE ` + where
+	}
+	var n int
+	if err := e.pool.QueryRow(e.ctx, q, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func (e *Env) mustExec(sql string, args ...any) {
@@ -613,7 +675,7 @@ func (e *Env) server(needsDB, dbUnavailable, rateLimited bool) (*httptest.Server
 		}
 		return e.offline, nil
 	case e.live == nil:
-		return nil, errors.New("SILO_TEST_DATABASE_URL is not set")
+		return nil, errors.New(DatabaseEnv + " is not set")
 	case rateLimited:
 		return e.liveLimited, nil
 	}

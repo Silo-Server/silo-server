@@ -8,11 +8,20 @@
 // Usage:
 //
 //	go run ./cmd/apibench -plan plan.json -out report.json \
-//	    [-db "$SILO_TEST_DATABASE_URL"] [-metrics http://127.0.0.1:8080/metrics] \
+//	    [-db postgres://...] [-metrics http://127.0.0.1:8080/metrics] \
 //	    [-concurrency 8] [-duration 30s] [-label v1-baseline]
 //
+// The database DSN for query-count deltas comes from -db or, when the flag
+// is empty, from SILO_BENCH_DATABASE_URL. The variable is read after flag
+// parsing and never used as a flag default, so -h and usage errors do not
+// echo a DSN (and its password) to the terminal. The harness has its own
+// variable rather than the executor's SILO_SCENARIO_DATABASE_URL because it
+// only reads pg_stat views on the server under test; it never migrates or
+// truncates.
+//
 // The plan holds no credentials; ${ENV_VAR} references inside it are
-// expanded at run time. See internal/apibench/testdata/plan.example.json.
+// expanded at run time. body_file paths resolve relative to the plan file.
+// See internal/apibench/testdata/plan.example.json.
 package main
 
 import (
@@ -23,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,15 +41,22 @@ import (
 	"github.com/Silo-Server/silo-server/internal/apibench"
 )
 
+// databaseEnv is the fallback source of the -db DSN. It is resolved after
+// flag.Parse so the value never appears in flag defaults or usage output.
+const databaseEnv = "SILO_BENCH_DATABASE_URL"
+
 func main() {
 	planPath := flag.String("plan", "", "path to the plan JSON (required)")
 	outPath := flag.String("out", "", "path to write the JSON report (default stdout)")
-	dbDSN := flag.String("db", os.Getenv("SILO_TEST_DATABASE_URL"), "Postgres DSN for query-count deltas (default $SILO_TEST_DATABASE_URL; empty disables)")
+	dbDSN := flag.String("db", "", "Postgres DSN for query-count deltas (falls back to $"+databaseEnv+"; empty disables)")
 	metricsURL := flag.String("metrics", "", "Prometheus /metrics URL for allocation deltas (empty disables)")
 	concurrency := flag.Int("concurrency", 0, "override plan concurrency")
 	duration := flag.Duration("duration", 0, "override plan duration per path")
 	label := flag.String("label", "", "override plan label")
 	flag.Parse()
+	if *dbDSN == "" {
+		*dbDSN = os.Getenv(databaseEnv)
+	}
 	if *planPath == "" {
 		fmt.Fprintln(os.Stderr, "apibench: -plan is required")
 		flag.Usage()
@@ -53,6 +70,7 @@ func main() {
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		fail(fmt.Errorf("parse plan: %w", err))
 	}
+	plan.BaseDir = filepath.Dir(*planPath)
 	if *concurrency > 0 {
 		plan.Concurrency = *concurrency
 	}

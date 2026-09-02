@@ -27,6 +27,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -51,7 +52,8 @@ type Path struct {
 	// with the session captured from a prior "capture_session_id" path.
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers,omitempty"`
-	// Body is an inline JSON body; BodyFile names a file to read instead.
+	// Body is an inline JSON body; BodyFile names a file to read instead,
+	// resolved relative to Plan.BaseDir (the plan file's directory).
 	Body     json.RawMessage `json:"body,omitempty"`
 	BodyFile string          `json:"body_file,omitempty"`
 	// CaptureSessionID reads response.session_id after the warm-up and
@@ -76,6 +78,9 @@ type Plan struct {
 	Bearer    string `json:"bearer"`
 	ProfileID string `json:"profile_id"`
 	EmbyToken string `json:"emby_token,omitempty"`
+	// BaseDir resolves relative BodyFile paths. It is not part of the JSON
+	// plan; the loader sets it to the plan file's directory.
+	BaseDir string `json:"-"`
 	// Concurrency is the number of parallel workers per path.
 	Concurrency int `json:"concurrency"`
 	// Duration bounds each path's measured window.
@@ -476,7 +481,11 @@ func (r *Runner) currentSession() string {
 func (r *Runner) loadBody(p Path) ([]byte, error) {
 	switch {
 	case p.BodyFile != "":
-		raw, err := os.ReadFile(p.BodyFile)
+		name := p.BodyFile
+		if !filepath.IsAbs(name) && r.Plan.BaseDir != "" {
+			name = filepath.Join(r.Plan.BaseDir, name)
+		}
+		raw, err := os.ReadFile(name)
 		if err != nil {
 			return nil, err
 		}

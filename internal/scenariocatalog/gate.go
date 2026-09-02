@@ -78,13 +78,20 @@ type Wave struct {
 // Route groups and rows wave 1 covers. The auth group is referenced from
 // tests as well, so it is a named constant.
 const (
-	GroupAuth   = "/api/v1/auth"
-	listenerAPI = "api"
+	GroupAuth    = "/api/v1/auth"
+	GroupDevices = "/api/v1/devices"
+	listenerAPI  = "api"
 )
 
 // Waves is the ratified wave order. A wave is gated once any catalog
 // declares it; later waves populate their catalogs before their first
 // section PR (maintainer decision on #135).
+//
+// Wave membership follows the migration ledger's release_flow (login, setup,
+// profiles), not the plan's prose list of route groups: /api/v1/onboarding
+// (release_flow setup) and /api/v1/profile/sections (release_flow profiles)
+// are tier-1 rows of those flows, so they sit in wave 1 even though the plan
+// text mentions onboarding under wave 2 and sections under wave 3.
 var Waves = []Wave{
 	{
 		Number: 1,
@@ -96,7 +103,7 @@ var Waves = []Wave{
 			"/api/v1/profile/sections",
 			"/api/v1/invitations/{token}",
 			"/api/v1/onboarding",
-			"/api/v1/devices",
+			GroupDevices,
 			"/api/v1/api-keys",
 			"/api/v1/admin/invitations",
 			"/api/v1/admin/invite-codes",
@@ -171,8 +178,13 @@ func verify(catalogs []*Catalog, byKey map[contractledger.Key]LedgerEntry) error
 				problems = append(problems, fmt.Sprintf("%s: row %s is not in the migration ledger", c.File, k))
 				continue
 			}
-			if entry.RouteGroup != c.RouteGroup && !required[c.Wave][k] {
-				problems = append(problems, fmt.Sprintf("%s: row %s belongs to ledger route group %s, not %s", c.File, k, entry.RouteGroup, c.RouteGroup))
+			// A row lives in the catalog of its ledger route group; only
+			// the wave's extra rows (health/ready under /api/v1) may not.
+			if entry.RouteGroup != c.RouteGroup && !isExtraRow(wave, k) {
+				problems = append(problems, fmt.Sprintf("%s: row %s belongs to ledger route group %s, not %s; move it to %s/%s.json", c.File, k, entry.RouteGroup, c.RouteGroup, entry.Listener, groupSlug(entry.RouteGroup)))
+			}
+			if entry.Tier == 1 && !hasExecutableAssertion(row) {
+				problems = append(problems, fmt.Sprintf("%s: tier-1 row %s has no status_headers or authorization scenario; every tier-1 row needs an executable assertion, not only not_applicable reasons", c.File, k))
 			}
 			if entry.Tier != 1 && row.Tier2Inclusion == "" {
 				problems = append(problems, fmt.Sprintf("%s: row %s is tier %d in the ledger; tier-2 rows need tier2_inclusion", c.File, k, entry.Tier))
@@ -224,6 +236,16 @@ func contains(list []string, s string) bool {
 	return false
 }
 
+// isExtraRow reports whether the wave lists the key as an extra row.
+func isExtraRow(w Wave, k contractledger.Key) bool {
+	for _, extra := range w.ExtraRows {
+		if extra == k {
+			return true
+		}
+	}
+	return false
+}
+
 // hasExtraGroup reports whether the catalog only holds extra rows of the
 // wave (the health/ready catalog under route group /api/v1).
 func hasExtraGroup(w Wave, c *Catalog) bool {
@@ -231,18 +253,23 @@ func hasExtraGroup(w Wave, c *Catalog) bool {
 		return false
 	}
 	for _, row := range c.Rows {
-		found := false
-		for _, k := range w.ExtraRows {
-			if k == row.Key() {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !isExtraRow(w, row.Key()) {
 			return false
 		}
 	}
 	return true
+}
+
+// hasExecutableAssertion reports whether the row pins at least one
+// status_headers or authorization scenario. not_applicable reasons on every
+// category would otherwise let a tier-1 row through with nothing to run.
+func hasExecutableAssertion(row Row) bool {
+	for _, s := range row.Scenarios {
+		if s.Category == CategoryStatusHeaders || s.Category == CategoryAuthorization {
+			return true
+		}
+	}
+	return false
 }
 
 // Coverage summarizes the catalogs for reports and tests.

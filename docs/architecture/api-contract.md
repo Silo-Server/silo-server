@@ -924,18 +924,29 @@ v2 behavior or a reviewed intentional difference. Behavior that looks accidental
 faithfully and flagged in `notes`, never corrected in the catalog.
 
 The coverage rule: every tier-1 row in a wave has a catalog, with at least one scenario per
-category or a stated `not_applicable` reason, before that wave's first section PR. Later waves
-populate their own catalogs on the same schedule. `make verify-scenario-catalogs`
-(`internal/scenariocatalog`) checks the schema, reconciles every row against the ledger, and
-fails on an uncovered row; CI runs it beside the ledger gate.
+category or a stated `not_applicable` reason, and at least one `status_headers` or
+`authorization` scenario so the row is executable, before that wave's first section PR. Later
+waves populate their own catalogs on the same schedule. Wave membership follows the ledger's
+`release_flow` (login, setup, profiles for wave 1), not the plan's prose list of route groups,
+which is why `/api/v1/onboarding` and `/api/v1/profile/sections` are wave-1 catalogs.
+`make verify-scenario-catalogs` (`internal/scenariocatalog`) checks the schema, reconciles every
+row against the ledger and its route group's catalog file, and fails on an uncovered or misfiled
+row; CI runs it beside the ledger gate.
 
 The executor (`internal/scenariocatalog/executor`) runs the scenarios through the real router
 and middleware in an in-process `httptest` server. Scenarios that only need the router — public
 discovery, readiness failure, validation, and auth refusals on routes that register without a
 user store — run in plain CI. Anything that sends a credential, applies a server setting, or
-declares `requires: [database]` runs only when `SILO_TEST_DATABASE_URL` points at a scratch
-database the executor may migrate and reseed, and skips otherwise; the executor refuses a
-database that holds media or non-fixture accounts.
+declares `requires: [database]` runs only when `SILO_SCENARIO_DATABASE_URL` points at an empty
+database the executor owns, and skips otherwise. The variable is deliberately not
+`SILO_TEST_DATABASE_URL`: the executor truncates accounts, access groups, invite codes, and
+invitations on every reseed, which would break the other DB-gated packages sharing the test
+database. Before migrating or reseeding, the executor inspects the database and refuses one
+that holds media, library folders, accounts it did not seed (NULL or empty emails count as
+foreign), or server settings it did not write. Every profile-scoped wave-1 row pins the
+cross-account case: a member bearer declaring a profile owned by another account is 404
+`not_found` from viewer access, so a v2 rewrite that resolves the profile before the account
+fails the catalog rather than passing silently.
 
 Fixture privacy follows the contract-fixture rule above: identities, profiles, codes, and
 tokens are deterministic synthetic values under reserved origins; credentials are minted at run

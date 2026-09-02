@@ -130,8 +130,10 @@ jobs:
       # Every tier-1 row in a migration wave needs an executable scenario
       # catalog before that wave's first section PR. The catalogs are
       # schema-checked and reconciled against the ledger here; the executor
-      # runs their public subset under make test-go and the rest against a
-      # scratch Postgres locally.
+      # runs their public subset under make test-go and the rest locally
+      # against an empty database named by SILO_SCENARIO_DATABASE_URL (a
+      # dedicated variable: the executor truncates, so it never shares
+      # SILO_TEST_DATABASE_URL with the other DB-gated packages).
       - name: Verify the tier-1 scenario catalogs cover their waves
         run: make verify-scenario-catalogs
 

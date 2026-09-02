@@ -425,6 +425,7 @@ def device_rows():
            notes="Profile binding is asserted through the seeded approved state in device_poll.remote_approved."),
         sc("handoff.shape", "field_presence_nullability", "The success body is exactly {status}.", "primary_profile",
            {"path": "/api/v1/auth/device/approve-handoff", "body": {"token": "${browser_code_remote}"}}, {"status": 200, "body": [{"pointer": "", "op": "keys_equal", "value": ["status"]}]}, fresh_state=True),
+        other_account_profile("handoff", "/api/v1/auth/device/approve-handoff", body={"token": "x"}),
         unauth("handoff", "POST", "/api/v1/auth/device/approve-handoff", body={"token": "x"}),
     ], not_applicable=na({"filtering": "Only the token/code selector; covered on the approve row.", "sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     deny = row("POST", "/api/v1/auth/device/deny", [

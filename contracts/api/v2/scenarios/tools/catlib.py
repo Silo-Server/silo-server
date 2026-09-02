@@ -87,6 +87,20 @@ def bad_token(id_prefix, path, body=None):
               "public", req, err(401, "unauthorized", "Invalid or expired token"))
 
 
+def other_account_profile(id_prefix, path, body=None):
+    """Member bearer declaring a profile the admin account owns. Viewer access
+    scopes the lookup to the bearer's account, so today this is 404 not_found,
+    indistinguishable from an unknown profile; the catalog pins it so a v2
+    rewrite that resolves the profile before the account cannot pass."""
+    req = {"path": path}
+    if body is not None:
+        req["body"] = body
+    return sc(f"{id_prefix}.other_account_profile", "authorization",
+              "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+              {"class": "profile", "profile": "admin_primary"}, req, err(404, "not_found", "Profile not found"),
+              notes="Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.")
+
+
 def rate_limited(id_prefix, path, endpoint_label, burst, method_body=None, principal="public", category="status_headers"):
     req = {"path": path, "repeat": burst + 1}
     if method_body is not None:

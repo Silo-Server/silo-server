@@ -24,20 +24,28 @@ from the report rather than reported as zero.
 `catalog_list`, `catalog_search`, `home_sections`, `playback_start`,
 `playback_replan`, `progress_write`, `jellycompat_browse`. The example plan
 under `testdata/plan.example.json` names all seven; copy it and fill in the
-`${...}` environment references. Playback start captures `session_id` from its
-first response so replan can target it. Mutating paths use `"once": true` so
-they run one request per worker instead of the full window.
+`${...}` environment references. The two playback paths read their bodies from
+`playback-start.json` and `playback-replan.json` next to the plan (`body_file`
+resolves relative to the plan file's directory); they are synthetic v3 shapes
+whose ids are `${SILO_BENCH_*}` placeholders, so set those too. Playback start
+captures `session_id` from its first response so replan can target it.
+Mutating paths use `"once": true` so they run one request per worker instead
+of the full window.
 
 ## Running
 
-Not part of CI. It needs a reachable server and, for query counts, a database
-DSN in the same style as the test suite's `SILO_TEST_DATABASE_URL` gating:
+Not part of CI. It needs a reachable server and, for query counts, a read-only
+DSN for that server's database in `SILO_BENCH_DATABASE_URL` (or `-db`). The
+harness only reads `pg_stat_*` views; it never migrates or truncates, which is
+why it does not share the executor's `SILO_SCENARIO_DATABASE_URL`. The DSN is
+read after flag parsing and is never a flag default, so `-h` and usage errors
+do not print it.
 
 ```
-SILO_BENCH_BEARER=... SILO_BENCH_PROFILE_ID=... \
+SILO_BENCH_BEARER=... SILO_BENCH_PROFILE_ID=... SILO_BENCH_DATABASE_URL=... \
 go run ./cmd/apibench -plan internal/apibench/testdata/plan.example.json \
     -out /tmp/v1-baseline.json -metrics http://127.0.0.1:8080/metrics \
-    -db "$SILO_TEST_DATABASE_URL" -concurrency 8 -duration 30s -label v1-baseline
+    -concurrency 8 -duration 30s -label v1-baseline
 ```
 
 Run the same plan against the v2 candidate with `-label v2-candidate` in the

@@ -8,7 +8,8 @@ import (
 
 // TestScenarioCatalogs runs every scenario against the real router. Public
 // and database-unavailable scenarios run in plain CI; the rest run when
-// SILO_TEST_DATABASE_URL points at a scratch database and skip otherwise.
+// SILO_SCENARIO_DATABASE_URL points at an empty database the executor owns
+// (never SILO_TEST_DATABASE_URL: the executor truncates) and skip otherwise.
 func TestScenarioCatalogs(t *testing.T) {
 	catalogs, err := scenariocatalog.Load()
 	if err != nil {

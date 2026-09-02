@@ -9,7 +9,8 @@
 //     route group agree with the ledger;
 //   - every tier-1 ledger row in a wave whose catalogs exist has a catalog
 //     row with at least one scenario per category, or a reason under
-//     not_applicable for each category it does not cover.
+//     not_applicable for each category it does not cover, and at least one
+//     status_headers or authorization scenario so the row is executable.
 //
 // The executor that runs the scenarios against the real router lives in the
 // executor subpackage so the gate stays free of handler dependencies.
@@ -34,12 +35,19 @@ import (
 // Category is one of the scenario classes the plan names for tier-1 rows.
 type Category string
 
+// Categories every tier-1 row must pin at least one scenario in (see
+// hasExecutableAssertion in gate.go).
+const (
+	CategoryStatusHeaders Category = "status_headers"
+	CategoryAuthorization Category = "authorization"
+)
+
 // Categories lists every category in schema order.
 var Categories = []Category{
-	"status_headers",
+	CategoryStatusHeaders,
 	"data_meaning",
 	"field_presence_nullability",
-	"authorization",
+	CategoryAuthorization,
 	"sorting",
 	"filtering",
 	"pagination",
