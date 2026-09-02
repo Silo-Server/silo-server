@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* Tailwind v4 wraps every `hover:` and `group-hover:` utility in
+   `@media (hover: hover)`. That feature is false on Windows machines whose
+   Chromium under-reports pointer capability — the same devices the card
+   controls gate works around — so every hover style in the app is silently
+   inert there, not just the card controls.
+
+   Gate on the observed-pointer attribute instead (see lib/pointerCapability.ts,
+   which seeds it from the equivalent media query at boot). Behaviour is
+   unchanged wherever the media query was already right; touch devices still
+   get no hover styling, because a touch press clears the attribute. */
+@custom-variant hover (:root[data-fine-pointer="true"] &:hover);
+
 /* ================================================================
    § 1  THEME BRIDGE — Tailwind ↔ CSS Custom Properties
    ================================================================
