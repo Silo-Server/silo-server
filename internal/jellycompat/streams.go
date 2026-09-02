@@ -2454,10 +2454,8 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 ) (*playback.TranscodeSession, error) {
 	sourceAudioChannels := compatHLSRecipeSourceAudioChannels(source)
 	audioTrackIndex := compatAudioTrackIndexOrDefault(source)
-	slog.WarnContext(ctx, "DEBUGCAP entry", "upstreamSessionID", upstreamSessionID, "sourceMaxStreamingBitrateKbps", source.MaxStreamingBitrateKbps, "hasExisting", h.tm.GetTranscodeSession(upstreamSessionID) != nil)
 	if existing := h.tm.GetTranscodeSession(upstreamSessionID); existing != nil && compatTranscodeSessionUsesToneMapMode(existing, requiredToneMapMode) {
 		if compatLiveTranscodeMatchesAudioSource(existing, source) {
-			slog.WarnContext(ctx, "DEBUGCAP reuse existing", "existingTargetBitrateKbps", existing.Opts().TargetBitrateKbps, "existingTargetResolution", existing.Opts().TargetResolution)
 			return existing, nil
 		}
 		return nil, errCompatRecipeSourceMismatch
@@ -2578,7 +2576,6 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// so it wins even over an already-set VideoToolbox tone-map bitrate: that
 	// value is resolution-derived and knows nothing about the client's request.
 	applyCompatMaxStreamingBitrateCap(&opts, source.MaxStreamingBitrateKbps)
-	slog.WarnContext(ctx, "DEBUGCAP after apply", "sourceMaxStreamingBitrateKbps", source.MaxStreamingBitrateKbps, "optsTargetBitrateKbps", opts.TargetBitrateKbps, "compatHLSCopiesVideo", compatHLSCopiesVideo(source))
 	// The same cap implies a resolution ceiling (a "720p - 4 Mbps" profile
 	// expects 720p output, not a 4K frame starved down to 4 Mbps): downscale
 	// when the source exceeds what the cap's quality-profile resolution
