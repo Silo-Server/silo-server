@@ -159,6 +159,9 @@ func attrValue(v slog.Value) any {
 	case slog.KindTime:
 		return v.Time().UTC().Format(time.RFC3339Nano)
 	case slog.KindAny:
+		if err, ok := v.Any().(error); ok {
+			return err.Error()
+		}
 		return v.Any()
 	default:
 		return v.String()
