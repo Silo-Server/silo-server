@@ -203,6 +203,101 @@ func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 	}
 }
 
+func TestBuildPlaybackSourceMaxStreamingBitrateGate(t *testing.T) {
+	// A DirectPlayProfile that would otherwise allow direct play outright, so
+	// any denial in these cases must come from the bitrate cap, not codec
+	// mismatch.
+	permissive := DeviceProfile{
+		DirectPlayProfiles: []DirectPlayProfile{
+			{Type: "Video", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"},
+		},
+		TranscodingProfiles: []TranscodingProfile{
+			{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"},
+		},
+	}
+	version := catalog.FileVersion{
+		FileID:     1,
+		Resolution: "1080p",
+		CodecVideo: "h264",
+		CodecAudio: "aac",
+		Container:  "mp4",
+		Bitrate:    20_000, // 20 Mbps source
+	}
+
+	tests := []struct {
+		name                 string
+		req                  playbackInfoRequest
+		profile              DeviceProfile
+		wantDirectPlay       bool
+		wantDirectStream     bool
+		wantHLSRemux         bool
+		wantMaxStreamingKbps int
+	}{
+		{
+			name:                 "no cap allows direct play",
+			req:                  playbackInfoRequest{},
+			profile:              permissive,
+			wantDirectPlay:       true,
+			wantDirectStream:     true,
+			wantMaxStreamingKbps: 0,
+		},
+		{
+			name:                 "cap above source bitrate allows direct play",
+			req:                  playbackInfoRequest{MaxStreamingBitrate: 25_000_000},
+			profile:              permissive,
+			wantDirectPlay:       true,
+			wantDirectStream:     true,
+			wantMaxStreamingKbps: 25_000,
+		},
+		{
+			name:                 "request cap below source bitrate forces transcode",
+			req:                  playbackInfoRequest{MaxStreamingBitrate: 4_000_000},
+			profile:              permissive,
+			wantMaxStreamingKbps: 4_000,
+		},
+		{
+			name:                 "device profile cap below source bitrate forces transcode",
+			req:                  playbackInfoRequest{},
+			profile:              deviceProfileWithMaxBitrate(permissive, 4_000_000),
+			wantMaxStreamingKbps: 4_000,
+		},
+		{
+			name: "tighter of the two caps applies",
+			req:  playbackInfoRequest{MaxStreamingBitrate: 25_000_000},
+			// Profile cap (4 Mbps) is tighter than the request cap (25 Mbps).
+			profile:              deviceProfileWithMaxBitrate(permissive, 4_000_000),
+			wantMaxStreamingKbps: 4_000,
+		},
+	}
+
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := h.buildPlaybackSource("item", "ps", version, tt.profile, tt.req, false)
+			if source.SupportsDirectPlay != tt.wantDirectPlay {
+				t.Errorf("SupportsDirectPlay = %v, want %v", source.SupportsDirectPlay, tt.wantDirectPlay)
+			}
+			if source.SupportsDirectStream != tt.wantDirectStream {
+				t.Errorf("SupportsDirectStream = %v, want %v", source.SupportsDirectStream, tt.wantDirectStream)
+			}
+			if source.HLSRemux != tt.wantHLSRemux {
+				t.Errorf("HLSRemux = %v, want %v", source.HLSRemux, tt.wantHLSRemux)
+			}
+			if source.MaxStreamingBitrateKbps != tt.wantMaxStreamingKbps {
+				t.Errorf("MaxStreamingBitrateKbps = %d, want %d", source.MaxStreamingBitrateKbps, tt.wantMaxStreamingKbps)
+			}
+			if !tt.wantDirectPlay && !tt.wantDirectStream && !tt.wantHLSRemux && !source.SupportsTranscoding {
+				t.Error("expected a full transcode to remain available when direct methods are withheld")
+			}
+		})
+	}
+}
+
+func deviceProfileWithMaxBitrate(profile DeviceProfile, maxStreamingBitrate int64) DeviceProfile {
+	profile.MaxStreamingBitrate = maxStreamingBitrate
+	return profile
+}
+
 // TestApplyCompatToneMapAvailability verifies compatibility sources reflect executor availability.
 func TestApplyCompatToneMapAvailability(t *testing.T) {
 	hdrVersion := catalog.FileVersion{

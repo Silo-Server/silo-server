@@ -2569,6 +2569,14 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 			opts.TargetBitrateKbps = autoVideoToolboxBitrate
 		}
 	}
+	// A client-requested MaxStreamingBitrate cap that forced this transcode
+	// (direct play and video-copy transports were withheld because the source
+	// exceeded it) must also bound the encode itself, or the "lower quality"
+	// pick still streams at the source's native bitrate. The VideoToolbox
+	// tone-map bitrate above is resolution-derived and takes priority when set.
+	if opts.TargetBitrateKbps == 0 && source.MaxStreamingBitrateKbps > 0 {
+		opts.TargetBitrateKbps = source.MaxStreamingBitrateKbps
+	}
 	opts.SegmentDuration = h.compatSegmentDuration()
 
 	// Hold the per-session lifecycle lock across "check existing → spawn →

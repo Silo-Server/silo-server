@@ -47,11 +47,15 @@ const (
 )
 
 type playbackInfoRequest struct {
-	UserID               string          `json:"UserId"`
-	MediaSourceID        string          `json:"MediaSourceId"`
-	AudioStreamIndex     *compatIntValue `json:"AudioStreamIndex,omitempty"`
-	SubtitleStreamIndex  *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
-	StartTimeTicks       int64           `json:"StartTimeTicks"`
+	UserID              string          `json:"UserId"`
+	MediaSourceID       string          `json:"MediaSourceId"`
+	AudioStreamIndex    *compatIntValue `json:"AudioStreamIndex,omitempty"`
+	SubtitleStreamIndex *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
+	StartTimeTicks      int64           `json:"StartTimeTicks"`
+	// MaxStreamingBitrate is the client's requested ceiling in bits per second
+	// (e.g. the "720p - 4 Mbps" quality profile), independent of any cap the
+	// device profile itself advertises. Zero means the client set no cap.
+	MaxStreamingBitrate  int64           `json:"MaxStreamingBitrate,omitempty"`
 	EnableDirectPlay     *bool           `json:"EnableDirectPlay"`
 	EnableDirectStream   *bool           `json:"EnableDirectStream"`
 	EnableTranscoding    *bool           `json:"EnableTranscoding"`
@@ -2148,7 +2152,19 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		selectedAudioIndex = intPtr(int(*req.AudioStreamIndex))
 	}
 
-	supportsDirectPlay := enableDirectPlay && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
+	// A client picking a lower quality profile (e.g. "720p - 4 Mbps") caps the
+	// stream via MaxStreamingBitrate rather than declaring narrower codec
+	// support. Direct play and any video-copy transport (progressive remux or
+	// HLS remux) all serve the source video verbatim, so none of them can honor
+	// a cap below the source's own bitrate — only a real transcode can. Below
+	// that cap, negotiation proceeds exactly as before.
+	maxStreamingBitrateKbps := effectiveCompatMaxStreamingBitrateKbps(req, profile)
+	bitrateCapExceeded := maxStreamingBitrateKbps > 0 && version.Bitrate > maxStreamingBitrateKbps
+	if bitrateCapExceeded {
+		allowVideoCopy = false
+	}
+
+	supportsDirectPlay := enableDirectPlay && !bitrateCapExceeded && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
 	audioSupported := profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	enableTranscoding := boolDefault(req.EnableTranscoding, true)
@@ -2213,7 +2229,28 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		SelectedAudioStreamIndex:   selectedAudioIndex,
 		DefaultSubtitleStreamIndex: subtitleIndex,
 		ETag:                       mediaSourceETag(version),
+		MaxStreamingBitrateKbps:    maxStreamingBitrateKbps,
 	}
+}
+
+// effectiveCompatMaxStreamingBitrateKbps returns the tighter of the two caps a
+// Jellyfin client can advertise: the per-request MaxStreamingBitrate (set when
+// the user picks a quality profile) and the device profile's own
+// MaxStreamingBitrate. Both arrive in bits per second; catalog.FileVersion.Bitrate
+// is kbps (see mediaSourceDTO's Bitrate*1000 conversion), so the result is
+// converted to match. Zero means neither side set a cap.
+func effectiveCompatMaxStreamingBitrateKbps(req playbackInfoRequest, profile DeviceProfile) int {
+	maxKbps := 0
+	if req.MaxStreamingBitrate > 0 {
+		maxKbps = int(req.MaxStreamingBitrate / 1000)
+	}
+	if profile.MaxStreamingBitrate > 0 {
+		profileMaxKbps := int(profile.MaxStreamingBitrate / 1000)
+		if maxKbps == 0 || profileMaxKbps < maxKbps {
+			maxKbps = profileMaxKbps
+		}
+	}
+	return maxKbps
 }
 
 // supportedHLSRemuxAudioStreamIndexes freezes the copy-safe switch targets. A
@@ -3134,6 +3171,9 @@ func applyPlaybackQueryOverrides(req *playbackInfoRequest, query url.Values) {
 	if value, ok := parseOptionalInt(firstQueryValue(query, "SubtitleStreamIndex")); ok {
 		req.SubtitleStreamIndex = compatIntValuePtr(value)
 	}
+	if value, ok := parseOptionalInt64(firstQueryValue(query, "MaxStreamingBitrate")); ok {
+		req.MaxStreamingBitrate = value
+	}
 	if value, ok := parseOptionalBool(firstQueryValue(query, "EnableDirectPlay")); ok {
 		req.EnableDirectPlay = &value
 	}
@@ -3176,6 +3216,17 @@ func parseOptionalInt(raw string) (int, bool) {
 		return 0, false
 	}
 	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+func parseOptionalInt64(raw string) (int64, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, false
 	}
