@@ -22,6 +22,23 @@ import (
 // space without colliding with silo's SPA fallback. See
 // newAudiobookshelfListener.
 func newRootHandler(apiRouter http.Handler) http.Handler {
+	return sealedHandler{h: newRootMux(apiRouter)}
+}
+
+// sealedHandler is what newRootHandler hands out: the finished mux behind an
+// unexported field and a ServeHTTP method, nothing else, so no assertion, type
+// switch or reflect call can recover a registration surface from it (see the
+// route inventory in docs/architecture/api-contract.md). Do not embed
+// http.Handler here: embedding exports the field and promotes its methods.
+type sealedHandler struct {
+	h http.Handler
+}
+
+func (h sealedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.h.ServeHTTP(w, r) }
+
+// newRootMux is the root listener's registration surface. The route inventory
+// generator walks this function; every registration must be reachable from it.
+func newRootMux(apiRouter http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	// Prometheus metrics are not behind auth.
 	mux.Handle("/metrics", promhttp.Handler())

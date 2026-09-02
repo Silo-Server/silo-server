@@ -9,8 +9,9 @@ import (
 )
 
 // The sweep is the module-wide half of the completeness guarantee. The walk
-// enumerates what the declared listeners register; the sweep proves that no
-// router can come into existence anywhere else. It runs over the type-checked
+// enumerates what the declared listeners register and seal.go proves nothing
+// can get a listener's router back; the sweep proves that no router can come
+// into existence or be recovered anywhere else. It runs over the type-checked
 // syntax of every non-test package in the module and refuses:
 //
 //   - any expression that produces a router — chi.Router, chi.Routes,
@@ -31,11 +32,14 @@ import (
 //     without a non-nil Handler, and an import of net/http/pprof or expvar
 //     (chi's middleware package links pprof in, so that mux is never empty).
 //
-// Every listener entry function returns its router as an http.Handler (the
-// walk checks the signature), so once the sweep has run the only way back to
-// a router after construction is a type assertion or type switch to a router
-// type. That is refused by the ruleguard rule in lintrules/, which
-// golangci-lint runs over the whole tree; the sweep does not model it.
+//   - any attempt to recover a router from a value: a type assertion or type
+//     switch case whose type is a router — by name or by method set, so an
+//     alias, a defined type, an embedding or structural interface count — a
+//     generic instantiated with such a type, and reflect.Value.MethodByName.
+//     Every listener entry function returns a sealed handler (seal.go), so
+//     none of these can succeed on a listener; they are refused so that a
+//     router that is not a listener cannot be recovered either. The ruleguard
+//     rule in lintrules/ reports the same shapes in the editor.
 
 // handlerConsumingCalls are the net/http functions whose last argument is the
 // handler to serve; nil selects http.DefaultServeMux.
@@ -136,19 +140,61 @@ func (s *sweeper) visit(decl ast.Node, where string, allowed bool) {
 				s.report(typed, "a variable is declared with %s %s; its zero value is a working router "+
 					"that no listener enumerates", typeLabel(t), where)
 			}
+		case *ast.TypeAssertExpr:
+			if typed.Type != nil {
+				s.recovery(typed, typed.Type, "type-asserts to")
+			}
+		case *ast.TypeSwitchStmt:
+			for _, stmt := range typed.Body.List {
+				clause, ok := stmt.(*ast.CaseClause)
+				if !ok {
+					continue
+				}
+				for _, expr := range clause.List {
+					s.recovery(expr, expr, "switches on")
+				}
+			}
 		}
 		return true
 	})
 }
 
-// ident refuses the two identifiers that matter wherever they appear: a router
-// constructor used as a function value, and http.DefaultServeMux.
+// recovery refuses a type assertion or switch case to a router type.
+func (s *sweeper) recovery(at ast.Node, typeExpr ast.Expr, verb string) {
+	t := s.info().TypeOf(typeExpr)
+	if _, isParam := types.Unalias(t).(*types.TypeParam); isParam {
+		s.report(at, "%s a type parameter; instantiated with a router type it would recover a router "+
+			"no listener enumerates", verb)
+		return
+	}
+	if kind := s.a.set.routerKind(t); kind != ctorNone {
+		s.report(at, "%s %s, which is %s by its method set; a router recovered from a value is a "+
+			"registration surface the inventory cannot see", verb, typeLabel(t), kind)
+	}
+}
+
+// ident refuses the identifiers that matter wherever they appear: a router
+// constructor used as a function value, http.DefaultServeMux, a generic
+// instantiated with a router type, and reflect.Value.MethodByName.
 func (s *sweeper) ident(ident *ast.Ident) {
+	if inst, ok := s.info().Instances[ident]; ok && inst.TypeArgs != nil {
+		for i := 0; i < inst.TypeArgs.Len(); i++ {
+			if kind := s.a.set.routerKind(inst.TypeArgs.At(i)); kind != ctorNone {
+				s.report(ident, "%s is instantiated with %s, which is %s by its method set; a generic "+
+					"can assert a value to its type argument and recover a router", ident.Name,
+					typeLabel(inst.TypeArgs.At(i)), kind)
+			}
+		}
+	}
 	switch obj := s.info().Uses[ident].(type) {
 	case *types.Func:
 		if isRouterCtor(obj) != ctorNone && !s.a.set.callees[ident] {
 			s.report(ident, "%s.%s is used as a function value rather than called; a router built through it "+
 				"would not be recognized as a construction", obj.Pkg().Name(), obj.Name())
+		}
+		if obj.Pkg() != nil && obj.Pkg().Path() == "reflect" && obj.Name() == "MethodByName" {
+			s.report(ident, "reflect.Value.MethodByName can call a registration method on a router the "+
+				"inventory cannot see")
 		}
 	case *types.Var:
 		if obj.Pkg() != nil && obj.Pkg().Path() == httpImportPath && obj.Name() == "DefaultServeMux" {

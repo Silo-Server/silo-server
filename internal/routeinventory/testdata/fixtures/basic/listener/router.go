@@ -31,8 +31,19 @@ func registerExtras(r chi.Router, h *Handlers) {
 	r.Get("/extras", h.Health)
 }
 
-// NewRouter is the fixture listener entry point.
+// NewRouter is the fixture listener entry point; it seals the router.
 func NewRouter(enableAdmin bool, adminHandler *Handlers) http.Handler {
+	return sealedHandler{h: newRouter(enableAdmin, adminHandler)}
+}
+
+// sealedHandler is the fixture's sealed return type.
+type sealedHandler struct {
+	h http.Handler
+}
+
+func (s sealedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.h.ServeHTTP(w, r) }
+
+func newRouter(enableAdmin bool, adminHandler *Handlers) chi.Router {
 	r := chi.NewRouter()
 	r.Use(baseMiddleware)
 	h := &Handlers{}

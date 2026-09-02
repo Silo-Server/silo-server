@@ -3,8 +3,6 @@ package transcodenode
 import (
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
@@ -29,7 +27,7 @@ func TestRouteInventoryMatchesRuntimeRouter(t *testing.T) {
 	router := NewServer(
 		nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{}),
 		nodesessions.NewTracker(nil, "", "", ""),
-	).Handler().(chi.Routes)
+	).router()
 
 	observed, err := routeinventory.Observed(router)
 	if err != nil {

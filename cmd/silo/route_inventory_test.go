@@ -24,11 +24,9 @@ func TestRouteInventoryMatchesRootListener(t *testing.T) {
 	}
 
 	apiStub := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	mux, ok := newRootHandler(apiStub).(*http.ServeMux)
-	if !ok {
-		t.Fatal("newRootHandler no longer returns an *http.ServeMux; the route inventory's root listener model is wrong")
-	}
-	observed, err := routeinventory.ObservedServeMux(mux)
+	// newRootHandler seals the mux; the test walks it through the unexported
+	// constructor, which is the same mux with the same registrations.
+	observed, err := routeinventory.ObservedServeMux(newRootMux(apiStub))
 	if err != nil {
 		t.Fatal(err)
 	}

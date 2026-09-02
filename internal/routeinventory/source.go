@@ -54,6 +54,13 @@ type sourceSet struct {
 	// callees are the identifiers in call position, so a constructor
 	// referenced as a function value can be told from one that is called.
 	callees map[*ast.Ident]bool
+
+	// registration holds, by method name, the signatures a type must carry
+	// one of to count as a router: chi.Router's registration methods and
+	// http.ServeMux's Handle/HandleFunc, read off the loaded packages.
+	registration map[string][]*types.Signature
+	// kinds memoizes routerKind; the leak check asks about every expression.
+	kinds map[types.Type]ctorKind
 }
 
 // loadSources type-checks the whole module under root and indexes it. It fails
@@ -65,25 +72,39 @@ func loadSources(root string, analyzed []string) (*sourceSet, error) {
 		return nil, err
 	}
 	fset := token.NewFileSet()
+	// The router packages are loaded by name beside the module so the
+	// registration signatures (routerKind's method-set check) come from the
+	// packages themselves, whether or not anything in the module imports them.
 	pkgs, err := packages.Load(&packages.Config{
 		Mode: packages.LoadSyntax | packages.NeedModule,
 		Dir:  root,
 		Fset: fset,
-	}, "./...")
+	}, "./...", chiImportPath, httpImportPath)
 	if err != nil {
 		return nil, fmt.Errorf("load packages under %s: %w", root, err)
 	}
 	set := &sourceSet{
-		fset:      fset,
-		root:      root,
-		packages:  map[string]*pkgSource{},
-		byImport:  map[string]*pkgSource{},
-		funcDecls: map[*types.Func]*ast.FuncDecl{},
-		declPkg:   map[*ast.FuncDecl]*pkgSource{},
-		callees:   map[*ast.Ident]bool{},
+		fset:         fset,
+		root:         root,
+		packages:     map[string]*pkgSource{},
+		byImport:     map[string]*pkgSource{},
+		funcDecls:    map[*types.Func]*ast.FuncDecl{},
+		declPkg:      map[*ast.FuncDecl]*pkgSource{},
+		callees:      map[*ast.Ident]bool{},
+		registration: map[string][]*types.Signature{},
+		kinds:        map[types.Type]ctorKind{},
 	}
 	var problems []string
+	var routerPkgs []*types.Package
 	for _, pkg := range pkgs {
+		if pkg.PkgPath == chiImportPath || pkg.PkgPath == httpImportPath {
+			// A module that does not depend on chi has nothing chi-shaped to
+			// recognize, and net/http is always present; neither is swept.
+			if pkg.Types != nil {
+				routerPkgs = append(routerPkgs, pkg.Types)
+			}
+			continue
+		}
 		if len(pkg.GoFiles) == 0 && len(pkg.Syntax) == 0 {
 			// A directory whose files are all excluded by build constraints
 			// (the ruleguard rules in lintrules/) lists as a package with an
@@ -113,6 +134,7 @@ func loadSources(root string, analyzed []string) (*sourceSet, error) {
 		return nil, fmt.Errorf("no Go packages under %s", root)
 	}
 	sort.Slice(set.all, func(i, j int) bool { return set.all[i].Dir < set.all[j].Dir })
+	set.indexRegistrationMethods(routerPkgs)
 
 	byDir := map[string]*pkgSource{}
 	for _, src := range set.all {
@@ -281,18 +303,109 @@ func routerTypeKind(t types.Type) ctorKind {
 	return ctorNone
 }
 
-// routerKind is routerTypeKind on a possibly nil type.
-func (s *sourceSet) routerKind(t types.Type) ctorKind { return routerTypeKind(t) }
+// registrationMethods are the router methods that add to or reshape the served
+// surface. A type that carries one of them with the signature chi.Router or
+// http.ServeMux gives it is a registration surface whatever it is called: an
+// interface embedding chi.Router, a structural interface spelling one method,
+// or a wrapper struct. Read-only methods (Routes, Match, ...) are not here: a
+// value that can only be walked registers nothing.
+var registrationMethods = map[string]bool{
+	methodHandle: true, methodHandleFunc: true, "Method": true, "MethodFunc": true,
+	"Connect": true, "Delete": true, "Get": true, "Head": true, "Options": true,
+	"Patch": true, "Post": true, "Put": true, "Trace": true,
+	"Route": true, "Group": true, "Mount": true, "Use": true, methodWith: true,
+	"NotFound": true, "MethodNotAllowed": true,
+}
+
+// indexRegistrationMethods reads the registration signatures off the chi and
+// net/http packages themselves, so the method-set check compares against what
+// those packages declare rather than a spelling kept here.
+func (s *sourceSet) indexRegistrationMethods(routerPkgs []*types.Package) {
+	for _, pkg := range routerPkgs {
+		switch pkg.Path() {
+		case chiImportPath:
+			if obj, ok := pkg.Scope().Lookup("Router").(*types.TypeName); ok {
+				s.addRegistrationMethods(obj.Type())
+			}
+		case httpImportPath:
+			if obj, ok := pkg.Scope().Lookup("ServeMux").(*types.TypeName); ok {
+				s.addRegistrationMethods(types.NewPointer(obj.Type()))
+			}
+		}
+	}
+}
+
+func (s *sourceSet) addRegistrationMethods(t types.Type) {
+	set := types.NewMethodSet(t)
+	for i := 0; i < set.Len(); i++ {
+		fn, ok := set.At(i).Obj().(*types.Func)
+		if !ok || !registrationMethods[fn.Name()] {
+			continue
+		}
+		s.registration[fn.Name()] = append(s.registration[fn.Name()], fn.Signature())
+	}
+}
+
+// routerKind classifies a type as a router, or ctorNone. It is routerTypeKind
+// — chi.Router, chi.Routes, chi.Mux, http.ServeMux, through aliases and one
+// pointer — widened by a method-set check: any type whose method set carries a
+// registration method with the signature chi.Router or http.ServeMux gives it
+// can have routes registered on it, whatever it is named. That is what makes
+// an alias, a defined interface type, an interface embedding chi.Router and a
+// structural interface all the same thing to the walk, the sweep and the
+// sealing checks.
+func (s *sourceSet) routerKind(t types.Type) ctorKind {
+	if t == nil {
+		return ctorNone
+	}
+	if kind, ok := s.kinds[t]; ok {
+		return kind
+	}
+	kind := routerTypeKind(t)
+	if kind == ctorNone {
+		kind = s.registrationKind(t)
+	}
+	s.kinds[t] = kind
+	return kind
+}
+
+// registrationKind is the method-set half of routerKind: chi-shaped when t
+// carries any chi registration method, ServeMux-shaped when it carries only
+// Handle/HandleFunc. A type parameter has no method set of its own to judge;
+// the sweep refuses the instantiation instead.
+func (s *sourceSet) registrationKind(t types.Type) ctorKind {
+	if _, isParam := types.Unalias(t).(*types.TypeParam); isParam {
+		return ctorNone
+	}
+	kind := ctorNone
+	for name, signatures := range s.registration {
+		obj, _, _ := types.LookupFieldOrMethod(t, true, nil, name)
+		fn, ok := obj.(*types.Func)
+		if !ok {
+			continue
+		}
+		for _, want := range signatures {
+			if !types.Identical(fn.Signature(), want) {
+				continue
+			}
+			if name != methodHandle && name != methodHandleFunc {
+				return ctorChiRouter
+			}
+			kind = ctorServeMux
+		}
+	}
+	return kind
+}
 
 // tupleRouterKind is routerTypeKind over a possibly multi-valued expression
 // type: a call returning `(*chi.Mux, error)` produces a router too.
 func (s *sourceSet) tupleRouterKind(t types.Type) ctorKind {
 	tuple, ok := t.(*types.Tuple)
 	if !ok {
-		return routerTypeKind(t)
+		return s.routerKind(t)
 	}
 	for i := 0; i < tuple.Len(); i++ {
-		if kind := routerTypeKind(tuple.At(i).Type()); kind != ctorNone {
+		if kind := s.routerKind(tuple.At(i).Type()); kind != ctorNone {
 			return kind
 		}
 	}
@@ -312,16 +425,16 @@ func (s *sourceSet) producesRouter(t types.Type) bool {
 	}
 	if tuple, ok := t.(*types.Tuple); ok {
 		for i := 0; i < tuple.Len(); i++ {
-			if holdsRouterValue(tuple.At(i).Type(), map[types.Type]bool{}) {
+			if s.holdsRouterValue(tuple.At(i).Type(), map[types.Type]bool{}) {
 				return true
 			}
 		}
 		return false
 	}
-	return holdsRouterValue(t, map[types.Type]bool{})
+	return s.holdsRouterValue(t, map[types.Type]bool{})
 }
 
-func holdsRouterValue(t types.Type, seen map[types.Type]bool) bool {
+func (s *sourceSet) holdsRouterValue(t types.Type, seen map[types.Type]bool) bool {
 	if t == nil {
 		return false
 	}
@@ -335,21 +448,21 @@ func holdsRouterValue(t types.Type, seen map[types.Type]bool) bool {
 		if _, isInterface := typed.Underlying().(*types.Interface); !isInterface && routerTypeKind(typed) != ctorNone {
 			return true
 		}
-		return holdsRouterValue(typed.Underlying(), seen)
+		return s.holdsRouterValue(typed.Underlying(), seen)
 	case *types.Struct:
 		for i := 0; i < typed.NumFields(); i++ {
-			if holdsRouterValue(typed.Field(i).Type(), seen) {
+			if s.holdsRouterValue(typed.Field(i).Type(), seen) {
 				return true
 			}
 		}
 	case *types.Array:
-		return holdsRouterValue(typed.Elem(), seen)
+		return s.holdsRouterValue(typed.Elem(), seen)
 	case *types.Slice:
-		return holdsRouterValue(typed.Elem(), seen)
+		return s.holdsRouterValue(typed.Elem(), seen)
 	case *types.Map:
-		return holdsRouterValue(typed.Elem(), seen)
+		return s.holdsRouterValue(typed.Elem(), seen)
 	case *types.Chan:
-		return holdsRouterValue(typed.Elem(), seen)
+		return s.holdsRouterValue(typed.Elem(), seen)
 	}
 	return false
 }

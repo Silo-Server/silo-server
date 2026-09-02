@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -189,6 +189,13 @@ route-inventory:
 verify-route-inventory:
 	@go run ./cmd/route-inventory -check $(ROUTE_INVENTORY) \
 		|| { echo "::error::$(ROUTE_INVENTORY) is stale or a route is unaccounted for; run make route-inventory"; exit 1; }
+
+# Run the route inventory's router-recovery lint rule over the whole tree, not
+# only changed lines. It is the one gocritic check the repo enables (see
+# .golangci.yml), and the tree passes it today, so this can gate CI while the
+# rest of `make lint` cannot.
+lint-router-recovery:
+	golangci-lint run --enable-only gocritic ./...
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

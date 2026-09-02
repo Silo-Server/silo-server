@@ -32,14 +32,19 @@ linters:
 
   settings:
     # gocritic is enabled for exactly one check: the ruleguard rules under
-    # internal/routeinventory/lintrules/, which the legacy native route
-    # inventory's completeness guarantee depends on (see
-    # docs/architecture/api-contract.md, "Legacy native route inventory").
-    # Every listener returns its router as an http.Handler; these rules make
-    # the only way back — a type assertion or type switch to a router type —
-    # a lint error outside tests. The rules match on resolved types, so an
-    # alias or import rename does not evade them. Keep the check list to
-    # ruleguard: widening it enrolls the whole tree in gocritic's style set.
+    # internal/routeinventory/lintrules/, defense in depth for the legacy
+    # native route inventory (docs/architecture/api-contract.md, "Legacy
+    # native route inventory"). The guarantee itself is structural — every
+    # listener entry function returns a sealed handler the generator checks —
+    # and these rules report the attempt early: a type assertion, type switch
+    # or generic instantiation whose type registers routes by its method set
+    # (alias, defined type, embedding or structural interface included), and
+    # reflect.Value.MethodByName, outside tests. CI runs the check full-tree
+    # (make lint-router-recovery) as well as on changed lines. ruleguard was
+    # chosen over forbidigo because forbidigo visits only identifier and
+    # selector nodes and cannot tell an assertion from a parameter type. Keep
+    # the check list to ruleguard: widening it enrolls the whole tree in
+    # gocritic's style set.
     gocritic:
       disable-all: true
       enabled-checks:

@@ -15,9 +15,12 @@ const ArtifactPath = "contracts/api/v2/route-inventory.json"
 // function and a chi constructor cannot make one constant mean two things.
 const (
 	apiRouterFunc            = "NewRouter"
+	apiRouterCtor            = "newChiRouter"
 	nodeHandlerRecv          = "Server"
 	nodeHandlerFunc          = "Handler"
+	nodeHandlerCtor          = "router"
 	rootHandlerFunc          = "newRootHandler"
+	rootHandlerCtor          = "newRootMux"
 	absListenerFunc          = "newAudiobookshelfListener"
 	jellycompatRouterFunc    = "NewRouter"
 	jellycompatRouterFile    = "internal/jellycompat/router.go"
@@ -48,15 +51,17 @@ func DefaultConfig(root string) Config {
 				Kind: ListenerKindServeMux,
 				Description: "Process root listener on the primary port: the http.ServeMux that serves /metrics, " +
 					"delegates /api/ to the API listener, and serves the frontend at /.",
-				Dir:       cmdSiloDir,
-				Func:      rootHandlerFunc,
-				Delegates: map[string]string{"apiRouter": ListenerAPI},
+				Dir:         cmdSiloDir,
+				Func:        rootHandlerFunc,
+				Constructor: rootHandlerCtor,
+				Delegates:   map[string]string{"apiRouter": ListenerAPI},
 			},
 			{
 				ID:          ListenerAPI,
 				Description: "Main Silo API listener: the /api/v1 namespace and the routes mounted beside it.",
 				Dir:         internalAPIDir,
 				Func:        apiRouterFunc,
+				Constructor: apiRouterCtor,
 			},
 			{
 				ID:          ListenerProxy,
@@ -64,6 +69,7 @@ func DefaultConfig(root string) Config {
 				Dir:         internalProxyDir,
 				Recv:        nodeHandlerRecv,
 				Func:        nodeHandlerFunc,
+				Constructor: nodeHandlerCtor,
 			},
 			{
 				ID:          ListenerTranscodeNode,
@@ -71,6 +77,7 @@ func DefaultConfig(root string) Config {
 				Dir:         internalTranscodeNodeDir,
 				Recv:        nodeHandlerRecv,
 				Func:        nodeHandlerFunc,
+				Constructor: nodeHandlerCtor,
 			},
 		},
 		AuditDirs: []string{

@@ -16,6 +16,7 @@ func fixtureConfig(name string) Config {
 			Description: "analyzer fixture",
 			Dir:         "listener",
 			Func:        "NewRouter",
+			Constructor: "newRouter",
 		}},
 		AuditDirs: []string{"listener"},
 	}
@@ -32,6 +33,7 @@ func servemuxFixtureConfig(name string) Config {
 				Description: "analyzer fixture api listener",
 				Dir:         "api",
 				Func:        "NewRouter",
+				Constructor: "newRouter",
 			},
 			{
 				ID:          "root",
@@ -39,6 +41,7 @@ func servemuxFixtureConfig(name string) Config {
 				Description: "analyzer fixture root listener",
 				Dir:         "root",
 				Func:        "newRootHandler",
+				Constructor: "newRootMux",
 				Delegates:   map[string]string{"apiRouter": "api"},
 			},
 		},
@@ -256,6 +259,54 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 		// An entry point that hands its router out as a router lets a caller
 		// keep registering after the walk is over.
 		{fixture: "entry_returns_router", want: "must return exactly one http.Handler"},
+		// A closure or immediately invoked function passed where a handler or
+		// middleware goes can capture the router and register on it. Each
+		// argument position is leak-checked like a handler argument.
+		{fixture: "hidden_notfound_iife", want: `router value "r" escapes`},
+		{fixture: "hidden_notfound_closure", want: `router value "r" escapes`},
+		{fixture: "hidden_use_closure", want: `router value "r" escapes`},
+		{fixture: "hidden_use_factory", want: `router value "r" escapes`},
+		{fixture: "hidden_with_iife", want: `router value "r" escapes`},
+		{fixture: "hidden_methodnotallowed_iife", want: `router value "r" escapes`},
+		{fixture: "hidden_readonly_iife", want: `router value "r" escapes`},
+		// The sealing invariant (seal.go): the entry function returns a sealed
+		// type built from the unexported constructor, and nothing else reaches
+		// either.
+		{fixture: "seal_missing", want: "does not seal its router"},
+		{fixture: "seal_embedded", want: "embeds http.Handler"},
+		{fixture: "seal_exported_field", want: "has exported field H"},
+		{fixture: "seal_router_field", want: "holds a router in field h"},
+		{fixture: "seal_extra_method", want: "must have exactly one method, ServeHTTP"},
+		{fixture: "seal_field_read", want: "is read outside its ServeHTTP"},
+		{fixture: "seal_ctor_called_elsewhere", want: "is called outside the sealing entry function"},
+		{fixture: "seal_ctor_value", want: "is referenced as a value"},
+		{
+			fixture: "seal_ctor_exported",
+			cfg: func(name string) Config {
+				cfg := fixtureConfig(name)
+				cfg.Listeners[0].Constructor = "NewInner"
+				return cfg
+			},
+			want: "constructor NewInner is exported",
+		},
+		{fixture: "exported_router_return", want: "listener.Sub is exported and returns chi.Router"},
+		// Recovering a router from a value after the entry function returned.
+		// Sealing makes each of these fail at runtime; the sweep refuses them
+		// so a router that is not a listener cannot be recovered either.
+		{fixture: "recover_alias", want: "type-asserts to main.routerAlias, which is a chi router by its method set"},
+		{fixture: "recover_defined", want: "type-asserts to main.routerDefined, which is a chi router by its method set"},
+		{fixture: "recover_embedded", want: "type-asserts to main.routerEmbedded, which is a chi router by its method set"},
+		{fixture: "recover_structural", want: "type-asserts to interface{Get(string, http.HandlerFunc)}, which is a chi router"},
+		{fixture: "recover_switch_default", want: "switches on chi.Router"},
+		{fixture: "recover_generic", want: "as is instantiated with chi.Router"},
+		{fixture: "recover_reflect", want: "reflect.Value.MethodByName"},
+		{fixture: "recover_ptr_alias", want: "type-asserts to *main.muxAlias, which is a chi router by its method set"},
+		{fixture: "recover_switch_alias", want: "switches on main.routerAlias, which is a chi router by its method set"},
+		// The root constructor asserting its delegated API handler to a
+		// structural interface: the walk refuses the value it produces. No
+		// package in the fixture imports chi; the registration signatures come
+		// from the router packages themselves, so the shape is still known.
+		{fixture: "recover_param_structural", cfg: rootOnlyFixtureConfig, want: "apiRouter.(interface"},
 		// A method-aware ServeMux pattern means more than the row it spells.
 		{
 			fixture: "servemux_method",

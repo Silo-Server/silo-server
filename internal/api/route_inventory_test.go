@@ -42,17 +42,17 @@ func TestRouteInventoryCoversRuntimeRouter(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	// NewRouter returns http.Handler so no production caller can register on the
-	// finished router; walking the tree in a test is what the assertion is for.
+	// NewRouter seals the router so no production caller can register on it;
+	// a test walks the tree through the unexported constructor instead.
 	fixtures := map[string]chi.Routes{
-		"minimal": NewRouter(Dependencies{Config: cfg}).(chi.Routes),
-		"maximal": NewRouter(Dependencies{
+		"minimal": newChiRouter(Dependencies{Config: cfg}),
+		"maximal": newChiRouter(Dependencies{
 			DB:         pool,
 			Config:     cfg,
 			FileRepo:   scanner.NewFileRepository(pool),
 			FolderRepo: catalog.NewFolderRepository(pool),
 			SessionMgr: playback.NewSessionManager(0, 0),
-		}).(chi.Routes),
+		}),
 	}
 
 	total := 0

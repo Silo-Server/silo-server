@@ -156,8 +156,28 @@ func newStreamTransport() *http.Transport {
 	return t
 }
 
-// Handler returns the chi.Router with all proxy routes mounted.
+// sealedHandler is what Handler hands out: the finished router behind an
+// unexported field and a ServeHTTP method, nothing else, so no assertion,
+// type switch or reflect call can recover a registration surface from it (see
+// the route inventory in docs/architecture/api-contract.md). Do not embed
+// http.Handler here: embedding exports the field and promotes its methods.
+type sealedHandler struct {
+	h http.Handler
+}
+
+func (h sealedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.h.ServeHTTP(w, r) }
+
+// Handler returns the proxy listener as a sealed http.Handler. The route
+// inventory generator requires exactly this shape: seal the unexported
+// constructor and nothing else. A test that needs to walk the tree calls
+// router directly.
 func (s *Server) Handler() http.Handler {
+	return sealedHandler{h: s.router()}
+}
+
+// router is the proxy listener's registration surface. The route inventory
+// generator walks this method; every registration must be reachable from it.
+func (s *Server) router() chi.Router {
 	declareProxyMediaRoutes()
 	r := chi.NewRouter()
 	if s.clientIP != nil {

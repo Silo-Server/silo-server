@@ -76,7 +76,8 @@ var readOnlyRouterMethods = map[string]bool{
 	methodRoutes: true, "Middlewares": true, "Match": true, methodServeHTTP: true, "Find": true,
 }
 
-// ListenerSpec names one HTTP listener and the function that builds its router.
+// ListenerSpec names one HTTP listener, the entry function that hands its
+// handler out, and the constructor that builds the router behind it.
 type ListenerSpec struct {
 	ID          string
 	Description string
@@ -84,7 +85,13 @@ type ListenerSpec struct {
 	Kind string
 	Dir  string // repo-relative package directory
 	Recv string // receiver type name, empty for a package-level function
+	// Func is the entry function: what the process serves. It must return a
+	// sealed http.Handler built from Constructor and nothing else (seal.go).
 	Func string
+	// Constructor is the unexported function or method (on the same Recv)
+	// that builds the router. The walk starts here; it must return the
+	// router type and be called from Func only.
+	Constructor string
 	// Delegates maps a parameter name of the entry function to the listener ID
 	// whose surface that parameter carries. A root listener that hands /api/ to
 	// the API router registers a delegation, not a leaf route, and the row says
@@ -189,6 +196,9 @@ func Analyze(cfg Config) (*Inventory, error) {
 		}
 	}
 	if err := a.audit(); err != nil {
+		return nil, err
+	}
+	if err := a.auditExportedRouterReturns(); err != nil {
 		return nil, err
 	}
 	if err := a.sweep(); err != nil {
@@ -394,24 +404,11 @@ func (a *Analyzer) walkListener(spec ListenerSpec) error {
 	if pkg == nil {
 		return fmt.Errorf("listener %s: package %s not loaded", spec.ID, spec.Dir)
 	}
-	decl := pkg.funcs[spec.Func]
-	if spec.Recv != "" {
-		decl = pkg.methods[spec.Recv+"."+spec.Func]
-	}
-	if decl == nil {
-		return fmt.Errorf("listener %s: entry function %s not found in %s", spec.ID, spec.Entrypoint(), spec.Dir)
-	}
-	if decl.Body == nil {
-		return fmt.Errorf("listener %s: entry function %s has no body", spec.ID, spec.Entrypoint())
-	}
-	// The entry function must hand its router out as an http.Handler. A
-	// router-typed result would let any caller keep registering after the
-	// walk is over; behind http.Handler the only way back to the router is a
-	// type assertion, which the lint rule in lintrules/ refuses.
-	results := flattenParams(decl.Type.Results)
-	if len(results) != 1 || !isHTTPHandlerType(pkg.info().TypeOf(results[0].typ)) {
-		return a.errorf(decl, "listener %s: entry function %s must return exactly one http.Handler; "+
-			"a router-typed result would let a caller register routes after the walk is over", spec.ID, spec.Func)
+	// The walk starts at the constructor. The entry function that seals its
+	// result is checked separately, with type information, in seal.go.
+	decl, err := a.checkSeal(spec, pkg)
+	if err != nil {
+		return err
 	}
 	a.enteredFuncs[decl] = true
 	a.rootConstructed = false
@@ -534,7 +531,7 @@ func (a *Analyzer) handleMuxMethod(call *ast.CallExpr, sel *ast.SelectorExpr, en
 		}
 		return a.emitMux(call, env, pattern, argAt(call, 1))
 	case serveMuxReadOnlyMethods[name]:
-		return nil
+		return a.leakCheckArgs(call, env)
 	}
 	return a.errorf(call, "unknown http.ServeMux method %q", name)
 }
@@ -916,37 +913,55 @@ func (a *Analyzer) bindMuxValue(stmt ast.Stmt, binding valueBinding, ctor ctorKi
 
 // resolveRouter maps an expression to the router scope it denotes, following
 // With() chains. It never invents a scope: an expression it does not model
-// returns false and the caller refuses the construct.
-func (a *Analyzer) resolveRouter(expr ast.Expr, env *walkEnv) (*routerScope, bool) {
+// returns false and the caller refuses the construct. A With() argument that
+// captures the router is refused outright, like any other handler argument.
+func (a *Analyzer) resolveRouter(expr ast.Expr, env *walkEnv) (*routerScope, bool, error) {
 	switch typed := unwrapParen(expr).(type) {
 	case *ast.Ident:
 		obj := env.varOf(typed)
 		if obj == nil {
-			return nil, false
+			return nil, false, nil
 		}
 		scope, ok := env.routers[obj]
-		return scope, ok
+		return scope, ok, nil
 	case *ast.CallExpr:
 		sel, ok := unwrapParen(typed.Fun).(*ast.SelectorExpr)
 		if !ok || sel.Sel.Name != methodWith {
-			return nil, false
+			return nil, false, nil
 		}
-		base, ok := a.resolveRouter(sel.X, env)
-		if !ok {
-			return nil, false
+		base, ok, err := a.resolveRouter(sel.X, env)
+		if !ok || err != nil {
+			return nil, false, err
 		}
 		derived := base.clone()
 		for _, arg := range typed.Args {
+			if err := a.leakCheck(arg, env); err != nil {
+				return nil, false, err
+			}
 			derived.mw = append(derived.mw, mwEntry{expr: a.set.exprText(arg), conds: append([]string{}, env.conds...)})
 		}
-		return derived, true
+		return derived, true, nil
 	}
-	return nil, false
+	return nil, false, nil
+}
+
+// leakCheckArgs leak-checks every argument of a call.
+func (a *Analyzer) leakCheckArgs(call *ast.CallExpr, env *walkEnv) error {
+	for _, arg := range call.Args {
+		if err := a.leakCheck(arg, env); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Analyzer) handleCall(call *ast.CallExpr, env *walkEnv) (bool, error) {
 	if sel, ok := unwrapParen(call.Fun).(*ast.SelectorExpr); ok {
-		if scope, isRouter := a.resolveRouter(sel.X, env); isRouter {
+		scope, isRouter, err := a.resolveRouter(sel.X, env)
+		if err != nil {
+			return true, err
+		}
+		if isRouter {
 			return true, a.handleRouterMethod(call, sel, scope, env)
 		}
 	}
@@ -967,9 +982,10 @@ func (a *Analyzer) callPassesRouter(call *ast.CallExpr, env *walkEnv) bool {
 }
 
 // followHelper walks a helper that receives a tracked router. Only a helper
-// declared in an audited package is followed: those are the packages whose
-// unreached router-taking helpers are refused, so following one cannot leave
-// a sibling unexamined.
+// declared in an audited package (Config.AuditDirs) is followed, whichever of
+// those packages it lives in: those are the packages whose unreached
+// router-taking helpers are refused, so following one cannot leave a sibling
+// unexamined. A helper outside them is refused.
 func (a *Analyzer) followHelper(call *ast.CallExpr, env *walkEnv) error {
 	decl := a.set.funcDecls[calleeFunc(call, env.info())]
 	declPkg := a.set.declPkg[decl]
@@ -1072,7 +1088,14 @@ func (a *Analyzer) handleRouterMethod(call *ast.CallExpr, sel *ast.SelectorExpr,
 		return a.walkRouterLit(lit, scope.clone(), env)
 
 	case name == "Use":
+		// A middleware expression that captures the router — a closure or an
+		// immediately invoked function that registers inside — would register
+		// routes the walk never sees, so every argument is leak-checked the
+		// same way a handler argument is.
 		for _, arg := range call.Args {
+			if err := a.leakCheck(arg, env); err != nil {
+				return err
+			}
 			scope.mw = append(scope.mw, mwEntry{expr: a.set.exprText(arg), conds: append([]string{}, env.conds...)})
 		}
 		return nil
@@ -1085,11 +1108,12 @@ func (a *Analyzer) handleRouterMethod(call *ast.CallExpr, sel *ast.SelectorExpr,
 			"the mounted handler's routes would be invisible. Add explicit support before mounting")
 
 	case name == "NotFound" || name == "MethodNotAllowed":
-		// Fallback handlers, not addressable method+path operations.
-		return nil
+		// Fallback handlers, not addressable method+path operations; the
+		// handler expression still may not capture the router.
+		return a.leakCheckArgs(call, env)
 
 	case readOnlyRouterMethods[name]:
-		return nil
+		return a.leakCheckArgs(call, env)
 
 	case verbMethods[name] != "":
 		pattern, err := a.stringArg(call, 0)

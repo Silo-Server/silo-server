@@ -113,34 +113,32 @@ migration decision is measured against: one row per method+path variant (`GET` a
 WebSocket handshake, and each method of a wildcard `Handle` are separate rows) across four
 listeners — the process root `http.ServeMux` (`cmd/silo.newRootHandler`), the main API router
 (`internal/api.NewRouter`), the proxy node (`internal/proxy.(*Server).Handler`) and the transcode
-node (`internal/transcodenode.(*Server).Handler`). Root `/api/` rows are delegations to the API
-listener. The artifact's `totals` and per-listener `route_count` are the authoritative numbers.
+node (`internal/transcodenode.(*Server).Handler`). Root `/api/` rows delegate to the API listener;
+`totals` and `route_count` are authoritative. `cmd/route-inventory` generates the file from
+registration source, since a runtime walk shows only what one wiring constructed.
 
-`cmd/route-inventory` generates it from registration source, not from a router built with one
-set of dependencies: native routes sit under `if` guards on optional wiring, so a runtime walk
-shows only what that wiring constructed (about half of the API listener) and does not say so.
+The contract: each listener entry function returns a sealed `http.Handler` that cannot be
+converted back to a router — an unexported struct holding the router in an unexported field,
+with `ServeHTTP` as its only method — built from an unexported constructor that the entry
+function alone calls. The generator checks that shape with type information, walks the
+constructor, and enumerates every chi and `http.ServeMux` registration reachable from it, or
+fails. A router-taking helper inside the audited packages (the four listener packages and
+`internal/api/handlers`) is followed and enumerated; one outside them is refused. Also refused:
+any router-typed value the walk did not model, including closures and immediately invoked
+functions passed as middleware or fallback handlers; any router produced outside a constructor
+or a recorded exclusion (Jellyfin and Audiobookshelf compatibility); any exported function in
+the audited packages returning a router; any type assertion, type switch, generic instantiation
+or `reflect` call that could recover a router by its method set; and `http.DefaultServeMux`.
+Defense in depth: those recovery shapes are also a `golangci-lint` error outside `_test.go`
+(`.golangci.yml`; ruleguard, because forbidigo cannot tell an assertion from a parameter type),
+run over the whole tree in CI, not only changed lines.
 
-The guarantee: within the audited listener packages, every chi and `http.ServeMux` registration
-reachable from a declared entry function is enumerated, or the generator fails. The generator
-type-checks the module with `golang.org/x/tools/go/packages`, walks each entry function, and
-refuses any router-typed value it did not model, any router produced outside an entry function or
-a recorded exclusion (Jellyfin and Audiobookshelf compatibility), and anything serving
-`http.DefaultServeMux`. Every entry function returns `http.Handler`, so the one way back to a
-router afterwards is a type assertion or type switch; the ruleguard rule in
-`internal/routeinventory/lintrules/` makes that a `golangci-lint` error outside `_test.go`. That
-rule is load-bearing for the guarantee, not a style preference — keep it enabled full-tree.
-
-To add a route: register it inside the entry function, or in a same-package helper taking
-`chi.Router` that the entry function calls, with a literal path and method; run
-`make route-inventory` and commit the artifact. Loops, `Mount`, dynamic patterns, a second router
-in an entry function and cross-package helpers are refused, and the error names the shape.
-
-`make verify-route-inventory` byte-compares the artifact in CI. As a backstop against a generator
-bug, each listener package reconciles a real handler at test time: exact equality for root, proxy
-and transcode node (unconditional rows), one-way for the API listener (every observed route has a
-row). Success statuses and error codes are null (`deferred_fields`); `request_kind`,
-`response_media_kind` and `upgrades_websocket` are inferred from handler bodies
-(`heuristic_fields`) and are evidence to confirm, not facts.
+To add a route: register it inside the constructor, or in a `chi.Router`-taking helper in an
+audited package that the constructor calls, with a literal path and method; run
+`make route-inventory` and commit the artifact, which `make verify-route-inventory` byte-compares
+in CI. As a backstop against a generator bug, each listener package reconciles a real router at
+test time through its unexported constructor (exact for root, proxy and transcode node; one-way
+for the API listener). `deferred_fields` are null; `heuristic_fields` are evidence, not facts.
 
 ### Contract foundation
 
