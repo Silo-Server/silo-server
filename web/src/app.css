@@ -1617,15 +1617,25 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .group\/media:focus-within .media-card-hover-dim {
     opacity: 1;
   }
-  @media (any-hover: hover) and (any-pointer: fine) {
-    .group\/media:hover .media-card-hover-dim {
-      opacity: 1;
-    }
-    .group\/card:hover .media-card-action-trigger,
-    .group\/media:hover .media-card-play-trigger {
-      opacity: 1;
-      pointer-events: auto;
-    }
+  /* Gated on an attribute set from observed pointer events
+     (lib/pointerCapability.ts), not on a media query. Chromium on some Windows
+     hybrid machines reports `any-hover: none` and `any-pointer: coarse` even
+     while a mouse is actively hovering the card, so this block never matched
+     and the controls stayed at `opacity: 0` permanently. The attribute is
+     seeded from that same media query at boot, so behaviour is unchanged
+     wherever it was already right.
+
+     Deliberately no `[data-fine-pointer="false"]` counterpart forcing opacity
+     back to 0: at this specificity it would out-weigh the `[data-state="open"]`
+     and `:focus-visible` rules above and hide the trigger while its own menu is
+     open on a touch device. Rest state is the base rule's job. */
+  :root[data-fine-pointer="true"] .group\/media:hover .media-card-hover-dim {
+    opacity: 1;
+  }
+  :root[data-fine-pointer="true"] .group\/card:hover .media-card-action-trigger,
+  :root[data-fine-pointer="true"] .group\/media:hover .media-card-play-trigger {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   /* A long press on a card opens the action sheet, so the browser's own image
