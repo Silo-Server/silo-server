@@ -2652,6 +2652,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				replaceUnlock()
 				return nil, readyErr
 			}
+			// As above: the downgrade may have cleared a VideoToolbox-derived
+			// bitrate that matched the pre-downgrade target, and this manifest-
+			// timeout fallback must not lose the client's own cap either.
+			applyCompatMaxStreamingBitrateCap(&opts, source.MaxStreamingBitrateKbps)
 			transcodeSession, err = playback.StartTranscode(ctx, opts)
 			if err != nil {
 				replaceUnlock()
