@@ -16,8 +16,12 @@ deltas over the window (`go_memstats_mallocs_total`,
 `go_memstats_alloc_bytes_total`, and per-request averages). With `-db` it
 records database activity deltas from `pg_stat_database` (`xact_commit`,
 `tup_returned`, `tup_fetched`) and, when `pg_stat_statements` is installed,
-total statement calls per request. A source that is not configured is absent
-from the report rather than reported as zero.
+total statement calls per request. Both are scoped to the DSN's database and
+the statement count leaves the sampler's own queries out (they carry an
+`apibench_sampler` alias, which survives `pg_stat_statements` normalization
+where a comment would not); other clients of the same database inside the
+window still count. A source that is not configured is absent from the
+report rather than reported as zero.
 
 ## Named hot paths
 

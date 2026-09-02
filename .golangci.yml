@@ -1,7 +1,8 @@
 version: "2"
 
 run:
-  timeout: 5m
+  # Diff-scoped CI runs over large PRs exceed 5m on the shared runner (exit 4).
+  timeout: 15m
 
 formatters:
   enable:

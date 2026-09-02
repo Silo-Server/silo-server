@@ -12,8 +12,9 @@
 //
 // SILO_SCENARIO_DATABASE_URL is deliberately not SILO_TEST_DATABASE_URL: the
 // executor TRUNCATEs users, access groups, invite codes, and invitations on
-// every reseed, which would break the other DB-gated packages sharing the
-// test database (and two executors sharing one database collide). Point it at
+// every reseed (restoring only the migration-seeded default group), which
+// would break the other DB-gated packages sharing the test database (and two
+// executors sharing one database collide). Point it at
 // an empty database the executor owns. Before touching anything, including
 // running migrations, the executor inspects the database and refuses one
 // that holds any media item, media file, or library folder; any account
@@ -347,6 +348,20 @@ func (e *Env) Reseed() {
 		`TRUNCATE TABLE invite_codes RESTART IDENTITY CASCADE`,
 		`TRUNCATE TABLE invitations RESTART IDENTITY CASCADE`,
 		`TRUNCATE TABLE access_groups RESTART IDENTITY CASCADE`,
+		// Truncating access_groups also removes the seeded default group
+		// (migrations/sql/20260702173000_default_access_group.sql), and
+		// users.Create assigns that group to every new non-admin account.
+		// Restore the migration's exact row before any fixture user exists so
+		// the scratch database matches a real install.
+		`INSERT INTO access_groups (
+			name, description, is_default, library_ids, max_playback_quality,
+			download_allowed, download_transcode_allowed, max_streams, max_transcodes,
+			allowed_permissions, requests_allowed
+		) VALUES (
+			'Default Group', 'Applied automatically to newly created users.', true, NULL, '',
+			true, false, 5, 5,
+			ARRAY['marker_edit'], true
+		)`,
 		`DELETE FROM server_settings WHERE key IN ('demo.enabled','signup.enabled','notifications.email.external_url','branding.server_name','sections.allow_profile_custom_sections')`,
 	} {
 		if _, err := e.pool.Exec(ctx, stmt); err != nil {

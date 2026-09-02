@@ -27,15 +27,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/apibench"
@@ -89,12 +89,16 @@ func main() {
 		runner.Metrics = &apibench.PrometheusSampler{URL: *metricsURL}
 	}
 	if *dbDSN != "" {
+		name, err := databaseName(*dbDSN)
+		if err != nil {
+			fail(fmt.Errorf("parse database dsn: %w", err))
+		}
 		pool, err := pgxpool.New(ctx, *dbDSN)
 		if err != nil {
 			fail(fmt.Errorf("connect database: %w", err))
 		}
 		defer pool.Close()
-		runner.Database = &apibench.PostgresSampler{Pool: pool, Database: databaseName(*dbDSN)}
+		runner.Database = &apibench.PostgresSampler{Pool: pool, Database: name}
 	}
 
 	report, err := runner.Run(ctx)
@@ -115,12 +119,20 @@ func main() {
 	fmt.Fprintf(os.Stderr, "wrote %s (%d paths, %s)\n", *outPath, len(report.Paths), report.FinishedAt.Sub(report.StartedAt).Round(time.Millisecond))
 }
 
-func databaseName(dsn string) string {
-	u, err := url.Parse(dsn)
+// databaseName is the database the DSN targets, in URL form
+// (postgres://.../silo) or keyword/value form (host=... dbname=silo); the
+// sampler filters pg_stat_* to it.
+func databaseName(dsn string) (string, error) {
+	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strings.TrimPrefix(u.Path, "/")
+	if cfg.Database == "" {
+		// libpq would fall back to the user name; the sampler filter would
+		// then silently match nothing, so require it explicitly.
+		return "", errors.New("dsn names no database (add dbname= or a URL path)")
+	}
+	return cfg.Database, nil
 }
 
 func fail(err error) {
