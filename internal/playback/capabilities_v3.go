@@ -220,11 +220,28 @@ func routeVideoMetadataCompleteV3(source SourceDescriptorV3) bool {
 		source.BitrateKbps > 0
 }
 
-func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, VideoClaimsV3) {
-	hdr := request.ClientPlaybackContext.Output.HDRDetails
-	if hdr == nil {
-		hdr = request.Capabilities.HDRDetails
+// nativeOutputHDRV3 resolves the HDR facts a native HDR/DV presentation may be
+// planned against. output.hdr_details is the authority. The device-level
+// capability is a fallback only for clients that predate the output display
+// evidence field: a client that reports the evidence tier has separated its
+// decoder facts from its output facts, so a missing output value means "no
+// native HDR output", and an unknown evidence tier fails closed the same way.
+func nativeOutputHDRV3(request StartRequestV3) *HDRCapabilitiesV3 {
+	output := request.ClientPlaybackContext.Output
+	if output.Display != nil {
+		if output.Display.HDREvidence != OutputHDREvidenceExactV3 {
+			return nil
+		}
+		return output.HDRDetails
 	}
+	if output.HDRDetails != nil {
+		return output.HDRDetails
+	}
+	return request.Capabilities.HDRDetails
+}
+
+func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, VideoClaimsV3) {
+	hdr := nativeOutputHDRV3(request)
 	claims := VideoClaimsV3{}
 	switch source.DynamicRange {
 	case "", "sdr":
@@ -287,11 +304,74 @@ func clientSelectsOriginalAudioTrackV3(request StartRequestV3) bool {
 }
 
 func clientSupportsHDR10V3(request StartRequestV3) bool {
-	hdr := request.ClientPlaybackContext.Output.HDRDetails
-	if hdr == nil {
-		hdr = request.Capabilities.HDRDetails
-	}
+	hdr := nativeOutputHDRV3(request)
 	return hdr != nil && hdr.HDR10
+}
+
+func clientSupportsHLGV3(request StartRequestV3) bool {
+	hdr := nativeOutputHDRV3(request)
+	return hdr != nil && hdr.HLG
+}
+
+// clientDV8BaseLayerFallbackV3 reports whether the original_http executor may
+// play a single-layer Dolby Vision Profile 8 source through its ordinary HEVC
+// decoder, and which base range that presents. It is delivery-scoped like the
+// other original_http claims and, unlike clientManagesOriginalDynamicRangeV3,
+// the server keeps every other gate: an eligible profile and enhancement
+// layer, a compatibility id whose base range is standards-defined, that range
+// supported by the active output, and an HEVC decode entry that fits the
+// source (checked by videoEligibleV3 on the caller's side).
+func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartRequestV3) (bool, string) {
+	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 8 ||
+		source.DVEnhancementLayer != EnhancementNoneV3 {
+		return false, ""
+	}
+	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	if !ok || !delivery.Enabled || !delivery.SupportedOnDevice ||
+		!containsFoldV3(delivery.ValidatedClaims, ClaimClientDV8BaseLayerFallbackV3) {
+		return false, ""
+	}
+	baseRange, ok := dolbyVisionBaseLayerRangeV3(source.DVBLCompatID)
+	if !ok {
+		return false, ""
+	}
+	switch baseRange {
+	case DynamicRangeHDR10V3:
+		if !clientSupportsHDR10V3(request) {
+			return false, ""
+		}
+	case DynamicRangeHLGV3:
+		if !clientSupportsHLGV3(request) {
+			return false, ""
+		}
+	case DynamicRangeSDRV3:
+		// Compatibility id 2 (BT.709 SDR) is the only SDR base the Media3
+		// route has been validated for; id 5 (BT.2020 SDR) needs a gamut
+		// conversion the platform does not perform on an SDR sink.
+		if source.DVBLCompatID != 2 {
+			return false, ""
+		}
+	default:
+		return false, ""
+	}
+	return true, baseRange
+}
+
+// dolbyVisionBaseLayerRangeV3 maps a Profile 8 base-layer compatibility id to
+// the dynamic range an ordinary HEVC decoder presents. Ids 1 and 6 are PQ
+// (HDR10), 2 is BT.709 SDR, 4 is BT.2100 HLG, 5 is BT.2020 SDR. Id 0 (no
+// compatible base), 3 (legacy HLG), and anything reserved fail closed.
+func dolbyVisionBaseLayerRangeV3(compatID int) (string, bool) {
+	switch compatID {
+	case 1, 6:
+		return DynamicRangeHDR10V3, true
+	case 4:
+		return DynamicRangeHLGV3, true
+	case 2, 5:
+		return DynamicRangeSDRV3, true
+	default:
+		return "", false
+	}
 }
 
 func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copyOK, passthrough bool, claim AudioClaimsV3) {

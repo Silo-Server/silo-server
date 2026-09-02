@@ -69,11 +69,20 @@ const (
 	// original bytes. Packaged server deliveries remain output-gated.
 	ClaimClientManagedDynamicRangeV3 = "client_managed_dynamic_range_v1"
 	ClaimClientSelectedAudioTrackV3  = "client_selected_audio_track_v1"
-	ClientDV8HDR10PlusSanitizerV3    = "client_dv8_hdr10plus_sanitizer_v1"
-	ClientNativeHLSPlaybackV3        = "native_hls_playback_v1"
-	ClientPostResumeRecoveryV3       = "client_post_resume_video_recovery_v1"
-	ClientSurfaceRecoveryV3          = "client_surface_recovery_v1"
-	DeviceQuirkRegistryRevisionV3    = "2026-07-13.1"
+	// ClaimClientDV8BaseLayerFallbackV3 is scoped to the original_http
+	// delivery. The executor decodes a single-layer Dolby Vision Profile 8
+	// stream through an ordinary HEVC decoder and presents its
+	// standards-compatible base layer when the active output lacks native
+	// Dolby Vision. It is deliberately narrower than
+	// ClaimClientManagedDynamicRangeV3: the server still decides which base
+	// range the plan promises (from dv_bl_compat_id), still requires the
+	// active output to carry that range, and never claims Dolby Vision output.
+	ClaimClientDV8BaseLayerFallbackV3 = "client_dv8_base_layer_fallback_v1"
+	ClientDV8HDR10PlusSanitizerV3     = "client_dv8_hdr10plus_sanitizer_v1"
+	ClientNativeHLSPlaybackV3         = "native_hls_playback_v1"
+	ClientPostResumeRecoveryV3        = "client_post_resume_video_recovery_v1"
+	ClientSurfaceRecoveryV3           = "client_surface_recovery_v1"
+	DeviceQuirkRegistryRevisionV3     = "2026-07-13.1"
 )
 
 // Worker transport features are protocol capabilities rather than media
@@ -398,6 +407,13 @@ type OutputContextV3 struct {
 	AudioPassthrough *AudioPassthroughV3 `json:"audio_passthrough,omitempty"`
 	CurrentSink      string              `json:"current_sink,omitempty"`
 	SinkType         string              `json:"sink_type,omitempty"`
+	// Display carries the raw active-display HDR facts and how they were
+	// obtained. It is additive: HDRDetails above remains the native-output
+	// authority (decoder ∩ display) that older servers already read. When a
+	// client sends Display at all, the server never falls back from a missing
+	// output HDRDetails to the device-level capability, and an unknown
+	// evidence tier disables native HDR/DV output claims.
+	Display *OutputDisplayV3 `json:"display,omitempty"`
 	// OutputContextID is an optional opaque token identifying the current
 	// output route. The server only ever compares it for equality — in attempt
 	// keys and plan invalidation — so any stable platform-native identity
@@ -405,6 +421,21 @@ type OutputContextV3 struct {
 	// synthetic sink hash, web omits it.
 	OutputContextID string `json:"output_context_id,omitempty"`
 }
+
+// OutputDisplayV3 is the raw display probe with its evidence tier.
+type OutputDisplayV3 struct {
+	// HDREvidence is OutputHDREvidenceExactV3 for a successful probe (an
+	// empty HDRTypes then means a confirmed SDR panel) or
+	// OutputHDREvidenceUnknownV3 when the platform could not answer.
+	HDREvidence string             `json:"hdr_evidence"`
+	HDRTypes    *HDRCapabilitiesV3 `json:"hdr_types,omitempty"`
+	DisplayID   string             `json:"display_id,omitempty"`
+}
+
+const (
+	OutputHDREvidenceExactV3   = "exact"
+	OutputHDREvidenceUnknownV3 = "unknown"
+)
 
 type DeliverySubtitleCapabilitiesV3 struct {
 	EmbeddedText    bool `json:"embedded_text"`
@@ -1066,6 +1097,20 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 	}
 	for _, hdr := range []*HDRCapabilitiesV3{c.HDRDetails, ctx.Output.HDRDetails} {
 		if err := validateHDRCapabilitiesV3(hdr); err != nil {
+			return err
+		}
+	}
+	if display := ctx.Output.Display; display != nil {
+		display.HDREvidence = strings.ToLower(strings.TrimSpace(display.HDREvidence))
+		switch display.HDREvidence {
+		case OutputHDREvidenceExactV3, OutputHDREvidenceUnknownV3:
+		default:
+			return errors.New("output display hdr_evidence must be exact or unknown")
+		}
+		if len(display.DisplayID) > 64 {
+			return errors.New("output display id exceeds supported size")
+		}
+		if err := validateHDRCapabilitiesV3(display.HDRTypes); err != nil {
 			return err
 		}
 	}

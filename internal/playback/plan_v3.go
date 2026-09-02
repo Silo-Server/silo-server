@@ -225,7 +225,11 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	}
 	rangeOK, videoClaims := outputRangeEligibleV3(source, input.Request)
 	clientManagedRange := clientManagesOriginalDynamicRangeV3(source, input.Request)
-	originalRangeOK := rangeOK || clientManagedRange
+	clientDV8BaseLayerOK, clientDV8BaseRange := clientDV8BaseLayerFallbackV3(source, input.Request)
+	// The narrow base-layer claim only matters when the output cannot take the
+	// source natively; a native Dolby Vision route always wins over it.
+	clientDV8BaseLayerOK = clientDV8BaseLayerOK && !rangeOK
+	originalRangeOK := rangeOK || clientManagedRange || clientDV8BaseLayerOK
 	audioOK, passthrough, audioClaims := audioEligibilityV3(source, input.Request)
 	originalAudioSelectionOK := audioSelectionUsesContainerDefaultV3(file, input.AudioTrackIndex) ||
 		clientSelectsOriginalAudioTrackV3(input.Request)
@@ -438,7 +442,26 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		plan.Delivery = DeliveryOriginalHTTPV3
 		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 		plan.DecisionReason = "validated_original_playback"
-		if !rangeOK && clientManagedRange {
+		switch {
+		case rangeOK:
+		case clientDV8BaseLayerOK:
+			// Same bytes, ordinary HEVC decoder, base layer presented. The
+			// recipe names the range that actually reaches the output so the
+			// per-delivery HDR gate below and the attempt key both see the
+			// base range, and the plan never claims Dolby Vision.
+			plan.DecisionReason = decisionReasonClientDV8BaseLayerV3
+			plan.EffectiveRecipe.DynamicRange = clientDV8BaseRange
+			plan.Claims.Video = VideoClaimsV3{
+				HDR10:             clientDV8BaseRange == DynamicRangeHDR10V3,
+				HLG:               clientDV8BaseRange == DynamicRangeHLGV3,
+				DolbyVision:       false,
+				DolbyVisionReason: "base_layer_compatible_hevc",
+			}
+			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{
+				Code:    "dolby_vision_base_layer_only",
+				Message: "This output does not carry Dolby Vision; the file plays unchanged through an HEVC decoder as its " + strings.ToUpper(clientDV8BaseRange) + " base layer and the Dolby Vision metadata is not presented.",
+			})
+		case clientManagedRange:
 			plan.DecisionReason = decisionReasonClientManagedDynamicRangeV3
 		}
 		applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
@@ -688,6 +711,12 @@ const (
 	// decisionReasonClientManagedDynamicRangeV3 marks an original-file plan
 	// whose executor owns source-to-output dynamic-range presentation.
 	decisionReasonClientManagedDynamicRangeV3 = "client_managed_dynamic_range"
+
+	// decisionReasonClientDV8BaseLayerV3 marks an original-file plan for a
+	// Dolby Vision Profile 8 source that the client plays through an ordinary
+	// HEVC decoder as its compatible base layer. The recipe's dynamic_range is
+	// that base range, not dolby_vision.
+	decisionReasonClientDV8BaseLayerV3 = "client_dv8_base_layer"
 )
 
 // planAudioOnlyV3 plans sources without a video track (audiobooks, music).
@@ -1011,10 +1040,7 @@ func canClientTransformDV7ToHDR10V3(source SourceDescriptorV3, request StartRequ
 }
 
 func clientSupportsDVProfileV3(request StartRequestV3, source SourceDescriptorV3, profile int) bool {
-	hdr := request.ClientPlaybackContext.Output.HDRDetails
-	if hdr == nil {
-		hdr = request.Capabilities.HDRDetails
-	}
+	hdr := nativeOutputHDRV3(request)
 	source.DVProfile = profile
 	return hdr != nil && hdrSupportsDolbyVisionSourceV3(*hdr, source)
 }

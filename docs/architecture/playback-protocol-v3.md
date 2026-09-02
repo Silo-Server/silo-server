@@ -413,16 +413,56 @@ output supports HDR10, and the plan carries the `hdr_range_assumed_hdr10`
 degradation warning. Refusing to play those outright would be worse than an
 assumption the client is told about.
 
-There is one delivery-scoped exception. An `original_http` capability carrying
-the validated claim `client_managed_dynamic_range_v1` asserts that its executor
-accepts the declared source range and resolves presentation against the live
-output after receiving the original bytes. The planner may therefore deliver
-HDR or Dolby Vision through that class even when the active sink does not
-natively advertise the source range. The exception does not apply to
-`progressive` or `hls`: those server-packaged streams remain output-gated. The
-output snapshot is still retained for plan identity, diagnostics, output-change
-replans, explicit Dolby Vision transformation selection, and future server
-tone-map targeting.
+A client may additionally report the raw display probe in `output.display`
+with an evidence tier:
+
+```json
+"output": {
+  "hdr_details": { "hdr10": true, "dolby_vision_profiles": [] },
+  "display": { "hdr_evidence": "exact", "hdr_types": { "hdr10": true }, "display_id": "0" }
+}
+```
+
+`hdr_details` stays the native-output authority (decoder ∩ display) and keeps
+its meaning on older servers. `display.hdr_evidence` is `exact` when the
+platform answered (an empty `hdr_types` is then a confirmed SDR panel) or
+`unknown` when it could not (no display, unsupported API, null capabilities,
+probe failure). When `display` is present at all, the server never falls back
+from a missing `output.hdr_details` to `client_capabilities.hdr_details`, and
+`unknown` disables every native HDR and Dolby Vision output claim. Clients that
+have separated decoder facts from output facts must send `display` so a decoder
+capability can never be promoted to a native-output promise.
+
+There are two delivery-scoped exceptions. An `original_http` capability
+carrying the validated claim `client_managed_dynamic_range_v1` asserts that its
+executor accepts the declared source range and resolves presentation against
+the live output after receiving the original bytes. The planner may therefore
+deliver HDR or Dolby Vision through that class even when the active sink does
+not natively advertise the source range.
+
+The narrower claim `client_dv8_base_layer_fallback_v1`, also `original_http`
+only, asserts that the executor decodes a single-layer Dolby Vision Profile 8
+stream through an ordinary HEVC decoder and presents its standards-compatible
+base layer when the output lacks native Dolby Vision. The server keeps every
+other gate: the source must be Profile 8 with no enhancement layer and a
+compatibility id that names a base range (`1` and `6` are HDR10, `4` is HLG,
+`2` is BT.709 SDR; `0`, `3`, `5`, and unknown ids fail closed), the active
+output must carry that base range, and the HEVC stream must fit the client's
+decode bounds. The plan is then `validated_original_playback` bytes with
+`decision_reason: client_dv8_base_layer`, `effective_recipe.dynamic_range` set
+to the base range, `claims.video.dolby_vision: false` with
+`dolby_vision_reason: base_layer_compatible_hevc`, and the
+`dolby_vision_base_layer_only` degradation warning. A native Dolby Vision route
+always wins over the claim. The executor reports
+`dv8_base_layer_decoder_unavailable`, `dv8_base_layer_output_mismatch`, or
+`dv8_base_layer_metadata_mismatch` as a typed failure when it cannot honour the
+promise, and the plan's attempt key (which includes the effective range) keeps
+the native and base-layer plans distinct in the replan ladder.
+
+Neither exception applies to `progressive` or `hls`: those server-packaged
+streams remain output-gated. The output snapshot is still retained for plan
+identity, diagnostics, output-change replans, explicit Dolby Vision
+transformation selection, and future server tone-map targeting.
 
 The web client does not promote the generic high-dynamic-range media query to a
 format claim, and it does not gate format claims on it either. Decoder capability
@@ -496,9 +536,10 @@ because "the user turned HLS off" and "this device has no HLS player" call for
 different degradation warnings and different diagnostics. A class the client
 omits entirely is unavailable — the server will not guess.
 
-`client_managed_dynamic_range_v1` is valid only as a `validated_claims` entry
-on `original_http`. It is not a selectable transformation: the server supplies
-the source and the client executor probes and routes it internally. If that
+`client_managed_dynamic_range_v1` and `client_dv8_base_layer_fallback_v1` are
+valid only as `validated_claims` entries on `original_http`. Neither is a
+selectable transformation: the server supplies the source and the client
+executor probes and routes it internally. If that
 executor later reports a typed load failure, normal attempted-plan-key
 exclusion applies. Until a server tone-map recipe exists, an exhausted HDR
 original route terminates honestly rather than pretending an ordinary video
@@ -948,7 +989,8 @@ must not branch on an unrecognized value.
 
 `validated_original_playback`, `container_normalization`, `audio_adaptation`,
 `hls_audio_adaptation`, `hls_packaging_required`, `subtitle_burn_in_required`,
-`client_dv7_to_dv81`, `client_dv7_to_hdr10`, `evidence_insufficient_for_direct`,
+`client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
+`client_dv8_base_layer`, `evidence_insufficient_for_direct`,
 and the quality reasons `quality_original`, `quality_auto_source`,
 `quality_fixed_rung`, `quality_device_limit`, `quality_bandwidth_limit`,
 `quality_metered_limit`, `quality_bandwidth_cap`.
