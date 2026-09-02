@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -2576,6 +2577,19 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// so it wins even over an already-set VideoToolbox tone-map bitrate: that
 	// value is resolution-derived and knows nothing about the client's request.
 	applyCompatMaxStreamingBitrateCap(&opts, source.MaxStreamingBitrateKbps)
+	// The same cap implies a resolution ceiling (a "720p - 4 Mbps" profile
+	// expects 720p output, not a 4K frame starved down to 4 Mbps): downscale
+	// when the source exceeds what the cap's quality-profile resolution
+	// implies. Never upscale, and never override a resolution a tone-map
+	// recipe already pinned above.
+	if opts.TargetResolution == "" {
+		if resCap := compatMaxResolutionForBitrateKbps(source.MaxStreamingBitrateKbps); resCap != "" {
+			if sourceLabel := compatResolutionLabelForHeight(compatSourceVideoHeight(source.Version)); sourceLabel != "" &&
+				access.CompareQuality(sourceLabel, resCap) > 0 {
+				opts.TargetResolution = resCap
+			}
+		}
+	}
 	opts.SegmentDuration = h.compatSegmentDuration()
 
 	// Hold the per-session lifecycle lock across "check existing → spawn →

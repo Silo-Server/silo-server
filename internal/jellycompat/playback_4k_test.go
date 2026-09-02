@@ -316,6 +316,78 @@ func TestBuildPlaybackSourceMaxStreamingBitrateGate(t *testing.T) {
 	}
 }
 
+func TestBuildPlaybackSourceMaxStreamingBitrateGateResolutionImplied(t *testing.T) {
+	// A DirectPlayProfile that would otherwise allow direct play outright.
+	permissive := DeviceProfile{
+		DirectPlayProfiles: []DirectPlayProfile{
+			{Type: "Video", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"},
+		},
+		TranscodingProfiles: []TranscodingProfile{
+			{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"},
+		},
+	}
+	// An unusually efficient 1080p encode: its bitrate alone fits under a
+	// "720p - 4 Mbps" cap, but its resolution does not.
+	version := catalog.FileVersion{
+		FileID:     1,
+		Resolution: "1080p",
+		CodecVideo: "h264",
+		CodecAudio: "aac",
+		Container:  "mp4",
+		Bitrate:    3_000,
+	}
+
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	source := h.buildPlaybackSource("item", "ps", version, permissive, playbackInfoRequest{MaxStreamingBitrate: 4_000_000}, false)
+	if source.SupportsDirectPlay {
+		t.Error("SupportsDirectPlay = true, want false: source resolution exceeds the cap's implied 720p ceiling")
+	}
+	if source.SupportsDirectStream {
+		t.Error("SupportsDirectStream = true, want false: source resolution exceeds the cap's implied 720p ceiling")
+	}
+	if !source.SupportsTranscoding {
+		t.Error("expected a full transcode to remain available")
+	}
+}
+
+func TestCompatMaxResolutionForBitrateKbps(t *testing.T) {
+	tests := []struct {
+		kbps int
+		want string
+	}{
+		{kbps: 0, want: ""},
+		{kbps: 1_500, want: "480p"},
+		{kbps: 4_000, want: "720p"},
+		{kbps: 10_000, want: "1080p"},
+		{kbps: 25_000, want: ""},
+	}
+	for _, tt := range tests {
+		if got := compatMaxResolutionForBitrateKbps(tt.kbps); got != tt.want {
+			t.Errorf("compatMaxResolutionForBitrateKbps(%d) = %q, want %q", tt.kbps, got, tt.want)
+		}
+	}
+}
+
+func TestCompatResolutionLabelForHeight(t *testing.T) {
+	tests := []struct {
+		height int
+		want   string
+	}{
+		{height: 0, want: ""},
+		{height: 480, want: "480p"},
+		{height: 576, want: "480p"},
+		{height: 720, want: "720p"},
+		{height: 1080, want: "1080p"},
+		{height: 2160, want: "2160p"},
+		{height: 4320, want: "4320p"},
+	}
+	for _, tt := range tests {
+		if got := compatResolutionLabelForHeight(tt.height); got != tt.want {
+			t.Errorf("compatResolutionLabelForHeight(%d) = %q, want %q", tt.height, got, tt.want)
+		}
+	}
+}
+
 func deviceProfileWithMaxBitrate(profile DeviceProfile, maxStreamingBitrate int64) DeviceProfile {
 	profile.MaxStreamingBitrate = maxStreamingBitrate
 	return profile

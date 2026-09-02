@@ -1003,6 +1003,27 @@ func is4KResolution(res string) bool {
 	return access.CompareQuality(res, "2160p") >= 0
 }
 
+// compatSourceVideoHeight resolves a version's pixel height from its probed
+// video track, falling back to the catalog resolution label when no track
+// carries a usable value.
+func compatSourceVideoHeight(version catalog.FileVersion) int {
+	for _, track := range version.VideoTracks {
+		if track.Height > 0 {
+			return track.Height
+		}
+	}
+	resolution := strings.ToLower(strings.TrimSpace(version.Resolution))
+	switch resolution {
+	case "8k":
+		return 4320
+	case "4k", "uhd":
+		return 2160
+	default:
+		height, _ := strconv.Atoi(strings.TrimSuffix(resolution, "p"))
+		return height
+	}
+}
+
 // compatVideoToolboxToneMapBitrateKbps chooses a resolution-aware bitrate for
 // Jellyfin-compatible VideoToolbox tone maps. Those requests intentionally
 // preserve source dimensions, so leaving the bitrate unset would make the
@@ -1012,25 +1033,7 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 		return 0
 	}
 
-	height := 0
-	for _, track := range version.VideoTracks {
-		if track.Height > 0 {
-			height = track.Height
-			break
-		}
-	}
-	if height == 0 {
-		resolution := strings.ToLower(strings.TrimSpace(version.Resolution))
-		switch resolution {
-		case "8k":
-			height = 4320
-		case "4k", "uhd":
-			height = 2160
-		default:
-			height, _ = strconv.Atoi(strings.TrimSuffix(resolution, "p"))
-		}
-	}
-
+	height := compatSourceVideoHeight(version)
 	switch {
 	case height >= 2160:
 		return 20_000
@@ -1044,6 +1047,46 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 		return version.Bitrate
 	default:
 		return 0
+	}
+}
+
+// compatResolutionLabelForHeight buckets a probed pixel height into the
+// resolution labels access.CompareQuality understands.
+func compatResolutionLabelForHeight(height int) string {
+	switch {
+	case height >= 4320:
+		return "4320p"
+	case height >= 2160:
+		return "2160p"
+	case height >= 1080:
+		return "1080p"
+	case height >= 720:
+		return "720p"
+	case height > 0:
+		return "480p"
+	default:
+		return ""
+	}
+}
+
+// compatMaxResolutionForBitrateKbps maps a negotiated MaxStreamingBitrate
+// ceiling onto the resolution its Jellyfin quality-profile name implies (e.g.
+// "720p - 4 Mbps", "1080p - 10 Mbps"), so a forced transcode actually
+// downscales instead of spending a starved bitrate on full source dimensions.
+// A cap generous enough to carry 4K returns "": at that ceiling the encoder's
+// normal resolution-aware bitrate ladder already applies.
+func compatMaxResolutionForBitrateKbps(kbps int) string {
+	switch {
+	case kbps <= 0:
+		return ""
+	case kbps < 2_000:
+		return "480p"
+	case kbps < 6_000:
+		return "720p"
+	case kbps < 20_000:
+		return "1080p"
+	default:
+		return ""
 	}
 }
 
@@ -2156,15 +2199,25 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	// stream via MaxStreamingBitrate rather than declaring narrower codec
 	// support. Direct play and any video-copy transport (progressive remux or
 	// HLS remux) all serve the source video verbatim, so none of them can honor
-	// a cap below the source's own bitrate — only a real transcode can. Below
-	// that cap, negotiation proceeds exactly as before.
+	// a cap below the source's own bitrate — only a real transcode can. The
+	// same cap implies a resolution ceiling too (a "720p - 4 Mbps" profile
+	// means 720p, not a 4K frame starved down to 4 Mbps): a source above that
+	// implied resolution is gated the same way, even if its bitrate alone
+	// happens to fit. Below both, negotiation proceeds exactly as before.
 	maxStreamingBitrateKbps := effectiveCompatMaxStreamingBitrateKbps(req, profile)
-	bitrateCapExceeded := maxStreamingBitrateKbps > 0 && version.Bitrate > maxStreamingBitrateKbps
-	if bitrateCapExceeded {
+	qualityCapExceeded := maxStreamingBitrateKbps > 0 && version.Bitrate > maxStreamingBitrateKbps
+	if !qualityCapExceeded && maxStreamingBitrateKbps > 0 {
+		if resCap := compatMaxResolutionForBitrateKbps(maxStreamingBitrateKbps); resCap != "" {
+			if sourceLabel := compatResolutionLabelForHeight(compatSourceVideoHeight(version)); sourceLabel != "" {
+				qualityCapExceeded = access.CompareQuality(sourceLabel, resCap) > 0
+			}
+		}
+	}
+	if qualityCapExceeded {
 		allowVideoCopy = false
 	}
 
-	supportsDirectPlay := enableDirectPlay && !bitrateCapExceeded && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
+	supportsDirectPlay := enableDirectPlay && !qualityCapExceeded && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
 	audioSupported := profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	enableTranscoding := boolDefault(req.EnableTranscoding, true)
