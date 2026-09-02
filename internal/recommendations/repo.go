@@ -1325,7 +1325,7 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 		watched_items AS (
 			SELECT item_id, watcher_id
 			FROM   watched_activity
-			WHERE  updated_at > NOW() - ($1 || ' days')::interval
+			WHERE  updated_at > NOW() - make_interval(days => $1)
 		)
 		SELECT wi.item_id, COUNT(DISTINCT wi.watcher_id) AS watch_count
 		FROM   watched_items wi
@@ -1333,7 +1333,7 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 		GROUP  BY wi.item_id
 		ORDER  BY watch_count DESC
 		LIMIT  $2`, watchedActivityCTE)
-	rows, err := r.pool.Query(ctx, query, fmt.Sprintf("%d", days), limit)
+	rows, err := r.pool.Query(ctx, query, days, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get popular items: %w", err)
 	}
@@ -1362,10 +1362,10 @@ func (r *Repo) GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]Sc
 		SELECT mi.content_id, mi.created_at
 		FROM   media_items mi
 		WHERE  %s
-		  AND  mi.created_at > NOW() - ($1 || ' days')::interval
+		  AND  mi.created_at > NOW() - make_interval(days => $1)
 		ORDER  BY mi.created_at DESC
 		LIMIT  $2`, recommendationItemEligibilityWhereClause("mi"))
-	rows, err := r.pool.Query(ctx, query, fmt.Sprintf("%d", days), limit)
+	rows, err := r.pool.Query(ctx, query, days, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get recently added: %w", err)
 	}
