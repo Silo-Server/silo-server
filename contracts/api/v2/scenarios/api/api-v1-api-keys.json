@@ -101,6 +101,11 @@
             "body": [
               {
                 "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
                 "op": "every",
                 "value": {
                   "pointer": "",
@@ -152,11 +157,21 @@
             "body": [
               {
                 "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
                 "op": "sorted",
                 "value": {
                   "by": "/created_at",
                   "direction": "desc"
                 }
+              },
+              {
+                "pointer": "",
+                "op": "unique_by",
+                "value": "/id"
               }
             ]
           },
@@ -846,6 +861,11 @@
             "status": 200,
             "body": [
               {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              },
+              {
                 "pointer": "/scopes/0/name",
                 "op": "equals",
                 "value": "admin:users"
@@ -895,6 +915,11 @@
           "expect": {
             "status": 200,
             "body": [
+              {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              },
               {
                 "pointer": "/scopes",
                 "op": "every",

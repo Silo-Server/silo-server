@@ -49,7 +49,7 @@ func RunAll(t *testing.T, catalogs []*scenariocatalog.Catalog) []Result {
 				t.Run(row.Method+" "+row.Path+" #"+strconv.Itoa(row.RegistrationIndex), func(t *testing.T) {
 					// Rows start from the same synthetic state so a mutation in
 					// one row cannot change what another row observes.
-					if env.HasDatabase() && rowNeedsDatabase(row) {
+					if env.HasDatabase() && env.rowNeedsDatabase(row) {
 						env.Reseed()
 					}
 					for _, s := range row.Scenarios {
@@ -74,7 +74,11 @@ func (e *Env) Run(t *testing.T, c *scenariocatalog.Catalog, row scenariocatalog.
 	defer func() { record(res) }()
 	needsDB := s.NeedsDatabase()
 	dbUnavailable := s.HasRequirement("database_unavailable")
-	rateLimited := s.HasRequirement("rate_limiter")
+	// A scenario on the rate-limited registration variant (#1 rows, which
+	// the router only registers with a rate-limit middleware) runs on the
+	// limited router whatever it asserts, so the row's real middleware
+	// chain is the one exercised. requires: rate_limiter forces the same.
+	rateLimited := s.HasRequirement("rate_limiter") || e.rowRateLimited(row)
 	if rateLimited {
 		needsDB = true
 	}
@@ -119,39 +123,81 @@ func (e *Env) Run(t *testing.T, c *scenariocatalog.Catalog, row scenariocatalog.
 		e.resetRateLimits()
 	}
 
-	repeat := s.Request.Repeat
+	failures, fatal := e.exchange(server.URL, s.Method(), s.Request, s.Principal, s.Expect)
+	if fatal != nil {
+		res.Failures = []string{fatal.Error()}
+		t.Fatal(res.Failures[0])
+		return
+	}
+	res.Failures = failures
+	// Follow-up exchanges observe the primary request's effect in the same
+	// state. They run even when the primary failed so the report shows the
+	// whole picture, but stop at the first step that cannot be built.
+	for i, step := range s.Then {
+		principal := s.Principal
+		if step.Principal != nil {
+			principal = *step.Principal
+		}
+		stepFailures, fatal := e.exchange(server.URL, step.Method, step.Request, principal, step.Expect)
+		if fatal != nil {
+			res.Failures = append(res.Failures, fmt.Sprintf("then[%d]: %v", i, fatal))
+			t.Fatal(res.Failures[len(res.Failures)-1])
+			return
+		}
+		for _, f := range stepFailures {
+			label := fmt.Sprintf("then[%d]", i)
+			if step.Description != "" {
+				label += " (" + step.Description + ")"
+			}
+			res.Failures = append(res.Failures, label+": "+f)
+		}
+	}
+	if len(res.Failures) > 0 {
+		t.Errorf("%s\n  %s", s.Description, strings.Join(res.Failures, "\n  "))
+	}
+}
+
+// exchange sends one request (repeated when the request says so), checks
+// the final response, and returns the assertion failures with the response
+// summary attached. A non-nil error means the exchange could not be built
+// or sent at all.
+func (e *Env) exchange(base, method string, request scenariocatalog.Request, principal scenariocatalog.Principal, expect scenariocatalog.Expect) ([]string, error) {
+	repeat := request.Repeat
 	if repeat < 1 {
 		repeat = 1
 	}
 	var resp response
 	for i := 0; i < repeat; i++ {
-		req, err := e.buildRequest(server.URL, s)
+		req, err := e.buildRequest(base, method, request, principal)
 		if err != nil {
-			res.Failures = []string{"build request: " + err.Error()}
-			t.Fatal(res.Failures[0])
-			return
+			return nil, fmt.Errorf("build request: %w", err)
 		}
 		resp, err = send(req)
 		if err != nil {
-			res.Failures = []string{"send request: " + err.Error()}
-			t.Fatal(res.Failures[0])
-			return
+			return nil, fmt.Errorf("send request: %w", err)
 		}
 	}
-	exp, err := e.substituteExpect(s.Expect)
+	exp, err := e.substituteExpect(expect)
 	if err != nil {
-		res.Failures = []string{"expected values: " + err.Error()}
-		t.Fatal(res.Failures[0])
-		return
+		return nil, fmt.Errorf("expected values: %w", err)
 	}
-	res.Failures = check(exp, resp)
-	if len(res.Failures) > 0 {
+	failures := check(exp, resp)
+	if len(failures) > 0 {
 		body := string(resp.Raw)
 		if len(body) > 600 {
 			body = body[:600] + "..."
 		}
-		t.Errorf("%s\n  %s\n  response: %d %s", s.Description, strings.Join(res.Failures, "\n  "), resp.Status, body)
+		failures = append(failures, fmt.Sprintf("response: %d %s", resp.Status, body))
 	}
+	return failures, nil
+}
+
+// rowRateLimited reports whether the ledger registers the row only behind
+// the rate-limit middleware, in which case its scenarios must run on the
+// limited router or they never reach that registration at all.
+func (e *Env) rowRateLimited(row scenariocatalog.Row) bool {
+	entry, ok := e.ledger[row.Key()]
+	return ok && entry.RateLimited()
 }
 
 // applySettings writes server_settings rows for a scenario and returns the
@@ -210,7 +256,10 @@ func (e *Env) substituteExpect(exp scenariocatalog.Expect) (scenariocatalog.Expe
 	return out, nil
 }
 
-func rowNeedsDatabase(row scenariocatalog.Row) bool {
+func (e *Env) rowNeedsDatabase(row scenariocatalog.Row) bool {
+	if e.rowRateLimited(row) {
+		return true
+	}
 	for _, s := range row.Scenarios {
 		if s.NeedsDatabase() || s.HasRequirement("rate_limiter") {
 			return true
@@ -401,7 +450,7 @@ func (e *Env) principalHeaders(p scenariocatalog.Principal) (http.Header, error)
 	// The disabled account's seeded session validates like any other; the
 	// middleware does not consult users.enabled for JWTs. Handlers decide.
 	h.Set("Authorization", "Bearer "+e.accessToken(user))
-	if profile != "" && profile != "none" {
+	if profile != "" && profile != profileNone {
 		id, ok := e.placeholder("profile_" + profile)
 		if !ok {
 			return nil, fmt.Errorf("unknown fixture profile %q", profile)
@@ -414,8 +463,8 @@ func (e *Env) principalHeaders(p scenariocatalog.Principal) (http.Header, error)
 	return h, nil
 }
 
-func (e *Env) buildRequest(base string, s scenariocatalog.Scenario) (*http.Request, error) {
-	path, err := e.substitute(s.Request.Path)
+func (e *Env) buildRequest(base, method string, r scenariocatalog.Request, principal scenariocatalog.Principal) (*http.Request, error) {
+	path, err := e.substitute(r.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -423,9 +472,9 @@ func (e *Env) buildRequest(base string, s scenariocatalog.Scenario) (*http.Reque
 	if err != nil {
 		return nil, err
 	}
-	if len(s.Request.Query) > 0 {
+	if len(r.Query) > 0 {
 		q := u.Query()
-		for k, v := range s.Request.Query {
+		for k, v := range r.Query {
 			sv, err := e.substitute(v)
 			if err != nil {
 				return nil, err
@@ -438,15 +487,15 @@ func (e *Env) buildRequest(base string, s scenariocatalog.Scenario) (*http.Reque
 	var body io.Reader
 	contentType := ""
 	switch {
-	case s.Request.Multipart != nil:
+	case r.Multipart != nil:
 		buf := &bytes.Buffer{}
 		mw := multipart.NewWriter(buf)
-		for k, v := range s.Request.Multipart.Fields {
+		for k, v := range r.Multipart.Fields {
 			if err := mw.WriteField(k, v); err != nil {
 				return nil, err
 			}
 		}
-		for _, f := range s.Request.Multipart.Files {
+		for _, f := range r.Multipart.Files {
 			header := textproto.MIMEHeader{}
 			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, f.Field, f.Filename))
 			header.Set("Content-Type", f.ContentType)
@@ -467,17 +516,17 @@ func (e *Env) buildRequest(base string, s scenariocatalog.Scenario) (*http.Reque
 		}
 		body = buf
 		contentType = mw.FormDataContentType()
-	case s.Request.RawBody != nil:
-		raw, err := e.substitute(*s.Request.RawBody)
+	case r.RawBody != nil:
+		raw, err := e.substitute(*r.RawBody)
 		if err != nil {
 			return nil, err
 		}
 		body = strings.NewReader(raw)
 		contentType = contentTypeJSON
-	case s.Request.BodyRef != "":
-		raw, err := scenarios.FS.ReadFile("fixtures/" + s.Request.BodyRef)
+	case r.BodyRef != "":
+		raw, err := scenarios.FS.ReadFile("fixtures/" + r.BodyRef)
 		if err != nil {
-			return nil, fmt.Errorf("body_ref %s: %w", s.Request.BodyRef, err)
+			return nil, fmt.Errorf("body_ref %s: %w", r.BodyRef, err)
 		}
 		sub, err := e.substitute(string(raw))
 		if err != nil {
@@ -485,24 +534,23 @@ func (e *Env) buildRequest(base string, s scenariocatalog.Scenario) (*http.Reque
 		}
 		body = strings.NewReader(sub)
 		contentType = contentTypeJSON
-	case s.Request.Body != nil:
-		sub, err := e.substitute(string(s.Request.Body))
+	case r.Body != nil:
+		sub, err := e.substitute(string(r.Body))
 		if err != nil {
 			return nil, err
 		}
 		body = strings.NewReader(sub)
 		contentType = contentTypeJSON
 	}
-	if s.Request.ContentType != "" {
-		contentType = s.Request.ContentType
+	if r.ContentType != "" {
+		contentType = r.ContentType
 	}
 
-	method := methodOf(s)
 	req, err := http.NewRequest(method, u.String(), body)
 	if err != nil {
 		return nil, err
 	}
-	headers, err := e.principalHeaders(s.Principal)
+	headers, err := e.principalHeaders(principal)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +562,7 @@ func (e *Env) buildRequest(base string, s scenariocatalog.Scenario) (*http.Reque
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	for k, v := range s.Request.Headers {
+	for k, v := range r.Headers {
 		if v == nil {
 			req.Header.Del(k)
 			continue
@@ -526,13 +574,6 @@ func (e *Env) buildRequest(base string, s scenariocatalog.Scenario) (*http.Reque
 		req.Header.Set(k, sv)
 	}
 	return req, nil
-}
-
-// methodOf reads the HTTP method from the scenario's row; the executor stores
-// it on the scenario during RunAll via the request path lookup. Scenarios
-// belong to exactly one row, so the row's method is authoritative.
-func methodOf(s scenariocatalog.Scenario) string {
-	return s.Method()
 }
 
 // principalDefaults maps a principal class to the fixture account and
@@ -551,6 +592,9 @@ var principalDefaults = map[string][2]string{
 }
 
 const contentTypeJSON = "application/json"
+
+// profileNone is the catalog spelling for "send no X-Profile-Id".
+const profileNone = "none"
 
 var noRedirect = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 

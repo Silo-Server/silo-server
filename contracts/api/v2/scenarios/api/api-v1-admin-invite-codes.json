@@ -91,6 +91,11 @@
             "body": [
               {
                 "pointer": "",
+                "op": "length",
+                "value": 3
+              },
+              {
+                "pointer": "",
                 "op": "every",
                 "value": {
                   "pointer": "",
@@ -125,6 +130,11 @@
           "expect": {
             "status": 200,
             "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 3
+              },
               {
                 "pointer": "",
                 "op": "sorted",

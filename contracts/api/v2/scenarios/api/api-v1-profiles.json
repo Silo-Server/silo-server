@@ -51,7 +51,7 @@
         {
           "id": "profiles_list.meaning",
           "category": "data_meaning",
-          "description": "Every profile of the account is returned (four for the member), the first created is primary, the child flag and content rating carry through, and avatar upload is off without S3.",
+          "description": "Every profile of the account is returned (four for the member), the first created is primary, the child flag and content rating carry through, and avatar_upload_enabled reports true today even without an object store (see notes).",
           "principal": {
             "class": "authenticated"
           },
@@ -116,6 +116,11 @@
             "body": [
               {
                 "pointer": "/profiles",
+                "op": "length",
+                "value": 4
+              },
+              {
+                "pointer": "/profiles",
                 "op": "every",
                 "value": {
                   "pointer": "",
@@ -178,6 +183,11 @@
           "expect": {
             "status": 200,
             "body": [
+              {
+                "pointer": "/profiles",
+                "op": "length",
+                "value": 4
+              },
               {
                 "pointer": "/profiles",
                 "op": "sorted",
@@ -460,7 +470,7 @@
         {
           "id": "profiles_create.meaning",
           "category": "data_meaning",
-          "description": "The new profile is not primary, has no PIN, gets forced subtitles on by default and the trimmed name.",
+          "description": "The new profile is not primary, reports has_pin because a PIN was supplied, gets forced subtitles on by default, the trimmed name, and the preset avatar.",
           "principal": {
             "class": "primary_profile"
           },
@@ -1796,6 +1806,62 @@
           "v2_expectation": null
         },
         {
+          "id": "profiles_update.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account PUT cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}",
+            "body": {
+              "name": "Hijacked"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "profiles_update.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -2153,6 +2219,59 @@
           "v2_expectation": null
         },
         {
+          "id": "profiles_delete.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account DELETE cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_secondary}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "profiles_delete.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -2221,7 +2340,7 @@
         {
           "id": "verify_pin.ok",
           "category": "status_headers",
-          "description": "The right PIN answers 200 with a profile token.",
+          "description": "The right PIN answers 200 with a profile token; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "authenticated"
           },
@@ -2238,6 +2357,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -2252,6 +2375,7 @@
               }
             ]
           },
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -2579,6 +2703,62 @@
             ]
           },
           "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account POST cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}/verify-pin",
+            "body": {
+              "pin": "${locked_pin}"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found or has no PIN"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
           "v2_expectation": null
         },
         {
@@ -3065,6 +3245,59 @@
           "v2_expectation": null
         },
         {
+          "id": "avatar_upload.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account PUT cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
           "id": "avatar_upload.no_token",
           "category": "authorization",
           "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
@@ -3354,6 +3587,59 @@
             ]
           },
           "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account DELETE cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
           "v2_expectation": null
         },
         {

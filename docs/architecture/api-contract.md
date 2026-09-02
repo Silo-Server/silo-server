@@ -942,17 +942,35 @@ database the executor owns, and skips otherwise. The variable is deliberately no
 `SILO_TEST_DATABASE_URL`: the executor truncates accounts, access groups, invite codes, and
 invitations on every reseed, which would break the other DB-gated packages sharing the test
 database. Before migrating or reseeding, the executor inspects the database and refuses one
-that holds media, library folders, accounts it did not seed (NULL or empty emails count as
-foreign), or server settings it did not write. Every profile-scoped wave-1 row pins the
-cross-account case: a member bearer declaring a profile owned by another account is 404
-`not_found` from viewer access, so a v2 rewrite that resolves the profile before the account
-fails the catalog rather than passing silently.
+that holds any media item, media file, or library folder; any account whose email is missing or
+not a fixture address; any secret-bearing `server_settings` value (keys matching secret,
+password, api_key, access_key, token_secret, or jwt with a non-empty value); or a
+`branding.server_name` other than the fixture's. Other settings rows are not a refusal signal.
+Scenarios on a row the ledger registers only behind the rate-limit middleware (the `#1`
+registration variants) run on the rate-limited router variant, so the registration they name is
+the one exercised. Every profile-scoped wave-1 row pins the cross-account case: a member bearer
+declaring a profile owned by another account is 404 `not_found` from viewer access, and the
+profile mutation rows (update, delete, verify-pin, avatar upload and delete) also pin the
+path-level case, a member's own profile header with an admin-owned profile id in the path, so a
+v2 rewrite that resolves the profile before the account fails the catalog rather than passing
+silently.
+
+A scenario may carry a `then` list: ordered follow-up exchanges (method, request, expected
+outcome, optional principal) executed after the primary request in the same fixture state, so a
+cross-request effect (the device poll after an approval, the GET after a PUT) is asserted rather
+than described. The collection predicates `every`, `none`, `sorted`, and `unique_by` fail on an
+array too short to test (empty for `every`/`none`, fewer than two elements for the others)
+unless the same scenario pins that array's size with `empty`, `length`, `min_length`, or
+`non_empty` on the same pointer; the default `json` body kind fails on a body that does not
+decode, and `text` compares the raw bytes.
 
 Fixture privacy follows the contract-fixture rule above: identities, profiles, codes, and
 tokens are deterministic synthetic values under reserved origins; credentials are minted at run
 time and referenced through `${...}` placeholders, so no committed catalog carries a secret.
-`make verify-local-paths` scans the catalogs for machine paths, non-reserved hosts, and
-credential-looking literals.
+`make verify-local-paths` scans the catalog bodies and the committed generators under
+`contracts/api/v2/scenarios/tools/` for non-reserved hosts (URL, protocol-relative, mail
+domain, bracketed IPv6, and bare dotted names whose last label is a public TLD), non-loopback
+IP literals, and credential-looking literals, and the whole scenario tree for machine paths.
 
 ## Evolution policy
 

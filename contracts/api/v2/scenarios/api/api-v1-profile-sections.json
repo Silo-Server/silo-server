@@ -374,7 +374,7 @@
         {
           "id": "overrides_put.roundtrip",
           "category": "data_meaning",
-          "description": "A saved override is returned by the next GET with the same section_id, hidden flag, and position.",
+          "description": "A saved override is returned by the next GET with the same id, section_id, hidden flag, and position, under the profile's home scope.",
           "principal": {
             "class": "profile"
           },
@@ -393,10 +393,60 @@
             }
           },
           "expect": {
-            "status": 204
+            "status": 204,
+            "body_kind": "empty"
           },
           "fresh_state": true,
-          "notes": "The executor runs rows independently, so the GET-after-PUT round trip lives in the section PR's handler test.",
+          "then": [
+            {
+              "method": "GET",
+              "description": "the next GET returns the saved override",
+              "request": {
+                "path": "/api/v1/profile/sections/"
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/overrides",
+                    "op": "length",
+                    "value": 1
+                  },
+                  {
+                    "pointer": "/overrides/0/ID",
+                    "op": "equals",
+                    "value": "00000000-0000-4000-8000-0000000000e1"
+                  },
+                  {
+                    "pointer": "/overrides/0/SectionID",
+                    "op": "equals",
+                    "value": "home-recently-added"
+                  },
+                  {
+                    "pointer": "/overrides/0/Hidden",
+                    "op": "equals",
+                    "value": true
+                  },
+                  {
+                    "pointer": "/overrides/0/Position",
+                    "op": "equals",
+                    "value": 2
+                  },
+                  {
+                    "pointer": "/overrides/0/ProfileID",
+                    "op": "equals",
+                    "value": "${profile_secondary}"
+                  },
+                  {
+                    "pointer": "/overrides/0/Scope",
+                    "op": "equals",
+                    "value": "home"
+                  }
+                ]
+              }
+            }
+          ],
+          "notes": "The GET body serializes userstore.SectionOverride with Go field names (ID, SectionID, Hidden, Position...) while the PUT reads snake_case (section_id, hidden, position): the two halves of the round trip use different casing. Flagged for the section PR.",
           "v2_expectation": null
         },
         {

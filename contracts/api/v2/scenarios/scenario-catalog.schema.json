@@ -145,7 +145,7 @@
       }
     },
     "bodyOp": {
-      "description": "Predicate vocabulary for JSON-pointer assertions. Product-behavior predicates, not byte equality.",
+      "description": "Predicate vocabulary for JSON-pointer assertions. Product-behavior predicates, not byte equality. every requires the nested predicate of each array element; none requires that no element satisfies it. every and none fail on an empty array, and sorted and unique_by on an array shorter than two, unless the same scenario pins the array's size with an empty, length, min_length, or (for every/none) non_empty predicate on the same pointer.",
       "enum": [
         "exists",
         "absent",
@@ -169,7 +169,8 @@
         "keys_include",
         "sorted",
         "unique_by",
-        "every"
+        "every",
+        "none"
       ]
     },
     "bodyAssertion": {
@@ -191,7 +192,7 @@
       },
       "allOf": [
         {
-          "if": { "properties": { "op": { "enum": ["equals", "not_equals", "type", "length", "min_length", "max_length", "matches", "one_of", "contains", "gte", "lte", "keys_equal", "keys_include", "sorted", "unique_by", "every"] } } },
+          "if": { "properties": { "op": { "enum": ["equals", "not_equals", "type", "length", "min_length", "max_length", "matches", "one_of", "contains", "gte", "lte", "keys_equal", "keys_include", "sorted", "unique_by", "every", "none"] } } },
           "then": { "required": ["value"] }
         },
         {
@@ -218,7 +219,7 @@
           }
         },
         {
-          "if": { "properties": { "op": { "const": "every" } } },
+          "if": { "properties": { "op": { "enum": ["every", "none"] } } },
           "then": { "properties": { "value": { "$ref": "#/$defs/bodyAssertion" } } }
         }
       ]
@@ -246,6 +247,19 @@
           "enum": ["json", "text", "empty", "any"],
           "default": "json"
         }
+      }
+    },
+    "thenStep": {
+      "description": "One follow-up exchange run after the primary request in the same fixture state. The method is explicit because the step may target another row; the principal defaults to the scenario's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "request", "expect"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1 },
+        "method": { "$ref": "#/$defs/method" },
+        "principal": { "$ref": "#/$defs/principal" },
+        "request": { "$ref": "#/$defs/request" },
+        "expect": { "$ref": "#/$defs/expect" }
       }
     },
     "v2Expectation": {
@@ -302,6 +316,12 @@
         "fresh_state": {
           "description": "The scenario mutates the synthetic fixture set. The executor reseeds before and after it so neighbouring scenarios observe the canonical state.",
           "type": "boolean"
+        },
+        "then": {
+          "description": "Ordered follow-up exchanges executed after the primary request within the same fresh state, so a cross-request effect (poll after approve, GET after PUT) is asserted rather than described. Implies database.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/thenStep" }
         },
         "notes": {
           "description": "Reviewer-facing remarks. Accidental-looking current behavior is flagged here for the section PR, never silently corrected.",

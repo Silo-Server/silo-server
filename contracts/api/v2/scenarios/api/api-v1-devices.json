@@ -132,6 +132,11 @@
             "body": [
               {
                 "pointer": "/devices",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/devices",
                 "op": "sorted",
                 "value": {
                   "by": "/last_seen_at",
@@ -230,9 +235,9 @@
           "v2_expectation": null
         },
         {
-          "id": "devices_list.shape",
-          "category": "field_presence_nullability",
-          "description": "Every device has the full field set; an empty list is [] not null.",
+          "id": "devices_list.scope_case",
+          "category": "filtering",
+          "description": "The scope match is case-insensitive: scope=HOUSEHOLD from a non-primary profile is the same 403 as the lowercase form.",
           "principal": {
             "class": "profile"
           },
@@ -243,9 +248,78 @@
             }
           },
           "expect": {
-            "status": 403
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Viewing the household's devices requires the primary profile or admin access"
+              }
+            ]
           },
-          "notes": "Scope match is case-insensitive.",
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.shape",
+          "category": "field_presence_nullability",
+          "description": "A profile with no registered devices (the child) gets an empty array, not null.",
+          "principal": {
+            "class": "child_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "devices"
+                ]
+              },
+              {
+                "pointer": "/devices",
+                "op": "type",
+                "value": "array"
+              },
+              {
+                "pointer": "/devices",
+                "op": "empty"
+              }
+            ]
+          },
           "v2_expectation": null
         },
         {
@@ -261,6 +335,11 @@
           "expect": {
             "status": 200,
             "body": [
+              {
+                "pointer": "/devices",
+                "op": "length",
+                "value": 2
+              },
               {
                 "pointer": "/devices",
                 "op": "every",

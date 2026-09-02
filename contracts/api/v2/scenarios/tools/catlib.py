@@ -20,7 +20,7 @@ def err(status, code, message=None, extra=None):
 
 
 def sc(id, category, description, principal, request, expect, requires=None, settings=None,
-       fresh_state=False, notes=None, method=None):
+       fresh_state=False, notes=None, method=None, then=None):
     s = {"id": id, "category": category, "description": description,
          "principal": principal if isinstance(principal, dict) else {"class": principal},
          "request": request, "expect": expect}
@@ -30,10 +30,32 @@ def sc(id, category, description, principal, request, expect, requires=None, set
         s["settings"] = settings
     if fresh_state:
         s["fresh_state"] = True
+    if then:
+        s["then"] = then
     if notes:
         s["notes"] = notes
     s["v2_expectation"] = None
     return s
+
+
+def step(method, request, expect, description=None, principal=None):
+    """One follow-up exchange for a scenario's `then` list: runs after the
+    primary request in the same state, with the scenario's principal unless
+    one is given, so a cross-request effect is asserted rather than described."""
+    st = {"method": method}
+    if description:
+        st["description"] = description
+    if principal is not None:
+        st["principal"] = principal if isinstance(principal, dict) else {"class": principal}
+    st["request"] = request
+    st["expect"] = expect
+    return st
+
+
+# Credential-bearing responses carry no Cache-Control today; each such
+# scenario pins the absence so the section PR sees the omission.
+NO_CACHE_CONTROL = [{"name": "Cache-Control", "op": "absent"}]
+NO_CACHE_NOTE = "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission."
 
 
 def row(method, path, scenarios, not_applicable=None, registration_index=0, notes=None, tier2=None):

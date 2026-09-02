@@ -16,8 +16,11 @@
 // test database (and two executors sharing one database collide). Point it at
 // an empty database the executor owns. Before touching anything, including
 // running migrations, the executor inspects the database and refuses one
-// that holds media, libraries, accounts it did not seed (a NULL or empty
-// email counts as foreign), or server settings it did not write.
+// that holds any media item, media file, or library folder; any account
+// whose email is missing or not a fixture address; any server_settings row
+// whose key looks secret-bearing (secret, password, api_key, access_key,
+// token_secret, jwt) with a non-empty value; or a branding.server_name other
+// than the fixture's. Other settings rows are not a refusal signal.
 //
 // Principals are minted from the synthetic fixture set at run time; catalogs
 // never carry credentials. Scenario bodies reference minted values through
@@ -38,7 +41,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -47,10 +49,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/contractledger"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -61,6 +65,19 @@ import (
 // its own scratch database. See the package documentation for why it is not
 // SILO_TEST_DATABASE_URL.
 const DatabaseEnv = "SILO_SCENARIO_DATABASE_URL"
+
+// fixtureProviderID names the executor's second login provider.
+const fixtureProviderID = "fixture-directory"
+
+// rejectingProvider is a credentials provider that never authenticates; it
+// exists so /auth/providers lists more than one entry.
+type rejectingProvider struct{}
+
+func (rejectingProvider) Authenticate(context.Context, auth.Credentials) (*models.User, error) {
+	return nil, auth.ErrInvalidCredentials
+}
+
+func (rejectingProvider) ValidateSession(context.Context, string) (bool, error) { return false, nil }
 
 // Fixture account names, as catalogs reference them in principal.user.
 const (
@@ -138,6 +155,9 @@ type Env struct {
 	// exercised on the live router.
 	offline       *httptest.Server
 	offlineRoutes map[string]bool
+	// ledger tells the executor which rows are the rate-limited
+	// registration variant, so their scenarios run on liveLimited.
+	ledger map[contractledger.Key]scenariocatalog.LedgerEntry
 	// Live routers, only when a database is configured.
 	live        *httptest.Server
 	liveLimited *httptest.Server
@@ -145,6 +165,7 @@ type Env struct {
 	settings    catalog.SettingsStore
 	stores      userstore.UserStoreProvider
 	jwt         *auth.JWTService
+	auth        *auth.Service
 	profileTok  *access.ProfileTokenService
 	limiter     *ratelimit.Middleware
 	policy      *policy.System
@@ -194,6 +215,11 @@ func New(t testing.TB) *Env {
 	t.Helper()
 	ctx := context.Background()
 	e := &Env{t: t, ctx: ctx, users: map[string]*models.User{}, sessions: map[string]string{}, apiKeys: map[string]string{}, fixtures: map[string]string{}}
+	ledger, err := scenariocatalog.LoadLedger()
+	if err != nil {
+		t.Fatalf("scenario executor: %v", err)
+	}
+	e.ledger = ledger
 
 	cfg := e.config()
 	// A pool whose target never answers: the router registers the
@@ -241,6 +267,12 @@ func New(t testing.TB) *Env {
 	e.stores = pgstore.NewPostgresProvider(pool)
 	e.jwt = auth.NewJWTService(cfg.Auth.JWTSecret, cfg.Auth.AccessTokenExpiry, cfg.Auth.RefreshTokenExpiry)
 	e.profileTok = access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
+	// The same service the router builds, so impersonation tokens come from
+	// the real StartImpersonation path rather than a hand-built JWT.
+	userRepo := auth.NewUserRepository(pool)
+	sessionRepo := auth.NewSessionRepository(pool)
+	e.auth = auth.NewService(auth.NewLocalProvider(userRepo, sessionRepo), e.jwt, sessionRepo, userRepo,
+		auth.NewInviteCodeRepository(pool), e.settings, e.stores)
 
 	e.policy = policy.NewSystem(policy.NewPolicyStore(pool), nil, slog.Default())
 	if err := e.policy.Start(ctx); err != nil {
@@ -265,6 +297,13 @@ func New(t testing.TB) *Env {
 			PublicURL:         publicURL,
 			UserStoreProvider: e.stores,
 			PolicySystem:      e.policy,
+			// A second credentials provider whose display name sorts after
+			// "Local" makes the providers list ordering observable (default
+			// first, then display name); it accepts no login.
+			AuthProviders: []auth.RegisteredProvider{{
+				Info:     auth.LoginProviderInfo{ID: fixtureProviderID, DisplayName: "Fixture Directory", Mode: "credentials"},
+				Provider: rejectingProvider{},
+			}},
 		}
 		if limited {
 			d.RateLimitMW = e.limiter
@@ -323,6 +362,12 @@ func (e *Env) Reseed() {
 	}
 	e.mustSetting("branding.server_name", serverName)
 	e.mustSetting("signup.enabled", "true")
+	// Media requests on, so the onboarding flow's requests step is present
+	// for non-child profiles and the child filter has something to remove.
+	e.mustExec(`INSERT INTO request_settings (id, requests_enabled) VALUES (true, true)
+		ON CONFLICT (id) DO UPDATE SET requests_enabled = true`)
+	// Minted lazily per fixture state; see impersonationToken.
+	delete(e.fixtures, "impersonation_token")
 
 	users := auth.NewUserRepository(e.pool)
 	sessions := auth.NewSessionRepository(e.pool)
@@ -641,24 +686,25 @@ func (e *Env) refreshTokenFor(name, sessionID string) string {
 	return token
 }
 
-// impersonationToken mints an access token for the member whose session
-// carries admin provenance, so /auth/impersonation/end has a real case.
+// impersonationToken starts a real impersonation of the member by the
+// seeded admin session through auth.Service.StartImpersonation (the path
+// behind POST /admin/users/{id}/impersonate) and returns its access token,
+// so /auth/me and /auth/impersonation/end see the token shape and session
+// row the product issues. One impersonation session per fixture state: a
+// repeated request reuses the token, and Reseed drops it. Scenarios that
+// reference the token carry fresh_state because it adds a session row.
 func (e *Env) impersonationToken() string {
+	if token, ok := e.fixtures["impersonation_token"]; ok {
+		return token
+	}
 	admin, member := e.users[fixtureAdmin], e.users[fixtureMember]
-	id := "00000000-0000-4000-8000-0000000001a1"
-	now := time.Now()
-	if _, err := e.pool.Exec(e.ctx, `INSERT INTO auth_sessions (id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at)
-		VALUES ($1, $2, 'fixture-impersonation', '127.0.0.1', $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
-		id, member.ID, now.Add(time.Hour), admin.ID, now); err != nil {
-		e.t.Fatalf("scenario executor: impersonation session: %v", err)
-	}
-	claims := auth.Claims{UserID: member.ID, Role: member.Role, SessionID: id, ImpersonatorUserID: &admin.ID, TokenType: auth.TokenTypeAccess}
-	claims.RegisteredClaims = jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)), IssuedAt: jwt.NewNumericDate(now)}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims).SignedString([]byte(jwtSecret))
+	adminClaims := &auth.Claims{UserID: admin.ID, Role: admin.Role, SessionID: e.sessions[fixtureAdmin], TokenType: auth.TokenTypeAccess}
+	pair, _, _, err := e.auth.StartImpersonation(auth.WithClaims(e.ctx, adminClaims), admin.ID, member.ID, "fixture-client", "127.0.0.1")
 	if err != nil {
-		e.t.Fatalf("scenario executor: impersonation token: %v", err)
+		e.t.Fatalf("scenario executor: start impersonation: %v", err)
 	}
-	return token
+	e.fixtures["impersonation_token"] = pair.AccessToken
+	return pair.AccessToken
 }
 
 // server picks the router variant for a scenario.

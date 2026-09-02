@@ -20,7 +20,7 @@
         {
           "id": "login.ok",
           "category": "status_headers",
-          "description": "Valid credentials answer 200 with a JSON token pair.",
+          "description": "Valid credentials answer 200 with a JSON token pair; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -38,6 +38,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -91,6 +95,7 @@
           "requires": [
             "database"
           ],
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -623,7 +628,7 @@
         {
           "id": "login.ok.r1",
           "category": "status_headers",
-          "description": "Valid credentials answer 200 with a JSON token pair.",
+          "description": "Valid credentials answer 200 with a JSON token pair; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -641,6 +646,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -694,6 +703,7 @@
           "requires": [
             "database"
           ],
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -2394,6 +2404,11 @@
             "body": [
               {
                 "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
                 "op": "every",
                 "value": {
                   "pointer": "",
@@ -2416,37 +2431,7 @@
         {
           "id": "providers.sorted",
           "category": "sorting",
-          "description": "The default provider sorts first, then by display name.",
-          "principal": {
-            "class": "public"
-          },
-          "request": {
-            "path": "/api/v1/auth/providers"
-          },
-          "expect": {
-            "status": 200,
-            "body": [
-              {
-                "pointer": "",
-                "op": "sorted",
-                "value": {
-                  "by": "/default",
-                  "direction": "desc",
-                  "then_by": "/display_name",
-                  "then_direction": "asc"
-                }
-              }
-            ]
-          },
-          "requires": [
-            "database"
-          ],
-          "v2_expectation": null
-        },
-        {
-          "id": "providers.oauth_hidden",
-          "category": "filtering",
-          "description": "OAuth-mode providers are filtered out when the OAuth routes are not mounted (no plugin providers are registered in the fixture, so none appear).",
+          "description": "The default provider sorts first, then by display name: local precedes the fixture's second credentials provider even though its display name sorts later.",
           "principal": {
             "class": "public"
           },
@@ -2459,7 +2444,67 @@
               {
                 "pointer": "",
                 "op": "length",
-                "value": 1
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "sorted",
+                "value": {
+                  "by": "/default",
+                  "direction": "desc",
+                  "then_by": "/display_name",
+                  "then_direction": "asc"
+                }
+              },
+              {
+                "pointer": "/0/id",
+                "op": "equals",
+                "value": "local"
+              },
+              {
+                "pointer": "/1/id",
+                "op": "equals",
+                "value": "fixture-directory"
+              },
+              {
+                "pointer": "/1/default",
+                "op": "equals",
+                "value": false
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "The executor registers a second credentials provider (fixture-directory, display name 'Fixture Directory') that accepts no login, so the ordering rule is observable; local ('Local') sorts first by default, not by name.",
+          "v2_expectation": null
+        },
+        {
+          "id": "providers.oauth_hidden",
+          "category": "filtering",
+          "description": "OAuth-mode providers are filtered out when the OAuth routes are not mounted; the two credentials providers (local and the fixture's second one) are the whole list.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/providers"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "none",
+                "value": {
+                  "pointer": "/mode",
+                  "op": "equals",
+                  "value": "oauth"
+                }
               }
             ]
           },
@@ -2595,7 +2640,7 @@
         {
           "id": "signup.ok",
           "category": "status_headers",
-          "description": "A valid invite code creates the account and answers 201 with the login response.",
+          "description": "A valid invite code creates the account and answers 201 with the login response; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -2616,6 +2661,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -2670,6 +2719,7 @@
             "database"
           ],
           "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -3147,7 +3197,7 @@
         {
           "id": "signup.ok.r1",
           "category": "status_headers",
-          "description": "A valid invite code creates the account and answers 201 with the login response.",
+          "description": "A valid invite code creates the account and answers 201 with the login response; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -3168,6 +3218,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -3222,6 +3276,7 @@
             "database"
           ],
           "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -3770,7 +3825,7 @@
         {
           "id": "refresh.ok",
           "category": "status_headers",
-          "description": "A valid refresh token answers 200 with a new pair.",
+          "description": "A valid refresh token answers 200 with a new pair; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -3787,6 +3842,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -3804,6 +3863,7 @@
           "requires": [
             "database"
           ],
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -4315,6 +4375,11 @@
                 "value": "${admin_username}"
               },
               {
+                "pointer": "/impersonation/impersonator_user_id",
+                "op": "equals",
+                "value": "${admin_user_id:int}"
+              },
+              {
                 "pointer": "/impersonation",
                 "op": "keys_equal",
                 "value": [
@@ -4325,6 +4390,8 @@
               }
             ]
           },
+          "fresh_state": true,
+          "notes": "${impersonation_token} is minted through auth.Service.StartImpersonation (the path behind POST /admin/users/{id}/impersonate) from the seeded admin session, so the claims and session row are the ones the product issues.",
           "v2_expectation": null
         },
         {
@@ -5016,6 +5083,11 @@
             "body": [
               {
                 "pointer": "/sessions",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/sessions",
                 "op": "every",
                 "value": {
                   "pointer": "",
@@ -5063,6 +5135,11 @@
           "expect": {
             "status": 200,
             "body": [
+              {
+                "pointer": "/sessions",
+                "op": "length",
+                "value": 2
+              },
               {
                 "pointer": "/sessions",
                 "op": "sorted",
@@ -7172,7 +7249,7 @@
         {
           "id": "device_poll.approved",
           "category": "data_meaning",
-          "description": "Polling an approved request consumes it and returns a full login (tokens plus user).",
+          "description": "Polling an approved request consumes it and returns a full login (tokens plus user); no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -7184,6 +7261,12 @@
           },
           "expect": {
             "status": 200,
+            "headers": [
+              {
+                "name": "Cache-Control",
+                "op": "absent"
+              }
+            ],
             "body": [
               {
                 "pointer": "/status",
@@ -7222,6 +7305,7 @@
             "database"
           ],
           "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -7532,7 +7616,7 @@
         {
           "id": "device_poll.approved.r1",
           "category": "data_meaning",
-          "description": "Polling an approved request consumes it and returns a full login (tokens plus user).",
+          "description": "Polling an approved request consumes it and returns a full login (tokens plus user); no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -7544,6 +7628,12 @@
           },
           "expect": {
             "status": 200,
+            "headers": [
+              {
+                "name": "Cache-Control",
+                "op": "absent"
+              }
+            ],
             "body": [
               {
                 "pointer": "/status",
@@ -7582,6 +7672,7 @@
             "database"
           ],
           "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -7986,10 +8077,59 @@
             }
           },
           "expect": {
-            "status": 200
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/status",
+                "op": "equals",
+                "value": "approved"
+              }
+            ]
           },
           "fresh_state": true,
-          "notes": "Cross-row effect (poll after approve) is asserted in device_poll.approved via seeded approved state.",
+          "then": [
+            {
+              "method": "POST",
+              "description": "the device polls and receives the approving member's login",
+              "principal": {
+                "class": "public"
+              },
+              "request": {
+                "path": "/api/v1/auth/device/poll",
+                "body": {
+                  "device_code": "${device_code}"
+                }
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/status",
+                    "op": "equals",
+                    "value": "approved"
+                  },
+                  {
+                    "pointer": "/access_token",
+                    "op": "non_empty"
+                  },
+                  {
+                    "pointer": "/refresh_token",
+                    "op": "non_empty"
+                  },
+                  {
+                    "pointer": "/user/username",
+                    "op": "equals",
+                    "value": "${member_username}"
+                  },
+                  {
+                    "pointer": "/user/id",
+                    "op": "equals",
+                    "value": "${member_user_id:int}"
+                  }
+                ]
+              }
+            }
+          ],
           "v2_expectation": null
         },
         {
@@ -8655,7 +8795,7 @@
         {
           "id": "handoff.meaning",
           "category": "data_meaning",
-          "description": "The approval binds the caller's profile: a later poll returns that profile_id.",
+          "description": "The approval binds the caller's profile: a later poll returns that profile_id with a profile token and the temporary flag.",
           "principal": {
             "class": "primary_profile"
           },
@@ -8666,10 +8806,60 @@
             }
           },
           "expect": {
-            "status": 200
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/status",
+                "op": "equals",
+                "value": "approved"
+              }
+            ]
           },
           "fresh_state": true,
-          "notes": "Profile binding is asserted through the seeded approved state in device_poll.remote_approved.",
+          "then": [
+            {
+              "method": "POST",
+              "description": "the device polls and receives the login bound to the approving profile",
+              "principal": {
+                "class": "public"
+              },
+              "request": {
+                "path": "/api/v1/auth/device/poll",
+                "body": {
+                  "device_code": "${device_code_remote}"
+                }
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/status",
+                    "op": "equals",
+                    "value": "approved"
+                  },
+                  {
+                    "pointer": "/profile_id",
+                    "op": "equals",
+                    "value": "${profile_primary}"
+                  },
+                  {
+                    "pointer": "/profile_token",
+                    "op": "non_empty"
+                  },
+                  {
+                    "pointer": "/temporary",
+                    "op": "equals",
+                    "value": true
+                  },
+                  {
+                    "pointer": "/user/username",
+                    "op": "equals",
+                    "value": "${member_username}"
+                  }
+                ]
+              }
+            }
+          ],
           "v2_expectation": null
         },
         {
@@ -8889,7 +9079,7 @@
         {
           "id": "deny.approved",
           "category": "data_meaning",
-          "description": "Denying an approved-but-unconsumed request overrides the approval.",
+          "description": "Denying an approved-but-unconsumed request overrides the approval: the device's next poll sees denied and no tokens.",
           "principal": {
             "class": "authenticated"
           },
@@ -8900,9 +9090,53 @@
             }
           },
           "expect": {
-            "status": 200
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/status",
+                "op": "equals",
+                "value": "denied"
+              }
+            ]
           },
           "fresh_state": true,
+          "then": [
+            {
+              "method": "POST",
+              "description": "the device polls and the approval is gone",
+              "principal": {
+                "class": "public"
+              },
+              "request": {
+                "path": "/api/v1/auth/device/poll",
+                "body": {
+                  "device_code": "${device_code_approved}"
+                }
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/status",
+                    "op": "equals",
+                    "value": "denied"
+                  },
+                  {
+                    "pointer": "/access_token",
+                    "op": "absent"
+                  },
+                  {
+                    "pointer": "/refresh_token",
+                    "op": "absent"
+                  },
+                  {
+                    "pointer": "/user",
+                    "op": "absent"
+                  }
+                ]
+              }
+            }
+          ],
           "v2_expectation": null
         },
         {

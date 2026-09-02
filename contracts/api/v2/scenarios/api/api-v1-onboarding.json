@@ -100,7 +100,7 @@
         {
           "id": "flow.surface_filter",
           "category": "filtering",
-          "description": "surface=tv drops steps that need input; an unknown surface is 400.",
+          "description": "surface=tv (case-insensitive) drops the steps that need input (the setting_choice steps) and the web-only apps step; the welcome step stays.",
           "principal": {
             "class": "profile"
           },
@@ -116,6 +116,71 @@
               {
                 "pointer": "/steps",
                 "op": "non_empty"
+              },
+              {
+                "pointer": "/steps",
+                "op": "none",
+                "value": {
+                  "pointer": "/kind",
+                  "op": "equals",
+                  "value": "setting_choice"
+                }
+              },
+              {
+                "pointer": "/steps",
+                "op": "none",
+                "value": {
+                  "pointer": "/id",
+                  "op": "equals",
+                  "value": "apps"
+                }
+              },
+              {
+                "pointer": "/steps/0/id",
+                "op": "equals",
+                "value": "welcome"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.web_surface",
+          "category": "filtering",
+          "description": "The default web surface keeps the setting_choice steps the tv surface drops.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/steps",
+                "op": "min_length",
+                "value": 4
+              },
+              {
+                "pointer": "/steps/1/kind",
+                "op": "equals",
+                "value": "setting_choice"
+              },
+              {
+                "pointer": "/steps/1/id",
+                "op": "equals",
+                "value": "playback-quality"
+              },
+              {
+                "pointer": "/steps/2/kind",
+                "op": "equals",
+                "value": "setting_choice"
+              },
+              {
+                "pointer": "/steps/2/id",
+                "op": "equals",
+                "value": "subtitles"
               }
             ]
           },
@@ -179,7 +244,7 @@
         {
           "id": "flow.child_filter",
           "category": "filtering",
-          "description": "A child profile receives a flow without the requests step.",
+          "description": "A child profile receives a flow without the requests step even when requests are enabled; the parent's flow includes it.",
           "principal": {
             "class": "child_profile"
           },
@@ -192,9 +257,45 @@
               {
                 "pointer": "/steps",
                 "op": "non_empty"
+              },
+              {
+                "pointer": "/steps",
+                "op": "none",
+                "value": {
+                  "pointer": "/id",
+                  "op": "equals",
+                  "value": "requests"
+                }
               }
             ]
           },
+          "then": [
+            {
+              "method": "GET",
+              "description": "a non-child profile's flow carries the requests step",
+              "principal": {
+                "class": "profile"
+              },
+              "request": {
+                "path": "/api/v1/onboarding/flow"
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/steps",
+                    "op": "non_empty"
+                  },
+                  {
+                    "pointer": "/steps/4/id",
+                    "op": "equals",
+                    "value": "requests"
+                  }
+                ]
+              }
+            }
+          ],
+          "notes": "The fixture seeds request_settings.requests_enabled=true so the requests step is in the parent's flow; only the child filter removes it.",
           "v2_expectation": null
         },
         {
@@ -708,7 +809,7 @@
         {
           "id": "progress.completed_monotonic",
           "category": "data_meaning",
-          "description": "Marking completed sets done; a later write cannot clear it (monotonic).",
+          "description": "Marking completed sets done; a later write without completed moves last_step but cannot clear completed_at (monotonic).",
           "principal": {
             "class": "profile"
           },
@@ -724,7 +825,78 @@
             "body_kind": "empty"
           },
           "fresh_state": true,
-          "notes": "The read-back (state.done true after completed) is asserted in the section PR handler test; the executor keeps rows independent.",
+          "then": [
+            {
+              "method": "GET",
+              "description": "state reports done after completion",
+              "request": {
+                "path": "/api/v1/onboarding/state"
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/done",
+                    "op": "equals",
+                    "value": true
+                  },
+                  {
+                    "pointer": "/last_step",
+                    "op": "equals",
+                    "value": "finish"
+                  },
+                  {
+                    "pointer": "/completed_at",
+                    "op": "rfc3339"
+                  },
+                  {
+                    "pointer": "/skipped_at",
+                    "op": "absent"
+                  }
+                ]
+              }
+            },
+            {
+              "method": "POST",
+              "description": "a later plain progress write",
+              "request": {
+                "path": "/api/v1/onboarding/progress",
+                "body": {
+                  "last_step": "welcome"
+                }
+              },
+              "expect": {
+                "status": 204,
+                "body_kind": "empty"
+              }
+            },
+            {
+              "method": "GET",
+              "description": "completed_at survives the later write",
+              "request": {
+                "path": "/api/v1/onboarding/state"
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/done",
+                    "op": "equals",
+                    "value": true
+                  },
+                  {
+                    "pointer": "/last_step",
+                    "op": "equals",
+                    "value": "welcome"
+                  },
+                  {
+                    "pointer": "/completed_at",
+                    "op": "rfc3339"
+                  }
+                ]
+              }
+            }
+          ],
           "v2_expectation": null
         },
         {

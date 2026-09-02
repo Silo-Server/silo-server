@@ -334,7 +334,7 @@
         {
           "id": "inv_accept.ok",
           "category": "status_headers",
-          "description": "Accepting with a strong password creates the account and answers 201 with the login shape.",
+          "description": "Accepting with a strong password creates the account and answers 201 with the login shape; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -351,6 +351,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -382,6 +386,7 @@
             "database"
           ],
           "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {
@@ -1077,7 +1082,7 @@
         {
           "id": "inv_accept.ok.r1",
           "category": "status_headers",
-          "description": "Accepting with a strong password creates the account and answers 201 with the login shape.",
+          "description": "Accepting with a strong password creates the account and answers 201 with the login shape; no Cache-Control is set on the credential response.",
           "principal": {
             "class": "public"
           },
@@ -1094,6 +1099,10 @@
                 "name": "Content-Type",
                 "op": "equals",
                 "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
               }
             ],
             "body": [
@@ -1125,6 +1134,7 @@
             "database"
           ],
           "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
           "v2_expectation": null
         },
         {

@@ -86,19 +86,34 @@ func (r Row) Key() contractledger.Key {
 
 // Scenario is one executable behavior case.
 type Scenario struct {
-	ID            string            `json:"id"`
-	Category      Category          `json:"category"`
-	Description   string            `json:"description"`
-	Principal     Principal         `json:"principal"`
-	Request       Request           `json:"request"`
-	Expect        Expect            `json:"expect"`
-	Requires      []string          `json:"requires,omitempty"`
-	Settings      map[string]string `json:"settings,omitempty"`
-	FreshState    bool              `json:"fresh_state,omitempty"`
-	Notes         string            `json:"notes,omitempty"`
-	V2Expectation json.RawMessage   `json:"v2_expectation"`
+	ID          string            `json:"id"`
+	Category    Category          `json:"category"`
+	Description string            `json:"description"`
+	Principal   Principal         `json:"principal"`
+	Request     Request           `json:"request"`
+	Expect      Expect            `json:"expect"`
+	Requires    []string          `json:"requires,omitempty"`
+	Settings    map[string]string `json:"settings,omitempty"`
+	FreshState  bool              `json:"fresh_state,omitempty"`
+	// Then lists follow-up exchanges run after the primary request, in the
+	// same state, so a scenario can pin the effect of a mutation (the poll
+	// after an approval, the GET after a PUT) instead of only its status.
+	Then          []Step          `json:"then,omitempty"`
+	Notes         string          `json:"notes,omitempty"`
+	V2Expectation json.RawMessage `json:"v2_expectation"`
 
 	method string
+}
+
+// Step is one follow-up exchange of a scenario's then list. It names its
+// own method because it may target a different row than the primary
+// request; the principal defaults to the scenario's.
+type Step struct {
+	Description string     `json:"description,omitempty"`
+	Method      string     `json:"method"`
+	Principal   *Principal `json:"principal,omitempty"`
+	Request     Request    `json:"request"`
+	Expect      Expect     `json:"expect"`
 }
 
 // Method returns the HTTP method of the row the scenario belongs to.
@@ -107,7 +122,7 @@ func (s Scenario) Method() string { return s.method }
 // NeedsDatabase reports whether the scenario can only run against a live
 // Postgres: anything that sends a credential, applies settings, or says so.
 func (s Scenario) NeedsDatabase() bool {
-	if s.Principal.Class != "public" || len(s.Settings) > 0 {
+	if s.Principal.Class != "public" || len(s.Settings) > 0 || len(s.Then) > 0 {
 		return true
 	}
 	for _, req := range s.Requires {
@@ -299,6 +314,14 @@ func (c *Catalog) check() []string {
 			}
 			if s.Principal.Class != "api_key" && len(s.Principal.Scopes) > 0 {
 				problems = append(problems, fmt.Sprintf("%s: scenario %s sets scopes on a non-api_key principal", c.File, s.ID))
+			}
+			for i, step := range s.Then {
+				if step.Request.Body != nil && (step.Request.BodyRef != "" || step.Request.RawBody != nil || step.Request.Multipart != nil) {
+					problems = append(problems, fmt.Sprintf("%s: scenario %s then[%d] declares more than one body source", c.File, s.ID, i))
+				}
+				if step.Principal != nil && step.Principal.Class != "api_key" && len(step.Principal.Scopes) > 0 {
+					problems = append(problems, fmt.Sprintf("%s: scenario %s then[%d] sets scopes on a non-api_key principal", c.File, s.ID, i))
+				}
 			}
 		}
 		for cat, reason := range row.NotApplicable {

@@ -38,6 +38,19 @@ def non_admin_403(id_prefix, path, body=None):
         req["body"] = body
     return sc(f"{id_prefix}.non_admin", "authorization", "A non-admin account is 403 forbidden.", "primary_profile", req, err(403, "forbidden", "Admin access required"))
 
+def other_account_path(id_prefix, method, path, body=None, message="Profile not found"):
+    """Member bearer with its own primary profile header targeting a profile
+    id the admin account owns in the path. The user store is scoped to the
+    bearer's account, so the lookup misses and the handler answers 404."""
+    req = {"path": path}
+    if body is not None:
+        req["body"] = body
+    return sc(f"{id_prefix}.other_account_path", "authorization",
+              f"A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account {method} cannot reach the mutation.",
+              "primary_profile", req, err(404, "not_found", message),
+              notes="Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.")
+
+
 def demo_blocked(id_prefix, path, body=None, method_note=""):
     req = {"path": path}
     if body is not None:
@@ -77,9 +90,9 @@ def invitations_public():
         rows.append(row("GET", "/api/v1/invitations/{token}/", lookup, registration_index=idx,
                         not_applicable=na({"authorization": "Public by design: the token is the credential; unknown/expired/accepted all collapse to one 404."}, NA_SINGLE)))
         accept = [
-            sc("inv_accept.ok", "status_headers", "Accepting with a strong password creates the account and answers 201 with the login shape.", "public",
+            sc("inv_accept.ok", "status_headers", "Accepting with a strong password creates the account and answers 201 with the login shape; no Cache-Control is set on the credential response.", "public",
                {"path": "/api/v1/invitations/${invitation_token}/accept", "body": {"password": "fixture-invitee-password"}},
-               {"status": 201, "headers": JSON_CT, "body": [{"pointer": "", "op": "keys_equal", "value": LOGIN_KEYS}, {"pointer": "/user", "op": "keys_equal", "value": USER_KEYS}]}, requires=["database"], fresh_state=True),
+               {"status": 201, "headers": JSON_CT + NO_CACHE_CONTROL, "body": [{"pointer": "", "op": "keys_equal", "value": LOGIN_KEYS}, {"pointer": "/user", "op": "keys_equal", "value": USER_KEYS}]}, requires=["database"], fresh_state=True, notes=NO_CACHE_NOTE),
             sc("inv_accept.meaning", "data_meaning", "The new account's username is the invited email and its role is the invited role.", "public",
                {"path": "/api/v1/invitations/${invitation_token}/accept", "body": {"password": "fixture-invitee-password"}},
                {"status": 201, "body": [{"pointer": "/user/username", "op": "equals", "value": "fixture-invitee@silo.example.test"}, {"pointer": "/user/email", "op": "equals", "value": "fixture-invitee@silo.example.test"}, {"pointer": "/user/role", "op": "equals", "value": "user"}]}, requires=["database"], fresh_state=True),
@@ -107,17 +120,17 @@ def profiles():
     list_row = row("GET", "/api/v1/profiles/", [
         sc("profiles_list.ok", "status_headers", "Lists the account's profiles, 200 JSON.", "authenticated", {"path": "/api/v1/profiles/"},
            {"status": 200, "headers": JSON_CT, "body": [{"pointer": "", "op": "keys_equal", "value": ["profiles", "avatar_upload_enabled"]}]}),
-        sc("profiles_list.meaning", "data_meaning", "Every profile of the account is returned (four for the member), the first created is primary, the child flag and content rating carry through, and avatar upload is off without S3.", "authenticated", {"path": "/api/v1/profiles/"},
+        sc("profiles_list.meaning", "data_meaning", "Every profile of the account is returned (four for the member), the first created is primary, the child flag and content rating carry through, and avatar_upload_enabled reports true today even without an object store (see notes).", "authenticated", {"path": "/api/v1/profiles/"},
            {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 4}, {"pointer": "/profiles/0/is_primary", "op": "equals", "value": True}, {"pointer": "/profiles/0/id", "op": "equals", "value": "${profile_primary}"},
                                     {"pointer": "/profiles/2/is_child", "op": "equals", "value": True}, {"pointer": "/profiles/2/max_content_rating", "op": "equals", "value": "PG"},
                                     {"pointer": "/profiles/3/has_pin", "op": "equals", "value": True}, {"pointer": "/avatar_upload_enabled", "op": "equals", "value": True}]},
            notes="avatar_upload_enabled is true even though no object store is configured: the router assigns the nil *s3client.Client to the handler's interface field, which then compares non-nil. Flagged for the section PR (typed-nil)."),
         sc("profiles_list.shape", "field_presence_nullability", "Each profile carries the always-present fields; optional strings (avatar, max_content_rating, language...) are omitted when empty; allowed_library_ids is null (not []) when the profile has none.", "authenticated", {"path": "/api/v1/profiles/"},
-           {"status": 200, "body": [{"pointer": "/profiles", "op": "every", "value": PROFILE_REQUIRED}, {"pointer": "/profiles/0/allowed_library_ids", "op": "is_null"}, {"pointer": "/profiles/0/avatar", "op": "absent"}, {"pointer": "/profiles/0/max_content_rating", "op": "absent"},
+           {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 4}, {"pointer": "/profiles", "op": "every", "value": PROFILE_REQUIRED}, {"pointer": "/profiles/0/allowed_library_ids", "op": "is_null"}, {"pointer": "/profiles/0/avatar", "op": "absent"}, {"pointer": "/profiles/0/max_content_rating", "op": "absent"},
                                     {"pointer": "/profiles/0/created_at", "op": "rfc3339"}, {"pointer": "/profiles/0/max_playback_quality", "op": "equals", "value": ""}]},
            notes="allowed_library_ids serializes as null for an empty list while max_playback_quality is an empty string; inconsistent empty representations. Flagged for the section PR."),
         sc("profiles_list.sorted", "sorting", "Profiles are ordered by creation time ascending (primary first).", "authenticated", {"path": "/api/v1/profiles/"},
-           {"status": 200, "body": [{"pointer": "/profiles", "op": "sorted", "value": {"by": "/created_at", "direction": "asc"}}, {"pointer": "/profiles", "op": "unique_by", "value": "/id"}]}),
+           {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 4}, {"pointer": "/profiles", "op": "sorted", "value": {"by": "/created_at", "direction": "asc"}}, {"pointer": "/profiles", "op": "unique_by", "value": "/id"}]}),
         sc("profiles_list.no_profile_needed", "authorization", "The list works without X-Profile-Id: it is what a client calls to pick one.", "authenticated", {"path": "/api/v1/profiles/"}, {"status": 200}),
         sc("profiles_list.other_account", "authorization", "The admin sees only its own two profiles, never another account's.", "admin", {"path": "/api/v1/profiles/"},
            {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 2}]}),
@@ -131,7 +144,7 @@ def profiles():
     create_row = row("POST", "/api/v1/profiles/", [
         sc("profiles_create.ok", "status_headers", "The primary profile creates a household member: 201 with the profile.", "primary_profile",
            {"path": "/api/v1/profiles/", "body": create_body}, {"status": 201, "headers": JSON_CT, "body": [PROFILE_REQUIRED]}, fresh_state=True),
-        sc("profiles_create.meaning", "data_meaning", "The new profile is not primary, has no PIN, gets forced subtitles on by default and the trimmed name.", "primary_profile",
+        sc("profiles_create.meaning", "data_meaning", "The new profile is not primary, reports has_pin because a PIN was supplied, gets forced subtitles on by default, the trimmed name, and the preset avatar.", "primary_profile",
            {"path": "/api/v1/profiles/", "body": {"name": "  Fixture New  ", "pin": "1357", "avatar": "avatar-2"}},
            {"status": 201, "body": [{"pointer": "/name", "op": "equals", "value": "Fixture New"}, {"pointer": "/is_primary", "op": "equals", "value": False}, {"pointer": "/has_pin", "op": "equals", "value": True},
                                     {"pointer": "/show_forced_subtitles", "op": "equals", "value": True}, {"pointer": "/avatar", "op": "equals", "value": "preset:avatar-2"}, {"pointer": "/avatar_source", "op": "equals", "value": "preset"}, {"pointer": "/avatar_url", "op": "non_empty"}]}, fresh_state=True),
@@ -186,6 +199,7 @@ def profiles():
         sc("profiles_update.shape", "field_presence_nullability", "Response is the full profile shape, not a delta.", "primary_profile",
            {"path": upd, "body": {"auto_skip_recap": True}}, {"status": 200, "body": [PROFILE_REQUIRED]}, fresh_state=True),
         other_account_profile("profiles_update", upd, body={"name": "X"}),
+        other_account_path("profiles_update", "PUT", "/api/v1/profiles/${profile_admin_primary}", body={"name": "Hijacked"}),
         unauth("profiles_update", "PUT", upd, body={"name": "X"}),
     ], not_applicable=na({"sorting": NA_SINGLE["sorting"], "pagination": NA_SINGLE["pagination"]}, NA_RAW))
     delete_row = row("DELETE", "/api/v1/profiles/{id}", [
@@ -198,12 +212,13 @@ def profiles():
         sc("profiles_delete.not_found", "error", "Unknown id is 404.", "primary_profile", {"path": "/api/v1/profiles/${profile_missing}"}, err(404, "not_found")),
         sc("profiles_delete.shape", "field_presence_nullability", "Success has no body.", "primary_profile", {"path": "/api/v1/profiles/${profile_child}"}, {"status": 204, "body_kind": "empty"}, fresh_state=True),
         other_account_profile("profiles_delete", upd),
+        other_account_path("profiles_delete", "DELETE", "/api/v1/profiles/${profile_admin_secondary}"),
         unauth("profiles_delete", "DELETE", upd),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     pin_path = "/api/v1/profiles/${profile_locked}/verify-pin"
     verify_row = row("POST", "/api/v1/profiles/{id}/verify-pin", [
-        sc("verify_pin.ok", "status_headers", "The right PIN answers 200 with a profile token.", "authenticated",
-           {"path": pin_path, "body": {"pin": "${locked_pin}"}}, {"status": 200, "headers": JSON_CT, "body": [{"pointer": "/valid", "op": "equals", "value": True}, {"pointer": "/profile_token", "op": "non_empty"}]}),
+        sc("verify_pin.ok", "status_headers", "The right PIN answers 200 with a profile token; no Cache-Control is set on the credential response.", "authenticated",
+           {"path": pin_path, "body": {"pin": "${locked_pin}"}}, {"status": 200, "headers": JSON_CT + NO_CACHE_CONTROL, "body": [{"pointer": "/valid", "op": "equals", "value": True}, {"pointer": "/profile_token", "op": "non_empty"}]}, notes=NO_CACHE_NOTE),
         sc("verify_pin.wrong", "data_meaning", "A wrong PIN is still 200 with valid false and no token.", "authenticated",
            {"path": pin_path, "body": {"pin": "0000"}}, {"status": 200, "body": [{"pointer": "", "op": "equals", "value": {"valid": False}}]},
            notes="A failed PIN is a 200 {valid:false}, not an error status. Recorded as-is."),
@@ -217,6 +232,7 @@ def profiles():
         sc("verify_pin.missing", "error", "An empty pin is 400.", "authenticated", {"path": pin_path, "body": {"pin": ""}}, err(400, "bad_request", "PIN is required")),
         sc("verify_pin.malformed", "error", "A non-JSON body is 400.", "authenticated", {"path": pin_path, "raw_body": "x"}, err(400, "bad_request", "Invalid request body")),
         other_account_profile("verify_pin", pin_path, body={"pin": "1"}),
+        other_account_path("verify_pin", "POST", "/api/v1/profiles/${profile_admin_primary}/verify-pin", body={"pin": "${locked_pin}"}, message="Profile not found or has no PIN"),
         unauth("verify_pin", "POST", pin_path, body={"pin": "1"}),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     avatar_path = "/api/v1/profiles/${profile_secondary}/avatar"
@@ -240,6 +256,7 @@ def profiles():
            {"path": "/api/v1/profiles/${profile_primary}/avatar"}, err(400, "bad_request", "Invalid multipart form"),
            notes="No primary/admin check on avatar upload, unlike profile update. Flagged for the section PR."),
         other_account_profile("avatar_upload", avatar_path),
+        other_account_path("avatar_upload", "PUT", "/api/v1/profiles/${profile_admin_primary}/avatar"),
         unauth("avatar_upload", "PUT", avatar_path),
     ], not_applicable=na(NA_SINGLE))
     delete_avatar_row = row("DELETE", "/api/v1/profiles/{id}/avatar", [
@@ -253,6 +270,7 @@ def profiles():
         sc("avatar_delete.not_found", "error", "Unknown profile is 404.", "primary_profile", {"path": "/api/v1/profiles/${profile_missing}/avatar"}, err(404, "not_found")),
         sc("avatar_delete.shape", "field_presence_nullability", "Response is the profile shape.", "primary_profile", {"path": avatar_path}, {"status": 200, "body": [PROFILE_REQUIRED]}),
         other_account_profile("avatar_delete", avatar_path),
+        other_account_path("avatar_delete", "DELETE", "/api/v1/profiles/${profile_admin_primary}/avatar"),
         unauth("avatar_delete", "DELETE", avatar_path),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     household_row = row("GET", "/api/v1/profiles/household/sessions", [
@@ -291,9 +309,18 @@ def profile_sections():
     save_ok = {"scope": "home", "overrides": [{"id": "00000000-0000-4000-8000-0000000000s1".replace("s", "e"), "section_id": "home-recently-added", "hidden": True, "position": 2}]}
     put_row = row("PUT", "/api/v1/profile/sections/", [
         sc("overrides_put.ok", "status_headers", "Saving overrides answers 204.", "profile", {"path": base, "body": save_ok}, {"status": 204, "body_kind": "empty"}, fresh_state=True),
-        sc("overrides_put.roundtrip", "data_meaning", "A saved override is returned by the next GET with the same section_id, hidden flag, and position.", "profile",
-           {"path": base, "body": save_ok}, {"status": 204}, fresh_state=True,
-           notes="The executor runs rows independently, so the GET-after-PUT round trip lives in the section PR's handler test."),
+        sc("overrides_put.roundtrip", "data_meaning", "A saved override is returned by the next GET with the same id, section_id, hidden flag, and position, under the profile's home scope.", "profile",
+           {"path": base, "body": save_ok}, {"status": 204, "body_kind": "empty"}, fresh_state=True,
+           then=[step("GET", {"path": base},
+                      {"status": 200, "body": [{"pointer": "/overrides", "op": "length", "value": 1},
+                                               {"pointer": "/overrides/0/ID", "op": "equals", "value": save_ok["overrides"][0]["id"]},
+                                               {"pointer": "/overrides/0/SectionID", "op": "equals", "value": "home-recently-added"},
+                                               {"pointer": "/overrides/0/Hidden", "op": "equals", "value": True},
+                                               {"pointer": "/overrides/0/Position", "op": "equals", "value": 2},
+                                               {"pointer": "/overrides/0/ProfileID", "op": "equals", "value": "${profile_secondary}"},
+                                               {"pointer": "/overrides/0/Scope", "op": "equals", "value": "home"}]},
+                      description="the next GET returns the saved override")],
+           notes="The GET body serializes userstore.SectionOverride with Go field names (ID, SectionID, Hidden, Position...) while the PUT reads snake_case (section_id, hidden, position): the two halves of the round trip use different casing. Flagged for the section PR."),
         sc("overrides_put.user_added_gate", "authorization", "A non-admin adding a custom (admin-only recipe) section while the server setting is off is 403 custom_disabled.", "profile",
            {"path": base, "body": {"overrides": [{"is_user_added": True, "user_section_type": "admin_curated_list", "user_config": {"item_ids": ["x"]}}]}},
            err(403, "custom_disabled", "this server does not allow profiles to build custom sections")),
@@ -363,9 +390,18 @@ def onboarding():
         sc("flow.meaning", "data_meaning", "The current tour id and version are fixed constants; steps are non-empty and each has id and kind.", "profile", {"path": flow},
            {"status": 200, "body": [{"pointer": "/tour_id", "op": "equals", "value": "core-2026-07"}, {"pointer": "/version", "op": "equals", "value": 1}, {"pointer": "/steps", "op": "non_empty"},
                                     {"pointer": "/steps", "op": "every", "value": {"pointer": "", "op": "keys_include", "value": ["id", "kind"]}}, {"pointer": "/steps", "op": "unique_by", "value": "/id"}]}),
-        sc("flow.surface_filter", "filtering", "surface=tv drops steps that need input; an unknown surface is 400.", "profile", {"path": flow, "query": {"surface": "TV"}}, {"status": 200, "body": [{"pointer": "/steps", "op": "non_empty"}]}),
+        sc("flow.surface_filter", "filtering", "surface=tv (case-insensitive) drops the steps that need input (the setting_choice steps) and the web-only apps step; the welcome step stays.", "profile", {"path": flow, "query": {"surface": "TV"}},
+           {"status": 200, "body": [{"pointer": "/steps", "op": "non_empty"}, {"pointer": "/steps", "op": "none", "value": {"pointer": "/kind", "op": "equals", "value": "setting_choice"}},
+                                    {"pointer": "/steps", "op": "none", "value": {"pointer": "/id", "op": "equals", "value": "apps"}}, {"pointer": "/steps/0/id", "op": "equals", "value": "welcome"}]}),
+        sc("flow.web_surface", "filtering", "The default web surface keeps the setting_choice steps the tv surface drops.", "profile", {"path": flow},
+           {"status": 200, "body": [{"pointer": "/steps", "op": "min_length", "value": 4}, {"pointer": "/steps/1/kind", "op": "equals", "value": "setting_choice"}, {"pointer": "/steps/1/id", "op": "equals", "value": "playback-quality"},
+                                    {"pointer": "/steps/2/kind", "op": "equals", "value": "setting_choice"}, {"pointer": "/steps/2/id", "op": "equals", "value": "subtitles"}]}),
         sc("flow.bad_surface", "error", "An unknown surface is 400 bad_request.", "profile", {"path": flow, "query": {"surface": "watch"}}, err(400, "bad_request", "surface must be web, phone, or tv")),
-        sc("flow.child_filter", "filtering", "A child profile receives a flow without the requests step.", "child_profile", {"path": flow}, {"status": 200, "body": [{"pointer": "/steps", "op": "non_empty"}]}),
+        sc("flow.child_filter", "filtering", "A child profile receives a flow without the requests step even when requests are enabled; the parent's flow includes it.", "child_profile", {"path": flow},
+           {"status": 200, "body": [{"pointer": "/steps", "op": "non_empty"}, {"pointer": "/steps", "op": "none", "value": {"pointer": "/id", "op": "equals", "value": "requests"}}]},
+           then=[step("GET", {"path": flow}, {"status": 200, "body": [{"pointer": "/steps", "op": "non_empty"}, {"pointer": "/steps/4/id", "op": "equals", "value": "requests"}]},
+                      description="a non-child profile's flow carries the requests step", principal="profile")],
+           notes="The fixture seeds request_settings.requests_enabled=true so the requests step is in the parent's flow; only the child filter removes it."),
         sc("flow.shape", "field_presence_nullability", "steps is an array; optional step fields are omitted when empty.", "profile", {"path": flow}, {"status": 200, "body": [{"pointer": "/steps", "op": "type", "value": "array"}]}),
         profile_required_400("flow", "GET", flow),
         other_account_profile("flow", flow),
@@ -384,9 +420,13 @@ def onboarding():
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     progress_row = row("POST", "/api/v1/onboarding/progress", [
         sc("progress.ok", "status_headers", "Recording progress answers 204.", "profile", {"path": progress, "body": {"tour_id": "core-2026-07", "last_step": "welcome"}}, {"status": 204, "body_kind": "empty"}),
-        sc("progress.completed_monotonic", "data_meaning", "Marking completed sets done; a later write cannot clear it (monotonic).", "profile",
+        sc("progress.completed_monotonic", "data_meaning", "Marking completed sets done; a later write without completed moves last_step but cannot clear completed_at (monotonic).", "profile",
            {"path": progress, "body": {"last_step": "finish", "completed": True}}, {"status": 204, "body_kind": "empty"}, fresh_state=True,
-           notes="The read-back (state.done true after completed) is asserted in the section PR handler test; the executor keeps rows independent."),
+           then=[step("GET", {"path": state}, {"status": 200, "body": [{"pointer": "/done", "op": "equals", "value": True}, {"pointer": "/last_step", "op": "equals", "value": "finish"}, {"pointer": "/completed_at", "op": "rfc3339"}, {"pointer": "/skipped_at", "op": "absent"}]},
+                      description="state reports done after completion"),
+                 step("POST", {"path": progress, "body": {"last_step": "welcome"}}, {"status": 204, "body_kind": "empty"}, description="a later plain progress write"),
+                 step("GET", {"path": state}, {"status": 200, "body": [{"pointer": "/done", "op": "equals", "value": True}, {"pointer": "/last_step", "op": "equals", "value": "welcome"}, {"pointer": "/completed_at", "op": "rfc3339"}]},
+                      description="completed_at survives the later write")]),
         sc("progress.tour_mismatch", "error", "A stale tour id is 409 tour_mismatch.", "profile", {"path": progress, "body": {"tour_id": "core-2025-01", "last_step": "x"}}, err(409, "tour_mismatch", "This tour is no longer current")),
         sc("progress.malformed", "error", "A non-JSON body is 400.", "profile", {"path": progress, "raw_body": "x"}, err(400, "bad_request", "Invalid request body")),
         sc("progress.empty_tour_id", "filtering", "An omitted tour_id means the current tour.", "profile", {"path": progress, "body": {"last_step": "welcome"}}, {"status": 204, "body_kind": "empty"}),
@@ -410,15 +450,17 @@ def devices():
         sc("devices_list.current_device", "data_meaning", "is_current_device marks the device named by X-Silo-Device-Id.", "primary_profile", {"path": base, "headers": {"X-Silo-Device-Id": "${device_b}"}},
            {"status": 200, "body": [{"pointer": "/devices/0/is_current_device", "op": "equals", "value": True}, {"pointer": "/devices/0/device_id", "op": "equals", "value": "${device_b}"}]}),
         sc("devices_list.sorted", "sorting", "Newest last_seen first, then device_id ascending as the tie-breaker.", "primary_profile", {"path": base},
-           {"status": 200, "body": [{"pointer": "/devices", "op": "sorted", "value": {"by": "/last_seen_at", "direction": "desc", "then_by": "/device_id", "then_direction": "asc"}}, {"pointer": "/devices", "op": "unique_by", "value": "/device_id"}]}),
+           {"status": 200, "body": [{"pointer": "/devices", "op": "length", "value": 2}, {"pointer": "/devices", "op": "sorted", "value": {"by": "/last_seen_at", "direction": "desc", "then_by": "/device_id", "then_direction": "asc"}}, {"pointer": "/devices", "op": "unique_by", "value": "/device_id"}]}),
         sc("devices_list.household_scope", "filtering", "scope=household from the primary profile lists every profile's devices.", "primary_profile", {"path": base, "query": {"scope": "household"}},
            {"status": 200, "body": [{"pointer": "/devices", "op": "length", "value": 3}]}),
         sc("devices_list.household_forbidden", "authorization", "scope=household from a non-primary profile is 403.", "profile", {"path": base, "query": {"scope": "household"}},
            err(403, "forbidden", "Viewing the household's devices requires the primary profile or admin access")),
-        sc("devices_list.shape", "field_presence_nullability", "Every device has the full field set; an empty list is [] not null.", "profile", {"path": base, "query": {"scope": "HOUSEHOLD"}},
-           {"status": 403}, notes="Scope match is case-insensitive."),
+        sc("devices_list.scope_case", "filtering", "The scope match is case-insensitive: scope=HOUSEHOLD from a non-primary profile is the same 403 as the lowercase form.", "profile", {"path": base, "query": {"scope": "HOUSEHOLD"}},
+           err(403, "forbidden", "Viewing the household's devices requires the primary profile or admin access")),
+        sc("devices_list.shape", "field_presence_nullability", "A profile with no registered devices (the child) gets an empty array, not null.", "child_profile", {"path": base},
+           {"status": 200, "body": [{"pointer": "", "op": "keys_equal", "value": ["devices"]}, {"pointer": "/devices", "op": "type", "value": "array"}, {"pointer": "/devices", "op": "empty"}]}),
         sc("devices_list.shape_fields", "field_presence_nullability", "Every device row has exactly the eight fields.", "primary_profile", {"path": base},
-           {"status": 200, "body": [{"pointer": "/devices", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": DEVICE_KEYS}}]}),
+           {"status": 200, "body": [{"pointer": "/devices", "op": "length", "value": 2}, {"pointer": "/devices", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": DEVICE_KEYS}}]}),
         profile_required_400("devices_list", "GET", base),
         other_account_profile("devices_list", base),
         unauth("devices_list", "GET", base),
@@ -465,8 +507,8 @@ def api_keys():
            {"status": 200, "body": [{"pointer": "", "op": "length", "value": 2}, {"pointer": "", "op": "every", "value": {"pointer": "/key", "op": "matches", "value": "^sa_[0-9a-f]{64}$"}}, {"pointer": "", "op": "every", "value": {"pointer": "/user_id", "op": "equals", "value": "${admin_user_id:int}"}}]},
            notes="The full secret is returned on every list, not just at creation. Flagged for the section PR (security review)."),
         sc("keys_list.shape", "field_presence_nullability", "scopes is [] for an unscoped key (never null); last_used_at is omitted until first use.", "admin", {"path": base},
-           {"status": 200, "body": [{"pointer": "", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": KEY_KEYS}}, {"pointer": "/1/scopes", "op": "equals", "value": []}, {"pointer": "/0/scopes", "op": "equals", "value": ["admin:users"]}, {"pointer": "/0/rate_tier", "op": "equals", "value": "standard"}]}),
-        sc("keys_list.sorted", "sorting", "Newest first by created_at.", "admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "sorted", "value": {"by": "/created_at", "direction": "desc"}}]}),
+           {"status": 200, "body": [{"pointer": "", "op": "length", "value": 2}, {"pointer": "", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": KEY_KEYS}}, {"pointer": "/1/scopes", "op": "equals", "value": []}, {"pointer": "/0/scopes", "op": "equals", "value": ["admin:users"]}, {"pointer": "/0/rate_tier", "op": "equals", "value": "standard"}]}),
+        sc("keys_list.sorted", "sorting", "Newest first by created_at.", "admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "length", "value": 2}, {"pointer": "", "op": "sorted", "value": {"by": "/created_at", "direction": "desc"}}, {"pointer": "", "op": "unique_by", "value": "/id"}]}),
         sc("keys_list.api_key_forbidden", "authorization", "An API key may not manage API keys: 403.", {"class": "api_key"}, {"path": base}, err(403, "forbidden", "API key management is not accessible via API key authentication")),
         sc("keys_list.empty", "data_meaning", "An account with no keys gets [] not null.", {"class": "authenticated", "user": "grouped"}, {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "empty"}]}),
         unauth("keys_list", "GET", base),
@@ -491,9 +533,9 @@ def api_keys():
         sc("scopes.ok", "status_headers", "The scope catalog for feature detection: 200 JSON.", "authenticated", {"path": base + "scopes"},
            {"status": 200, "headers": JSON_CT, "body": [{"pointer": "", "op": "keys_equal", "value": ["scopes"]}]}),
         sc("scopes.meaning", "data_meaning", "Both known scopes are listed with descriptions, in a stable order.", "authenticated", {"path": base + "scopes"},
-           {"status": 200, "body": [{"pointer": "/scopes/0/name", "op": "equals", "value": "admin:users"}, {"pointer": "/scopes/1/name", "op": "equals", "value": "admin:access-groups:read"}, {"pointer": "/scopes", "op": "every", "value": {"pointer": "/description", "op": "non_empty"}}]}),
+           {"status": 200, "body": [{"pointer": "/scopes", "op": "length", "value": 2}, {"pointer": "/scopes/0/name", "op": "equals", "value": "admin:users"}, {"pointer": "/scopes/1/name", "op": "equals", "value": "admin:access-groups:read"}, {"pointer": "/scopes", "op": "every", "value": {"pointer": "/description", "op": "non_empty"}}]}),
         sc("scopes.api_key_allowed", "authorization", "Unlike the management routes, an API key may read the catalog.", {"class": "api_key"}, {"path": base + "scopes"}, {"status": 200}),
-        sc("scopes.shape", "field_presence_nullability", "Each scope has exactly name and description.", "authenticated", {"path": base + "scopes"}, {"status": 200, "body": [{"pointer": "/scopes", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": ["name", "description"]}}]}),
+        sc("scopes.shape", "field_presence_nullability", "Each scope has exactly name and description.", "authenticated", {"path": base + "scopes"}, {"status": 200, "body": [{"pointer": "/scopes", "op": "length", "value": 2}, {"pointer": "/scopes", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": ["name", "description"]}}]}),
         sc("scopes.sorted", "sorting", "Catalog order is fixed (not alphabetical).", "authenticated", {"path": base + "scopes"}, {"status": 200, "body": [{"pointer": "/scopes", "op": "length", "value": 2}]}),
         unauth("scopes", "GET", base + "scopes"),
         sc("scopes.error_shape", "error", "Refusal envelope shape.", "public", {"path": base + "scopes"}, {"status": 401, "body": ERR_SHAPE}),
@@ -521,9 +563,9 @@ def admin_invitations():
            {"status": 200, "body": [{"pointer": "", "op": "length", "value": 3}, {"pointer": "", "op": "every", "value": {"pointer": "/status", "op": "one_of", "value": ["pending", "accepted", "expired", "revoked"]}},
                                     {"pointer": "", "op": "every", "value": {"pointer": "/invited_by_name", "op": "equals", "value": "${admin_username}"}}]}),
         sc("adm_inv_list.shape", "field_presence_nullability", "Optional fields (access_group_id, library_ids, note, accepted_at, accepted_user_id, invited_by_name) are omitted when empty; accepted_at is an RFC3339 string when present.", "acting_admin", {"path": base},
-           {"status": 200, "body": [{"pointer": "", "op": "every", "value": {"pointer": "", "op": "keys_include", "value": INV_KEYS}}, {"pointer": "", "op": "every", "value": {"pointer": "/expires_at", "op": "rfc3339"}}]},
+           {"status": 200, "body": [{"pointer": "", "op": "length", "value": 3}, {"pointer": "", "op": "every", "value": {"pointer": "", "op": "keys_include", "value": INV_KEYS}}, {"pointer": "", "op": "every", "value": {"pointer": "/expires_at", "op": "rfc3339"}}]},
            notes="expires_at/created_at are time.Time while accepted_at is a pre-formatted string pointer; mixed timestamp encodings on one object. Flagged for the section PR."),
-        sc("adm_inv_list.sorted", "sorting", "Newest first by created_at.", "acting_admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "sorted", "value": {"by": "/created_at", "direction": "desc"}}, {"pointer": "", "op": "unique_by", "value": "/id"}]}),
+        sc("adm_inv_list.sorted", "sorting", "Newest first by created_at.", "acting_admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "length", "value": 3}, {"pointer": "", "op": "sorted", "value": {"by": "/created_at", "direction": "desc"}}, {"pointer": "", "op": "unique_by", "value": "/id"}]}),
         sc("adm_inv_list.admin_no_profile", "authorization", "An admin without a declared profile passes the acting-admin gate.", "admin", {"path": base}, {"status": 200}),
         not_primary_403("adm_inv_list", base), non_admin_403("adm_inv_list", base),
         sc("adm_inv_list.scoped_key", "authorization", "A scoped API key (admin:users) is refused: the scope does not cover invitations.", {"class": "api_key", "scopes": ["admin:users"]}, {"path": base}, err(403, "forbidden", "API key scopes do not permit this route")),
@@ -585,8 +627,8 @@ def invite_codes():
         sc("codes_list.ok", "status_headers", "Lists every invite code: 200 JSON array.", "acting_admin", {"path": base}, {"status": 200, "headers": JSON_CT, "body": [{"pointer": "", "op": "type", "value": "array"}]}),
         sc("codes_list.meaning", "data_meaning", "All three seeded codes appear with use counts and the enabled flag; the exhausted one has use_count == max_uses.", "acting_admin", {"path": base},
            {"status": 200, "body": [{"pointer": "", "op": "length", "value": 3}, {"pointer": "", "op": "every", "value": {"pointer": "/created_by", "op": "equals", "value": "${admin_user_id:int}"}}]}),
-        sc("codes_list.shape", "field_presence_nullability", "Every row has exactly the nine fields; no nulls.", "acting_admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": CODE_KEYS}}]}),
-        sc("codes_list.sorted", "sorting", "Newest first by created_at; ids unique.", "acting_admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "sorted", "value": {"by": "/created_at", "direction": "desc"}}, {"pointer": "", "op": "unique_by", "value": "/id"}]}),
+        sc("codes_list.shape", "field_presence_nullability", "Every row has exactly the nine fields; no nulls.", "acting_admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "length", "value": 3}, {"pointer": "", "op": "every", "value": {"pointer": "", "op": "keys_equal", "value": CODE_KEYS}}]}),
+        sc("codes_list.sorted", "sorting", "Newest first by created_at; ids unique.", "acting_admin", {"path": base}, {"status": 200, "body": [{"pointer": "", "op": "length", "value": 3}, {"pointer": "", "op": "sorted", "value": {"by": "/created_at", "direction": "desc"}}, {"pointer": "", "op": "unique_by", "value": "/id"}]}),
         not_primary_403("codes_list", base), non_admin_403("codes_list", base),
         unauth("codes_list", "GET", base),
         sc("codes_list.error_shape", "error", "Refusal envelope shape.", "primary_profile", {"path": base}, {"status": 403, "body": ERR_SHAPE}),

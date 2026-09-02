@@ -16,6 +16,23 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 )
 
+// Body kinds and the predicate ops the engine special-cases by name.
+const (
+	bodyKindEmpty = "empty"
+	bodyKindAny   = "any"
+	bodyKindText  = "text"
+
+	opEmpty     = "empty"
+	opNonEmpty  = "non_empty"
+	opLength    = "length"
+	opMinLength = "min_length"
+	opMaxLength = "max_length"
+	opEvery     = "every"
+	opNone      = "none"
+	opSorted    = "sorted"
+	opUniqueBy  = "unique_by"
+)
+
 // response is what the assertion engine sees: status, headers, the raw body,
 // and the decoded body when the scenario declares it JSON.
 type response struct {
@@ -38,20 +55,60 @@ func check(exp scenariocatalog.Expect, resp response) []string {
 		}
 	}
 	switch exp.BodyKind {
-	case "empty":
+	case bodyKindEmpty:
 		if len(resp.Raw) != 0 {
 			failures = append(failures, fmt.Sprintf("body = %d bytes, want empty", len(resp.Raw)))
 		}
 		return failures
-	case "any":
+	case bodyKindAny:
 		return failures
+	case bodyKindText:
+		// A text body is the raw bytes at pointer "", even when they happen
+		// to parse as JSON; an empty body is not a text body.
+		if len(resp.Raw) == 0 {
+			failures = append(failures, "body is empty, want text")
+			return failures
+		}
+		resp.Doc = string(resp.Raw)
+	default:
+		// json (the default): the body must decode, or every scenario that
+		// carries no body predicate would accept HTML or an empty body.
+		if !resp.IsJSON {
+			failures = append(failures, fmt.Sprintf("body is not JSON (%d bytes), want a JSON body", len(resp.Raw)))
+			return failures
+		}
 	}
+	sized := sizedPointers(exp.Body)
 	for _, a := range exp.Body {
-		if msg := checkBody(a, resp.Doc); msg != "" {
+		if msg := checkBody(a, resp.Doc, sized[a.Pointer]); msg != "" {
 			failures = append(failures, msg)
 		}
 	}
 	return failures
+}
+
+// sizedPointers collects the pointers whose array size the scenario pins
+// with its own predicate. The collection predicates (every, none, sorted,
+// unique_by) are vacuous on short arrays and only accept one when the
+// scenario says that size is the point.
+func sizedPointers(body []scenariocatalog.BodyAssertion) map[string]bool {
+	out := map[string]bool{}
+	for _, a := range body {
+		switch a.Op {
+		case opEmpty, opLength, opMinLength, opNonEmpty:
+			out[a.Pointer] = true
+		}
+	}
+	return out
+}
+
+// minElements is the smallest array a collection predicate says anything
+// about: one element for every/none, two for an ordering or uniqueness.
+func minElements(op string) int {
+	if op == opEvery || op == opNone {
+		return 1
+	}
+	return 2
 }
 
 func checkHeader(h scenariocatalog.HeaderAssertion, headers http.Header) string {
@@ -91,12 +148,21 @@ func checkHeader(h scenariocatalog.HeaderAssertion, headers http.Header) string 
 	return ""
 }
 
-func checkBody(a scenariocatalog.BodyAssertion, doc any) string {
+// checkBody evaluates one predicate. sized says the scenario pins the size
+// of the array at the pointer, which lets a collection predicate accept an
+// array too short to test anything.
+func checkBody(a scenariocatalog.BodyAssertion, doc any, sized bool) string {
 	label := "body" + a.Pointer
 	if a.Why != "" {
 		label += " (" + a.Why + ")"
 	}
 	got, found := resolvePointer(doc, a.Pointer)
+	switch a.Op {
+	case opEvery, opNone, opSorted, opUniqueBy:
+		if arr, ok := got.([]any); found && ok && len(arr) < minElements(a.Op) && !sized {
+			return fmt.Sprintf("%s: %s over %d element(s) is vacuous; pin the size with empty/length/min_length on the same pointer if that is intended", label, a.Op, len(arr))
+		}
+	}
 	var want any
 	if len(a.Value) > 0 {
 		if err := json.Unmarshal(a.Value, &want); err != nil {
@@ -135,33 +201,33 @@ func checkBody(a scenariocatalog.BodyAssertion, doc any) string {
 		if t := jsonType(got); t != want && (want != "number" || t != "integer") {
 			return fmt.Sprintf("%s: type %s, want %v", label, t, want)
 		}
-	case "empty":
+	case opEmpty:
 		if !found {
 			return fmt.Sprintf("%s: absent, want empty collection", label)
 		}
 		if n, ok := length(got); !ok || n != 0 {
 			return fmt.Sprintf("%s = %s, want empty", label, short(got))
 		}
-	case "non_empty":
+	case opNonEmpty:
 		if n, ok := length(got); !found || !ok || n == 0 {
 			return fmt.Sprintf("%s = %s, want non-empty", label, short(got))
 		}
-	case "length", "min_length", "max_length":
+	case opLength, opMinLength, opMaxLength:
 		n, ok := length(got)
 		wantN, isNum := want.(float64)
 		if !found || !ok || !isNum {
 			return fmt.Sprintf("%s = %s, cannot take its length", label, short(got))
 		}
 		switch a.Op {
-		case "length":
+		case opLength:
 			if float64(n) != wantN {
 				return fmt.Sprintf("%s: length %d, want %v", label, n, wantN)
 			}
-		case "min_length":
+		case opMinLength:
 			if float64(n) < wantN {
 				return fmt.Sprintf("%s: length %d, want at least %v", label, n, wantN)
 			}
-		case "max_length":
+		case opMaxLength:
 			if float64(n) > wantN {
 				return fmt.Sprintf("%s: length %d, want at most %v", label, n, wantN)
 			}
@@ -233,9 +299,23 @@ func checkBody(a scenariocatalog.BodyAssertion, doc any) string {
 				}
 			}
 		}
-	case "sorted":
+	case opSorted:
 		return checkSorted(label, got, found, want)
-	case "unique_by":
+	case opNone:
+		arr, ok := got.([]any)
+		if !found || !ok {
+			return fmt.Sprintf("%s = %s, want an array", label, short(got))
+		}
+		var inner scenariocatalog.BodyAssertion
+		if err := json.Unmarshal(a.Value, &inner); err != nil {
+			return fmt.Sprintf("%s: bad nested assertion: %v", label, err)
+		}
+		for i, el := range arr {
+			if msg := checkBody(inner, el, false); msg == "" {
+				return fmt.Sprintf("%s[%d] = %s satisfies %s at %s, want no element to", label, i, short(el), inner.Op, "body"+inner.Pointer)
+			}
+		}
+	case opUniqueBy:
 		arr, ok := got.([]any)
 		by, _ := want.(string)
 		if !found || !ok {
@@ -250,7 +330,7 @@ func checkBody(a scenariocatalog.BodyAssertion, doc any) string {
 			}
 			seen[key] = i
 		}
-	case "every":
+	case opEvery:
 		arr, ok := got.([]any)
 		if !found || !ok {
 			return fmt.Sprintf("%s = %s, want an array", label, short(got))
@@ -260,7 +340,7 @@ func checkBody(a scenariocatalog.BodyAssertion, doc any) string {
 			return fmt.Sprintf("%s: bad nested assertion: %v", label, err)
 		}
 		for i, el := range arr {
-			if msg := checkBody(inner, el); msg != "" {
+			if msg := checkBody(inner, el, false); msg != "" {
 				return fmt.Sprintf("%s[%d]: %s", label, i, msg)
 			}
 		}
