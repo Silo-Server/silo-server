@@ -25,7 +25,7 @@ const (
 	// the field and falls back from a missing output.hdr_details to the
 	// device-level HDR facts, so a client that sends output.display must
 	// always send output.hdr_details (decoder ∩ display) as well; it may
-	// rely on the evidence tier being honoured only when this token is
+	// rely on the evidence tier being honored only when this token is
 	// advertised.
 	FeatureOutputDisplayEvidenceV3 = "output_display_evidence_v1"
 	FeatureDirectStreamResumeV3    = "direct_stream_resume_v1"
@@ -1145,6 +1145,19 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 					return errors.New("output hdr_details claims a dolby vision profile the exact display record does not carry")
 				}
 			}
+			// Numeric bounds are ceilings: hdr_details may be tighter than
+			// the panel (the decoder narrows it) but never looser.
+			if boundExceedsV3(out.HDR10MaxWidth, panel.HDR10MaxWidth) || boundExceedsV3(out.HDR10MaxHeight, panel.HDR10MaxHeight) ||
+				boundExceedsFloatV3(out.HDR10MaxFrameRate, panel.HDR10MaxFrameRate) || boundExceedsV3(out.HDR10MaxBitrateKbps, panel.HDR10MaxBitrateKbps) {
+				return errors.New("output hdr_details hdr10 limits exceed the exact display record")
+			}
+			for _, capability := range out.DolbyVisionProfileLevels {
+				for _, panelCapability := range panel.DolbyVisionProfileLevels {
+					if panelCapability.Profile == capability.Profile && capability.MaxLevel > panelCapability.MaxLevel {
+						return errors.New("output hdr_details dolby vision level exceeds the exact display record")
+					}
+				}
+			}
 		}
 	}
 	for name, delivery := range ctx.Deliveries {
@@ -1330,3 +1343,13 @@ func NewTerminalResponseV3(reason, message string, retryable bool) DecisionRespo
 }
 
 func NewPlanExpiryV3(now time.Time) string { return now.Add(MaxTokenTTL).UTC().Format(time.RFC3339) }
+
+// boundExceedsV3 reports whether an output ceiling is looser than the panel's.
+// Zero means "no ceiling declared" on either side.
+func boundExceedsV3(output, panel int) bool {
+	return panel > 0 && (output == 0 || output > panel)
+}
+
+func boundExceedsFloatV3(output, panel float64) bool {
+	return panel > 0 && (output == 0 || output > panel)
+}

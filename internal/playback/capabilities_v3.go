@@ -253,7 +253,27 @@ func nativeOutputHDRV3(request StartRequestV3) *HDRCapabilitiesV3 {
 		narrowed.DolbyVisionProfiles = profiles
 		if !narrowed.HDR10 {
 			narrowed.HDR10MaxWidth, narrowed.HDR10MaxHeight, narrowed.HDR10MaxFrameRate, narrowed.HDR10MaxBitrateKbps = 0, 0, 0, 0
+		} else {
+			// A panel ceiling caps the decoder ceiling; zero on either side
+			// means that side declared none.
+			narrowed.HDR10MaxWidth = tighterBoundV3(narrowed.HDR10MaxWidth, panel.HDR10MaxWidth)
+			narrowed.HDR10MaxHeight = tighterBoundV3(narrowed.HDR10MaxHeight, panel.HDR10MaxHeight)
+			narrowed.HDR10MaxFrameRate = tighterBoundFloatV3(narrowed.HDR10MaxFrameRate, panel.HDR10MaxFrameRate)
+			narrowed.HDR10MaxBitrateKbps = tighterBoundV3(narrowed.HDR10MaxBitrateKbps, panel.HDR10MaxBitrateKbps)
 		}
+		levels := make([]DolbyVisionProfileCapabilityV3, 0, len(narrowed.DolbyVisionProfileLevels))
+		for _, capability := range narrowed.DolbyVisionProfileLevels {
+			if !containsIntV3(profiles, capability.Profile) {
+				continue
+			}
+			for _, panelCapability := range panel.DolbyVisionProfileLevels {
+				if panelCapability.Profile == capability.Profile && panelCapability.MaxLevel > 0 && panelCapability.MaxLevel < capability.MaxLevel {
+					capability.MaxLevel = panelCapability.MaxLevel
+				}
+			}
+			levels = append(levels, capability)
+		}
+		narrowed.DolbyVisionProfileLevels = levels
 		return &narrowed
 	}
 	if output.HDRDetails != nil {
@@ -531,4 +551,30 @@ func containsAtLeastV3(values []int, wanted int) bool {
 		}
 	}
 	return false
+}
+
+func tighterBoundV3(a, b int) int {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case b < a:
+		return b
+	default:
+		return a
+	}
+}
+
+func tighterBoundFloatV3(a, b float64) float64 {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case b < a:
+		return b
+	default:
+		return a
+	}
 }

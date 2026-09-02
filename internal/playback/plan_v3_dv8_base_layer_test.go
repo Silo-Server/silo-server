@@ -245,3 +245,57 @@ func TestServerFeaturesV3AdvertiseOutputDisplayEvidence(t *testing.T) {
 		t.Fatal("output_display_evidence_v1 must be advertised so clients can gate output.display")
 	}
 }
+
+func TestNativeOutputHDRV3IntersectsExactPanelBounds(t *testing.T) {
+	req := validStartRequestV3()
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{
+		HDR10: true, HDR10MaxWidth: 3840, HDR10MaxHeight: 2160, HDR10MaxFrameRate: 60, HDR10MaxBitrateKbps: 100_000,
+		DolbyVisionProfiles: []int{8}, DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 9}},
+	}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{
+		HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080, HDR10MaxFrameRate: 30,
+		DolbyVisionProfiles: []int{8}, DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 6}},
+	}}
+	got := nativeOutputHDRV3(req)
+	if got == nil || got.HDR10MaxWidth != 1920 || got.HDR10MaxHeight != 1080 || got.HDR10MaxFrameRate != 30 || got.HDR10MaxBitrateKbps != 100_000 {
+		t.Fatalf("hdr10 bounds were not narrowed to the panel: %#v", got)
+	}
+	if len(got.DolbyVisionProfileLevels) != 1 || got.DolbyVisionProfileLevels[0].MaxLevel != 6 {
+		t.Fatalf("dolby vision level was not narrowed to the panel: %#v", got.DolbyVisionProfileLevels)
+	}
+}
+
+func TestStartRequestV3RejectsOutputBoundsLooserThanExactPanel(t *testing.T) {
+	req := validStartRequestV3()
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 3840}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920}}
+	if _, err := req.NormalizeAndValidate(); err == nil {
+		t.Fatal("an output hdr10 ceiling looser than the exact panel must be rejected")
+	}
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}, DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 9}}}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}, DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 6}}}}
+	if _, err := req.NormalizeAndValidate(); err == nil {
+		t.Fatal("an output dolby vision level above the exact panel must be rejected")
+	}
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 3840}}
+	if _, err := req.NormalizeAndValidate(); err != nil {
+		t.Fatalf("a tighter output ceiling is the decoder narrowing the panel and must validate: %v", err)
+	}
+}
+
+func TestPlanPlaybackV3BaseLayerUsedWhenDeliveryRefusesNativeDolbyVision(t *testing.T) {
+	file := dv8BaseLayerFixtureV3(1)
+	// Output carries native DV, but the original_http executor only knows
+	// how to present HDR10 (per-delivery hdr_details override).
+	output := &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
+	req := dv8BaseLayerRequestV3(output)
+	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	direct.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+
+	result := planDV8V3(t, file, req)
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.Plan.DecisionReason != decisionReasonClientDV8BaseLayerV3 || result.Plan.EffectiveRecipe.DynamicRange != DynamicRangeHDR10V3 {
+		t.Fatalf("expected the base-layer route when the delivery cannot carry native DV: %s", ExplainPlannerResultV3(result))
+	}
+}

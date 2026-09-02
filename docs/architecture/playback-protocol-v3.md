@@ -107,7 +107,7 @@ the document is always the full one:
 }
 ```
 
-The thirteen feature strings above are the full set this server version advertises:
+The fourteen feature strings above are the full set this server version advertises:
 
 | Feature | What it promises |
 | --- | --- |
@@ -118,7 +118,7 @@ The thirteen feature strings above are the full set this server version advertis
 | `device_quirks_v1` | Plans may carry `applied_quirks` and `runtime_corrections` (§9) |
 | `seek_reanchor_v1` | The `seek_reanchor` replan operation is available (§6) |
 | `output_change_v1` | The `output_change` intent replan is available; clients must keep the active route when this feature is absent |
-| `output_display_evidence_v1` | The server honours `output.display` and its `hdr_evidence` tier; without it a client must still send `output.hdr_details` so the legacy fallback stays correct |
+| `output_display_evidence_v1` | The server honors `output.display` and its `hdr_evidence` tier; without it a client must still send `output.hdr_details` so the legacy fallback stays correct |
 | `direct_stream_resume_v1` | A direct route may resume mid-file rather than restarting |
 | `header_authenticated_media_v1` | An opted-in client receives media URLs without signed credentials in their query or path, and authenticates every media request with its normal Authorization header (§4.1) |
 | `authorized_media_origins_v1` | Meaningful only with the token above: the client also honors credential-free absolute media URLs on server-designated proxy origins, which restores distributed egress for a header-authenticated attempt (§4.1) |
@@ -431,14 +431,14 @@ platform answered (an empty `hdr_types` is then a confirmed SDR panel) or
 probe failure). When `display` is present at all, the server never falls back
 from a missing `output.hdr_details` to `client_capabilities.hdr_details`, and
 `unknown` disables every native HDR and Dolby Vision output claim, and an exact
-record narrows `hdr_details` to the ranges the panel actually carries (a
-contradiction is rejected at validation). Clients that have separated decoder
+record narrows `hdr_details` to the ranges, HDR10 ceilings, and Dolby Vision
+levels the panel actually carries (a contradiction is rejected at validation). Clients that have separated decoder
 facts from output facts must send `display` so a decoder capability can never
 be promoted to a native-output promise. A client that sends `display` must
 always send `output.hdr_details` too, because a server without
 `output_display_evidence_v1` ignores `display` and would otherwise fall back to
 `client_capabilities.hdr_details`; the feature token tells the client whether
-the evidence tier is being honoured.
+the evidence tier is being honored.
 
 There are two delivery-scoped exceptions. An `original_http` capability
 carrying the validated claim `client_managed_dynamic_range_v1` asserts that its
@@ -462,9 +462,11 @@ decode bounds. The plan is then `validated_original_playback` bytes with
 to the base range, `claims.video.dolby_vision: false` with
 `dolby_vision_reason: base_layer_compatible_hevc`, and the
 `dolby_vision_base_layer_only` degradation warning. A native Dolby Vision route
-always wins over the claim. The executor reports
+wins over the claim whenever the `original_http` capability can carry it;
+when that delivery refuses the native plan (an HDR10-only executor on a
+DV-capable output) the base-layer route is used instead. The executor reports
 `dv8_base_layer_decoder_unavailable`, `dv8_base_layer_output_mismatch`, or
-`dv8_base_layer_metadata_mismatch` as a typed failure when it cannot honour the
+`dv8_base_layer_metadata_mismatch` as a typed failure when it cannot honor the
 promise, and the plan's attempt key (which includes the effective range) keeps
 the native and base-layer plans distinct in the replan ladder.
 

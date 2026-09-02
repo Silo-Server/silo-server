@@ -226,9 +226,6 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	rangeOK, videoClaims := outputRangeEligibleV3(source, input.Request)
 	clientManagedRange := clientManagesOriginalDynamicRangeV3(source, input.Request)
 	clientDV8BaseLayerOK, clientDV8BaseRange := clientDV8BaseLayerFallbackV3(source, input.Request)
-	// The narrow base-layer claim only matters when the output cannot take the
-	// source natively; a native Dolby Vision route always wins over it.
-	clientDV8BaseLayerOK = clientDV8BaseLayerOK && !rangeOK
 	originalRangeOK := rangeOK || clientManagedRange || clientDV8BaseLayerOK
 	audioOK, passthrough, audioClaims := audioEligibilityV3(source, input.Request)
 	originalAudioSelectionOK := audioSelectionUsesContainerDefaultV3(file, input.AudioTrackIndex) ||
@@ -442,8 +439,19 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		plan.Delivery = DeliveryOriginalHTTPV3
 		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 		plan.DecisionReason = "validated_original_playback"
+		// A native route always wins when the delivery can actually carry
+		// it. When the original_http capability itself refuses the native
+		// Dolby Vision plan (an HDR10-only executor on a DV-capable output),
+		// fall through to the base-layer route rather than adapting.
+		nativeDeliverable := rangeOK
+		if rangeOK && clientDV8BaseLayerOK {
+			nativeProbe := plan
+			finalizePlanIdentityV3(&nativeProbe, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+			nativeDeliverable = deliverySupportsPlanV3(input.Request, DeliveryClassOriginalHTTPV3, nativeProbe) &&
+				!planAttemptedV3(nativeProbe, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys)
+		}
 		switch {
-		case rangeOK:
+		case nativeDeliverable:
 		case clientDV8BaseLayerOK:
 			// Same bytes, ordinary HEVC decoder, base layer presented. The
 			// recipe names the range that actually reaches the output so the

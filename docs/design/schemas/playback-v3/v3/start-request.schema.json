@@ -592,6 +592,30 @@
               "type": "string",
               "maxLength": 128
             },
+            "display": {
+              "type": "object",
+              "description": "Raw active-display HDR facts with their evidence tier. hdr_details stays the native-output authority (decoder AND display); this record lets the server tell a confirmed SDR panel from a failed probe. Honored only by servers advertising output_display_evidence_v1.",
+              "required": [
+                "hdr_evidence"
+              ],
+              "properties": {
+                "hdr_evidence": {
+                  "type": "string",
+                  "enum": [
+                    "exact",
+                    "unknown"
+                  ]
+                },
+                "hdr_types": {
+                  "$ref": "#/$defs/hdr_capabilities"
+                },
+                "display_id": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              },
+              "additionalProperties": true
+            },
             "output_context_id": {
               "type": "string",
               "description": "Opaque token identifying the current output route. The server only ever compares it for equality, so any stable platform-native identity works and omitting it is valid.",
