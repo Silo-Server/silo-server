@@ -452,8 +452,8 @@ only, asserts that the executor decodes a single-layer Dolby Vision Profile 8
 stream through an ordinary HEVC decoder and presents its standards-compatible
 base layer when the output lacks native Dolby Vision. The server keeps every
 other gate: the source must be Profile 8 with no enhancement layer and a
-compatibility id that names a base range (`1` and `6` are HDR10, `4` is HLG,
-`2` is BT.709 SDR; `0`, `3`, `5`, and unknown ids fail closed), scan-proven
+compatibility id in the standard Profile 8 set (`1` is HDR10, `4` is HLG,
+`2` is BT.709 SDR; `0`, `3`, `5`, `6`, and unknown ids fail closed), scan-proven
 base-layer metadata (a DV configuration record, an explicit compatibility id,
 and a present base layer, matching the tone-map path), the active
 output must carry that base range, and the HEVC stream must fit the client's

@@ -399,9 +399,13 @@ func clientSelectsOriginalAudioTrackV3(request StartRequestV3) bool {
 		containsFoldV3(delivery.ValidatedClaims, ClaimClientSelectedAudioTrackV3)
 }
 
-func clientSupportsHDR10V3(request StartRequestV3) bool {
-	hdr := nativeOutputHDRV3(request)
-	return hdr != nil && hdr.HDR10
+// clientSupportsHDR10V3 reports whether the resolved output can present
+// [source] as HDR10, including any HDR10 ceilings an exact panel record
+// narrowed onto the output. Every HDR10-producing route (native, server
+// strip, client conversion, base layer) shares this so a delivery that omits
+// its own hdr_details still sees the panel's limits.
+func clientSupportsHDR10V3(request StartRequestV3, source SourceDescriptorV3) bool {
+	return hdr10OutputFitsSourceV3(nativeOutputHDRV3(request), source)
 }
 
 func clientSupportsHLGV3(request StartRequestV3) bool {
@@ -433,7 +437,7 @@ func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartReques
 	}
 	switch baseRange {
 	case DynamicRangeHDR10V3:
-		if !hdr10OutputFitsSourceV3(nativeOutputHDRV3(request), source) {
+		if !clientSupportsHDR10V3(request, source) {
 			return false, ""
 		}
 	case DynamicRangeHLGV3:
@@ -441,12 +445,6 @@ func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartReques
 			return false, ""
 		}
 	case DynamicRangeSDRV3:
-		// Compatibility id 2 (BT.709 SDR) is the only SDR base the Media3
-		// route has been validated for; id 5 (BT.2020 SDR) needs a gamut
-		// conversion the platform does not perform on an SDR sink.
-		if source.DVBLCompatID != 2 {
-			return false, ""
-		}
 	default:
 		return false, ""
 	}
@@ -454,16 +452,18 @@ func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartReques
 }
 
 // dolbyVisionBaseLayerRangeV3 maps a Profile 8 base-layer compatibility id to
-// the dynamic range an ordinary HEVC decoder presents. Ids 1 and 6 are PQ
-// (HDR10), 2 is BT.709 SDR, 4 is BT.2100 HLG, 5 is BT.2020 SDR. Id 0 (no
-// compatible base), 3 (legacy HLG), and anything reserved fail closed.
+// the dynamic range an ordinary HEVC decoder presents, using only the
+// standard Profile 8 pairings the tone-map path accepts without a source
+// preflight: 1 is PQ (HDR10), 2 is BT.709 SDR, 4 is BT.2100 HLG. Id 6 is a
+// Profile 7 pairing that some Profile 8 files carry, 5 (BT.2020 SDR) needs
+// a gamut conversion, and 0, 3, and reserved ids fail closed.
 func dolbyVisionBaseLayerRangeV3(compatID int) (string, bool) {
 	switch compatID {
-	case 1, 6:
+	case 1:
 		return DynamicRangeHDR10V3, true
 	case 4:
 		return DynamicRangeHLGV3, true
-	case 2, 5:
+	case 2:
 		return DynamicRangeSDRV3, true
 	default:
 		return "", false

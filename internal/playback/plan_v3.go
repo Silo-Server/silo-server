@@ -248,7 +248,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	dvStripEligibleProgressive := false
 	dvStripEligibleHLS := false
 	dvStripPlausible := source.DynamicRange == DynamicRangeDolbyVisionV3 &&
-		clientSupportsHDR10V3(input.Request) &&
+		clientSupportsHDR10V3(input.Request, source) &&
 		(source.DVProfile == 7 || source.DVProfile == 8 && source.DVBLCompatID == 1)
 	if dvStripPlausible {
 		if deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
@@ -445,7 +445,11 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		// fall through to the base-layer route rather than adapting.
 		nativeDeliverable := rangeOK
 		if rangeOK && clientDV8BaseLayerOK {
+			// The probe must carry the same copied-video quirks as the real
+			// native candidate, or its attempt key differs and a replan after
+			// a native failure re-selects native instead of falling through.
 			nativeProbe := plan
+			applyCopiedVideoQuirksV3(&nativeProbe, source, input.Request, high10Quirk)
 			finalizePlanIdentityV3(&nativeProbe, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
 			nativeDeliverable = deliverySupportsPlanV3(input.Request, DeliveryClassOriginalHTTPV3, nativeProbe) &&
 				!planAttemptedV3(nativeProbe, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys)
@@ -1024,7 +1028,7 @@ func applySubtitleDecisionV3(plan *PlanV3, decision SubtitleDecisionV3) {
 }
 
 func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartRequestV3, registry *TransformationRegistryV3) bool {
-	if source.DynamicRange != DynamicRangeDolbyVisionV3 || !clientSupportsHDR10V3(request) || registry == nil || !registry.Available(TransformationServerDV7HDR10V3) {
+	if source.DynamicRange != DynamicRangeDolbyVisionV3 || !clientSupportsHDR10V3(request, source) || registry == nil || !registry.Available(TransformationServerDV7HDR10V3) {
 		return false
 	}
 	// Profile 7 always carries an HDR10-viewable base layer. Profile 8 is
@@ -1043,7 +1047,7 @@ func canClientTransformDV7ToDV81V3(source SourceDescriptorV3, request StartReque
 }
 
 func canClientTransformDV7ToHDR10V3(source SourceDescriptorV3, request StartRequestV3) bool {
-	return source.DynamicRange == DynamicRangeDolbyVisionV3 && source.DVProfile == 7 && clientSupportsHDR10V3(request) &&
+	return source.DynamicRange == DynamicRangeDolbyVisionV3 && source.DVProfile == 7 && clientSupportsHDR10V3(request, source) &&
 		clientTransformationAvailableV3(request, ClientDV7ToHDR10V3, ClientDVTransformVersionV3)
 }
 

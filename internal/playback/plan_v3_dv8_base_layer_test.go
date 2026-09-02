@@ -91,7 +91,7 @@ func TestPlanPlaybackV3DV8BaseLayerClaimUsesHLGForCompat4(t *testing.T) {
 }
 
 func TestPlanPlaybackV3DV8BaseLayerClaimFailsClosedOnUnsupportedCompatIDs(t *testing.T) {
-	for _, compatID := range []int{0, 3, 5, 7} {
+	for _, compatID := range []int{0, 3, 5, 6, 7} {
 		file := dv8BaseLayerFixtureV3(compatID)
 		result := planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true, HLG: true}))
 		if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
@@ -339,5 +339,21 @@ func TestPlanPlaybackV3ExactPanelHDR10CeilingGatesNativeRouteWithoutDeliveryBoun
 	result := planDV8V3(t, file, req)
 	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10 {
 		t.Fatalf("a 4K HDR10 source must not be planned natively on a panel capped at 1080p HDR10: %#v", result.Plan)
+	}
+}
+
+func TestPlanPlaybackV3ExactPanelHDR10CeilingGatesDV7Strip(t *testing.T) {
+	file := unstrippableProfile7FixtureV3() // 4K Profile 7
+	req := hdr10OnlyProfile7RequestV3()
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080}
+	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: req.ClientPlaybackContext.Output.HDRDetails}
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry})
+	if result.Plan != nil {
+		for _, transformation := range result.Plan.Transformations {
+			if transformation.Name == "server_dv7_to_hdr10" {
+				t.Fatalf("a 4K HDR10 strip must not be promised on a panel capped at 1080p HDR10: %#v", result.Plan)
+			}
+		}
 	}
 }
