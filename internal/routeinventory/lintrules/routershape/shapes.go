@@ -9,7 +9,11 @@
 // package at runtime.
 package routershape
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+)
 
 // Handles is chi.Router.Handle and (*http.ServeMux).Handle.
 type Handles interface{ Handle(string, http.Handler) }
@@ -78,3 +82,19 @@ type NotFounds interface{ NotFound(http.HandlerFunc) }
 
 // MethodNotAlloweds is chi.Router.MethodNotAllowed.
 type MethodNotAlloweds interface{ MethodNotAllowed(http.HandlerFunc) }
+
+// Routes is chi.Router.Route: it hands a router to its callback and returns
+// one, so a value carrying it alone is a registration surface.
+type Routes interface {
+	Route(string, func(chi.Router)) chi.Router
+}
+
+// Groups is chi.Router.Group.
+type Groups interface {
+	Group(func(chi.Router)) chi.Router
+}
+
+// Withs is chi.Router.With: the router it returns registers on the shared tree.
+type Withs interface {
+	With(...func(http.Handler) http.Handler) chi.Router
+}

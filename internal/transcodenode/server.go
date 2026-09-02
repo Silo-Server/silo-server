@@ -726,10 +726,13 @@ func (s *Server) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 }
 
 // sealedHandler is what Handler hands out: the finished router behind an
-// unexported field and a ServeHTTP method, nothing else, so no assertion,
-// type switch or reflect call can recover a registration surface from it (see
-// the route inventory in docs/architecture/api-contract.md). Do not embed
-// http.Handler here: embedding exports the field and promotes its methods.
+// unexported field and a ServeHTTP method, nothing else, so no assertion or
+// type switch recovers a registration surface from it, and the route
+// inventory refuses the reflect calls that could (MethodByName, Method,
+// NumMethod, NewAt, UnsafePointer, UnsafeAddr, Pointer) and any import of
+// unsafe in this package: short of unsafe, nothing gets the router back (see
+// docs/architecture/api-contract.md). Do not embed http.Handler here:
+// embedding exports the field and promotes its methods.
 type sealedHandler struct {
 	h http.Handler
 }

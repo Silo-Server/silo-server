@@ -6,6 +6,7 @@ import (
 	"go/printer"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -63,6 +64,13 @@ type sourceSet struct {
 	kinds map[types.Type]ctorKind
 }
 
+// productionGOOS is the build context the inventory is read under. The shipped
+// images are linux (amd64 and arm64, .github/workflows/docker.yml), so a
+// darwin host analyzes what ships rather than what it runs. GOARCH is not
+// pinned: a file constrained on architecture (or any other tag) in an audited
+// package is refused outright, see ignoredSources.
+const productionGOOS = "linux"
+
 // loadSources type-checks the whole module under root and indexes it. It fails
 // on any package error: the inventory is read off type information, so a tree
 // that does not compile is a tree it cannot see into.
@@ -75,10 +83,13 @@ func loadSources(root string, analyzed []string) (*sourceSet, error) {
 	// The router packages are loaded by name beside the module so the
 	// registration signatures (routerKind's method-set check) come from the
 	// packages themselves, whether or not anything in the module imports them.
+	// LoadSyntax includes NeedFiles, which populates IgnoredFiles: the files
+	// the build context left out, which ignoredSources refuses.
 	pkgs, err := packages.Load(&packages.Config{
 		Mode: packages.LoadSyntax | packages.NeedModule,
 		Dir:  root,
 		Fset: fset,
+		Env:  productionEnv(),
 	}, "./...", chiImportPath, httpImportPath)
 	if err != nil {
 		return nil, fmt.Errorf("load packages under %s: %w", root, err)
@@ -145,10 +156,41 @@ func loadSources(root string, analyzed []string) (*sourceSet, error) {
 		if src == nil {
 			return nil, fmt.Errorf("package %s has no non-test Go files", dir)
 		}
+		if ignored := set.ignoredSources(src.Pkg); len(ignored) > 0 {
+			return nil, fmt.Errorf("package %s: build-constrained registration source is not analyzable: %s is "+
+				"excluded by a build constraint under the generator's build context (GOOS=%s, host GOARCH); "+
+				"the inventory reads one build of an audited package, so a file another build would compile "+
+				"is a registration surface it cannot see. Move the platform-specific code out of the audited "+
+				"packages and keep every route registration unconditional",
+				dir, strings.Join(ignored, ", "), productionGOOS)
+		}
 		set.packages[dir] = src
 		set.byImport[src.Pkg.PkgPath] = src
 	}
 	return set, nil
+}
+
+// productionEnv is the environment the module is loaded under: the host's,
+// with GOOS pinned to the production target. CGO_ENABLED is pinned on to match
+// the image build (Dockerfile); cross-OS loads default it off, which would
+// drop the cgo-bound packages and fail type-checking.
+func productionEnv() []string {
+	return append(os.Environ(), "GOOS="+productionGOOS, "CGO_ENABLED=1")
+}
+
+// ignoredSources lists the non-test Go files of pkg that the build context
+// excluded, repo-relative and sorted. Test files are not registration source
+// and may be constrained freely.
+func (s *sourceSet) ignoredSources(pkg *packages.Package) []string {
+	var ignored []string
+	for _, name := range pkg.IgnoredFiles {
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		ignored = append(ignored, s.relPath(name))
+	}
+	sort.Strings(ignored)
+	return ignored
 }
 
 func (s *sourceSet) index(pkg *packages.Package) *pkgSource {
@@ -310,7 +352,7 @@ func routerTypeKind(t types.Type) ctorKind {
 // or a wrapper struct. Read-only methods (Routes, Match, ...) are not here: a
 // value that can only be walked registers nothing.
 var registrationMethods = map[string]bool{
-	methodHandle: true, methodHandleFunc: true, "Method": true, "MethodFunc": true,
+	methodHandle: true, methodHandleFunc: true, methodMethod: true, "MethodFunc": true,
 	"Connect": true, "Delete": true, "Get": true, "Head": true, "Options": true,
 	"Patch": true, "Post": true, "Put": true, "Trace": true,
 	"Route": true, "Group": true, "Mount": true, "Use": true, methodWith: true,

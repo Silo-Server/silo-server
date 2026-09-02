@@ -259,12 +259,15 @@ func (deps Dependencies) invalidateNodeCapabilities(playbackHandler *handlers.Pl
 
 // sealedHandler is what NewRouter hands out: the finished router behind an
 // unexported field and a ServeHTTP method, nothing else. Its dynamic type is
-// never a router, so no type assertion, alias, embedded interface, type switch,
-// generic instantiation or reflect call can recover a registration surface
-// from it. That is the route inventory's guarantee that every route the API
-// listener serves was registered inside newChiRouter, where the generator
-// enumerates it. Do not embed http.Handler here: embedding exports the field
-// and promotes its methods.
+// never a router, so no type assertion, alias, embedded interface, type switch
+// or generic instantiation recovers a registration surface from it, and the
+// route inventory refuses the reflect calls that could (MethodByName, Method,
+// NumMethod, NewAt, UnsafePointer, UnsafeAddr, Pointer) and any import of
+// unsafe in this package: short of unsafe, nothing gets the router back. That
+// is the route inventory's guarantee that every route the API listener serves
+// was registered inside newChiRouter, where the generator enumerates it. Do
+// not embed http.Handler here: embedding exports the field and promotes its
+// methods.
 type sealedHandler struct {
 	h http.Handler
 }

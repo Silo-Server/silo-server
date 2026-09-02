@@ -35,11 +35,17 @@ import (
 //   - any attempt to recover a router from a value: a type assertion or type
 //     switch case whose type is a router — by name or by method set, so an
 //     alias, a defined type, an embedding or structural interface count — a
-//     generic instantiated with such a type, and reflect.Value.MethodByName.
-//     Every listener entry function returns a sealed handler (seal.go), so
-//     none of these can succeed on a listener; they are refused so that a
-//     router that is not a listener cannot be recovered either. The ruleguard
-//     rule in lintrules/ reports the same shapes in the editor.
+//     generic instantiated with such a type, and the reflect calls that reach
+//     a method or the memory behind a value: MethodByName, Method and
+//     NumMethod on reflect.Value or reflect.Type, reflect.NewAt, and
+//     reflect.Value.UnsafePointer, UnsafeAddr and Pointer. Every listener
+//     entry function returns a sealed handler (seal.go), so none of these
+//     can succeed on a listener; they are refused so that a router that is
+//     not a listener cannot be recovered either. The ruleguard rule in
+//     lintrules/ reports the same shapes in the editor;
+//   - an import of unsafe in an audited package (Config.AuditDirs and the
+//     listener directories): with unsafe, a sealed field is one pointer
+//     arithmetic away, and no audited package needs it.
 
 // handlerConsumingCalls are the net/http functions whose last argument is the
 // handler to serve; nil selects http.DefaultServeMux.
@@ -88,11 +94,16 @@ func (s *sweeper) info() *types.Info { return s.pkg.info() }
 
 func (s *sweeper) file(file *ast.File) {
 	rel := s.pkg.FileNames[file]
+	audited := s.a.set.packages[s.pkg.Dir] != nil
 	for _, spec := range file.Imports {
 		path := strings.Trim(spec.Path.Value, `"`)
 		if defaultMuxImports[path] {
 			s.report(spec, "%s imports %s, which registers on http.DefaultServeMux at init; "+
 				"nothing may serve that mux, so the import is refused", rel, path)
+		}
+		if path == "unsafe" && audited {
+			s.report(spec, "%s imports unsafe in an audited package; unsafe can reach the router behind a "+
+				"sealed handler, so audited packages may not import it", rel)
 		}
 	}
 	for _, decl := range file.Decls {
@@ -173,9 +184,30 @@ func (s *sweeper) recovery(at ast.Node, typeExpr ast.Expr, verb string) {
 	}
 }
 
+// reflectRecovery lists the reflect functions and methods that reach a method
+// or the memory behind a value, keyed by receiver type name ("" for a package
+// function). Each is a way to call a registration method, or to rebuild a
+// pointer to the router, without naming a router type.
+var reflectRecovery = map[string]map[string]string{
+	"": {"NewAt": "reflect.NewAt rebuilds a typed pointer from an address"},
+	"Value": {
+		"MethodByName":  "reflect.Value.MethodByName can call a registration method",
+		methodMethod:    "reflect.Value.Method can call a registration method by index",
+		"NumMethod":     "reflect.Value.NumMethod enumerates methods to call by index",
+		"UnsafePointer": "reflect.Value.UnsafePointer exposes the address behind a value",
+		"UnsafeAddr":    "reflect.Value.UnsafeAddr exposes the address behind a value",
+		"Pointer":       "reflect.Value.Pointer exposes the address behind a value",
+	},
+	"Type": {
+		"MethodByName": "reflect.Type.MethodByName yields a registration method callable with the value as receiver",
+		methodMethod:   "reflect.Type.Method yields a registration method callable with the value as receiver",
+		"NumMethod":    "reflect.Type.NumMethod enumerates methods to call by index",
+	},
+}
+
 // ident refuses the identifiers that matter wherever they appear: a router
 // constructor used as a function value, http.DefaultServeMux, a generic
-// instantiated with a router type, and reflect.Value.MethodByName.
+// instantiated with a router type, and the reflect calls in reflectRecovery.
 func (s *sweeper) ident(ident *ast.Ident) {
 	if inst, ok := s.info().Instances[ident]; ok && inst.TypeArgs != nil {
 		for i := 0; i < inst.TypeArgs.Len(); i++ {
@@ -192,9 +224,10 @@ func (s *sweeper) ident(ident *ast.Ident) {
 			s.report(ident, "%s.%s is used as a function value rather than called; a router built through it "+
 				"would not be recognized as a construction", obj.Pkg().Name(), obj.Name())
 		}
-		if obj.Pkg() != nil && obj.Pkg().Path() == "reflect" && obj.Name() == "MethodByName" {
-			s.report(ident, "reflect.Value.MethodByName can call a registration method on a router the "+
-				"inventory cannot see")
+		if obj.Pkg() != nil && obj.Pkg().Path() == "reflect" {
+			if why := reflectRecovery[recvName(obj)][obj.Name()]; why != "" {
+				s.report(ident, "%s on a router the inventory cannot see", why)
+			}
 		}
 	case *types.Var:
 		if obj.Pkg() != nil && obj.Pkg().Path() == httpImportPath && obj.Name() == "DefaultServeMux" {
@@ -278,4 +311,20 @@ func (s *sweeper) derivesRouter(call *ast.CallExpr) bool {
 	}
 	_, instantiated := s.info().Instances[calleeIdent(call)]
 	return !instantiated
+}
+
+// recvName is the receiver's type name of a method, or "" for a function.
+func recvName(fn *types.Func) string {
+	recv := fn.Signature().Recv()
+	if recv == nil {
+		return ""
+	}
+	t := types.Unalias(recv.Type())
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	if named, ok := t.(*types.Named); ok {
+		return named.Obj().Name()
+	}
+	return ""
 }

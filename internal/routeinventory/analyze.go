@@ -18,6 +18,7 @@ const (
 	methodHandle     = "Handle"
 	methodHandleFunc = "HandleFunc"
 	methodWith       = "With"
+	methodMethod     = "Method"
 	methodServeHTTP  = "ServeHTTP"
 	methodRoutes     = "Routes"
 	// methodHandler is http.ServeMux's read-only Handler lookup.
@@ -1122,7 +1123,7 @@ func (a *Analyzer) handleRouterMethod(call *ast.CallExpr, sel *ast.SelectorExpr,
 		}
 		return a.emit(call, env, scope, []string{verbMethods[name]}, originExplicit, pattern, argAt(call, 1))
 
-	case name == "Method" || name == "MethodFunc":
+	case name == methodMethod || name == "MethodFunc":
 		method, err := a.methodArg(call, 0, env)
 		if err != nil {
 			return err

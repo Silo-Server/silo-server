@@ -195,7 +195,7 @@ verify-route-inventory:
 # .golangci.yml), and the tree passes it today, so this can gate CI while the
 # rest of `make lint` cannot.
 lint-router-recovery:
-	golangci-lint run --enable-only gocritic ./...
+	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

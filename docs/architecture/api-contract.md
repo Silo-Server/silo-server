@@ -111,34 +111,33 @@ change without changing these canonical project URLs.
 `contracts/api/v2/route-inventory.json` is the enumerated legacy native surface every later
 migration decision is measured against: one row per method+path variant (`GET` and `HEAD`, a
 WebSocket handshake, and each method of a wildcard `Handle` are separate rows) across four
-listeners — the process root `http.ServeMux` (`cmd/silo.newRootHandler`), the main API router
-(`internal/api.NewRouter`), the proxy node (`internal/proxy.(*Server).Handler`) and the transcode
-node (`internal/transcodenode.(*Server).Handler`). Root `/api/` rows delegate to the API listener;
-`totals` and `route_count` are authoritative. `cmd/route-inventory` generates the file from
-registration source, since a runtime walk shows only what one wiring constructed.
+listeners: the root `http.ServeMux` (`cmd/silo.newRootHandler`), the API router
+(`internal/api.NewRouter`), the proxy node and the transcode node (each `(*Server).Handler`). Root
+`/api/` rows delegate to the API listener; `totals` and `route_count` are authoritative;
+`cmd/route-inventory` generates the file from registration source.
 
-The contract: each listener entry function returns a sealed `http.Handler` that cannot be
-converted back to a router — an unexported struct holding the router in an unexported field,
-with `ServeHTTP` as its only method — built from an unexported constructor that the entry
-function alone calls. The generator checks that shape with type information, walks the
-constructor, and enumerates every chi and `http.ServeMux` registration reachable from it, or
-fails. A router-taking helper inside the audited packages (the four listener packages and
-`internal/api/handlers`) is followed and enumerated; one outside them is refused. Also refused:
-any router-typed value the walk did not model, including closures and immediately invoked
-functions passed as middleware or fallback handlers; any router produced outside a constructor
-or a recorded exclusion (Jellyfin and Audiobookshelf compatibility); any exported function in
-the audited packages returning a router; any type assertion, type switch, generic instantiation
-or `reflect` call that could recover a router by its method set; and `http.DefaultServeMux`.
-Defense in depth: those recovery shapes are also a `golangci-lint` error outside `_test.go`
-(`.golangci.yml`; ruleguard, because forbidigo cannot tell an assertion from a parameter type),
-run over the whole tree in CI, not only changed lines.
+The contract: each listener entry function returns a sealed `http.Handler` — an unexported struct
+holding the router in an unexported field, with `ServeHTTP` as its only method — built from an
+unexported constructor that the entry function alone calls. The generator checks that shape with
+type information, walks the constructor, and enumerates every chi and `http.ServeMux` registration
+reachable from it, or fails, as compiled for the linux production build; a build-constrained
+non-test file in an audited package is refused. A router-taking helper inside the audited packages
+(the four listener packages and `internal/api/handlers`) is followed; one outside them is refused,
+as is any router-typed value the walk did not model (closures, immediately invoked functions), any
+router produced outside a constructor or a recorded exclusion (Jellyfin and Audiobookshelf compat),
+any exported router-returning function in the audited packages, any type assertion, type switch or
+generic instantiation whose type is a router by its method set, the `reflect` calls that reach a
+method or the memory behind a value (`MethodByName`, `Method`, `NumMethod` on `reflect.Value` or
+`reflect.Type`; `reflect.NewAt`; `reflect.Value.UnsafePointer`, `UnsafeAddr`, `Pointer`), an import
+of `unsafe` in the audited packages, and `http.DefaultServeMux`. Short of `unsafe`, refused there,
+nothing recovers the router; `make lint-router-recovery` reports the same shapes tree-wide in CI.
 
-To add a route: register it inside the constructor, or in a `chi.Router`-taking helper in an
-audited package that the constructor calls, with a literal path and method; run
-`make route-inventory` and commit the artifact, which `make verify-route-inventory` byte-compares
-in CI. As a backstop against a generator bug, each listener package reconciles a real router at
-test time through its unexported constructor (exact for root, proxy and transcode node; one-way
-for the API listener). `deferred_fields` are null; `heuristic_fields` are evidence, not facts.
+To add a route: register it inside the constructor or in a `chi.Router`-taking helper it calls in
+an audited package, with a literal path and method; run `make route-inventory` and commit the
+artifact, which `make verify-route-inventory` byte-compares in CI. As a backstop against a generator
+bug, each listener package reconciles a real router at test time through its unexported constructor
+(exact for root, proxy, transcode; one-way for API). `deferred_fields` are null; `heuristic_fields`
+are evidence, not facts.
 
 ### Contract foundation
 

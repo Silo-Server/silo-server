@@ -300,6 +300,21 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 		{fixture: "recover_switch_default", want: "switches on chi.Router"},
 		{fixture: "recover_generic", want: "as is instantiated with chi.Router"},
 		{fixture: "recover_reflect", want: "reflect.Value.MethodByName"},
+		// reflect.NewAt over Value.UnsafePointer rebuilds a pointer to the
+		// router behind the sealed field and Method(i) calls Get on it: no
+		// unsafe import, no assertion, no MethodByName. Every step is refused.
+		{fixture: "recover_newat", want: "reflect.NewAt rebuilds a typed pointer"},
+		{fixture: "recover_newat", want: "reflect.Value.UnsafePointer exposes the address"},
+		{fixture: "recover_newat", want: "reflect.Value.Method can call a registration method by index"},
+		{fixture: "recover_newat", want: "reflect.Value.NumMethod enumerates"},
+		{fixture: "recover_newat", want: "reflect.Type.Method yields"},
+		// An audited package may not import unsafe at all.
+		{fixture: "unsafe_import", want: "listener/peek.go:5: listener/peek.go imports unsafe in an audited package"},
+		// A helper pair split by build constraint registers in one build and
+		// not the other; the generator refuses the audited package rather
+		// than report whichever half its own build context selected.
+		{fixture: "tagged_helper", want: "build-constrained registration source is not analyzable"},
+		{fixture: "tagged_helper", want: "listener/arch_"},
 		{fixture: "recover_ptr_alias", want: "type-asserts to *main.muxAlias, which is a chi router by its method set"},
 		{fixture: "recover_switch_alias", want: "switches on main.routerAlias, which is a chi router by its method set"},
 		// The root constructor asserting its delegated API handler to a
