@@ -126,6 +126,29 @@ func TestDowngradeCompatLocalToneMapClearsOnlyAutomaticVideoToolboxBitrate(t *te
 	}
 }
 
+func TestApplyCompatMaxStreamingBitrateCap(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial int
+		cap     int
+		want    int
+	}{
+		{name: "no cap leaves target untouched", initial: 20_000, cap: 0, want: 20_000},
+		{name: "cap fills an unset target", initial: 0, cap: 4_000, want: 4_000},
+		{name: "cap overrides a looser auto target", initial: 20_000, cap: 4_000, want: 4_000},
+		{name: "auto target tighter than cap wins", initial: 2_000, cap: 4_000, want: 2_000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := playback.TranscodeOpts{TargetBitrateKbps: tt.initial}
+			applyCompatMaxStreamingBitrateCap(&opts, tt.cap)
+			if opts.TargetBitrateKbps != tt.want {
+				t.Fatalf("TargetBitrateKbps = %d, want %d", opts.TargetBitrateKbps, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 	version4K := catalog.FileVersion{
 		FileID:     1,

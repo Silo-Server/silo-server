@@ -2572,11 +2572,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// A client-requested MaxStreamingBitrate cap that forced this transcode
 	// (direct play and video-copy transports were withheld because the source
 	// exceeded it) must also bound the encode itself, or the "lower quality"
-	// pick still streams at the source's native bitrate. The VideoToolbox
-	// tone-map bitrate above is resolution-derived and takes priority when set.
-	if opts.TargetBitrateKbps == 0 && source.MaxStreamingBitrateKbps > 0 {
-		opts.TargetBitrateKbps = source.MaxStreamingBitrateKbps
-	}
+	// pick still streams at the source's native bitrate. It is a hard ceiling,
+	// so it wins even over an already-set VideoToolbox tone-map bitrate: that
+	// value is resolution-derived and knows nothing about the client's request.
+	applyCompatMaxStreamingBitrateCap(&opts, source.MaxStreamingBitrateKbps)
 	opts.SegmentDuration = h.compatSegmentDuration()
 
 	// Hold the per-session lifecycle lock across "check existing → spawn →
@@ -2602,6 +2601,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	manifestDeadline := time.Now().Add(compatManifestStartupTimeout)
 	transcodeSession, err := playback.StartTranscode(ctx, opts)
 	if err != nil && downgradeCompatLocalToneMap(&opts, toneMapCapabilities, autoVideoToolboxBitrate) {
+		// The downgrade clears a VideoToolbox-derived bitrate that matched the
+		// pre-downgrade target; the client's own cap must survive the retry.
+		applyCompatMaxStreamingBitrateCap(&opts, source.MaxStreamingBitrateKbps)
 		transcodeSession, err = playback.StartTranscode(ctx, opts)
 		if err == nil {
 			manifestDeadline = time.Now().Add(compatManifestStartupTimeout)
@@ -2694,6 +2696,19 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	publishUnlock()
 
 	return transcodeSession, nil
+}
+
+// applyCompatMaxStreamingBitrateCap tightens opts.TargetBitrateKbps to the
+// client's negotiated ceiling. It only ever lowers an existing target — a
+// tone-map-derived bitrate already under the cap is left alone — so it is
+// safe to call again after downgradeCompatLocalToneMap clears that target.
+func applyCompatMaxStreamingBitrateCap(opts *playback.TranscodeOpts, capKbps int) {
+	if opts == nil || capKbps <= 0 {
+		return
+	}
+	if opts.TargetBitrateKbps == 0 || capKbps < opts.TargetBitrateKbps {
+		opts.TargetBitrateKbps = capKbps
+	}
 }
 
 // downgradeCompatLocalToneMap removes the bitrate synthesized solely for a
