@@ -495,6 +495,15 @@ a lock-holding backend behind. Migrations time out after 20 minutes by default;
 raise `SILO_MIGRATE_TIMEOUT` (a Go duration such as `60m`, or `0` for no limit)
 for very large libraries.
 
+Some releases rewrite large tables in place. The bigint id widening, for
+example, rewrites `users`, `media_files`, and `media_folders` and holds an
+ACCESS EXCLUSIVE lock on every table that references them for the duration, so
+nothing can read or write most of the schema until it commits. A rewrite needs
+free disk for a second copy of the table plus its rebuilt indexes, and on a
+large library the `media_files` copy can run past the 20-minute default, so set
+`SILO_MIGRATE_TIMEOUT` higher (or to `0`) before starting the update. The
+release notes name the releases that carry a migration like this.
+
 > [!WARNING]
 > Rolling back the image does not reverse migrations. Check what was applied
 > with `docker compose run --rm silo --migrate-status`. For a reversible

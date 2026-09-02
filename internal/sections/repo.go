@@ -236,11 +236,11 @@ func (r *Repository) DeleteGeneratedTemplateBundleFeaturedSections(ctx context.C
 		  AND config->>'generated_source' = 'template_bundle_featured'
 		  AND config->>'template_bundle' = $2
 		  AND (
-		    (scope = 'library' AND library_id = ANY($3::int[]))
+		    (scope = 'library' AND library_id = ANY($3::bigint[]))
 		    OR (
 		      scope = 'home'
 		      AND config->>'library_id' ~ '^[0-9]+$'
-		      AND (config->>'library_id')::int = ANY($3::int[])
+		      AND (config->>'library_id')::bigint = ANY($3::bigint[])
 		    )
 		  )
 	`, SectionCollection, bundleID, libraryIDs)

@@ -349,7 +349,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	tag, err := tx.Exec(ctx, `
 		UPDATE admin_playback_history
 		SET media_item_id = $3
-		WHERE media_item_id = $1 AND media_file_id = ANY($2::int[])
+		WHERE media_item_id = $1 AND media_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
 		return fmt.Errorf("reattribute: admin_playback_history subset: %w", err)
@@ -360,7 +360,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	tag, err = tx.Exec(ctx, `
 		UPDATE user_downloads
 		SET media_item_id = $3
-		WHERE media_item_id = $1 AND media_file_id = ANY($2::int[])
+		WHERE media_item_id = $1 AND media_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
 		return fmt.Errorf("reattribute: user_downloads subset: %w", err)
@@ -372,7 +372,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	tag, err = tx.Exec(ctx, `
 		UPDATE downloads
 		SET content_id = $3, updated_at = NOW()
-		WHERE content_id = $1 AND media_file_id = ANY($2::int[])
+		WHERE content_id = $1 AND media_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
 		return fmt.Errorf("reattribute: downloads subset: %w", err)
@@ -407,7 +407,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 		DELETE FROM user_watch_progress src
 		USING user_watch_progress dest
 		WHERE src.media_item_id = $1
-		  AND src.last_file_id = ANY($2::int[])
+		  AND src.last_file_id = ANY($2::bigint[])
 		  AND dest.media_item_id = $3
 		  AND dest.user_id = src.user_id
 		  AND dest.profile_id = src.profile_id
@@ -423,7 +423,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 		USING user_watch_progress src
 		WHERE dest.media_item_id = $3
 		  AND src.media_item_id = $1
-		  AND src.last_file_id = ANY($2::int[])
+		  AND src.last_file_id = ANY($2::bigint[])
 		  AND src.user_id = dest.user_id
 		  AND src.profile_id = dest.profile_id
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
@@ -435,7 +435,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 	tag, err = tx.Exec(ctx, `
 		UPDATE user_watch_progress
 		SET media_item_id = $3
-		WHERE media_item_id = $1 AND last_file_id = ANY($2::int[])
+		WHERE media_item_id = $1 AND last_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("reattribute: progress subset move: %w", err)
@@ -469,8 +469,8 @@ func moveHistorySubset(ctx context.Context, tx pgx.Tx, opts Options, report *Rep
 	const evidenceCTE = `
 		WITH evidence AS (
 			SELECT user_id, profile_id,
-			       bool_or(media_file_id = ANY($2::int[])) AS any_moved,
-			       bool_or(NOT (media_file_id = ANY($2::int[]))) AS any_stayed
+			       bool_or(media_file_id = ANY($2::bigint[])) AS any_moved,
+			       bool_or(NOT (media_file_id = ANY($2::bigint[]))) AS any_stayed
 			FROM admin_playback_history
 			WHERE media_item_id = $1
 			GROUP BY user_id, profile_id

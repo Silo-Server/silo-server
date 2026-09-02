@@ -611,7 +611,7 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM library_collection_libraries
 			WHERE collection_id = $1
-			  AND NOT (library_id = ANY($2::int[]))
+			  AND NOT (library_id = ANY($2::bigint[]))
 		`, input.ID, updatedLibraryIDs); err != nil {
 			return fmt.Errorf("deleting removed collection library scopes: %w", err)
 		}

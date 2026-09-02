@@ -101,8 +101,8 @@ func TestBuildSweepBatchQueryUsesNativeNumericKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build folder query: %v", err)
 	}
-	if _, ok := args[0].(int32); !ok {
-		t.Fatalf("folder cursor type = %T, want int32", args[0])
+	if _, ok := args[0].(int64); !ok {
+		t.Fatalf("folder cursor type = %T, want int64", args[0])
 	}
 }
 

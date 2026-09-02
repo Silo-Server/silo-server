@@ -177,7 +177,6 @@ type artworkSweepKeyKind uint8
 
 const (
 	artworkSweepKeyText artworkSweepKeyKind = iota
-	artworkSweepKeyInt32
 	artworkSweepKeyInt64
 )
 
@@ -190,10 +189,6 @@ func textSweepKey(column string) artworkSweepKey {
 	return artworkSweepKey{column: column, kind: artworkSweepKeyText}
 }
 
-func int32SweepKey(column string) artworkSweepKey {
-	return artworkSweepKey{column: column, kind: artworkSweepKeyInt32}
-}
-
 func int64SweepKey(column string) artworkSweepKey {
 	return artworkSweepKey{column: column, kind: artworkSweepKeyInt64}
 }
@@ -202,9 +197,6 @@ func (k artworkSweepKey) parse(raw string) (any, error) {
 	switch k.kind {
 	case artworkSweepKeyText:
 		return raw, nil
-	case artworkSweepKeyInt32:
-		value, err := strconv.ParseInt(raw, 10, 32)
-		return int32(value), err
 	case artworkSweepKeyInt64:
 		return strconv.ParseInt(raw, 10, 64)
 	default:
@@ -332,7 +324,7 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "collection posters", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true},
 		{name: "collection backdrops", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "backdrop_url", clearSet: `backdrop_url = '', backdrop_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
 		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
-		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int32SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
+		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
 	}
 }
 

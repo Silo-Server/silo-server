@@ -2026,7 +2026,7 @@ func (r *FileRepository) GetByIDs(ctx context.Context, ids []int) ([]*models.Med
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+fileColumns+`
 		FROM media_files
-		WHERE id = ANY($1::int[])
+		WHERE id = ANY($1::bigint[])
 	`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("querying media files by ids: %w", err)
