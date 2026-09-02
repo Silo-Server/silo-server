@@ -52,7 +52,10 @@
     "responseMediaKind": { "enum": ["json", "multipart", "binary", "range", "redirect", "websocket", "html", "css", "dynamic_proxy", "unknown"] },
     "consumer": { "enum": ["web", "apple", "android", "internal", "compat", "external_unknown", "unused"] },
     "callSiteRepo": { "enum": ["web", "apple", "android", "server"] },
-    "matchKind": { "enum": ["mechanical", "manual"] },
+    "matchKind": {
+      "$comment": "mechanical: extract_consumers.py resolved the path at the site. manual: a maintainer resolved a path the scripts cannot follow. follower: the client fetches a server-supplied URL; the site is the resolver or allowlist that admits it, so the route's path is not spelled there.",
+      "enum": ["mechanical", "manual", "follower"]
+    },
     "releaseFlow": {
       "enum": [
         "login", "setup", "profiles", "browse_search", "playback_lifecycle", "progress", "settings",
@@ -90,6 +93,11 @@
         "repo": { "$ref": "#/$defs/callSiteRepo" },
         "file": { "type": "string", "minLength": 1, "pattern": "^[^/]" },
         "line": { "type": "integer", "minimum": 1 },
+        "path_literal_line": {
+          "description": "line where the path literal is declared when it differs from the call line",
+          "type": "integer",
+          "minimum": 1
+        },
         "types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "match": { "$ref": "#/$defs/matchKind" }
       },

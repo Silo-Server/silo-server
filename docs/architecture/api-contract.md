@@ -167,7 +167,7 @@ fails with `dynamic_plugin_proxy rule on a non-proxy handler`. The gate also pri
 mismatch, because later ones cascade from it.
 
 The second kind is curated by hand and is what the ledger exists to hold: `consumers` and
-`consumer_call_sites` (including `match: manual` sites), `release_flow`, `tier`, `disposition`,
+`consumer_call_sites` (including `match: manual` and `match: follower` sites), `release_flow`, `tier`, `disposition`,
 `disposition_rule`, `disposition_rationale`, `owner`, `review_state`, `v2`, and `notes`. The
 schema ties them together: each `disposition_rule` names the document or decision that justifies
 it and is therefore allowed only with the disposition it justifies (`maintainer_decision` is the
@@ -200,15 +200,27 @@ sites are pinned: the ledger's `source_trees` header records the silo-apple and 
 commit the sites were extracted from (`build_ledger.py` takes both SHAs as arguments), so a
 site is re-resolved with `git show <sha>:<file>` against that exact tree rather than a moving
 branch. `sweep_uncredited.py`, given the sibling git checkouts, reports a credited file that no
-longer exists at the pin as `stale-against-pinned-tree`, separately from an uncredited hit, and
-`TestSiblingCallSitesResolveAgainstPinnedTrees` does the same for every site when the sibling
-checkouts are present next to this repository (it skips otherwise, so CI is unaffected).
+longer exists at the pin as `stale-against-pinned-tree`, separately from an uncredited hit.
+`TestSiblingCallSitesResolveAgainstPinnedTrees` goes further for every apple and android site:
+the file must exist at the pin, the line must be inside it, and the route's last static path
+segment must appear within four lines of the credited line, so a wrong pin whose files still
+exist is reported rather than passed. Two site annotations refine that check. A site whose
+path is a constant declared elsewhere in the file records `path_literal_line`, the line of the
+declaration, and the segment is looked for there instead of at the call line. A site marked
+`match: follower` is the validator or resolver that admits a server-supplied URL (the stream
+and transcode URLs a client fetches from the playback plan), so it never spells the path and is
+exempt from the segment check while its file and line are still verified. The test skips only
+when a sibling checkout is absent next to this repository, which is the CI case; a checkout
+that is present but has not fetched the pinned commit, or a site that no longer holds up at
+the pin, fails it, so `make verify-migration-ledger` cannot print ok over an unfetched pin.
 `build_ledger.py` merges a regenerated inventory and consumer map into the committed ledger by
-key: it refreshes the copied fields and mechanical call sites, preserves every curated field and
-manual site on an existing entry, and seeds defaults only for rows that have no entry yet.
-Running it on an unchanged inventory is a no-op. Server-internal and compat consumers (Go URL
-builders in this repository) are recorded as manual sites. Absence of a first-party consumer is
-not proof of disuse; removal needs an affirmative product decision.
+key: it refreshes the copied fields and mechanical call sites (carrying each mechanical site's
+`path_literal_line` over by location), preserves every curated field and every manual and
+follower site on an existing entry, and seeds defaults only for rows that have no entry yet.
+Running it on an unchanged inventory and consumer map rewrites the file byte for byte.
+Server-internal and compat consumers (Go URL builders in this repository) are recorded as
+manual sites. Absence of a first-party consumer is not proof of disuse; removal needs an
+affirmative product decision.
 
 ### Contract foundation
 

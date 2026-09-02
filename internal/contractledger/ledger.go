@@ -63,6 +63,19 @@ const (
 	ReviewRejected = "rejected"
 )
 
+// Call-site match kinds (migration.schema.json $defs.matchKind).
+const (
+	// MatchMechanical: scripts/apiv2-ledger/extract_consumers.py resolved the
+	// route's path at the site.
+	MatchMechanical = "mechanical"
+	// MatchManual: a maintainer resolved a path the scripts cannot follow.
+	MatchManual = "manual"
+	// MatchFollower: the client fetches a server-supplied URL and the site is
+	// the resolver or allowlist that admits it, so the route's path is not
+	// spelled anywhere near the site.
+	MatchFollower = "follower"
+)
+
 // ownerPlaceholders are owner spellings that name nobody. Named reviewers are
 // not recorded yet (issue #135, execution input 1) and removed/redesigned/
 // replaced rows carry "pending:#135/execution-input-1" until they are. Values
@@ -155,11 +168,15 @@ type Entry struct {
 // Repo (web sites are relative to web/); apple and android sites refer to the
 // commit pinned in Ledger.SourceTrees.
 type CallSite struct {
-	Repo  string   `json:"repo"`
-	File  string   `json:"file"`
-	Line  int      `json:"line"`
-	Types []string `json:"types"`
-	Match string   `json:"match"`
+	Repo string `json:"repo"`
+	File string `json:"file"`
+	// Line is the request expression (the call), 1-based.
+	Line int `json:"line"`
+	// PathLiteralLine is where the route's path literal is declared when it
+	// is a constant rather than an argument at Line; zero when absent.
+	PathLiteralLine int      `json:"path_literal_line"`
+	Types           []string `json:"types"`
+	Match           string   `json:"match"`
 }
 
 func (e Entry) key() Key {

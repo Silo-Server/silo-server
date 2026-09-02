@@ -24,14 +24,20 @@ Merge rule (by key: listener + method + path + registration_index):
     request_kind, response_media_kind, streams, upgrades_websocket) and the
     derived profile_required/admin_required are always refreshed from the
     inventory row;
-  * mechanical call sites are always refreshed from CONSUMER_MAP;
+  * mechanical call sites are always refreshed from CONSUMER_MAP; a
+    path_literal_line annotation on an existing mechanical site (the line
+    where the path constant is declared when the call line only names it) is
+    carried over to the refreshed site at the same repo/file/line;
   * everything curated by hand on an existing entry is preserved verbatim:
-    match=manual call sites, capability_endpoint, release_flow, tier,
-    disposition, disposition_rule, disposition_rationale, owner, review_state,
-    v2, and notes. consumers is recomputed from the merged call sites;
+    match=manual and match=follower call sites (a follower is the resolver or
+    allowlist that admits a server-supplied URL, so the route's path is never
+    spelled there), capability_endpoint, release_flow, tier, disposition,
+    disposition_rule, disposition_rationale, owner, review_state, v2, and
+    notes. consumers is recomputed from the merged call sites;
   * a row with no existing entry receives the seed defaults below (flow and
     tier from the path, disposition from the ratified rules, notes from the
-    templates) and the manual sites recorded in this file for its key.
+    templates) and the manual and follower sites recorded in this file for
+    its key.
 
 Re-running on an unchanged inventory and consumer map is a no-op. The ledger is
 gated, not regenerated: CI runs make verify-migration-ledger, which reconciles
@@ -53,14 +59,14 @@ for sha in (APPLE_SHA, ANDROID_SHA):
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         sys.stderr.write(f"expected a full 40-hex commit SHA, got {sha!r}\n")
         sys.exit(2)
-with open(INV) as f:
+with open(INV, encoding='utf-8') as f:
     inv = json.load(f)
 rows = inv['routes']
-with open(CMAP) as f:
+with open(CMAP, encoding='utf-8') as f:
     cmap = json.load(f)
 existing = {}
 if os.path.exists(OUT):
-    with open(OUT) as f:
+    with open(OUT, encoding='utf-8') as f:
         for e in json.load(f)['entries']:
             existing[(e['listener'], e['method'], e['path'], e['registration_index'])] = e
 
@@ -129,26 +135,33 @@ manual_clients = {
     "api GET /api/v1/downloads/{id}/artwork/{kind}": [(A, "iosApp/iosApp/Downloads/DownloadManager.swift", 805, [])],
     "api GET /api/v1/downloads/{id}/subtitles/{ref}": [(A, "iosApp/iosApp/Downloads/DownloadManager.swift", 828, [])],
 }
-# Clients follow server-provided stream/manifest URLs; these are the code paths
-# that resolve those relative URLs against the API origin.
+# Clients build subtitle URLs from the sidecar descriptor the playback plan
+# carries; these are the builders that assemble them.
 subtitle_url_builders = [
     (A, "iosApp/iosApp/Networking/AIModels.swift", 351, ["SidecarSubtitleDescriptor"]),
     (N, "shared/src/commonMain/kotlin/org/siloserver/silo/model/playback/SubtitleTrackMerge.kt", 56, []),
 ]
 for k in ["api GET /api/v1/stream/{session_id}/subtitles/{track}", "api HEAD /api/v1/stream/{session_id}/subtitles/{track}"]:
     manual_clients.setdefault(k, []).extend(subtitle_url_builders)
-stream_followers = [
-    (W, "src/player/stream-url.ts", 9, []),
-    (A, "iosApp/iosApp/Screens/Player/StreamRequest.swift", 205, []),
-    (N, "android-shared/src/androidMain/kotlin/org/siloserver/silo/common/player/SiloPlayerFactory.kt", 731, []),
-]
-for k in [
+# Clients follow server-provided stream/manifest URLs from the playback plan.
+# The Apple and Android sites are the validator and resolver that admit those
+# URLs and are recorded as match=follower: the route's path is never spelled
+# there, so the pinned-tree test checks only that the file and line exist. The
+# web site is the preconnect hint on the same URL and stays match=manual.
+stream_routes = [
     "api GET /api/v1/stream/{session_id}", "api HEAD /api/v1/stream/{session_id}",
     "api GET /api/v1/stream/{session_id}/subtitles/{track}", "api HEAD /api/v1/stream/{session_id}/subtitles/{track}",
     "api GET /api/v1/stream/{session_id}/subtitles/{track}/fonts",
     "api GET /api/v1/playback/transcode/{session_id}/master.m3u8", "api GET /api/v1/playback/transcode/{session_id}/segment/{name}",
-]:
-    manual_clients.setdefault(k, []).extend(stream_followers)
+]
+stream_followers = [
+    (A, "iosApp/iosApp/Screens/Player/StreamRequest.swift", 205, []),
+    (N, "android-shared/src/androidMain/kotlin/org/siloserver/silo/common/player/SiloPlayerFactory.kt", 731, []),
+]
+follower_clients = {}
+for k in stream_routes:
+    manual_clients.setdefault(k, []).append((W, "src/player/stream-url.ts", 9, []))
+    follower_clients.setdefault(k, []).extend(stream_followers)
 
 # ---------------------------------------------------------------------------
 # Server-internal consumers: Go code in this repo that builds the URL or calls
@@ -363,15 +376,27 @@ for r in rows:
     reg_index = seen[k]; seen[k] += 1
     prior = existing.get((r['listener'], r['method'], r['path'], reg_index))
     sites = []
+    prior_by_loc = {}
     if prior is not None:
-        sites.extend(s for s in prior['consumer_call_sites'] if s['match'] == 'manual')
+        prior_by_loc = {(s['repo'], s['file'], s['line']): s for s in prior['consumer_call_sites']}
+        sites.extend(s for s in prior['consumer_call_sites'] if s['match'] in ('manual', 'follower'))
     else:
         for (repo, f, line, types) in manual_clients.get(k, []):
             sites.append({"repo": repo, "file": f, "line": line, "types": sorted(set(types)), "match": "manual"})
+        for (repo, f, line, types) in follower_clients.get(k, []):
+            sites.append({"repo": repo, "file": f, "line": line, "types": sorted(set(types)), "match": "follower"})
         for (repo, f, line, types) in internal.get(k, []):
             sites.append({"repo": repo, "file": f, "line": line, "types": [], "match": "manual"})
     for c in cmap.get(k, []):
-        sites.append({"repo": c['repo'], "file": c['file'], "line": c['line'], "types": sorted(set(t for t in c['types'] if t)), "match": "mechanical"})
+        site = OrderedDict([("repo", c['repo']), ("file", c['file']), ("line", c['line'])])
+        # The extractor does not know where a path constant is declared; that
+        # annotation is curated on the site and survives a refresh by location.
+        literal_line = prior_by_loc.get((c['repo'], c['file'], c['line']), {}).get('path_literal_line')
+        if literal_line is not None:
+            site["path_literal_line"] = literal_line
+        site["types"] = sorted(set(t for t in c['types'] if t))
+        site["match"] = "mechanical"
+        sites.append(site)
     # de-dup: a manual site and a mechanical site at the same place are one site
     uniq = OrderedDict()
     for s in sites: uniq[(s['repo'], s['file'], s['line'])] = s
@@ -449,8 +474,10 @@ doc = OrderedDict([
     ("totals", OrderedDict([("entries", len(entries))])),
     ("entries", entries),
 ])
-with open(OUT, 'w') as f:
-    json.dump(doc, f, indent=2)
+# ensure_ascii=False keeps the committed file's non-ASCII prose (an ellipsis
+# in a rationale) as UTF-8, so a re-run on an unchanged input is byte-identical.
+with open(OUT, 'w', encoding='utf-8') as f:
+    json.dump(doc, f, indent=2, ensure_ascii=False)
     f.write("\n")
 merged = sum(1 for e in entries if (e['listener'], e['method'], e['path'], e['registration_index']) in existing)
 print("entries:", len(entries), "merged from existing:", merged, "seeded:", len(entries) - merged)

@@ -19,7 +19,22 @@ will pin rather than pointing the scripts at a working checkout.
   as `stale-against-pinned-tree`.
 - `build_ledger.py ROUTE_INVENTORY CONSUMER_MAP LEDGER APPLE_SHA ANDROID_SHA`
   — merge a regenerated inventory and consumer map into the ledger by key,
-  preserving curated fields and manual call sites; seeds defaults only for
-  rows with no entry. The two SHAs (`git rev-parse origin/main` in each
-  sibling after `git fetch`) are written to the ledger's `source_trees` header
-  and must be the commits the trees were exported from.
+  preserving curated fields, manual and follower call sites, and each
+  mechanical site's `path_literal_line`; seeds defaults only for rows with no
+  entry. The two SHAs (`git rev-parse origin/main` in each sibling after
+  `git fetch`) are written to the ledger's `source_trees` header and must be
+  the commits the trees were exported from. Re-running on an unchanged
+  inventory and consumer map rewrites the ledger byte for byte.
+
+Two call-site annotations refine what the pinned-tree test
+(`TestSiblingCallSitesResolveAgainstPinnedTrees` in `internal/contractledger`)
+checks at a sibling site. `path_literal_line` is the line where a path
+constant is declared when the call line only names it (`static let endpoint`,
+`const val DEVICES_PATH`), so the route's last static segment is looked for
+there instead of at `line`. `match: follower` marks a site that never spells
+the path because the client fetches a server-supplied URL from the playback
+plan, and the site is the validator or resolver that admits it; a follower is
+exempt from the segment check but its file and line must still exist at the
+pin. The test skips only when a sibling checkout is absent next to this
+repository; a checkout that is present but has not fetched the pinned commit,
+or a site that no longer holds up at the pin, fails it.
