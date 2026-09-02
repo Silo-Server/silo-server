@@ -1,0 +1,1991 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/admin/invite-codes",
+  "wave": 1,
+  "description": "Admin invite codes for public signup: list, create, update, top-up, delete.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/admin/invite-codes/",
+      "registration_index": 0,
+      "not_applicable": {
+        "filtering": "No filter parameters.",
+        "pagination": "Unpaged admin list.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "codes_list.ok",
+          "category": "status_headers",
+          "description": "Lists every invite code: 200 JSON array.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_list.meaning",
+          "category": "data_meaning",
+          "description": "All three seeded codes appear with use counts and the enabled flag; the exhausted one has use_count == max_uses.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 3
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/created_by",
+                  "op": "equals",
+                  "value": "${admin_user_id:int}"
+                }
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_list.shape",
+          "category": "field_presence_nullability",
+          "description": "Every row has exactly the nine fields; no nulls.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "id",
+                    "code",
+                    "label",
+                    "max_uses",
+                    "use_count",
+                    "created_by",
+                    "enabled",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_list.sorted",
+          "category": "sorting",
+          "description": "Newest first by created_at; ids unique.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "sorted",
+                "value": {
+                  "by": "/created_at",
+                  "direction": "desc"
+                }
+              },
+              {
+                "pointer": "",
+                "op": "unique_by",
+                "value": "/id"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_list.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_list.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_list.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_list.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/"
+          },
+          "expect": {
+            "status": 403,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/admin/invite-codes/",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "codes_create.ok",
+          "category": "status_headers",
+          "description": "Creating a code answers 201 with the code.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "label": "fixture",
+              "max_uses": 3
+            }
+          },
+          "expect": {
+            "status": 201,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "id",
+                  "code",
+                  "label",
+                  "max_uses",
+                  "use_count",
+                  "created_by",
+                  "enabled",
+                  "created_at",
+                  "updated_at"
+                ]
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.generated",
+          "category": "data_meaning",
+          "description": "An omitted code is generated (8 characters); use_count starts at 0 and enabled at true.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "label": "fixture",
+              "max_uses": 3
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/code",
+                "op": "matches",
+                "value": "^[A-Z0-9]{8}$"
+              },
+              {
+                "pointer": "/use_count",
+                "op": "equals",
+                "value": 0
+              },
+              {
+                "pointer": "/enabled",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/max_uses",
+                "op": "equals",
+                "value": 3
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.explicit_code",
+          "category": "filtering",
+          "description": "A supplied code is stored verbatim.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "code": "FIXTURE7",
+              "label": "explicit",
+              "max_uses": 1
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/code",
+                "op": "equals",
+                "value": "FIXTURE7"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.duplicate_code",
+          "category": "error",
+          "description": "A code that already exists is 500 internal_error (the unique violation is not mapped).",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "code": "${invite_code}",
+              "label": "dup",
+              "max_uses": 1
+            }
+          },
+          "expect": {
+            "status": 500,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "internal_error"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Failed to create invite code"
+              }
+            ]
+          },
+          "notes": "Duplicate code surfaces as 500 rather than 409; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.zero_uses",
+          "category": "error",
+          "description": "max_uses <= 0 is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "label": "x",
+              "max_uses": 0
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "max_uses must be greater than 0"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "raw_body": "x"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.shape",
+          "category": "field_presence_nullability",
+          "description": "created_at/updated_at are RFC3339.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "label": "x",
+              "max_uses": 1
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/created_at",
+                "op": "rfc3339"
+              },
+              {
+                "pointer": "/updated_at",
+                "op": "rfc3339"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "label": "x",
+              "max_uses": 1
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "label": "x",
+              "max_uses": 1
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_create.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/",
+            "body": {
+              "label": "x",
+              "max_uses": 1
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "PUT",
+      "path": "/api/v1/admin/invite-codes/{id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "codes_update.ok",
+          "category": "status_headers",
+          "description": "Updating a code answers 204 with no body.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "body": {
+              "label": "renamed"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.partial",
+          "category": "data_meaning",
+          "description": "Only supplied fields change; an empty body is a no-op that still answers 204 for an existing code.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "body": {}
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.disable",
+          "category": "filtering",
+          "description": "enabled=false disables the code.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "body": {
+              "enabled": false
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.not_found",
+          "category": "error",
+          "description": "Unknown id is 404.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/999999",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invite code not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.bad_id",
+          "category": "error",
+          "description": "Non-integer id is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/abc",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid invite code ID"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.malformed",
+          "category": "error",
+          "description": "Non-JSON body is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "raw_body": "x"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.shape",
+          "category": "field_presence_nullability",
+          "description": "No body on success (unlike top-up, which returns the code).",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "notes": "PUT returns 204 while POST top-up returns 200 with the row; inconsistent within the group. Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_update.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/1",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/admin/invite-codes/{id}/top-up",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "codes_topup.ok",
+          "category": "status_headers",
+          "description": "Topping up answers 200 with the updated code.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}/top-up",
+            "body": {
+              "additional_uses": 2
+            }
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "id",
+                  "code",
+                  "label",
+                  "max_uses",
+                  "use_count",
+                  "created_by",
+                  "enabled",
+                  "created_at",
+                  "updated_at"
+                ]
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.meaning",
+          "category": "data_meaning",
+          "description": "max_uses grows by additional_uses (5 + 2).",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}/top-up",
+            "body": {
+              "additional_uses": 2
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/max_uses",
+                "op": "equals",
+                "value": 7
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.zero",
+          "category": "error",
+          "description": "additional_uses <= 0 is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}/top-up",
+            "body": {
+              "additional_uses": 0
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "additional_uses must be greater than 0"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.not_found",
+          "category": "error",
+          "description": "Unknown id is 404.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/999999/top-up",
+            "body": {
+              "additional_uses": 1
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.bad_id",
+          "category": "error",
+          "description": "Non-integer id is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/abc/top-up",
+            "body": {
+              "additional_uses": 1
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid invite code ID"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.shape",
+          "category": "field_presence_nullability",
+          "description": "The full code row is returned.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}/top-up",
+            "body": {
+              "additional_uses": 1
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/updated_at",
+                "op": "rfc3339"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}/top-up",
+            "body": {
+              "additional_uses": 1
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}/top-up",
+            "body": {
+              "additional_uses": 1
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_topup.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/1/top-up",
+            "body": {
+              "additional_uses": 1
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/admin/invite-codes/{id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "codes_delete.ok",
+          "category": "status_headers",
+          "description": "Deleting a code answers 204.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_delete.gone",
+          "category": "data_meaning",
+          "description": "A second delete is 404.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invite code not found"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_delete.bad_id",
+          "category": "error",
+          "description": "Non-integer id is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/abc"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_delete.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_disabled_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_delete.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_delete.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/${invite_code_id}"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "codes_delete.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invite-codes/1"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

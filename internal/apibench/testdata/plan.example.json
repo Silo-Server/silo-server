@@ -1,0 +1,22 @@
+{
+  "native_base_url": "http://127.0.0.1:8080",
+  "jellycompat_base_url": "http://127.0.0.1:8096",
+  "metrics_url": "http://127.0.0.1:8080/metrics",
+  "bearer": "${SILO_BENCH_BEARER}",
+  "profile_id": "${SILO_BENCH_PROFILE_ID}",
+  "emby_token": "${SILO_BENCH_EMBY_TOKEN}",
+  "concurrency": 8,
+  "duration": "20s",
+  "warmup": 20,
+  "cache_state": "warm",
+  "label": "v1-baseline",
+  "paths": [
+    { "name": "catalog_list", "surface": "native", "method": "GET", "url": "/api/v1/catalog?limit=40&offset=0" },
+    { "name": "catalog_search", "surface": "native", "method": "GET", "url": "/api/v1/catalog?q=${SILO_BENCH_SEARCH_TERM}&limit=40" },
+    { "name": "home_sections", "surface": "native", "method": "GET", "url": "/api/v1/home/sections" },
+    { "name": "playback_start", "surface": "native", "method": "POST", "url": "/api/v1/playback/start", "body_file": "playback-start.json", "capture_session_id": true, "once": true },
+    { "name": "playback_replan", "surface": "native", "method": "POST", "url": "/api/v1/playback/${session_id}/replan", "body_file": "playback-replan.json", "once": true },
+    { "name": "progress_write", "surface": "native", "method": "POST", "url": "/api/v1/sync/progress", "body": { "items": [ { "media_item_id": "${SILO_BENCH_MEDIA_ITEM_ID}", "position": 120, "duration": 5400 } ] } },
+    { "name": "jellycompat_browse", "surface": "jellycompat", "method": "GET", "url": "/Items?Recursive=true&IncludeItemTypes=Movie&Limit=40&StartIndex=0" }
+  ]
+}

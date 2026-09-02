@@ -906,6 +906,43 @@ program-wide quantitative threshold and hot-path budgets are agreed before any v
 are taken, so results cannot be rationalized after the fact, and sections may adopt stricter
 budgets.
 
+### Scenario catalogs
+
+Tier-1 rows carry their behavior scenarios in `contracts/api/v2/scenarios/`, one file per
+migration-ledger `route_group` under `<listener>/<group-slug>.json`, validated against
+`scenario-catalog.schema.json` (JSON Schema 2020-12, closed). A catalog names its ledger rows
+by listener, method, path, and registration index and records, per row, scenarios in the
+categories the tiering rule lists: `status_headers`, `data_meaning`,
+`field_presence_nullability`, `authorization`, `sorting`, `filtering`, `pagination`, `error`,
+`raw_protocol`. Each scenario states the product behavior in plain language, the principal
+class (public, authenticated, profile, child profile, primary profile, admin, acting admin,
+access group, demo, API key with scopes), a synthetic request, and the expected outcome as a
+status, header predicates, and JSON-pointer body predicates (`exists`, `absent`, `is_null`,
+`equals`, `type`, `keys_equal`, `sorted` with direction and tie-breaker, `unique_by`,
+`rfc3339`, and so on). `v2_expectation` stays `null` until the section PR records the intended
+v2 behavior or a reviewed intentional difference. Behavior that looks accidental is recorded
+faithfully and flagged in `notes`, never corrected in the catalog.
+
+The coverage rule: every tier-1 row in a wave has a catalog, with at least one scenario per
+category or a stated `not_applicable` reason, before that wave's first section PR. Later waves
+populate their own catalogs on the same schedule. `make verify-scenario-catalogs`
+(`internal/scenariocatalog`) checks the schema, reconciles every row against the ledger, and
+fails on an uncovered row; CI runs it beside the ledger gate.
+
+The executor (`internal/scenariocatalog/executor`) runs the scenarios through the real router
+and middleware in an in-process `httptest` server. Scenarios that only need the router — public
+discovery, readiness failure, validation, and auth refusals on routes that register without a
+user store — run in plain CI. Anything that sends a credential, applies a server setting, or
+declares `requires: [database]` runs only when `SILO_TEST_DATABASE_URL` points at a scratch
+database the executor may migrate and reseed, and skips otherwise; the executor refuses a
+database that holds media or non-fixture accounts.
+
+Fixture privacy follows the contract-fixture rule above: identities, profiles, codes, and
+tokens are deterministic synthetic values under reserved origins; credentials are minted at run
+time and referenced through `${...}` placeholders, so no committed catalog carries a secret.
+`make verify-local-paths` scans the catalogs for machine paths, non-reserved hosts, and
+credential-looking literals.
+
 ## Evolution policy
 
 Before the v2 lock, a breaking v2 change is allowed only when its migration-ledger entry, generated

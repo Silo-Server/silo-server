@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -206,6 +206,17 @@ MIGRATION_LEDGER := contracts/api/v2/migration.json
 verify-migration-ledger:
 	@go test -count=1 ./internal/contractledger/ \
 		|| { echo "::error::$(MIGRATION_LEDGER) violates contracts/api/v2/migration.schema.json or disagrees with $(ROUTE_INVENTORY); see docs/architecture/api-contract.md (Migration ledger)"; exit 1; }
+
+SCENARIO_CATALOG_DIR := contracts/api/v2/scenarios
+
+# Fail when a tier-1 scenario catalog violates its JSON Schema, names a row
+# the migration ledger does not carry at tier 1, or leaves a tier-1 row of a
+# declared wave without a scenario per applicable category. The executor that
+# runs the scenarios against the router is a separate go test
+# (./internal/scenariocatalog/executor); only its public subset runs in CI.
+verify-scenario-catalogs:
+	@go test -count=1 -run '^TestCatalogsPassGate$$' ./internal/scenariocatalog/ \
+		|| { echo "::error::$(SCENARIO_CATALOG_DIR) violates scenario-catalog.schema.json or leaves a tier-1 row uncovered"; exit 1; }
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

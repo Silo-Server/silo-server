@@ -1,0 +1,892 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/admin/system",
+  "wave": 1,
+  "description": "Admin system inspection: build info, host resources, hardware acceleration inventory.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/admin/system/build",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "build.ok",
+          "category": "status_headers",
+          "description": "Build metadata: 200 JSON.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/build"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "display",
+                  "revision",
+                  "dirty",
+                  "vcs_time",
+                  "build_number",
+                  "built_at",
+                  "available"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "build.meaning",
+          "category": "data_meaning",
+          "description": "available says whether VCS metadata was stamped; a go test binary reports the fields as empty/false rather than omitting them.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/build"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/available",
+                "op": "type",
+                "value": "boolean"
+              },
+              {
+                "pointer": "/build_number",
+                "op": "type",
+                "value": "integer"
+              },
+              {
+                "pointer": "/display",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "build.shape",
+          "category": "field_presence_nullability",
+          "description": "All seven fields are always present, none nullable.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/build"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/revision",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/dirty",
+                "op": "type",
+                "value": "boolean"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "build.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/build"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "build.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/build"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "build.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/build"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "build.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/build"
+          },
+          "expect": {
+            "status": 403,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/admin/system/resources",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "resources.ok",
+          "category": "status_headers",
+          "description": "The API host's own resource sample: 200 JSON.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/resources"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "resources.unsampled",
+          "category": "data_meaning",
+          "description": "Without a sampler wired the host reports available false and nothing else.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/resources"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": {
+                  "available": false
+                }
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "resources.shape",
+          "category": "field_presence_nullability",
+          "description": "sampled_at, system, and gpu are omitted (not null) when unavailable.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/resources"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/system",
+                "op": "absent"
+              },
+              {
+                "pointer": "/gpu",
+                "op": "absent"
+              },
+              {
+                "pointer": "/sampled_at",
+                "op": "absent"
+              }
+            ]
+          },
+          "notes": "The sampled shape (system/gpu blocks) needs a Linux host with the sampler; recorded in the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "resources.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/resources"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "resources.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/resources"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "resources.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/resources"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "resources.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/resources"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/admin/system/hw-accel",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "notes": "The local probe shells out to ffmpeg; timings depend on the host.",
+      "scenarios": [
+        {
+          "id": "hwaccel.ok",
+          "category": "status_headers",
+          "description": "With no transcode nodes the local host is probed: 200 JSON.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/hw-accel"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_include",
+                "value": [
+                  "resolved",
+                  "render_devices",
+                  "render_device_details",
+                  "intel_detected",
+                  "source"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "hwaccel.meaning",
+          "category": "data_meaning",
+          "description": "source identifies the probe origin and resolved is the backend the host would use; nodes is omitted when no node answered.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/hw-accel"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/source",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/resolved",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/nodes",
+                "op": "absent"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "hwaccel.shape",
+          "category": "field_presence_nullability",
+          "description": "render_devices and render_device_details are arrays (possibly null when the probe found none).",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/hw-accel"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/render_devices",
+                "op": "exists"
+              },
+              {
+                "pointer": "/render_device_details",
+                "op": "exists"
+              }
+            ]
+          },
+          "notes": "Both device lists serialize as null (not []) on a host without render devices. Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "hwaccel.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/hw-accel"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "hwaccel.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/hw-accel"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "hwaccel.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/hw-accel"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "hwaccel.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/system/hw-accel"
+          },
+          "expect": {
+            "status": 403,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

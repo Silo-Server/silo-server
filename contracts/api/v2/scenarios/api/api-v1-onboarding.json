@@ -1,0 +1,883 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/onboarding",
+  "wave": 1,
+  "description": "First-run tour manifest and per-profile progress.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/onboarding/flow",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Steps are in authored tour order, not sortable.",
+        "pagination": "Single manifest.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "flow.ok",
+          "category": "status_headers",
+          "description": "The tour manifest for the web surface: 200 JSON.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "version",
+                  "tour_id",
+                  "steps"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.meaning",
+          "category": "data_meaning",
+          "description": "The current tour id and version are fixed constants; steps are non-empty and each has id and kind.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/tour_id",
+                "op": "equals",
+                "value": "core-2026-07"
+              },
+              {
+                "pointer": "/version",
+                "op": "equals",
+                "value": 1
+              },
+              {
+                "pointer": "/steps",
+                "op": "non_empty"
+              },
+              {
+                "pointer": "/steps",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_include",
+                  "value": [
+                    "id",
+                    "kind"
+                  ]
+                }
+              },
+              {
+                "pointer": "/steps",
+                "op": "unique_by",
+                "value": "/id"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.surface_filter",
+          "category": "filtering",
+          "description": "surface=tv drops steps that need input; an unknown surface is 400.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow",
+            "query": {
+              "surface": "TV"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/steps",
+                "op": "non_empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.bad_surface",
+          "category": "error",
+          "description": "An unknown surface is 400 bad_request.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow",
+            "query": {
+              "surface": "watch"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "surface must be web, phone, or tv"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.child_filter",
+          "category": "filtering",
+          "description": "A child profile receives a flow without the requests step.",
+          "principal": {
+            "class": "child_profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/steps",
+                "op": "non_empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.shape",
+          "category": "field_presence_nullability",
+          "description": "steps is an array; optional step fields are omitted when empty.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/steps",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "flow.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/flow"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/onboarding/state",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "state.ok",
+          "category": "status_headers",
+          "description": "The profile's tour state: 200 JSON.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/state"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "state.fresh",
+          "category": "data_meaning",
+          "description": "A profile that never progressed reports done false and only tour_id and done.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/state"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "tour_id",
+                  "done"
+                ]
+              },
+              {
+                "pointer": "/done",
+                "op": "equals",
+                "value": false
+              },
+              {
+                "pointer": "/tour_id",
+                "op": "equals",
+                "value": "core-2026-07"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "state.shape",
+          "category": "field_presence_nullability",
+          "description": "last_step, completed_at, skipped_at are omitted (not null) until written.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/state"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/last_step",
+                "op": "absent"
+              },
+              {
+                "pointer": "/completed_at",
+                "op": "absent"
+              },
+              {
+                "pointer": "/skipped_at",
+                "op": "absent"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "state.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/state"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "state.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/state"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "state.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/state"
+          },
+          "expect": {
+            "status": 400,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/onboarding/progress",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "progress.ok",
+          "category": "status_headers",
+          "description": "Recording progress answers 204.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "body": {
+              "tour_id": "core-2026-07",
+              "last_step": "welcome"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "progress.completed_monotonic",
+          "category": "data_meaning",
+          "description": "Marking completed sets done; a later write cannot clear it (monotonic).",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "body": {
+              "last_step": "finish",
+              "completed": true
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "notes": "The read-back (state.done true after completed) is asserted in the section PR handler test; the executor keeps rows independent.",
+          "v2_expectation": null
+        },
+        {
+          "id": "progress.tour_mismatch",
+          "category": "error",
+          "description": "A stale tour id is 409 tour_mismatch.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "body": {
+              "tour_id": "core-2025-01",
+              "last_step": "x"
+            }
+          },
+          "expect": {
+            "status": 409,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "tour_mismatch"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "This tour is no longer current"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "progress.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "raw_body": "x"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "progress.empty_tour_id",
+          "category": "filtering",
+          "description": "An omitted tour_id means the current tour.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "body": {
+              "last_step": "welcome"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "progress.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "body": {
+              "last_step": "welcome"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "progress.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "body": {
+              "last_step": "x"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "progress.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/onboarding/progress",
+            "body": {
+              "last_step": "x"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

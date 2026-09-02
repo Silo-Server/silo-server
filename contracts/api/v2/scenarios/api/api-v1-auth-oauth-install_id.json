@@ -1,0 +1,408 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/auth/oauth/{install_id}",
+  "wave": 1,
+  "description": "Plugin-backed OAuth login: init redirect and IdP callback. Registered only when PublicURL and the database are set.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/auth/oauth/{install_id}/init",
+      "registration_index": 0,
+      "not_applicable": {
+        "authorization": "Public by design: the browser is not signed in yet.",
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page."
+      },
+      "scenarios": [
+        {
+          "id": "oauth_init.bad_install",
+          "category": "error",
+          "description": "A non-numeric install_id is 400 text/plain.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/abc/init"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "text/plain; charset=utf-8"
+              }
+            ],
+            "body_kind": "text",
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": "invalid install_id\n"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_init.unknown_plugin",
+          "category": "error",
+          "description": "An install id with no OAuth plugin is 502 auth plugin unavailable.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/init"
+          },
+          "expect": {
+            "status": 502,
+            "body_kind": "text",
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": "auth plugin unavailable\n"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "Errors are text/plain via http.Error, not the JSON envelope. Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_init.status",
+          "category": "status_headers",
+          "description": "The failure path carries nosniff and text/plain like every http.Error response.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/init"
+          },
+          "expect": {
+            "status": 502,
+            "headers": [
+              {
+                "name": "X-Content-Type-Options",
+                "op": "equals",
+                "value": "nosniff"
+              }
+            ],
+            "body_kind": "text"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_init.raw",
+          "category": "raw_protocol",
+          "description": "The success path is a 302 redirect to the IdP authorize URL; not observable without a plugin, so the fixture pins that no redirect is emitted on failure.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/init"
+          },
+          "expect": {
+            "status": 502,
+            "headers": [
+              {
+                "name": "Location",
+                "op": "absent"
+              }
+            ],
+            "body_kind": "text"
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "302 + Location and the state-cookie/next handling need a plugin-backed fixture in the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_init.meaning",
+          "category": "data_meaning",
+          "description": "install_id selects the plugin installation; zero and negative ids are invalid.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/0/init"
+          },
+          "expect": {
+            "status": 400,
+            "body_kind": "text"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_init.next_filter",
+          "category": "filtering",
+          "description": "The next query parameter is normalized (unobservable on failure); an absolute next is ignored without error.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/init",
+            "query": {
+              "next": "https://evil.example.test/"
+            }
+          },
+          "expect": {
+            "status": 502,
+            "body_kind": "text"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_init.shape",
+          "category": "field_presence_nullability",
+          "description": "Error bodies are bare text lines.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/init"
+          },
+          "expect": {
+            "status": 502,
+            "body_kind": "text",
+            "body": [
+              {
+                "pointer": "",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/auth/oauth/{install_id}/callback",
+      "registration_index": 0,
+      "not_applicable": {
+        "authorization": "Public by design: the IdP redirects the unauthenticated browser here.",
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page."
+      },
+      "scenarios": [
+        {
+          "id": "oauth_cb.bad_install",
+          "category": "error",
+          "description": "A non-numeric install_id is 400 text/plain.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/abc/callback"
+          },
+          "expect": {
+            "status": 400,
+            "body_kind": "text",
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": "invalid install_id\n"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_cb.missing_params",
+          "category": "error",
+          "description": "Missing code or state is 400.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/callback"
+          },
+          "expect": {
+            "status": 400,
+            "body_kind": "text",
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": "missing code or state\n"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_cb.bad_state",
+          "category": "raw_protocol",
+          "description": "An unverifiable state redirects (302) to the login page with error=oauth_failed&reason=state_invalid instead of erroring.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/callback",
+            "query": {
+              "code": "x",
+              "state": "forged"
+            }
+          },
+          "expect": {
+            "status": 302,
+            "headers": [
+              {
+                "name": "Location",
+                "op": "equals",
+                "value": "/login?error=oauth_failed&reason=state_invalid"
+              }
+            ],
+            "body_kind": "any"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_cb.status",
+          "category": "status_headers",
+          "description": "Redirects are 302 Found (not 303) with a relative Location.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/callback",
+            "query": {
+              "code": "x",
+              "state": "forged"
+            }
+          },
+          "expect": {
+            "status": 302,
+            "headers": [
+              {
+                "name": "Location",
+                "op": "matches",
+                "value": "^/login\\?"
+              }
+            ],
+            "body_kind": "any"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_cb.meaning",
+          "category": "data_meaning",
+          "description": "The reason query parameter tells the SPA which step failed.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/callback",
+            "query": {
+              "code": "x",
+              "state": "forged"
+            }
+          },
+          "expect": {
+            "status": 302,
+            "headers": [
+              {
+                "name": "Location",
+                "op": "contains",
+                "value": "reason=state_invalid"
+              }
+            ],
+            "body_kind": "any"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_cb.filter",
+          "category": "filtering",
+          "description": "Both code and state are required query parameters; either alone is 400.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/callback",
+            "query": {
+              "code": "x"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "body_kind": "text"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "oauth_cb.shape",
+          "category": "field_presence_nullability",
+          "description": "The redirect body is the Go default HTML stub; clients must not parse it.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/oauth/42/callback",
+            "query": {
+              "code": "x",
+              "state": "forged"
+            }
+          },
+          "expect": {
+            "status": 302,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "contains",
+                "value": "text/html"
+              }
+            ],
+            "body_kind": "any"
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

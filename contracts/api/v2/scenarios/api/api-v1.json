@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1",
+  "wave": 1,
+  "description": "API-listener liveness and readiness probes. Both are tier 2 in the ledger (operational); wave 1 baselines them because the native clients' server picker and the cluster health checks read them before any login.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/health",
+      "registration_index": 0,
+      "tier2_inclusion": "Operational probe consumed by the multi-server picker on Apple/Android before authentication; wave 1 covers discovery.",
+      "not_applicable": {
+        "authorization": "Public liveness probe; no principal distinction exists.",
+        "sorting": "Single object response.",
+        "filtering": "No parameters are read.",
+        "pagination": "Single object response.",
+        "error": "The handler has no failure branch; it never inspects dependencies.",
+        "raw_protocol": "Plain JSON; no ranges, redirects, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "health.ok",
+          "category": "status_headers",
+          "description": "Liveness answers 200 with a JSON body even when the database is unreachable; it checks nothing.",
+          "principal": { "class": "public" },
+          "request": { "path": "/api/v1/health" },
+          "requires": ["database_unavailable"],
+          "expect": {
+            "status": 200,
+            "headers": [{ "name": "Content-Type", "op": "equals", "value": "application/json" }],
+            "body": [{ "pointer": "/status", "op": "equals", "value": "ok" }]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "health.identity",
+          "category": "data_meaning",
+          "description": "The body carries the configured server name and stable server id so a client can label and de-duplicate servers.",
+          "principal": { "class": "public" },
+          "request": { "path": "/api/v1/health" },
+          "expect": {
+            "status": 200,
+            "body": [
+              { "pointer": "/server_name", "op": "equals", "value": "Silo Fixture" },
+              { "pointer": "/server_id", "op": "equals", "value": "00000000-0000-4000-8000-0000000000f1" }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "health.shape",
+          "category": "field_presence_nullability",
+          "description": "Exactly status, server_name, and server_id are present; identity fields are omitted (not null) when unconfigured.",
+          "principal": { "class": "public" },
+          "request": { "path": "/api/v1/health" },
+          "expect": {
+            "status": 200,
+            "body": [{ "pointer": "", "op": "keys_equal", "value": ["status", "server_name", "server_id"] }]
+          },
+          "notes": "Omission-on-empty (omitempty) rather than explicit null; the section PR decides whether v2 keeps optional-absent for identity.",
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/ready",
+      "registration_index": 0,
+      "tier2_inclusion": "Readiness gate used by cluster orchestration and the server picker; wave 1 covers discovery.",
+      "not_applicable": {
+        "authorization": "Public readiness probe; no principal distinction exists.",
+        "sorting": "Single object response.",
+        "filtering": "No parameters are read.",
+        "pagination": "Single object response.",
+        "raw_protocol": "Plain JSON; no ranges, redirects, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "ready.ok",
+          "category": "status_headers",
+          "description": "With Postgres reachable and no S3 configured, readiness is 200 and reports only status.",
+          "principal": { "class": "public" },
+          "request": { "path": "/api/v1/ready" },
+          "requires": ["database"],
+          "expect": {
+            "status": 200,
+            "headers": [{ "name": "Content-Type", "op": "equals", "value": "application/json" }],
+            "body": [
+              { "pointer": "/status", "op": "equals", "value": "ok" },
+              { "pointer": "", "op": "keys_equal", "value": ["status"] }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "ready.db_down",
+          "category": "error",
+          "description": "With Postgres unreachable, readiness is 503 and the per-dependency booleans appear.",
+          "principal": { "class": "public" },
+          "request": { "path": "/api/v1/ready" },
+          "requires": ["database_unavailable"],
+          "expect": {
+            "status": 503,
+            "body": [
+              { "pointer": "/status", "op": "equals", "value": "error" },
+              { "pointer": "/postgres", "op": "equals", "value": false },
+              { "pointer": "/s3", "op": "equals", "value": true }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "ready.shape_on_failure",
+          "category": "field_presence_nullability",
+          "description": "The dependency booleans are present only on failure; a healthy answer omits them rather than reporting true.",
+          "principal": { "class": "public" },
+          "request": { "path": "/api/v1/ready" },
+          "requires": ["database_unavailable"],
+          "expect": {
+            "status": 503,
+            "body": [{ "pointer": "", "op": "keys_equal", "value": ["status", "postgres", "s3"] }]
+          },
+          "notes": "Asymmetric shape: booleans exist only when status is error. Flagged for the section PR; an unconfigured S3 reports as healthy (true).",
+          "v2_expectation": null
+        },
+        {
+          "id": "ready.meaning",
+          "category": "data_meaning",
+          "description": "status is the aggregate of the dependency checks: error exactly when any dependency fails.",
+          "principal": { "class": "public" },
+          "request": { "path": "/api/v1/ready" },
+          "requires": ["database_unavailable"],
+          "expect": {
+            "status": 503,
+            "body": [{ "pointer": "/status", "op": "one_of", "value": ["ok", "error"] }, { "pointer": "/status", "op": "equals", "value": "error" }]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

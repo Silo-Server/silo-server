@@ -127,6 +127,14 @@ jobs:
       - name: Lint router recovery full-tree
         run: make lint-router-recovery
 
+      # Every tier-1 row in a migration wave needs an executable scenario
+      # catalog before that wave's first section PR. The catalogs are
+      # schema-checked and reconciled against the ledger here; the executor
+      # runs their public subset under make test-go and the rest against a
+      # scratch Postgres locally.
+      - name: Verify the tier-1 scenario catalogs cover their waves
+        run: make verify-scenario-catalogs
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and

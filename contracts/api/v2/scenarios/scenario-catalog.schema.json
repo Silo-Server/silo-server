@@ -1,0 +1,339 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siloserver.org/contracts/api/v2/scenarios/scenario-catalog.schema.json",
+  "title": "Silo tier-1 legacy behavior scenario catalog",
+  "description": "One catalog per migration-ledger route_group (contracts/api/v2/migration.json). Each catalog names its tier-1 ledger rows and records, per row, the executable behavior scenarios v2 must either reproduce or record a reviewed intentional difference for. internal/scenariocatalog validates this schema, cross-checks rows against the ledger, enforces per-category coverage, and runs the scenarios against the real router. Fixtures are synthetic: values are deterministic and privacy-safe, and runtime-minted secrets are referenced through ${...} placeholders rather than committed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "listener", "route_group", "wave", "description", "rows"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "listener": { "enum": ["root", "api", "proxy", "transcode_node"] },
+    "route_group": { "type": "string", "pattern": "^/" },
+    "wave": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "description": { "type": "string", "minLength": 1 },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/row" }
+    }
+  },
+  "$defs": {
+    "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"] },
+    "category": {
+      "description": "The scenario classes the plan names for every tier-1 row.",
+      "enum": [
+        "status_headers",
+        "data_meaning",
+        "field_presence_nullability",
+        "authorization",
+        "sorting",
+        "filtering",
+        "pagination",
+        "error",
+        "raw_protocol"
+      ]
+    },
+    "principalClass": {
+      "description": "Who sends the request. The executor mints the matching credential from the synthetic fixture set; catalogs never carry tokens.",
+      "enum": [
+        "public",
+        "authenticated",
+        "profile",
+        "child_profile",
+        "primary_profile",
+        "admin",
+        "acting_admin",
+        "access_group",
+        "demo",
+        "api_key"
+      ]
+    },
+    "fixtureUser": { "enum": ["admin", "member", "grouped", "disabled"] },
+    "fixtureProfile": { "enum": ["none", "primary", "secondary", "child", "locked", "admin_primary", "admin_secondary", "grouped_primary", "missing"] },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class"],
+      "properties": {
+        "class": { "$ref": "#/$defs/principalClass" },
+        "user": {
+          "description": "Override the fixture account the class defaults to (e.g. an authenticated request from the disabled account).",
+          "$ref": "#/$defs/fixtureUser"
+        },
+        "profile": {
+          "description": "Override the declared X-Profile-Id the class defaults to.",
+          "$ref": "#/$defs/fixtureProfile"
+        },
+        "verified": {
+          "description": "Send the X-Profile-Token for a PIN-locked declared profile.",
+          "type": "boolean"
+        },
+        "scopes": {
+          "description": "api_key only: the scopes the fixture key carries. Omitted or empty means an unscoped key.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "jsonValue": {},
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "Concrete request path. Path parameters are filled with synthetic values or ${name} fixture placeholders; inside JSON, a whole string value of the form \"${name:int}\" becomes a bare integer.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "headers": {
+          "description": "Extra request headers. A null value removes a header the principal would otherwise add.",
+          "type": "object",
+          "additionalProperties": { "oneOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "body": {
+          "description": "Inline synthetic JSON body. Strings inside are placeholder-substituted.",
+          "$ref": "#/$defs/jsonValue"
+        },
+        "body_ref": {
+          "description": "Path, relative to contracts/api/v2/scenarios/fixtures/, of a committed synthetic body.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./-]+$"
+        },
+        "raw_body": {
+          "description": "Literal request body for malformed-payload scenarios.",
+          "type": "string"
+        },
+        "content_type": { "type": "string", "minLength": 1 },
+        "multipart": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fields": { "type": "object", "additionalProperties": { "type": "string" } },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["field", "filename", "content_type", "content"],
+                "properties": {
+                  "field": { "type": "string", "minLength": 1 },
+                  "filename": { "type": "string", "minLength": 1 },
+                  "content_type": { "type": "string", "minLength": 1 },
+                  "content": {
+                    "description": "Synthetic payload generator: png:1x1 (valid image), text:<literal>, or bytes:<n> (n zero bytes).",
+                    "type": "string",
+                    "pattern": "^(png:[0-9]+x[0-9]+|text:.*|bytes:[0-9]+)$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "repeat": {
+          "description": "Send the request this many times and assert on the final response (rate-limit and idempotency scenarios).",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 500
+        }
+      }
+    },
+    "bodyOp": {
+      "description": "Predicate vocabulary for JSON-pointer assertions. Product-behavior predicates, not byte equality.",
+      "enum": [
+        "exists",
+        "absent",
+        "is_null",
+        "not_null",
+        "equals",
+        "not_equals",
+        "type",
+        "empty",
+        "non_empty",
+        "length",
+        "min_length",
+        "max_length",
+        "matches",
+        "one_of",
+        "contains",
+        "gte",
+        "lte",
+        "rfc3339",
+        "keys_equal",
+        "keys_include",
+        "sorted",
+        "unique_by",
+        "every"
+      ]
+    },
+    "bodyAssertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer", "op"],
+      "properties": {
+        "pointer": {
+          "description": "RFC 6901 JSON pointer into the response body; \"\" is the whole body.",
+          "type": "string",
+          "pattern": "^(/.*)?$"
+        },
+        "op": { "$ref": "#/$defs/bodyOp" },
+        "value": { "$ref": "#/$defs/jsonValue" },
+        "why": {
+          "description": "The product meaning being asserted, for the reviewer.",
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "enum": ["equals", "not_equals", "type", "length", "min_length", "max_length", "matches", "one_of", "contains", "gte", "lte", "keys_equal", "keys_include", "sorted", "unique_by", "every"] } } },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "type" } } },
+          "then": { "properties": { "value": { "enum": ["string", "number", "integer", "boolean", "array", "object", "null"] } } }
+        },
+        {
+          "if": { "properties": { "op": { "const": "sorted" } } },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["by", "direction"],
+                "properties": {
+                  "by": { "type": "string", "pattern": "^/.*$" },
+                  "direction": { "enum": ["asc", "desc"] },
+                  "then_by": { "type": "string", "pattern": "^/.*$" },
+                  "then_direction": { "enum": ["asc", "desc"] },
+                  "nulls": { "enum": ["first", "last"] }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "op": { "const": "every" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/bodyAssertion" } } }
+        }
+      ]
+    },
+    "headerAssertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "op"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "op": { "enum": ["exists", "absent", "equals", "contains", "matches"] },
+        "value": { "type": "string" }
+      }
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "headers": { "type": "array", "items": { "$ref": "#/$defs/headerAssertion" } },
+        "body": { "type": "array", "items": { "$ref": "#/$defs/bodyAssertion" } },
+        "body_kind": {
+          "description": "What the body is. json bodies are parsed before assertions; text bodies expose the body at pointer \"\" as a string; empty requires zero bytes.",
+          "enum": ["json", "text", "empty", "any"],
+          "default": "json"
+        }
+      }
+    },
+    "v2Expectation": {
+      "description": "Null until the section PR records the intended v2 behavior or a reviewed intentional difference.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "recorded_in"],
+          "properties": {
+            "kind": { "enum": ["same", "intentional_difference"] },
+            "summary": { "type": "string", "minLength": 1 },
+            "expect": { "$ref": "#/$defs/expect" },
+            "recorded_in": {
+              "description": "PR or ledger reference the review happened in.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "description", "principal", "request", "expect", "v2_expectation"],
+      "properties": {
+        "id": {
+          "description": "Stable identifier, unique within the catalog.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+        },
+        "category": { "$ref": "#/$defs/category" },
+        "description": {
+          "description": "The product behavior being pinned, in plain language.",
+          "type": "string",
+          "minLength": 1
+        },
+        "principal": { "$ref": "#/$defs/principal" },
+        "request": { "$ref": "#/$defs/request" },
+        "expect": { "$ref": "#/$defs/expect" },
+        "requires": {
+          "description": "Runtime the scenario needs. database: runs only when SILO_TEST_DATABASE_URL is set (any non-public principal or a settings block implies it). database_unavailable: runs against the offline router whose database pool cannot connect, to pin degraded behavior. rate_limiter: runs against the rate-limited router variant regardless of the row's registration conditions.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["database", "database_unavailable", "rate_limiter"] }
+        },
+        "settings": {
+          "description": "server_settings rows applied before the request and removed afterwards (for example demo.enabled). Implies database.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "fresh_state": {
+          "description": "The scenario mutates the synthetic fixture set. The executor reseeds before and after it so neighbouring scenarios observe the canonical state.",
+          "type": "boolean"
+        },
+        "notes": {
+          "description": "Reviewer-facing remarks. Accidental-looking current behavior is flagged here for the section PR, never silently corrected.",
+          "type": "string"
+        },
+        "v2_expectation": { "$ref": "#/$defs/v2Expectation" }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listener", "method", "path", "registration_index", "scenarios"],
+      "properties": {
+        "listener": { "enum": ["root", "api", "proxy", "transcode_node"] },
+        "method": { "$ref": "#/$defs/method" },
+        "path": { "type": "string", "pattern": "^/" },
+        "registration_index": { "type": "integer", "minimum": 0 },
+        "tier2_inclusion": {
+          "description": "Why a tier-2 ledger row is baselined anyway (only rows the wave definition in internal/scenariocatalog names explicitly).",
+          "type": "string",
+          "minLength": 8
+        },
+        "not_applicable": {
+          "description": "Categories with no scenario, each with the reason it does not apply to this row.",
+          "type": "object",
+          "additionalProperties": false,
+          "propertyNames": { "$ref": "#/$defs/category" },
+          "patternProperties": { "^.*$": { "type": "string", "minLength": 8 } }
+        },
+        "notes": { "type": "string" },
+        "scenarios": { "type": "array", "items": { "$ref": "#/$defs/scenario" } }
+      }
+    }
+  }
+}

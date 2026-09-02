@@ -1,0 +1,621 @@
+// Package executor runs tier-1 scenario catalogs against the real API router.
+//
+// Requests go through api.NewRouter with the production middleware stack in
+// an in-process httptest server. Two router variants exist:
+//
+//   - offline: no database pool that can connect, so only the routes that
+//     register without one exist. Public discovery, health, and readiness
+//     failure cases run here in plain CI.
+//   - live: a real Postgres (SILO_TEST_DATABASE_URL) migrated and seeded with
+//     a deterministic synthetic household. Everything else runs here and is
+//     skipped when the variable is unset.
+//
+// Principals are minted from the synthetic fixture set at run time; catalogs
+// never carry credentials. Scenario bodies reference minted values through
+// ${...} placeholders (see placeholders in run.go).
+package executor
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/api"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
+	"github.com/Silo-Server/silo-server/migrations"
+)
+
+// Fixture account names, as catalogs reference them in principal.user.
+const (
+	fixtureAdmin    = "admin"
+	fixtureMember   = "member"
+	fixtureGrouped  = "grouped"
+	fixtureDisabled = "disabled"
+)
+
+// Synthetic fixture constants. Every value is reserved or fictional.
+const (
+	jwtSecret     = "scenario-catalog-fixture-jwt-secret-0000000000000000"
+	masterKey     = "scenario-catalog-fixture-master-key-000000000000000"
+	serverName    = "Silo Fixture"
+	serverID      = "00000000-0000-4000-8000-0000000000f1"
+	publicURL     = "https://silo.example.test"
+	adminUsername = "fixture-admin"
+	adminEmail    = "fixture-admin@silo.example.test"
+	adminPassword = "fixture-admin-password"
+	memberUser    = "fixture-member"
+	memberEmail   = "fixture-member@silo.example.test"
+	memberPass    = "fixture-member-password"
+	groupedUser   = "fixture-grouped"
+	groupedEmail  = "fixture-grouped@silo.example.test"
+	groupedPass   = "fixture-grouped-password"
+	disabledUser  = "fixture-disabled"
+	disabledEmail = "fixture-disabled@silo.example.test"
+	disabledPass  = "fixture-disabled-password"
+	lockedPIN     = "2468"
+	inviteCode    = "FIXTURE1"
+	inviteCodeOff = "FIXTURE0"
+	inviteFull    = "FIXTURE9"
+	inviteToken   = "fixture-invitation-token-pending"
+	inviteTokenUs = "fixture-invitation-token-accepted"
+	deviceCode    = "fixture-device-code-pending"
+	browserCode   = "fixture-browser-code-pending"
+	userCode      = "FIXTURE1"
+	deviceCodeRem = "fixture-device-code-remote"
+	browserCodeRm = "fixture-browser-code-remote"
+	userCodeRem   = "FIXTURE2"
+	deviceCodeDen = "fixture-device-code-denied"
+	browserCodeDn = "fixture-browser-code-denied"
+	userCodeDen   = "FIXTURE3"
+	deviceCodeExp = "fixture-device-code-expired"
+	browserCodeEx = "fixture-browser-code-expired"
+	userCodeExp   = "FIXTURE4"
+	deviceCodeApp = "fixture-device-code-approved"
+	browserCodeAp = "fixture-browser-code-approved"
+	userCodeApp   = "FIXTURE5"
+	deviceCodeRA  = "fixture-device-code-remote-approved"
+	browserCodeRA = "fixture-browser-code-remote-approved"
+	userCodeRA    = "FIXTURE6"
+	deviceIDA     = "fixture-device-a"
+	deviceIDB     = "fixture-device-b"
+
+	// Profile IDs are fixed UUIDs so catalogs can name them directly.
+	profileAdminPrimary   = "00000000-0000-4000-8000-0000000000a1"
+	profileAdminSecondary = "00000000-0000-4000-8000-0000000000a2"
+	profilePrimary        = "00000000-0000-4000-8000-0000000000b1"
+	profileSecondary      = "00000000-0000-4000-8000-0000000000b2"
+	profileChild          = "00000000-0000-4000-8000-0000000000b3"
+	profileLocked         = "00000000-0000-4000-8000-0000000000b4"
+	profileGroupedPrimary = "00000000-0000-4000-8000-0000000000c1"
+	profileMissing        = "00000000-0000-4000-8000-0000000000ff"
+)
+
+// Env is one executor environment: an in-process server, its variants, and
+// the synthetic fixture identities the principals draw on.
+type Env struct {
+	t   testing.TB
+	ctx context.Context
+
+	// Offline router (no reachable database) for CI-runnable scenarios, and
+	// the method+pattern set it registered: a row absent from it can only be
+	// exercised on the live router.
+	offline       *httptest.Server
+	offlineRoutes map[string]bool
+	// Live routers, only when a database is configured.
+	live        *httptest.Server
+	liveLimited *httptest.Server
+	pool        *pgxpool.Pool
+	settings    catalog.SettingsStore
+	stores      userstore.UserStoreProvider
+	jwt         *auth.JWTService
+	profileTok  *access.ProfileTokenService
+	limiter     *ratelimit.Middleware
+	policy      *policy.System
+
+	users    map[string]*models.User
+	sessions map[string]string // fixture user -> session id
+	apiKeys  map[string]string // scope list key -> api key
+	fixtures map[string]string // placeholder -> value
+}
+
+// HasDatabase reports whether database-gated scenarios can run.
+func (e *Env) HasDatabase() bool { return e.pool != nil }
+
+// OfflineHas reports whether the offline router registered the row at all.
+// Rows behind a user store, policy system, or auth middleware do not exist
+// there, so their public scenarios (missing bearer, and so on) still need
+// the live router.
+func (e *Env) OfflineHas(method, pattern string) bool {
+	return e.offlineRoutes[method+" "+pattern]
+}
+
+// registeredRoutes walks the chi tree and returns "METHOD pattern" keys in
+// the same spelling the route inventory records.
+func registeredRoutes(t testing.TB, h http.Handler) map[string]bool {
+	t.Helper()
+	routes, ok := h.(chi.Routes)
+	if !ok {
+		t.Fatalf("scenario executor: router does not expose chi.Routes")
+	}
+	out := map[string]bool{}
+	walk := func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		// chi reports mounted subrouter roots as "/*"; the inventory keeps
+		// the registration form, which has no such suffix.
+		route = strings.TrimSuffix(route, "/*")
+		out[method+" "+route] = true
+		return nil
+	}
+	if err := chi.Walk(routes, walk); err != nil {
+		t.Fatalf("scenario executor: walk offline router: %v", err)
+	}
+	return out
+}
+
+// New builds the environment. Database wiring happens only when
+// SILO_TEST_DATABASE_URL is set; the offline router always exists.
+func New(t testing.TB) *Env {
+	t.Helper()
+	ctx := context.Background()
+	e := &Env{t: t, ctx: ctx, users: map[string]*models.User{}, sessions: map[string]string{}, apiKeys: map[string]string{}, fixtures: map[string]string{}}
+
+	cfg := e.config()
+	// A pool whose target never answers: the router registers the
+	// DB-dependent routes (the pool is non-nil) but every query fails, which
+	// is the "database unreachable" state readiness must report.
+	deadPool, err := pgxpool.New(ctx, "postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatalf("scenario executor: build offline pool: %v", err)
+	}
+	t.Cleanup(deadPool.Close)
+	cipher, err := secret.New([]byte(masterKey))
+	if err != nil {
+		t.Fatalf("scenario executor: cipher: %v", err)
+	}
+	offlineRouter := api.NewRouter(api.Dependencies{
+		Config:           cfg,
+		AppContext:       ctx,
+		DB:               deadPool,
+		SecretCipher:     cipher,
+		ClientIPResolver: clientip.NewResolver(nil),
+		NodeID:           "fixture-node",
+		PublicURL:        publicURL,
+	})
+	e.offline = httptest.NewServer(offlineRouter)
+	t.Cleanup(e.offline.Close)
+	e.offlineRoutes = registeredRoutes(t, offlineRouter)
+
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		return e
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("scenario executor: connect %s: %v", "SILO_TEST_DATABASE_URL", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
+		t.Fatalf("scenario executor: migrate: %v", err)
+	}
+	e.pool = pool
+	e.settings = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	e.stores = pgstore.NewPostgresProvider(pool)
+	e.jwt = auth.NewJWTService(cfg.Auth.JWTSecret, cfg.Auth.AccessTokenExpiry, cfg.Auth.RefreshTokenExpiry)
+	e.profileTok = access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
+
+	e.policy = policy.NewSystem(policy.NewPolicyStore(pool), nil, slog.Default())
+	if err := e.policy.Start(ctx); err != nil {
+		t.Fatalf("scenario executor: policy system: %v", err)
+	}
+	t.Cleanup(e.policy.Stop)
+
+	perKey := ratelimit.NewMemoryLimiter()
+	global := ratelimit.NewMemoryLimiter()
+	t.Cleanup(perKey.Close)
+	t.Cleanup(global.Close)
+	e.limiter = ratelimit.NewMiddleware(perKey, global, e.settings, true)
+
+	deps := func(limited bool) api.Dependencies {
+		d := api.Dependencies{
+			Config:            cfg,
+			AppContext:        ctx,
+			DB:                pool,
+			SecretCipher:      cipher,
+			ClientIPResolver:  clientip.NewResolver(nil),
+			NodeID:            "fixture-node",
+			PublicURL:         publicURL,
+			UserStoreProvider: e.stores,
+			PolicySystem:      e.policy,
+		}
+		if limited {
+			d.RateLimitMW = e.limiter
+		}
+		return d
+	}
+	e.live = httptest.NewServer(api.NewRouter(deps(false)))
+	t.Cleanup(e.live.Close)
+	e.liveLimited = httptest.NewServer(api.NewRouter(deps(true)))
+	t.Cleanup(e.liveLimited.Close)
+
+	e.Reseed()
+	return e
+}
+
+func (e *Env) config() *config.Config {
+	cfg, err := config.LoadFromDB(map[string]string{
+		"auth.jwt_secret":             jwtSecret,
+		"jellyfin_compat.server_name": serverName,
+		"jellyfin_compat.server_id":   serverID,
+	})
+	if err != nil {
+		e.t.Fatalf("scenario executor: config: %v", err)
+	}
+	return cfg
+}
+
+// Reseed wipes the synthetic household and recreates it. The scratch
+// database is owned by the executor; it refuses to run against a database
+// that holds anything it did not create.
+func (e *Env) Reseed() {
+	e.t.Helper()
+	ctx := e.ctx
+	e.guardScratchDatabase()
+
+	// Truncating users cascades to sessions, api keys, profiles, devices,
+	// device logins (SET NULL), invitations, and everything else keyed by
+	// user_id. Rows with no user FK are cleared explicitly.
+	for _, stmt := range []string{
+		`TRUNCATE TABLE users RESTART IDENTITY CASCADE`,
+		`TRUNCATE TABLE device_login_requests`,
+		`TRUNCATE TABLE invite_codes RESTART IDENTITY CASCADE`,
+		`TRUNCATE TABLE invitations RESTART IDENTITY CASCADE`,
+		`TRUNCATE TABLE access_groups RESTART IDENTITY CASCADE`,
+		`DELETE FROM server_settings WHERE key IN ('demo.enabled','signup.enabled','notifications.email.external_url','branding.server_name','sections.allow_profile_custom_sections')`,
+	} {
+		if _, err := e.pool.Exec(ctx, stmt); err != nil {
+			e.t.Fatalf("scenario executor: reseed %q: %v", stmt, err)
+		}
+	}
+	if err := ratelimit.SeedDefaults(ctx, e.settings); err != nil {
+		e.t.Fatalf("scenario executor: seed rate limits: %v", err)
+	}
+	if err := e.limiter.Reload(ctx); err != nil {
+		e.t.Fatalf("scenario executor: reload rate limits: %v", err)
+	}
+	e.mustSetting("branding.server_name", serverName)
+	e.mustSetting("signup.enabled", "true")
+
+	users := auth.NewUserRepository(e.pool)
+	sessions := auth.NewSessionRepository(e.pool)
+	apiKeys := auth.NewAPIKeyRepository(e.pool)
+	groups := access.NewGroupStore(e.pool)
+
+	create := func(name, username, email, password, role string) *models.User {
+		u, err := users.Create(ctx, models.CreateUserInput{Username: username, Email: email, Password: password, Role: role})
+		if err != nil {
+			e.t.Fatalf("scenario executor: create user %s: %v", name, err)
+		}
+		e.users[name] = u
+		return u
+	}
+	admin := create(fixtureAdmin, adminUsername, adminEmail, adminPassword, models.RoleAdmin)
+	member := create(fixtureMember, memberUser, memberEmail, memberPass, models.RoleUser)
+	grouped := create(fixtureGrouped, groupedUser, groupedEmail, groupedPass, models.RoleUser)
+	disabled := create(fixtureDisabled, disabledUser, disabledEmail, disabledPass, models.RoleUser)
+	off := false
+	if err := users.Update(ctx, disabled.ID, models.UpdateUserInput{Enabled: &off}); err != nil {
+		e.t.Fatalf("scenario executor: disable user: %v", err)
+	}
+	disabled.Enabled = false
+
+	group, err := groups.Create(ctx, access.CreateGroupInput{
+		Name: "Fixture Group", LibraryIDs: []int{}, DownloadAllowed: false, TranscodeAllowed: true, AudioTranscodeAllowed: true,
+	})
+	if err != nil {
+		e.t.Fatalf("scenario executor: create access group: %v", err)
+	}
+	if err := users.Update(ctx, grouped.ID, models.UpdateUserInput{AccessGroupID: models.SetValue(group.ID)}); err != nil {
+		e.t.Fatalf("scenario executor: assign access group: %v", err)
+	}
+
+	// Profiles. The first profile per account becomes primary.
+	e.mustProfile(admin.ID, userstore.Profile{ID: profileAdminPrimary, Name: "Fixture Admin"})
+	e.mustProfile(admin.ID, userstore.Profile{ID: profileAdminSecondary, Name: "Fixture Admin Two"})
+	e.mustProfile(member.ID, userstore.Profile{ID: profilePrimary, Name: "Fixture Parent"})
+	e.mustProfile(member.ID, userstore.Profile{ID: profileSecondary, Name: "Fixture Teen"})
+	e.mustProfile(member.ID, userstore.Profile{ID: profileChild, Name: "Fixture Kid", IsChild: true, MaxContentRating: "PG"})
+	e.mustProfile(member.ID, userstore.Profile{ID: profileLocked, Name: "Fixture Locked"})
+	pin := lockedPIN
+	store, err := e.stores.ForUser(ctx, member.ID)
+	if err != nil {
+		e.t.Fatalf("scenario executor: member store: %v", err)
+	}
+	if err := store.UpdateProfile(ctx, profileLocked, userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+		e.t.Fatalf("scenario executor: lock profile: %v", err)
+	}
+	e.mustProfile(grouped.ID, userstore.Profile{ID: profileGroupedPrimary, Name: "Fixture Grouped"})
+
+	// Devices seen by two member profiles, with deterministic last-seen order.
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		e.t.Fatalf("scenario executor: user store has no device registry")
+	}
+	for i, d := range []userstore.DeviceEntry{
+		{ProfileID: profilePrimary, DeviceID: deviceIDA, DeviceName: "Fixture TV", DevicePlatform: "tvos"},
+		{ProfileID: profilePrimary, DeviceID: deviceIDB, DeviceName: "Fixture Phone", DevicePlatform: "ios"},
+		{ProfileID: profileSecondary, DeviceID: "fixture-device-c", DeviceName: "Fixture Tablet", DevicePlatform: "android"},
+	} {
+		if err := registry.RegisterDevice(ctx, d); err != nil {
+			e.t.Fatalf("scenario executor: register device: %v", err)
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE user_devices SET last_seen_at = $1 WHERE user_id = $2 AND device_id = $3`,
+			time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(i)*time.Hour), member.ID, d.DeviceID); err != nil {
+			e.t.Fatalf("scenario executor: device last_seen: %v", err)
+		}
+	}
+
+	// One login session per account for bearer principals.
+	for name, u := range e.users {
+		id := fmt.Sprintf("00000000-0000-4000-8000-0000000d%04d", u.ID)
+		if err := sessions.Create(ctx, models.AuthSession{ID: id, UserID: u.ID, DeviceName: "fixture-client", IPAddress: "127.0.0.1", ExpiresAt: time.Now().Add(24 * time.Hour)}); err != nil {
+			e.t.Fatalf("scenario executor: session for %s: %v", name, err)
+		}
+		e.sessions[name] = id
+	}
+	// A second, already-revoked session for the member so revoked_at has a
+	// non-null case in the session list.
+	revoked := "00000000-0000-4000-8000-00000000dead"
+	if err := sessions.Create(ctx, models.AuthSession{ID: revoked, UserID: member.ID, DeviceName: "fixture-old-client", IPAddress: "127.0.0.1", ExpiresAt: time.Now().Add(24 * time.Hour)}); err != nil {
+		e.t.Fatalf("scenario executor: revoked session: %v", err)
+	}
+	if err := sessions.Revoke(ctx, revoked); err != nil {
+		e.t.Fatalf("scenario executor: revoke: %v", err)
+	}
+	e.fixtures["member_revoked_session_id"] = revoked
+
+	// API keys: unscoped and scoped, both owned by the admin.
+	unscoped, err := apiKeys.Create(ctx, admin.ID, "fixture-unscoped", nil)
+	if err != nil {
+		e.t.Fatalf("scenario executor: api key: %v", err)
+	}
+	e.apiKeys[""] = unscoped.Key
+	scoped, err := apiKeys.Create(ctx, admin.ID, "fixture-scoped", []string{auth.ScopeAdminUsers})
+	if err != nil {
+		e.t.Fatalf("scenario executor: scoped api key: %v", err)
+	}
+	e.apiKeys[auth.ScopeAdminUsers] = scoped.Key
+	memberKey, err := apiKeys.Create(ctx, member.ID, "fixture-member-key", nil)
+	if err != nil {
+		e.t.Fatalf("scenario executor: member api key: %v", err)
+	}
+	e.fixtures["admin_api_key_id"] = strconv.FormatInt(unscoped.ID, 10)
+	e.fixtures["member_api_key_id"] = strconv.FormatInt(memberKey.ID, 10)
+
+	// Invite codes: usable, disabled, exhausted.
+	codes := auth.NewInviteCodeRepository(e.pool)
+	usable, err := codes.Create(ctx, models.CreateInviteCodeInput{Code: inviteCode, Label: "fixture usable", MaxUses: 5, CreatedBy: admin.ID})
+	if err != nil {
+		e.t.Fatalf("scenario executor: invite code: %v", err)
+	}
+	offCode, err := codes.Create(ctx, models.CreateInviteCodeInput{Code: inviteCodeOff, Label: "fixture disabled", MaxUses: 5, CreatedBy: admin.ID})
+	if err != nil {
+		e.t.Fatalf("scenario executor: invite code: %v", err)
+	}
+	if err := codes.Update(ctx, offCode.ID, models.UpdateInviteCodeInput{Enabled: &off}); err != nil {
+		e.t.Fatalf("scenario executor: disable invite code: %v", err)
+	}
+	full, err := codes.Create(ctx, models.CreateInviteCodeInput{Code: inviteFull, Label: "fixture exhausted", MaxUses: 1, CreatedBy: admin.ID})
+	if err != nil {
+		e.t.Fatalf("scenario executor: invite code: %v", err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE invite_codes SET use_count = max_uses WHERE id = $1`, full.ID); err != nil {
+		e.t.Fatalf("scenario executor: exhaust invite code: %v", err)
+	}
+	e.fixtures["invite_code_id"] = strconv.Itoa(usable.ID)
+	e.fixtures["invite_code_disabled_id"] = strconv.Itoa(offCode.ID)
+
+	// Invitations: one pending, one accepted, one expired.
+	e.mustExec(`INSERT INTO invitations (email, token_hash, role, create_profile, show_tour, note, invited_by, expires_at)
+		VALUES ($1, $2, 'user', true, true, 'fixture pending', $3, now() + interval '7 days')`,
+		"fixture-invitee@silo.example.test", hashInvite(inviteToken), admin.ID)
+	e.mustExec(`INSERT INTO invitations (email, token_hash, role, create_profile, show_tour, note, invited_by, expires_at, accepted_at, accepted_user_id)
+		VALUES ($1, $2, 'user', true, true, 'fixture accepted', $3, now() + interval '7 days', now() - interval '1 day', $4)`,
+		memberEmail, hashInvite(inviteTokenUs), admin.ID, member.ID)
+	e.mustExec(`INSERT INTO invitations (email, token_hash, role, create_profile, show_tour, note, invited_by, expires_at)
+		VALUES ($1, $2, 'user', true, true, 'fixture expired', $3, now() - interval '1 day')`,
+		"fixture-expired@silo.example.test", hashInvite("fixture-invitation-token-expired"), admin.ID)
+	var pendingID, acceptedID int64
+	if err := e.pool.QueryRow(ctx, `SELECT id FROM invitations WHERE token_hash = $1`, hashInvite(inviteToken)).Scan(&pendingID); err != nil {
+		e.t.Fatalf("scenario executor: pending invitation id: %v", err)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT id FROM invitations WHERE token_hash = $1`, hashInvite(inviteTokenUs)).Scan(&acceptedID); err != nil {
+		e.t.Fatalf("scenario executor: accepted invitation id: %v", err)
+	}
+	e.fixtures["invitation_pending_id"] = strconv.FormatInt(pendingID, 10)
+	e.fixtures["invitation_accepted_id"] = strconv.FormatInt(acceptedID, 10)
+
+	// Device-login requests in every state the handlers distinguish.
+	insertDeviceLogin := func(id, dev, browser, user, status, purpose string, temporary bool, expires string) {
+		e.mustExec(`INSERT INTO device_login_requests
+			(id, device_code_hash, browser_code_hash, user_code_hash, match_code, device_name, device_platform, ip_address,
+			 status, client_purpose, temporary, expires_at)
+			VALUES ($1, $2, $3, $4, '42', 'Fixture TV', 'tvos', '127.0.0.1', $5, $6, $7, now() + $8::interval)`,
+			id, hashDevice(dev), hashDevice(browser), hashDevice(user), status, purpose, temporary, expires)
+	}
+	insertDeviceLogin("00000000-0000-4000-8000-0000000000e1", deviceCode, browserCode, userCode, "pending", "device_login", false, "10 minutes")
+	insertDeviceLogin("00000000-0000-4000-8000-0000000000e2", deviceCodeRem, browserCodeRm, userCodeRem, "pending", "remote_playback", true, "10 minutes")
+	insertDeviceLogin("00000000-0000-4000-8000-0000000000e3", deviceCodeDen, browserCodeDn, userCodeDen, "denied", "device_login", false, "10 minutes")
+	insertDeviceLogin("00000000-0000-4000-8000-0000000000e4", deviceCodeExp, browserCodeEx, userCodeExp, "pending", "device_login", false, "-1 minutes")
+	insertDeviceLogin("00000000-0000-4000-8000-0000000000e5", deviceCodeApp, browserCodeAp, userCodeApp, "approved", "device_login", false, "10 minutes")
+	e.mustExec(`UPDATE device_login_requests SET approved_by_user_id = $1, approved_at = now() WHERE id = '00000000-0000-4000-8000-0000000000e5'`, member.ID)
+	insertDeviceLogin("00000000-0000-4000-8000-0000000000e6", deviceCodeRA, browserCodeRA, userCodeRA, "approved", "remote_playback", true, "10 minutes")
+	e.mustExec(`UPDATE device_login_requests SET approved_by_user_id = $1, approved_profile_id = $2, approved_at = now() WHERE id = '00000000-0000-4000-8000-0000000000e6'`, member.ID, profilePrimary)
+
+	e.fixtures["admin_user_id"] = strconv.Itoa(admin.ID)
+	e.fixtures["member_user_id"] = strconv.Itoa(member.ID)
+	e.fixtures["grouped_user_id"] = strconv.Itoa(grouped.ID)
+	e.fixtures["member_session_id"] = e.sessions[fixtureMember]
+	e.fixtures["admin_session_id"] = e.sessions[fixtureAdmin]
+	e.fixtures["access_group_id"] = strconv.FormatInt(group.ID, 10)
+	e.fixtures["locked_profile_token"] = e.mintProfileToken(member, profileLocked)
+}
+
+// guardScratchDatabase refuses to touch a database that looks like anything
+// other than the executor's own scratch space: media rows or accounts the
+// seeder did not create.
+func (e *Env) guardScratchDatabase() {
+	var media int
+	if err := e.pool.QueryRow(e.ctx, `SELECT count(*) FROM media_items`).Scan(&media); err != nil {
+		e.t.Fatalf("scenario executor: inspect database: %v", err)
+	}
+	var foreign int
+	if err := e.pool.QueryRow(e.ctx, `SELECT count(*) FROM users WHERE email NOT LIKE '%@silo.example.test'`).Scan(&foreign); err != nil {
+		e.t.Fatalf("scenario executor: inspect users: %v", err)
+	}
+	if media > 0 || foreign > 0 {
+		e.t.Fatalf("scenario executor: SILO_TEST_DATABASE_URL points at a database with %d media items and %d non-fixture users; refusing to reseed a database with data", media, foreign)
+	}
+}
+
+func (e *Env) mustExec(sql string, args ...any) {
+	if _, err := e.pool.Exec(e.ctx, sql, args...); err != nil {
+		e.t.Fatalf("scenario executor: %s: %v", strings.Fields(sql)[0], err)
+	}
+}
+
+func (e *Env) mustSetting(key, value string) {
+	if err := e.settings.Set(e.ctx, key, value); err != nil {
+		e.t.Fatalf("scenario executor: setting %s: %v", key, err)
+	}
+}
+
+func (e *Env) mustProfile(userID int, p userstore.Profile) {
+	store, err := e.stores.ForUser(e.ctx, userID)
+	if err != nil {
+		e.t.Fatalf("scenario executor: store: %v", err)
+	}
+	if err := store.CreateProfile(e.ctx, p); err != nil {
+		e.t.Fatalf("scenario executor: profile %s: %v", p.Name, err)
+	}
+}
+
+func (e *Env) mintProfileToken(u *models.User, profileID string) string {
+	token, _, err := e.profileTok.Mint(access.ProfileTokenClaims{
+		UserID: u.ID, SessionID: e.sessions[userName(u)], ProfileID: profileID, PolicyRevision: e.currentRevision(u.ID),
+	})
+	if err != nil {
+		e.t.Fatalf("scenario executor: profile token: %v", err)
+	}
+	return token
+}
+
+func (e *Env) currentRevision(userID int) int64 {
+	var rev int64
+	if err := e.pool.QueryRow(e.ctx, `SELECT access_policy_revision FROM users WHERE id = $1`, userID).Scan(&rev); err != nil {
+		e.t.Fatalf("scenario executor: policy revision: %v", err)
+	}
+	return rev
+}
+
+func userName(u *models.User) string {
+	switch u.Username {
+	case adminUsername:
+		return fixtureAdmin
+	case memberUser:
+		return fixtureMember
+	case groupedUser:
+		return fixtureGrouped
+	case disabledUser:
+		return fixtureDisabled
+	}
+	return u.Username
+}
+
+// accessToken mints a bearer for the fixture account's seeded session.
+func (e *Env) accessToken(name string) string {
+	u, ok := e.users[name]
+	if !ok {
+		e.t.Fatalf("scenario executor: unknown fixture user %q", name)
+	}
+	token, err := e.jwt.GenerateAccessToken(u.ID, u.Role, e.sessions[name])
+	if err != nil {
+		e.t.Fatalf("scenario executor: access token: %v", err)
+	}
+	return token
+}
+
+func (e *Env) refreshToken(name string) string {
+	return e.refreshTokenFor(name, e.sessions[name])
+}
+
+func (e *Env) refreshTokenFor(name, sessionID string) string {
+	u := e.users[name]
+	token, err := e.jwt.GenerateRefreshToken(u.ID, u.Role, sessionID)
+	if err != nil {
+		e.t.Fatalf("scenario executor: refresh token: %v", err)
+	}
+	return token
+}
+
+// impersonationToken mints an access token for the member whose session
+// carries admin provenance, so /auth/impersonation/end has a real case.
+func (e *Env) impersonationToken() string {
+	admin, member := e.users[fixtureAdmin], e.users[fixtureMember]
+	id := "00000000-0000-4000-8000-0000000001a1"
+	now := time.Now()
+	if _, err := e.pool.Exec(e.ctx, `INSERT INTO auth_sessions (id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at)
+		VALUES ($1, $2, 'fixture-impersonation', '127.0.0.1', $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
+		id, member.ID, now.Add(time.Hour), admin.ID, now); err != nil {
+		e.t.Fatalf("scenario executor: impersonation session: %v", err)
+	}
+	claims := auth.Claims{UserID: member.ID, Role: member.Role, SessionID: id, ImpersonatorUserID: &admin.ID, TokenType: auth.TokenTypeAccess}
+	claims.RegisteredClaims = jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)), IssuedAt: jwt.NewNumericDate(now)}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims).SignedString([]byte(jwtSecret))
+	if err != nil {
+		e.t.Fatalf("scenario executor: impersonation token: %v", err)
+	}
+	return token
+}
+
+// server picks the router variant for a scenario.
+func (e *Env) server(needsDB, dbUnavailable, rateLimited bool) (*httptest.Server, error) {
+	switch {
+	case dbUnavailable:
+		return e.offline, nil
+	case !needsDB && !rateLimited:
+		// Public scenarios that only need the router prefer the live server
+		// when one exists (its routes are all registered) and fall back to
+		// the offline router otherwise.
+		if e.live != nil {
+			return e.live, nil
+		}
+		return e.offline, nil
+	case e.live == nil:
+		return nil, errors.New("SILO_TEST_DATABASE_URL is not set")
+	case rateLimited:
+		return e.liveLimited, nil
+	}
+	return e.live, nil
+}

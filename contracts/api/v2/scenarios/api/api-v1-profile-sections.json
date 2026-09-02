@@ -1,0 +1,1602 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/profile/sections",
+  "wave": 1,
+  "description": "Per-profile home/library section customization: overrides, reset, the resolved settings list, and the custom-sections flag.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/profile/sections/",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Overrides carry their own position field; the list is returned in store order.",
+        "pagination": "Unpaged per-profile list.",
+        "error": "Only the profile/auth refusals apply; the read has no validation branch.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "overrides_get.ok",
+          "category": "status_headers",
+          "description": "Lists the profile's section overrides for the home scope: 200 JSON.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "overrides"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_get.empty",
+          "category": "data_meaning",
+          "description": "With nothing saved the list is an empty array, never null.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/overrides",
+                "op": "empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_get.scope_default",
+          "category": "filtering",
+          "description": "scope defaults to home; an explicit library scope with library_id filters to that library.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "query": {
+              "scope": "library",
+              "library_id": "7"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/overrides",
+                "op": "empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_get.shape",
+          "category": "field_presence_nullability",
+          "description": "The wrapper always has exactly overrides.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "overrides"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_get.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_get.unknown_profile",
+          "category": "authorization",
+          "description": "A declared profile that does not belong to the account is 404 not_found from viewer access.",
+          "principal": {
+            "class": "profile",
+            "profile": "missing"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_get.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "PUT",
+      "path": "/api/v1/profile/sections/",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Positions are client-supplied; no server ordering.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "overrides_put.ok",
+          "category": "status_headers",
+          "description": "Saving overrides answers 204.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "scope": "home",
+              "overrides": [
+                {
+                  "id": "00000000-0000-4000-8000-0000000000e1",
+                  "section_id": "home-recently-added",
+                  "hidden": true,
+                  "position": 2
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.roundtrip",
+          "category": "data_meaning",
+          "description": "A saved override is returned by the next GET with the same section_id, hidden flag, and position.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "scope": "home",
+              "overrides": [
+                {
+                  "id": "00000000-0000-4000-8000-0000000000e1",
+                  "section_id": "home-recently-added",
+                  "hidden": true,
+                  "position": 2
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 204
+          },
+          "fresh_state": true,
+          "notes": "The executor runs rows independently, so the GET-after-PUT round trip lives in the section PR's handler test.",
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.user_added_gate",
+          "category": "authorization",
+          "description": "A non-admin adding a custom (admin-only recipe) section while the server setting is off is 403 custom_disabled.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": [
+                {
+                  "is_user_added": true,
+                  "user_section_type": "admin_curated_list",
+                  "user_config": {
+                    "item_ids": [
+                      "x"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "custom_disabled"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "this server does not allow profiles to build custom sections"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.user_added_allowed",
+          "category": "authorization",
+          "description": "With sections.allow_profile_custom_sections on, the same request is accepted.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": [
+                {
+                  "is_user_added": true,
+                  "user_section_type": "admin_curated_list",
+                  "user_config": {
+                    "item_ids": [
+                      "x"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "settings": {
+            "sections.allow_profile_custom_sections": "true"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.admin_bypass",
+          "category": "authorization",
+          "description": "An admin bypasses the custom-section gate.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": [
+                {
+                  "is_user_added": true,
+                  "user_section_type": "admin_curated_list",
+                  "user_config": {
+                    "item_ids": [
+                      "x"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.unknown_recipe",
+          "category": "error",
+          "description": "An unregistered section_type on a user-added override is 400 unknown_recipe.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": [
+                {
+                  "section_id": "",
+                  "section_type": "no_such_recipe"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unknown_recipe"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "section_type not registered: no_such_recipe"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.invalid_config",
+          "category": "error",
+          "description": "A recipe config that fails validation is 400 invalid_config.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": [
+                {
+                  "is_user_added": true,
+                  "user_section_type": "admin_curated_list",
+                  "user_config": {
+                    "item_ids": []
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "invalid_config"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "admin_curated_list: item_ids must not be empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "raw_body": "{"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.empty_section_id_is_user_added",
+          "category": "filtering",
+          "description": "An override with empty section_id is treated as user-added even without is_user_added, so the recipe gate applies.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": [
+                {
+                  "section_id": "",
+                  "section_type": "admin_curated_list",
+                  "config": {
+                    "item_ids": [
+                      "x"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "custom_disabled"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": []
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": []
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_put.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/",
+            "body": {
+              "overrides": []
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/profile/sections/reset",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "overrides_reset.ok",
+          "category": "status_headers",
+          "description": "Resetting the profile's home overrides answers 204.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/reset"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_reset.idempotent",
+          "category": "data_meaning",
+          "description": "Resetting with nothing saved is still 204.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/reset",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_reset.scope",
+          "category": "filtering",
+          "description": "scope and library_id select which override set is cleared.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/reset",
+            "query": {
+              "scope": "library",
+              "library_id": "7"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_reset.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/reset"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_reset.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/reset"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_reset.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/reset"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "overrides_reset.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/reset"
+          },
+          "expect": {
+            "status": 400,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/profile/sections/settings",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Ordered by resolved position; not observable on an empty fixture (see notes).",
+        "pagination": "Unpaged settings list.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "section_settings.ok",
+          "category": "status_headers",
+          "description": "The resolved section list for the settings screen: 200 JSON.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/settings"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "sections"
+                ]
+              },
+              {
+                "pointer": "/sections",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_settings.empty",
+          "category": "data_meaning",
+          "description": "With no admin sections seeded the list is empty (never null).",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/settings"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/sections",
+                "op": "empty"
+              }
+            ]
+          },
+          "notes": "Migrations seed no home sections into a fresh database; defaults are created at first admin visit. The populated shape (id, section_type, title, featured, item_limit, hidden, is_custom, customized, position, config) needs seeded sections in the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "section_settings.bad_library_id",
+          "category": "error",
+          "description": "A non-integer library_id is 400.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/settings",
+            "query": {
+              "library_id": "abc"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid library_id"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_settings.scope",
+          "category": "filtering",
+          "description": "scope=library with an integer library_id resolves that library's sections.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/settings",
+            "query": {
+              "scope": "library",
+              "library_id": "7"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/sections",
+                "op": "empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_settings.shape",
+          "category": "field_presence_nullability",
+          "description": "The wrapper has exactly sections.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/settings"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "sections"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_settings.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/settings"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "section_settings.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/settings"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/profile/sections/flags",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "section_flags.ok",
+          "category": "status_headers",
+          "description": "Exposes the custom-sections server flag to any profile: 200 JSON.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/flags"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "allow_profile_custom_sections"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_flags.off",
+          "category": "data_meaning",
+          "description": "Unset means false.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/flags"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/allow_profile_custom_sections",
+                "op": "equals",
+                "value": false
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_flags.on",
+          "category": "data_meaning",
+          "description": "The string true turns it on.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/flags"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/allow_profile_custom_sections",
+                "op": "equals",
+                "value": true
+              }
+            ]
+          },
+          "settings": {
+            "sections.allow_profile_custom_sections": "true"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_flags.shape",
+          "category": "field_presence_nullability",
+          "description": "Always a boolean.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/flags"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/allow_profile_custom_sections",
+                "op": "type",
+                "value": "boolean"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_flags.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/flags"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "section_flags.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/flags"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "section_flags.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profile/sections/flags"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}
