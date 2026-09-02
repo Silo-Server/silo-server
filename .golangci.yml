@@ -18,6 +18,7 @@ linters:
     - bodyclose
     - errcheck
     - errorlint
+    - gocritic
     - goconst
     - govet
     - ineffassign
@@ -30,6 +31,24 @@ linters:
     - wastedassign
 
   settings:
+    # gocritic is enabled for exactly one check: the ruleguard rules under
+    # internal/routeinventory/lintrules/, which the legacy native route
+    # inventory's completeness guarantee depends on (see
+    # docs/architecture/api-contract.md, "Legacy native route inventory").
+    # Every listener returns its router as an http.Handler; these rules make
+    # the only way back — a type assertion or type switch to a router type —
+    # a lint error outside tests. The rules match on resolved types, so an
+    # alias or import rename does not evade them. Keep the check list to
+    # ruleguard: widening it enrolls the whole tree in gocritic's style set.
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - ruleguard
+      settings:
+        ruleguard:
+          rules: '${base-path}/internal/routeinventory/lintrules/*.go'
+          failOn: all
+
     sloglint:
       # Require the context-carrying slog variants (InfoContext, …) wherever a
       # context.Context is in scope, so log records correlate with the active
@@ -74,6 +93,13 @@ linters:
       - path: _test\.go
         linters:
           - goconst
+
+      # Tests may recover a router from a handler to walk it (the route
+      # inventory backstops do); they register nothing that ships.
+      - path: _test\.go
+        linters:
+          - gocritic
+        text: "^ruleguard: route inventory:"
 
       # Allow unchecked errors in test cleanup/defer
       - path: _test\.go

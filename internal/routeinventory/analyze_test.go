@@ -10,8 +10,7 @@ import (
 
 func fixtureConfig(name string) Config {
 	return Config{
-		Root:       filepath.Join("testdata", "fixtures", name),
-		ModulePath: "example.test/fixture",
+		Root: filepath.Join("testdata", "fixtures", name),
 		Listeners: []ListenerSpec{{
 			ID:          "fixture",
 			Description: "analyzer fixture",
@@ -19,7 +18,6 @@ func fixtureConfig(name string) Config {
 			Func:        "NewRouter",
 		}},
 		AuditDirs: []string{"listener"},
-		ScanRoots: []string{"."},
 	}
 }
 
@@ -27,8 +25,7 @@ func fixtureConfig(name string) Config {
 // listener and the http.ServeMux in front of it.
 func servemuxFixtureConfig(name string) Config {
 	return Config{
-		Root:       filepath.Join("testdata", "fixtures", name),
-		ModulePath: "example.test/fixture",
+		Root: filepath.Join("testdata", "fixtures", name),
 		Listeners: []ListenerSpec{
 			{
 				ID:          "api",
@@ -46,7 +43,6 @@ func servemuxFixtureConfig(name string) Config {
 			},
 		},
 		AuditDirs: []string{"api", "root"},
-		ScanRoots: []string{"."},
 	}
 }
 
@@ -244,21 +240,22 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 		// chi.NewMux is a router constructor too: a stray listener built with
 		// it has to fail the same way one built with chi.NewRouter does.
 		{fixture: "stray_mux", want: "chi.NewMux() constructed in Handler outside the inventoried listeners"},
-		// A chi constructor the walk does not model may still return a router.
-		{fixture: "unmodeled_chi", want: "a chi constructor the route inventory does not model"},
+		// A router derived from the listener's router and bound to a name is
+		// one the walk did not model; a method call on it is refused.
+		{fixture: "derived_router_bound", want: "r.With(mw), which the route inventory does not model"},
 		// A second router in the entry point is attached somewhere the walk
-		// cannot prove, so its rows would claim the wrong paths. The three
-		// variants below are the same defect written in the binding forms a
-		// walk that matched only `name := chi.NewRouter()` did not recognize:
-		// each one used to be accepted, dropping /inner behind a wildcard.
+		// cannot prove, so its rows would claim the wrong paths. The variants
+		// below are the same defect in the binding forms a walk that matched
+		// only `name := chi.NewRouter()` did not recognize.
 		{fixture: "second_router", want: "a second chi router is constructed"},
 		{fixture: "second_router_var", want: "a second chi router is constructed"},
 		{fixture: "second_router_multi", want: "a second chi router is constructed"},
-		{fixture: "second_router_paren", want: "a second chi router is constructed"},
-		{fixture: "package_scope_router", want: "constructed at package scope"},
-		// A listener handler passed to a call the audit cannot see into could
-		// have anything registered on it, receiver or not.
-		{fixture: "carrier_helper", want: "type-asserts a listener handler after its entry point returned it"},
+		// A package-level router reaches the entry point as a value the walk
+		// never bound.
+		{fixture: "package_scope_router", want: "was never bound by the route inventory's walk"},
+		// An entry point that hands its router out as a router lets a caller
+		// keep registering after the walk is over.
+		{fixture: "entry_returns_router", want: "must return exactly one http.Handler"},
 		// A method-aware ServeMux pattern means more than the row it spells.
 		{
 			fixture: "servemux_method",
@@ -267,9 +264,6 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 		},
 		// A tracked router handed in as a handler is a mount in disguise.
 		{fixture: "router_as_handler", want: "does not model"},
-		// A registration made on the listener's handler after the entry point
-		// returned it is invisible to the walk of that entry point.
-		{fixture: "entrypoint_escape", want: "on a listener handler after its entry point returned it"},
 		// The mux of a root listener escapes into a helper.
 		{fixture: "servemux_escape", cfg: rootOnlyFixtureConfig, want: "does not model"},
 		// A ServeMux built without http.NewServeMux() is a working router the
@@ -281,34 +275,15 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 		// A zero http.ServeMux at package scope is live with no constructor.
 		{fixture: "package_scope_servemux_var", want: "declared with http.ServeMux at package scope"},
 		// A constructor reached through a function value builds a router
-		// nothing recognizes as a construction.
-		{fixture: "ctor_value_local", want: "is referenced as a function value"},
+		// nothing recognizes as a construction. Inside an entry point the walk
+		// refuses the binding; elsewhere the sweep refuses the reference.
+		{fixture: "ctor_value_local", want: "produced by ctor(), which the route inventory does not model"},
 		{fixture: "ctor_value_package", want: "is used as a function value rather than called"},
-		{fixture: "ctor_value_arg", want: "is referenced as a function value"},
-		{fixture: "dot_import", want: "dot-imports"},
-		// The http.Handler vouch is backed by an audit of the callee body with
-		// the parameter seeded as a carrier, so asserting it back is refused.
-		{fixture: "handler_param_assert", want: "wire: type-asserts a listener handler"},
-		// Every binding form the walk understands is a carrier binding too.
-		{fixture: "carrier_var", want: "calls Get on a listener handler after its entry point returned it"},
-		{fixture: "carrier_multi", want: "calls Get on a listener handler after its entry point returned it"},
-		{fixture: "carrier_struct", want: "in a position the route inventory does not follow"},
-		{fixture: "carrier_field_store", want: "stores a listener handler into field h"},
-		{fixture: "carrier_slice", want: "escapes into a construct the route inventory does not model"},
-		{fixture: "carrier_wrapper_return", want: "returns a listener handler"},
-		{fixture: "carrier_method_value", want: "takes Get of a listener handler as a value"},
-		// A package-level carrier is one everywhere in its package, whatever
-		// the declaration order of the files and functions involved.
-		{fixture: "carrier_package_var", want: "lateRegister: type-asserts a listener handler"},
 		// Everything that would serve http.DefaultServeMux.
 		{fixture: "default_servemux", want: "refers to http.DefaultServeMux"},
 		{fixture: "pprof_import", want: "imports net/http/pprof"},
 		{fixture: "listen_nil", want: "serves a nil handler"},
 		{fixture: "server_no_handler", want: "built without a Handler"},
-		// A second name for a router type, and a router-typed field outside
-		// the audited packages.
-		{fixture: "type_alias_chi", want: "type Router is declared with a chi router type"},
-		{fixture: "struct_field_chi", want: "type Holder is declared with a chi router type"},
 		// An exclusion covers one function, not the file it lives in.
 		{
 			fixture: "excluded_construct",
@@ -338,17 +313,6 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 				t.Fatalf("error = %q, want it to mention %q", err.Error(), tc.want)
 			}
 		})
-	}
-}
-
-// TestAnalyzeAcceptsScopedCarriers is the other half of the carrier rules:
-// carrier names are scoped per function, so an unrelated local that happens to
-// share a name with a listener handler is not refused, and a same-directory
-// function that takes the handler as http.Handler and only serves it is
-// accepted after its body has been audited.
-func TestAnalyzeAcceptsScopedCarriers(t *testing.T) {
-	if _, err := Analyze(fixtureConfig("carrier_scoped_ok")); err != nil {
-		t.Fatalf("scoped carriers should pass: %v", err)
 	}
 }
 

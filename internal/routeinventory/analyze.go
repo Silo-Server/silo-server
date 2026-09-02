@@ -3,32 +3,13 @@ package routeinventory
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
+	"go/types"
 	"net/http"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-)
-
-// chiImportPath is the router library the native listeners use. The analyzer
-// only trusts type syntax that names this package.
-const chiImportPath = "github.com/go-chi/chi/v5"
-
-// chiNewRouter and chiNewMux are the two constructors a chi router can come
-// from. chi.NewMux returns the same *chi.Mux as chi.NewRouter, so anything that
-// recognizes one has to recognize the other; a walk that knew only NewRouter
-// would drop every route registered on a NewMux router without a word.
-const (
-	chiNewRouter = "NewRouter"
-	chiNewMux    = "NewMux"
-)
-
-// httpImportPath and serveMuxNew identify the standard-library router the
-// process root listener is built from.
-const (
-	httpImportPath = "net/http"
-	serveMuxNew    = "NewServeMux"
 )
 
 // Router method names the analyzer matches on. They are spelled once so a
@@ -39,8 +20,7 @@ const (
 	methodWith       = "With"
 	methodServeHTTP  = "ServeHTTP"
 	methodRoutes     = "Routes"
-	// methodHandler is http.ServeMux's read-only Handler lookup; it is also the
-	// name of the http.Server field a listener handler may be assigned to.
+	// methodHandler is http.ServeMux's read-only Handler lookup.
 	methodHandler = "Handler"
 )
 
@@ -52,125 +32,6 @@ const (
 	originExplicit  = "explicit"
 	originHandleAll = "handle_all"
 )
-
-// isChiConstructor reports whether a chi package function returns a router.
-func isChiConstructor(name string) bool {
-	return name == chiNewRouter || name == chiNewMux
-}
-
-// unwrapParen strips redundant parentheses. Every place the analyzer asserts a
-// *ast.CallExpr, a *ast.SelectorExpr or an *ast.Ident goes through it:
-// `(chi.NewRouter())` constructs exactly what `chi.NewRouter()` does, and a
-// walk that recognized only the bare spelling would bind a router it never
-// models — dropping the routes registered on it without a word.
-func unwrapParen(expr ast.Expr) ast.Expr {
-	for {
-		paren, ok := expr.(*ast.ParenExpr)
-		if !ok {
-			return expr
-		}
-		expr = paren.X
-	}
-}
-
-// ctorKind is what the analyzer decides an expression constructs.
-type ctorKind int
-
-const (
-	ctorNone ctorKind = iota
-	// ctorChiRouter is chi.NewRouter() or chi.NewMux().
-	ctorChiRouter
-	// ctorServeMux is http.NewServeMux().
-	ctorServeMux
-	// ctorChiUnmodeled is any other call into the chi package. chi gains
-	// constructors over time and a value from one of them may well be a router.
-	ctorChiUnmodeled
-)
-
-func (k ctorKind) String() string {
-	switch k {
-	case ctorChiRouter:
-		return "a chi router"
-	case ctorServeMux:
-		return "an http.ServeMux"
-	case ctorChiUnmodeled:
-		return "a value from an unmodeled chi constructor"
-	}
-	return "nothing"
-}
-
-// callCtorKind classifies an expression as a router construction, resolving the
-// package identifier through the file's imports so a same-named local function
-// cannot trigger it.
-func callCtorKind(expr ast.Expr, file *ast.File) ctorKind {
-	if expr == nil {
-		return ctorNone
-	}
-	call, ok := unwrapParen(expr).(*ast.CallExpr)
-	if !ok {
-		return ctorNone
-	}
-	sel, ok := unwrapParen(call.Fun).(*ast.SelectorExpr)
-	if !ok {
-		return ctorNone
-	}
-	ident, ok := unwrapParen(sel.X).(*ast.Ident)
-	if !ok {
-		return ctorNone
-	}
-	switch importPathFor(file, ident.Name) {
-	case chiImportPath:
-		if isChiConstructor(sel.Sel.Name) {
-			return ctorChiRouter
-		}
-		return ctorChiUnmodeled
-	case httpImportPath:
-		if sel.Sel.Name == serveMuxNew {
-			return ctorServeMux
-		}
-	}
-	return ctorNone
-}
-
-// literalCtorKind classifies the non-call spellings of a router construction:
-// `new(http.ServeMux)`, `&http.ServeMux{}`, `http.ServeMux{}` and the chi.Mux
-// equivalents. A zero http.ServeMux is fully functional, so these build a
-// router as surely as the constructor does. They are recognized only to be
-// refused: the inventory models one construction shape, and a second spelling
-// would be a second place for a router to come from.
-func literalCtorKind(expr ast.Expr, file *ast.File) ctorKind {
-	if expr == nil {
-		return ctorNone
-	}
-	switch typed := unwrapParen(expr).(type) {
-	case *ast.UnaryExpr:
-		if typed.Op == token.AND {
-			return literalCtorKind(typed.X, file)
-		}
-	case *ast.CompositeLit:
-		return routerTypeKind(typed.Type, file)
-	case *ast.CallExpr:
-		if ident, ok := unwrapParen(typed.Fun).(*ast.Ident); ok && ident.Name == "new" && len(typed.Args) == 1 &&
-			importPathFor(file, "new") == "" {
-			return routerTypeKind(typed.Args[0], file)
-		}
-	}
-	return ctorNone
-}
-
-// routerTypeKind maps a router type expression to the constructor kind that
-// builds it.
-func routerTypeKind(typ ast.Expr, file *ast.File) ctorKind {
-	switch {
-	case typ == nil:
-		return ctorNone
-	case isChiRouterType(typ, file):
-		return ctorChiRouter
-	case isServeMuxType(typ, file):
-		return ctorServeMux
-	}
-	return ctorNone
-}
 
 // Listener IDs. They are the join key between the artifact and the
 // per-listener reconciliation tests.
@@ -239,15 +100,6 @@ func (l ListenerSpec) Entrypoint() string {
 	return l.Dir + ".(*" + l.Recv + ")." + l.Func
 }
 
-// declName is the enclosing declaration's name as the construction audit spells
-// it: `Func` for a package-level function, `Recv.Func` for a method.
-func (l ListenerSpec) declName() string {
-	if l.Recv == "" {
-		return l.Func
-	}
-	return l.Recv + "." + l.Func
-}
-
 func (l ListenerSpec) kind() string {
 	if l.Kind == "" {
 		return ListenerKindChi
@@ -270,32 +122,26 @@ func (e RouterExclusion) key() string { return e.File + "#" + e.Func }
 
 // Config drives one inventory build.
 type Config struct {
-	Root       string
-	ModulePath string
-	Listeners  []ListenerSpec
-	// AuditDirs are the package directories parsed and audited. Every listener
+	Root      string
+	Listeners []ListenerSpec
+	// AuditDirs are the package directories the walk follows helpers into and
+	// audits for router-taking helpers nothing reaches. Every listener
 	// directory must appear here; add the packages that register routes on a
-	// listener's behalf.
-	AuditDirs []string
-	// ScanRoots are the directory trees swept for routers constructed outside
-	// the enumerated listeners, and for registrations made on a listener's
-	// return value after construction. "." sweeps the whole repository, which
-	// is what keeps a router in a tree nobody enumerated from going unnoticed.
-	ScanRoots  []string
+	// listener's behalf. The whole module is type-checked and swept for stray
+	// constructions regardless (see sweep.go).
+	AuditDirs  []string
 	Exclusions []RouterExclusion
 }
 
 // Analyzer enumerates route registrations from source.
 type Analyzer struct {
-	cfg  Config
-	fset *token.FileSet
-	set  *sourceSet
+	cfg Config
+	set *sourceSet
 
 	routes []Route
 
 	enteredFuncs map[*ast.FuncDecl]bool
 	enteredLits  map[*ast.FuncLit]bool
-	entryFuncs   map[*ast.FuncDecl]ListenerSpec
 
 	// rootConstructed guards the current listener walk against a second router
 	// construction. The first one is the value the entry point returns and is
@@ -322,31 +168,30 @@ func Analyze(cfg Config) (*Inventory, error) {
 			}
 		}
 	}
-	fset := token.NewFileSet()
 	dirs := append([]string{}, cfg.AuditDirs...)
 	for _, listener := range cfg.Listeners {
 		dirs = append(dirs, listener.Dir)
 	}
-	set, err := loadSources(fset, cfg.Root, cfg.ModulePath, dirs)
+	set, err := loadSources(cfg.Root, dirs)
 	if err != nil {
 		return nil, err
 	}
 	a := &Analyzer{
 		cfg:          cfg,
-		fset:         fset,
 		set:          set,
 		enteredFuncs: map[*ast.FuncDecl]bool{},
 		enteredLits:  map[*ast.FuncLit]bool{},
-		entryFuncs:   map[*ast.FuncDecl]ListenerSpec{},
 		classifier:   newClassifier(set),
 	}
-	a.classifier.owner = a
 	for _, listener := range cfg.Listeners {
 		if err := a.walkListener(listener); err != nil {
 			return nil, err
 		}
 	}
 	if err := a.audit(); err != nil {
+		return nil, err
+	}
+	if err := a.sweep(); err != nil {
 		return nil, err
 	}
 	return a.build()
@@ -499,57 +344,49 @@ func renderMiddleware(chain []mwEntry, routeConds []string) []string {
 	return out
 }
 
+// walkEnv is the state of one function body being walked. Router and mux
+// values are keyed by the variable object the type checker resolved, so a
+// shadowing declaration is a different variable and never inherits a scope.
 type walkEnv struct {
 	pkg      *pkgSource
-	file     *ast.File
 	listener ListenerSpec
-	routers  map[string]*routerScope
-	// chiValues are locals initialized from a chi package call the walk does
-	// not model. They are tracked so a method call on one is refused instead of
-	// being read as ordinary application code.
-	chiValues map[string]string
+	routers  map[*types.Var]*routerScope
 	// muxes are the bound http.ServeMux locals of a servemux listener.
-	muxes map[string]bool
-	// delegates maps an in-scope name to the listener ID it carries.
-	delegates map[string]string
+	muxes map[*types.Var]bool
+	// delegates maps an entry parameter to the listener ID it carries.
+	delegates map[*types.Var]string
 	conds     []string
-	varTypes  map[string]string
 	depth     int
 	entry     bool
 }
 
+func (e *walkEnv) info() *types.Info { return e.pkg.info() }
+
 func (e *walkEnv) child() *walkEnv {
-	routers := make(map[string]*routerScope, len(e.routers))
-	for name, scope := range e.routers {
-		routers[name] = scope
+	routers := make(map[*types.Var]*routerScope, len(e.routers))
+	for obj, scope := range e.routers {
+		routers[obj] = scope
 	}
-	chiValues := make(map[string]string, len(e.chiValues))
-	for name, expr := range e.chiValues {
-		chiValues[name] = expr
-	}
-	muxes := make(map[string]bool, len(e.muxes))
-	for name := range e.muxes {
-		muxes[name] = true
+	muxes := make(map[*types.Var]bool, len(e.muxes))
+	for obj := range e.muxes {
+		muxes[obj] = true
 	}
 	return &walkEnv{
-		pkg: e.pkg, file: e.file, listener: e.listener,
-		routers: routers, chiValues: chiValues, muxes: muxes, delegates: e.delegates,
-		conds:    append([]string{}, e.conds...),
-		varTypes: e.varTypes, depth: e.depth, entry: e.entry,
+		pkg: e.pkg, listener: e.listener,
+		routers: routers, muxes: muxes, delegates: e.delegates,
+		conds: append([]string{}, e.conds...),
+		depth: e.depth, entry: e.entry,
 	}
 }
 
-// boundNames is every name in scope that denotes a router or mux value. The
-// leak check refuses any use of one it did not model.
-func (e *walkEnv) boundNames() map[string]bool {
-	names := make(map[string]bool, len(e.routers)+len(e.muxes))
-	for name := range e.routers {
-		names[name] = true
+// varOf resolves an identifier expression to the variable it uses.
+func (e *walkEnv) varOf(expr ast.Expr) *types.Var {
+	ident, ok := unwrapParen(expr).(*ast.Ident)
+	if !ok {
+		return nil
 	}
-	for name := range e.muxes {
-		names[name] = true
-	}
-	return names
+	obj, _ := e.info().Uses[ident].(*types.Var)
+	return obj
 }
 
 func (a *Analyzer) walkListener(spec ListenerSpec) error {
@@ -557,37 +394,44 @@ func (a *Analyzer) walkListener(spec ListenerSpec) error {
 	if pkg == nil {
 		return fmt.Errorf("listener %s: package %s not loaded", spec.ID, spec.Dir)
 	}
-	key := spec.Func
-	decl := pkg.funcs[key]
+	decl := pkg.funcs[spec.Func]
 	if spec.Recv != "" {
 		decl = pkg.methods[spec.Recv+"."+spec.Func]
 	}
 	if decl == nil {
 		return fmt.Errorf("listener %s: entry function %s not found in %s", spec.ID, spec.Entrypoint(), spec.Dir)
 	}
-	a.entryFuncs[decl] = spec
-	a.enteredFuncs[decl] = true
-	a.rootConstructed = false
-
-	file := pkg.fileOf[decl]
-	env := &walkEnv{
-		pkg:       pkg,
-		file:      file,
-		listener:  spec,
-		routers:   map[string]*routerScope{},
-		chiValues: map[string]string{},
-		muxes:     map[string]bool{},
-		delegates: map[string]string{},
-		varTypes:  a.collectVarTypes(pkg, file, decl),
-		entry:     true,
-	}
 	if decl.Body == nil {
 		return fmt.Errorf("listener %s: entry function %s has no body", spec.ID, spec.Entrypoint())
 	}
+	// The entry function must hand its router out as an http.Handler. A
+	// router-typed result would let any caller keep registering after the
+	// walk is over; behind http.Handler the only way back to the router is a
+	// type assertion, which the lint rule in lintrules/ refuses.
+	results := flattenParams(decl.Type.Results)
+	if len(results) != 1 || !isHTTPHandlerType(pkg.info().TypeOf(results[0].typ)) {
+		return a.errorf(decl, "listener %s: entry function %s must return exactly one http.Handler; "+
+			"a router-typed result would let a caller register routes after the walk is over", spec.ID, spec.Func)
+	}
+	a.enteredFuncs[decl] = true
+	a.rootConstructed = false
+
+	env := &walkEnv{
+		pkg:       pkg,
+		listener:  spec,
+		routers:   map[*types.Var]*routerScope{},
+		muxes:     map[*types.Var]bool{},
+		delegates: map[*types.Var]string{},
+		entry:     true,
+	}
 	if spec.kind() == ListenerKindServeMux {
 		for _, p := range flattenParams(decl.Type.Params) {
-			if id := spec.Delegates[p.name]; id != "" {
-				env.delegates[p.name] = id
+			id := spec.Delegates[p.name]
+			if id == "" || p.ident == nil {
+				continue
+			}
+			if obj, ok := pkg.info().Defs[p.ident].(*types.Var); ok {
+				env.delegates[obj] = id
 			}
 		}
 		return a.walkMuxStmts(decl.Body.List, env)
@@ -624,15 +468,7 @@ func (a *Analyzer) walkMuxStmt(stmt ast.Stmt, env *walkEnv) error {
 		if !ok {
 			return a.leakCheck(typed, env)
 		}
-		ident, ok := unwrapParen(sel.X).(*ast.Ident)
-		if !ok {
-			return a.leakCheck(typed, env)
-		}
-		if expr, unmodeled := env.chiValues[ident.Name]; unmodeled {
-			return a.errorf(call, "%s comes from %s, a chi constructor the route inventory does not model; "+
-				"a method call on it could register routes the inventory cannot see", ident.Name, expr)
-		}
-		if !env.muxes[ident.Name] {
+		if obj := env.varOf(sel.X); obj == nil || !env.muxes[obj] {
 			return a.leakCheck(typed, env)
 		}
 		return a.handleMuxMethod(call, sel, env)
@@ -663,18 +499,20 @@ func (a *Analyzer) walkMuxStmt(stmt ast.Stmt, env *walkEnv) error {
 		return a.walkMuxStmt(typed.Else, alt)
 
 	case *ast.AssignStmt:
-		return a.walkBinding(typed, bindingsOfAssign(typed), env, ListenerKindServeMux)
+		return a.walkBinding(typed, a.bindingsOfAssign(typed, env), env, ListenerKindServeMux)
 
 	case *ast.DeclStmt:
-		bindings, ok := bindingsOfDecl(typed)
+		bindings, ok := a.bindingsOfDecl(typed, env)
 		if !ok {
 			return a.leakCheck(typed, env)
 		}
 		return a.walkBinding(typed, bindings, env, ListenerKindServeMux)
 
 	case *ast.ReturnStmt:
-		if len(typed.Results) == 1 && env.muxes[identName(typed.Results[0])] {
-			return nil
+		if len(typed.Results) == 1 {
+			if obj := env.varOf(typed.Results[0]); obj != nil && env.muxes[obj] {
+				return nil
+			}
 		}
 		return a.leakCheck(typed, env)
 
@@ -715,11 +553,11 @@ func (a *Analyzer) emitMux(call *ast.CallExpr, env *walkEnv, pattern string, han
 	if err != nil {
 		return a.errorf(call, "%v", err)
 	}
-	sourceFile := env.pkg.FileNames[env.pkg.fileFor(call)]
+	sourceFile := a.set.sourceFile(call)
 
 	delegate := ""
-	if ident, ok := handler.(*ast.Ident); ok {
-		delegate = env.delegates[ident.Name]
+	if obj := env.varOf(handler); obj != nil {
+		delegate = env.delegates[obj]
 	}
 
 	for _, method := range methods {
@@ -796,6 +634,10 @@ func splitServeMuxPattern(pattern string) ([]string, string, string, error) {
 	return handleAllMethods, path, originHandleAll, nil
 }
 
+// ---------------------------------------------------------------------------
+// chi walk
+// ---------------------------------------------------------------------------
+
 func (a *Analyzer) walkStmts(stmts []ast.Stmt, env *walkEnv) error {
 	for _, stmt := range stmts {
 		if err := a.walkStmt(stmt, env); err != nil {
@@ -847,18 +689,20 @@ func (a *Analyzer) walkStmt(stmt ast.Stmt, env *walkEnv) error {
 		return a.walkStmt(typed.Else, alt)
 
 	case *ast.AssignStmt:
-		return a.walkBinding(typed, bindingsOfAssign(typed), env, ListenerKindChi)
+		return a.walkBinding(typed, a.bindingsOfAssign(typed, env), env, ListenerKindChi)
 
 	case *ast.DeclStmt:
-		bindings, ok := bindingsOfDecl(typed)
+		bindings, ok := a.bindingsOfDecl(typed, env)
 		if !ok {
 			return a.leakCheck(typed, env)
 		}
 		return a.walkBinding(typed, bindings, env, ListenerKindChi)
 
 	case *ast.ReturnStmt:
-		if env.entry && env.depth == 0 && a.returnsBoundRouter(typed, env) {
-			return nil
+		if env.entry && env.depth == 0 && len(typed.Results) == 1 {
+			if obj := env.varOf(typed.Results[0]); obj != nil && env.routers[obj] != nil {
+				return nil
+			}
 		}
 		return a.leakCheck(typed, env)
 
@@ -877,24 +721,25 @@ func (a *Analyzer) walkStmt(stmt ast.Stmt, env *walkEnv) error {
 // ---------------------------------------------------------------------------
 
 // valueBinding is one name a statement brings into scope, with the initializer
-// and declared type it was bound with. Bindings are read out of `:=`/`=`
-// assignments and `var` declarations alike, so a router cannot enter scope
-// through a spelling the walk never inspects.
+// it was bound with. Bindings are read out of `:=`/`=` assignments and `var`
+// declarations alike, so a router cannot enter scope through a spelling the
+// walk never inspects.
 type valueBinding struct {
-	name  string   // "" when the target is not a plain identifier
-	value ast.Expr // nil for a declaration with no initializer
-	typ   ast.Expr // declared type, nil when it is inferred
+	obj   *types.Var // nil when the target is not a plain identifier
+	value ast.Expr   // nil for a declaration with no initializer
+	// declared is the spelled type of a `var x T` binding, nil when inferred.
+	declared types.Type
 	// attributed is false when a single initializer feeds several names
 	// (`a, b := f()`), so no name can be tied to what it produced.
 	attributed bool
 }
 
 // bindingsOfAssign flattens an assignment into its bindings.
-func bindingsOfAssign(stmt *ast.AssignStmt) []valueBinding {
+func (a *Analyzer) bindingsOfAssign(stmt *ast.AssignStmt, env *walkEnv) []valueBinding {
 	if len(stmt.Lhs) == len(stmt.Rhs) {
 		out := make([]valueBinding, 0, len(stmt.Lhs))
 		for i, lhs := range stmt.Lhs {
-			out = append(out, valueBinding{name: identName(lhs), value: stmt.Rhs[i], attributed: true})
+			out = append(out, valueBinding{obj: a.bindingTarget(lhs, env), value: stmt.Rhs[i], attributed: true})
 		}
 		return out
 	}
@@ -906,9 +751,23 @@ func bindingsOfAssign(stmt *ast.AssignStmt) []valueBinding {
 	return out
 }
 
+// bindingTarget resolves the variable an assignment target names, whether the
+// statement defines it (`:=`, `var`) or assigns to an existing one (`=`).
+func (a *Analyzer) bindingTarget(lhs ast.Expr, env *walkEnv) *types.Var {
+	ident, ok := unwrapParen(lhs).(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	if obj, ok := env.info().Defs[ident].(*types.Var); ok {
+		return obj
+	}
+	obj, _ := env.info().Uses[ident].(*types.Var)
+	return obj
+}
+
 // bindingsOfDecl flattens a `var` declaration statement into its bindings. It
 // reports false for any other declaration.
-func bindingsOfDecl(stmt *ast.DeclStmt) ([]valueBinding, bool) {
+func (a *Analyzer) bindingsOfDecl(stmt *ast.DeclStmt, env *walkEnv) ([]valueBinding, bool) {
 	decl, ok := stmt.Decl.(*ast.GenDecl)
 	if !ok || decl.Tok != token.VAR {
 		return nil, false
@@ -919,34 +778,30 @@ func bindingsOfDecl(stmt *ast.DeclStmt) ([]valueBinding, bool) {
 		if !ok {
 			continue
 		}
+		var declared types.Type
+		if value.Type != nil {
+			declared = env.info().TypeOf(value.Type)
+		}
 		switch {
 		case len(value.Values) == 0:
 			// `var r chi.Router` — declared, uninitialized, and still a name a
 			// registration could be made through.
 			for _, name := range value.Names {
-				out = append(out, valueBinding{name: name.Name, typ: value.Type, attributed: true})
+				out = append(out, valueBinding{obj: a.bindingTarget(name, env), declared: declared, attributed: true})
 			}
 		case len(value.Names) == len(value.Values):
 			for i, name := range value.Names {
 				out = append(out, valueBinding{
-					name: name.Name, value: value.Values[i], typ: value.Type, attributed: true,
+					obj: a.bindingTarget(name, env), value: value.Values[i], declared: declared, attributed: true,
 				})
 			}
 		default:
 			for _, initializer := range value.Values {
-				out = append(out, valueBinding{value: initializer, typ: value.Type})
+				out = append(out, valueBinding{value: initializer, declared: declared})
 			}
 		}
 	}
 	return out, true
-}
-
-func identName(expr ast.Expr) string {
-	ident, ok := unwrapParen(expr).(*ast.Ident)
-	if !ok {
-		return ""
-	}
-	return ident.Name
 }
 
 // walkBinding models every way a router or mux value can be bound. A binding
@@ -955,8 +810,7 @@ func identName(expr ast.Expr) string {
 func (a *Analyzer) walkBinding(stmt ast.Stmt, bindings []valueBinding, env *walkEnv, kind string) error {
 	interesting := false
 	for _, binding := range bindings {
-		if callCtorKind(binding.value, env.file) != ctorNone || literalCtorKind(binding.value, env.file) != ctorNone ||
-			a.routerTypeName(binding.typ, env) != "" {
+		if a.set.routerKind(binding.declared) != ctorNone || a.valueRouterKind(binding.value, env) != ctorNone {
 			interesting = true
 			break
 		}
@@ -972,28 +826,18 @@ func (a *Analyzer) walkBinding(stmt ast.Stmt, bindings []valueBinding, env *walk
 	return nil
 }
 
-// routerTypeName names the router type a type expression denotes, or "".
-func (a *Analyzer) routerTypeName(typ ast.Expr, env *walkEnv) string {
-	switch {
-	case typ == nil:
-		return ""
-	case isChiRouterType(typ, env.file):
-		return "chi router"
-	case isServeMuxType(typ, env.file):
-		return "http.ServeMux"
+// valueRouterKind is the router kind an initializer produces, or ctorNone.
+func (a *Analyzer) valueRouterKind(value ast.Expr, env *walkEnv) ctorKind {
+	if value == nil {
+		return ctorNone
 	}
-	return ""
+	return a.set.tupleRouterKind(env.info().TypeOf(value))
 }
 
 func (a *Analyzer) bindOne(stmt ast.Stmt, binding valueBinding, env *walkEnv, kind string) error {
-	ctor := callCtorKind(binding.value, env.file)
-	declared := a.routerTypeName(binding.typ, env)
-	if literal := literalCtorKind(binding.value, env.file); literal != ctorNone {
-		return a.errorf(stmt, "%s is built by literal or new() in the %s listener entry point; "+
-			"the route inventory recognizes only chi.NewRouter(), chi.NewMux() and http.NewServeMux(), "+
-			"so this value would carry registrations it never sees", literal, env.listener.ID)
-	}
-	if ctor == ctorNone && declared == "" {
+	produced := a.valueRouterKind(binding.value, env)
+	declared := a.set.routerKind(binding.declared)
+	if produced == ctorNone && declared == ctorNone {
 		// A neighboring binding in the same statement; it still must not carry
 		// an already-bound router into an unmodeled construct.
 		if binding.value == nil {
@@ -1001,20 +845,35 @@ func (a *Analyzer) bindOne(stmt ast.Stmt, binding valueBinding, env *walkEnv, ki
 		}
 		return a.leakCheck(binding.value, env)
 	}
-	if declared != "" {
-		return a.errorf(stmt, "a %s value is bound through an explicit type declaration; "+
+	if declared != ctorNone {
+		return a.errorf(stmt, "%s value is bound through an explicit type declaration; "+
 			"the route inventory models only `name := constructor()`, so it cannot prove what this value is "+
 			"or where it attaches", declared)
 	}
-	if !binding.attributed || binding.name == "" {
+	value := unwrapParen(binding.value)
+	call, isCall := value.(*ast.CallExpr)
+	if !isCall || isBuiltinNew(call, env.info()) {
+		// new(T), &T{}, T{} — a zero router is fully functional, so these are
+		// constructions as much as the constructor call is. Anything else
+		// (a conversion, a function-typed value) is refused in the same breath.
+		return a.errorf(stmt, "%s is built by literal or new() in the %s listener entry point; "+
+			"the route inventory recognizes only chi.NewRouter(), chi.NewMux() and http.NewServeMux(), "+
+			"so this value would carry registrations it never sees", produced, env.listener.ID)
+	}
+	if isRouterCtor(calleeFunc(call, env.info())) == ctorNone {
+		return a.errorf(stmt, "%s is produced by %s, which the route inventory does not model; "+
+			"it recognizes only chi.NewRouter(), chi.NewMux() and http.NewServeMux(), "+
+			"so this value would carry registrations it never sees", produced, a.set.exprText(value))
+	}
+	if !binding.attributed || binding.obj == nil {
 		return a.errorf(stmt, "%s is constructed in a binding form the route inventory does not model; "+
-			"bind each router with a single `name := constructor()` so the walk can prove where it attaches", ctor)
+			"bind each router with a single `name := constructor()` so the walk can prove where it attaches", produced)
 	}
 	switch kind {
 	case ListenerKindServeMux:
-		return a.bindMuxValue(stmt, binding, ctor, env)
+		return a.bindMuxValue(stmt, binding, produced, env)
 	default:
-		return a.bindChiValue(stmt, binding, ctor, env)
+		return a.bindChiValue(stmt, binding, produced, env)
 	}
 }
 
@@ -1032,16 +891,11 @@ func (a *Analyzer) bindChiValue(stmt ast.Stmt, binding valueBinding, ctor ctorKi
 				env.listener.ID)
 		}
 		a.rootConstructed = true
-		env.routers[binding.name] = &routerScope{}
+		env.routers[binding.obj] = &routerScope{}
 		return nil
-	case ctorServeMux:
+	default:
 		return a.errorf(stmt, "an http.ServeMux is constructed inside the %s chi listener entry point; "+
 			"the inventory does not model what is registered on it", env.listener.ID)
-	default:
-		// A chi constructor the walk does not model may still return a router,
-		// so the value is tracked and any method call on it is refused.
-		env.chiValues[binding.name] = a.set.exprText(unwrapParen(binding.value))
-		return nil
 	}
 }
 
@@ -1052,68 +906,47 @@ func (a *Analyzer) bindMuxValue(stmt ast.Stmt, binding valueBinding, ctor ctorKi
 			return a.errorf(stmt, "a second http.ServeMux is constructed in the %s listener entry point; "+
 				"the inventory cannot prove which one the listener serves", env.listener.ID)
 		}
-		env.muxes[binding.name] = true
+		env.muxes[binding.obj] = true
 		return nil
-	case ctorChiRouter:
+	default:
 		return a.errorf(stmt, "a chi router is constructed inside the %s http.ServeMux listener entry point; "+
 			"the inventory does not model what is registered on it", env.listener.ID)
-	default:
-		env.chiValues[binding.name] = a.set.exprText(unwrapParen(binding.value))
-		return nil
 	}
-}
-
-func (a *Analyzer) returnsBoundRouter(stmt *ast.ReturnStmt, env *walkEnv) bool {
-	if len(stmt.Results) != 1 {
-		return false
-	}
-	name := identName(stmt.Results[0])
-	if name == "" {
-		return false
-	}
-	_, bound := env.routers[name]
-	return bound
 }
 
 // resolveRouter maps an expression to the router scope it denotes, following
 // With() chains. It never invents a scope: an expression it does not model
 // returns false and the caller refuses the construct.
-func (a *Analyzer) resolveRouter(expr ast.Expr, env *walkEnv) (*routerScope, bool, error) {
+func (a *Analyzer) resolveRouter(expr ast.Expr, env *walkEnv) (*routerScope, bool) {
 	switch typed := unwrapParen(expr).(type) {
 	case *ast.Ident:
-		scope, ok := env.routers[typed.Name]
-		return scope, ok, nil
+		obj := env.varOf(typed)
+		if obj == nil {
+			return nil, false
+		}
+		scope, ok := env.routers[obj]
+		return scope, ok
 	case *ast.CallExpr:
 		sel, ok := unwrapParen(typed.Fun).(*ast.SelectorExpr)
 		if !ok || sel.Sel.Name != methodWith {
-			return nil, false, nil
+			return nil, false
 		}
-		base, ok, err := a.resolveRouter(sel.X, env)
-		if err != nil || !ok {
-			return nil, ok, err
+		base, ok := a.resolveRouter(sel.X, env)
+		if !ok {
+			return nil, false
 		}
 		derived := base.clone()
 		for _, arg := range typed.Args {
 			derived.mw = append(derived.mw, mwEntry{expr: a.set.exprText(arg), conds: append([]string{}, env.conds...)})
 		}
-		return derived, true, nil
+		return derived, true
 	}
-	return nil, false, nil
+	return nil, false
 }
 
 func (a *Analyzer) handleCall(call *ast.CallExpr, env *walkEnv) (bool, error) {
 	if sel, ok := unwrapParen(call.Fun).(*ast.SelectorExpr); ok {
-		if ident, ok := unwrapParen(sel.X).(*ast.Ident); ok {
-			if expr, unmodeled := env.chiValues[ident.Name]; unmodeled {
-				return true, a.errorf(call, "%s comes from %s, a chi constructor the route inventory does not model; "+
-					"a method call on it could register routes the inventory cannot see", ident.Name, expr)
-			}
-		}
-		scope, isRouter, err := a.resolveRouter(sel.X, env)
-		if err != nil {
-			return false, err
-		}
-		if isRouter {
+		if scope, isRouter := a.resolveRouter(sel.X, env); isRouter {
 			return true, a.handleRouterMethod(call, sel, scope, env)
 		}
 	}
@@ -1126,16 +959,21 @@ func (a *Analyzer) handleCall(call *ast.CallExpr, env *walkEnv) (bool, error) {
 
 func (a *Analyzer) callPassesRouter(call *ast.CallExpr, env *walkEnv) bool {
 	for _, arg := range call.Args {
-		if _, bound := env.routers[identName(arg)]; bound {
+		if obj := env.varOf(arg); obj != nil && env.routers[obj] != nil {
 			return true
 		}
 	}
 	return false
 }
 
+// followHelper walks a helper that receives a tracked router. Only a helper
+// declared in an audited package is followed: those are the packages whose
+// unreached router-taking helpers are refused, so following one cannot leave
+// a sibling unexamined.
 func (a *Analyzer) followHelper(call *ast.CallExpr, env *walkEnv) error {
-	decl, declPkg := a.resolveFuncDecl(call.Fun, env)
-	if decl == nil {
+	decl := a.set.funcDecls[calleeFunc(call, env.info())]
+	declPkg := a.set.declPkg[decl]
+	if decl == nil || a.set.packages[declPkg.Dir] == nil {
 		return a.errorf(call, "a chi router is passed to %s, which the route inventory cannot follow; "+
 			"register routes inside an enumerated listener or an analyzed helper", a.set.exprText(call.Fun))
 	}
@@ -1145,17 +983,13 @@ func (a *Analyzer) followHelper(call *ast.CallExpr, env *walkEnv) error {
 	}
 	a.enteredFuncs[decl] = true
 
-	declFile := declPkg.fileOf[decl]
 	child := &walkEnv{
 		pkg:       declPkg,
-		file:      declFile,
 		listener:  env.listener,
-		routers:   map[string]*routerScope{},
-		chiValues: map[string]string{},
-		muxes:     map[string]bool{},
+		routers:   map[*types.Var]*routerScope{},
+		muxes:     map[*types.Var]bool{},
 		delegates: env.delegates,
 		conds:     append([]string{}, env.conds...),
-		varTypes:  a.collectVarTypes(declPkg, declFile, decl),
 		depth:     env.depth + 1,
 	}
 	params := flattenParams(decl.Type.Params)
@@ -1163,21 +997,26 @@ func (a *Analyzer) followHelper(call *ast.CallExpr, env *walkEnv) error {
 		return a.errorf(call, "cannot map arguments onto %s (variadic or mismatched signature)", decl.Name.Name)
 	}
 	for i, arg := range call.Args {
-		name := identName(arg)
-		if name == "" {
+		obj := env.varOf(arg)
+		if obj == nil {
 			if err := a.leakCheck(arg, env); err != nil {
 				return err
 			}
 			continue
 		}
-		scope, bound := env.routers[name]
+		scope, bound := env.routers[obj]
 		if !bound {
 			continue
 		}
-		if !isChiRouterType(params[i].typ, declFile) {
+		if a.set.routerKind(declPkg.info().TypeOf(params[i].typ)) != ctorChiRouter {
 			return a.errorf(call, "argument %d of %s receives a chi router but is not declared chi.Router", i, decl.Name.Name)
 		}
-		child.routers[params[i].name] = scope
+		if params[i].ident == nil {
+			continue
+		}
+		if paramObj, ok := declPkg.info().Defs[params[i].ident].(*types.Var); ok {
+			child.routers[paramObj] = scope
+		}
 	}
 	if decl.Body == nil {
 		return a.errorf(call, "route registration helper %s has no body", decl.Name.Name)
@@ -1186,8 +1025,9 @@ func (a *Analyzer) followHelper(call *ast.CallExpr, env *walkEnv) error {
 }
 
 type param struct {
-	name string
-	typ  ast.Expr
+	name  string
+	ident *ast.Ident // nil for an unnamed parameter
+	typ   ast.Expr
 }
 
 func flattenParams(fields *ast.FieldList) []param {
@@ -1201,36 +1041,10 @@ func flattenParams(fields *ast.FieldList) []param {
 			continue
 		}
 		for _, name := range field.Names {
-			out = append(out, param{name: name.Name, typ: field.Type})
+			out = append(out, param{name: name.Name, ident: name, typ: field.Type})
 		}
 	}
 	return out
-}
-
-func (a *Analyzer) resolveFuncDecl(fun ast.Expr, env *walkEnv) (*ast.FuncDecl, *pkgSource) {
-	switch typed := unwrapParen(fun).(type) {
-	case *ast.Ident:
-		if decl := env.pkg.funcs[typed.Name]; decl != nil {
-			return decl, env.pkg
-		}
-	case *ast.SelectorExpr:
-		ident, ok := unwrapParen(typed.X).(*ast.Ident)
-		if !ok {
-			return nil, nil
-		}
-		importPath := importPathFor(env.file, ident.Name)
-		if importPath == "" {
-			return nil, nil
-		}
-		pkg := a.set.byImport[importPath]
-		if pkg == nil {
-			return nil, nil
-		}
-		if decl := pkg.funcs[typed.Sel.Name]; decl != nil {
-			return decl, pkg
-		}
-	}
-	return nil, nil
 }
 
 func (a *Analyzer) handleRouterMethod(call *ast.CallExpr, sel *ast.SelectorExpr, scope *routerScope, env *walkEnv) error {
@@ -1307,12 +1121,14 @@ func (a *Analyzer) handleRouterMethod(call *ast.CallExpr, sel *ast.SelectorExpr,
 
 func (a *Analyzer) walkRouterLit(lit *ast.FuncLit, scope *routerScope, env *walkEnv) error {
 	params := flattenParams(lit.Type.Params)
-	if len(params) != 1 || !isChiRouterType(params[0].typ, env.file) {
+	if len(params) != 1 || params[0].ident == nil || a.set.routerKind(env.info().TypeOf(params[0].typ)) != ctorChiRouter {
 		return a.errorf(lit, "router closure must take exactly one chi.Router parameter")
 	}
 	a.enteredLits[lit] = true
 	child := env.child()
-	child.routers[params[0].name] = scope
+	if obj, ok := env.info().Defs[params[0].ident].(*types.Var); ok {
+		child.routers[obj] = scope
+	}
 	return a.walkStmts(lit.Body.List, child)
 }
 
@@ -1338,23 +1154,12 @@ func (a *Analyzer) stringArg(call *ast.CallExpr, index int) (string, error) {
 	return value, nil
 }
 
-// methodArg resolves r.Method's first argument: a string literal or an
-// http.MethodX constant. Anything else is refused.
+// methodArg resolves r.Method's first argument: a string constant, which
+// covers a literal and an http.MethodX name alike. Anything else is refused.
 func (a *Analyzer) methodArg(call *ast.CallExpr, index int, env *walkEnv) (string, error) {
 	expr := argAt(call, index)
-	if lit, ok := expr.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-		value, err := strconv.Unquote(lit.Value)
-		if err != nil {
-			return "", a.errorf(call, "unquote method: %v", err)
-		}
-		return strings.ToUpper(value), nil
-	}
-	if sel, ok := expr.(*ast.SelectorExpr); ok {
-		if ident, ok := sel.X.(*ast.Ident); ok && importPathFor(env.file, ident.Name) == "net/http" {
-			if method, found := strings.CutPrefix(sel.Sel.Name, "Method"); found && method != "" {
-				return strings.ToUpper(method), nil
-			}
-		}
+	if tv, ok := env.info().Types[expr]; ok && tv.Value != nil && tv.Value.Kind() == constant.String {
+		return strings.ToUpper(constant.StringVal(tv.Value)), nil
 	}
 	return "", a.errorf(call, "HTTP method must be a literal or an http.MethodX constant, got %s", a.set.exprText(expr))
 }
@@ -1382,7 +1187,7 @@ func (a *Analyzer) emit(call *ast.CallExpr, env *walkEnv, scope *routerScope, me
 	if group == "" {
 		group = "/"
 	}
-	sourceFile := env.pkg.FileNames[env.pkg.fileFor(call)]
+	sourceFile := a.set.sourceFile(call)
 
 	for _, method := range methods {
 		info := a.classifier.describe(handler, method, fullPath, env)
@@ -1445,149 +1250,64 @@ func joinPattern(prefix, pattern string) string {
 // Leak check
 // ---------------------------------------------------------------------------
 
-// leakCheck refuses any use of a bound router or mux value the walk did not
-// model, and any router value the walk cannot account for at all — one
-// constructed inside an unmodeled construct, or recovered from a type
-// assertion. It is the property that makes the inventory complete: a
-// registration can only happen through such a value, and every one of them is
-// either walked or reported here.
+// leakCheck refuses any router-typed value inside a construct the walk did not
+// model: a bound router or mux escaping into it, a router produced inside it
+// by any expression, or a router-typed variable the walk never bound. It is
+// the property that makes the inventory complete: a registration can only
+// happen through a router value, and every one of them is either walked or
+// reported here. The check is on resolved types, so the spelling of the value
+// does not matter.
 func (a *Analyzer) leakCheck(node ast.Node, env *walkEnv) error {
-	bound := env.boundNames()
-	shadow := map[string]bool{}
-	var found ast.Node
-	var foundName string
-	var foundReason string
-
-	var visit func(ast.Node, map[string]bool)
-	visit = func(n ast.Node, shadowed map[string]bool) {
-		if n == nil || found != nil {
-			return
-		}
-		switch typed := n.(type) {
-		case *ast.Ident:
-			if bound[typed.Name] && !shadowed[typed.Name] {
-				found, foundName = typed, typed.Name
-			}
-			return
-		case *ast.CallExpr, *ast.CompositeLit:
-			// A construction the walk never bound: whatever is registered on the
-			// result cannot reach the inventory.
-			expr, isExpr := n.(ast.Expr)
-			if !isExpr {
-				return
-			}
-			kind := callCtorKind(expr, env.file)
-			if kind == ctorNone {
-				kind = literalCtorKind(expr, env.file)
-			}
-			switch kind {
-			case ctorChiRouter:
-				found, foundReason = typed, "a chi router is constructed"
-				return
-			case ctorServeMux:
-				found, foundReason = typed, "an http.ServeMux is constructed"
-				return
-			}
-		case *ast.TypeAssertExpr:
-			if name := a.routerTypeName(typed.Type, env); name != "" {
-				found, foundReason = typed, "a "+name+" value is recovered by type assertion"
-				return
-			}
-		case *ast.SelectorExpr:
-			// A constructor referenced as a function value builds a router
-			// wherever it is eventually called, which is nowhere the walk looks.
-			if kind := ctorFunctionValue(typed, env.file); kind != "" {
-				found, foundReason = typed, kind+" is referenced as a function value"
-				return
-			}
-			// Only the base of a selector can be a router value.
-			visit(typed.X, shadowed)
-			return
-		case *ast.FuncLit:
-			inner := cloneShadow(shadowed)
-			for _, p := range flattenParams(typed.Type.Params) {
-				inner[p.name] = true
-			}
-			for _, p := range flattenParams(typed.Type.Results) {
-				inner[p.name] = true
-			}
-			ast.Inspect(typed.Body, func(child ast.Node) bool {
-				if child == nil || found != nil {
-					return false
-				}
-				if child == typed.Body {
-					return true
-				}
-				visit(child, inner)
-				return false
-			})
-			return
-		case *ast.AssignStmt:
-			if typed.Tok == token.DEFINE {
-				// `r := ...` introduces a new binding; only the right-hand side
-				// can still refer to the router.
-				for _, rhs := range typed.Rhs {
-					visit(rhs, shadowed)
-				}
-				return
-			}
-		case *ast.RangeStmt:
-			inner := cloneShadow(shadowed)
-			if typed.Tok == token.DEFINE {
-				for _, key := range []ast.Expr{typed.Key, typed.Value} {
-					if ident, ok := key.(*ast.Ident); ok {
-						inner[ident.Name] = true
-					}
-				}
-			}
-			visit(typed.X, shadowed)
-			if typed.Body != nil {
-				for _, stmt := range typed.Body.List {
-					visit(stmt, inner)
-				}
-			}
-			return
-		}
-		ast.Inspect(n, func(child ast.Node) bool {
-			if child == nil || found != nil {
-				return false
-			}
-			if child == n {
-				return true
-			}
-			visit(child, shadowed)
+	var found error
+	ast.Inspect(node, func(n ast.Node) bool {
+		if found != nil {
 			return false
-		})
-	}
-	visit(node, shadow)
-
-	switch {
-	case found != nil && foundReason != "":
-		return a.errorf(found, "%s in a construct the route inventory does not model; "+
-			"routes registered through it would not appear in the inventory", foundReason)
-	case found != nil:
-		return a.errorf(found, "router value %q escapes into a construct the route inventory does not model; "+
-			"routes registered through it would not appear in the inventory", foundName)
-	}
-	return nil
-}
-
-func cloneShadow(in map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
+		}
+		expr, ok := n.(ast.Expr)
+		if !ok {
+			return true
+		}
+		if _, isKey := n.(*ast.KeyValueExpr); isKey {
+			return true
+		}
+		tv, known := env.info().Types[expr]
+		if !known {
+			// Package names, field selectors and the like carry no type.
+			return true
+		}
+		if tv.IsType() {
+			// A type expression (`chi.Router` in a closure signature) is not a value.
+			return false
+		}
+		kind := a.set.tupleRouterKind(tv.Type)
+		if kind == ctorNone {
+			return true
+		}
+		if obj := env.varOf(expr); obj != nil {
+			if env.routers[obj] != nil || env.muxes[obj] {
+				found = a.errorf(expr, "router value %q escapes into a construct the route inventory does not model; "+
+					"routes registered through it would not appear in the inventory", obj.Name())
+				return false
+			}
+			found = a.errorf(expr, "router value %q was never bound by the route inventory's walk; "+
+				"routes registered through it would not appear in the inventory", obj.Name())
+			return false
+		}
+		found = a.errorf(expr, "%s is produced by %s in a construct the route inventory does not model; "+
+			"routes registered through it would not appear in the inventory", kind, a.set.exprText(expr))
+		return false
+	})
+	return found
 }
 
 // ---------------------------------------------------------------------------
 // Audit
 // ---------------------------------------------------------------------------
 
-// audit proves that no chi router value in the analyzed packages escaped the
-// walk. Without it, adding a route-registering helper that nothing calls from
-// an enumerated entry point would leave the inventory quietly short. The
-// unreached-helper rule below applies to the audited packages only; the
+// audit proves that no router-taking helper in the audited packages escaped
+// the walk. Without it, adding a route-registering helper that nothing calls
+// from an enumerated entry point would leave the inventory quietly short. The
+// unreached-helper rule applies to the audited packages only; the
 // repository-wide rules live in the sweep (see sweep.go).
 func (a *Analyzer) audit() error {
 	for _, dir := range sortedKeys(a.set.packages) {
@@ -1598,7 +1318,7 @@ func (a *Analyzer) audit() error {
 			}
 		}
 	}
-	return a.auditScannedTrees()
+	return nil
 }
 
 func (a *Analyzer) auditFile(pkg *pkgSource, file *ast.File) error {
@@ -1609,22 +1329,31 @@ func (a *Analyzer) auditFile(pkg *pkgSource, file *ast.File) error {
 		}
 		switch typed := node.(type) {
 		case *ast.FuncDecl:
-			if !hasChiRouterParam(typed.Type, file) || a.enteredFuncs[typed] {
+			if a.enteredFuncs[typed] || !a.hasRouterParam(typed.Type, pkg) {
 				return true
 			}
-			err = a.errorf(typed, "%s.%s takes a chi.Router but is never reached from a declared listener entry point; "+
-				"any route it registers would be missing from the inventory", pkg.Name, typed.Name.Name)
+			err = a.errorf(typed, "%s.%s takes a router but is never reached from a declared listener entry point; "+
+				"any route it registers would be missing from the inventory", pkg.Pkg.Name, typed.Name.Name)
 			return false
 		case *ast.FuncLit:
-			if !hasChiRouterParam(typed.Type, file) || a.enteredLits[typed] {
+			if a.enteredLits[typed] || !a.hasRouterParam(typed.Type, pkg) {
 				return true
 			}
-			err = a.errorf(typed, "a closure taking chi.Router in %s is never reached from a declared listener entry point", pkg.Name)
+			err = a.errorf(typed, "a closure taking a router in %s is never reached from a declared listener entry point", pkg.Pkg.Name)
 			return false
 		}
 		return true
 	})
 	return err
+}
+
+func (a *Analyzer) hasRouterParam(sig *ast.FuncType, pkg *pkgSource) bool {
+	for _, p := range flattenParams(sig.Params) {
+		if a.set.routerKind(pkg.info().TypeOf(p.typ)) != ctorNone {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedKeys[V any](in map[string]V) []string {
@@ -1636,56 +1365,7 @@ func sortedKeys[V any](in map[string]V) []string {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// Type syntax helpers
-// ---------------------------------------------------------------------------
-
-// isServeMuxType reports whether a type expression names http.ServeMux.
-func isServeMuxType(expr ast.Expr, file *ast.File) bool {
-	switch typed := unwrapParen(expr).(type) {
-	case *ast.StarExpr:
-		return isServeMuxType(typed.X, file)
-	case *ast.SelectorExpr:
-		ident, ok := unwrapParen(typed.X).(*ast.Ident)
-		return ok && typed.Sel.Name == "ServeMux" && importPathFor(file, ident.Name) == httpImportPath
-	}
-	return false
-}
-
-func isChiRouterType(expr ast.Expr, file *ast.File) bool {
-	switch typed := unwrapParen(expr).(type) {
-	case *ast.StarExpr:
-		return isChiRouterType(typed.X, file)
-	case *ast.SelectorExpr:
-		ident, ok := unwrapParen(typed.X).(*ast.Ident)
-		if !ok {
-			return false
-		}
-		if importPathFor(file, ident.Name) != chiImportPath {
-			return false
-		}
-		switch typed.Sel.Name {
-		case "Router", methodRoutes, "Mux":
-			return true
-		}
-	}
-	return false
-}
-
-func hasChiRouterParam(sig *ast.FuncType, file *ast.File) bool {
-	for _, p := range flattenParams(sig.Params) {
-		if isChiRouterType(p.typ, file) {
-			return true
-		}
-	}
-	return false
-}
-
 func (a *Analyzer) errorf(node ast.Node, format string, args ...any) error {
 	pos := a.set.position(node)
-	rel := pos.Filename
-	if trimmed, err := filepath.Rel(a.cfg.Root, pos.Filename); err == nil {
-		rel = filepath.ToSlash(trimmed)
-	}
-	return fmt.Errorf("%s:%d: %s", rel, pos.Line, fmt.Sprintf(format, args...))
+	return fmt.Errorf("%s:%d: %s", a.set.relPath(pos.Filename), pos.Line, fmt.Sprintf(format, args...))
 }

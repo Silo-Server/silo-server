@@ -10,7 +10,7 @@ import (
 func handler(w http.ResponseWriter, r *http.Request) {}
 
 // NewRouter builds a path template at runtime.
-func NewRouter(prefix string) chi.Router {
+func NewRouter(prefix string) http.Handler {
 	r := chi.NewRouter()
 	r.Get(prefix+"/thing", handler)
 	return r

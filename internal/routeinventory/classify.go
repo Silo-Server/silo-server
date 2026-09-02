@@ -3,6 +3,7 @@ package routeinventory
 import (
 	"go/ast"
 	"go/token"
+	"go/types"
 	"net/http"
 	"sort"
 	"strconv"
@@ -81,7 +82,6 @@ type handlerInfo struct {
 
 type classifier struct {
 	set   *sourceSet
-	owner *Analyzer
 	cache map[*ast.FuncDecl]*bodyEvidence
 }
 
@@ -89,18 +89,10 @@ func newClassifier(set *sourceSet) *classifier {
 	return &classifier{set: set, cache: map[*ast.FuncDecl]*bodyEvidence{}}
 }
 
-// inlineReceiverType resolves the type of a handler constructed inline at the
-// registration site, e.g. `(&handlers.Thing{...}).Handle`.
-func (c *classifier) inlineReceiverType(expr ast.Expr, env *walkEnv) string {
-	if c.owner == nil {
-		return ""
-	}
-	if paren, ok := expr.(*ast.ParenExpr); ok {
-		expr = paren.X
-	}
-	return c.owner.valueIdentity(expr, env.pkg, env.file)
-}
-
+// describe resolves a registration's handler expression to a stable identity
+// and classifies its body. Identity comes from the type checker: a method
+// value names its receiver type, a function names its package, and a closure
+// is keyed by listener and path.
 func (c *classifier) describe(handler ast.Expr, method, fullPath string, env *walkEnv) handlerInfo {
 	info := handlerInfo{expr: c.set.exprText(handler)}
 	inner, streams := unwrapHandler(handler)
@@ -115,44 +107,30 @@ func (c *classifier) describe(handler ast.Expr, method, fullPath string, env *wa
 		info.identity = "literal:" + env.listener.ID + ":" + fullPath
 		info.resolved = true
 		body = typed.Body
-	case *ast.SelectorExpr:
-		base, ok := typed.X.(*ast.Ident)
-		if !ok {
-			// An inline `(&handlers.Thing{...}).Handle` still names a type.
-			if recvType := c.inlineReceiverType(typed.X, env); recvType != "" {
-				info.kind = handlerKindMethod
-				info.identity = "(" + recvType + ")." + typed.Sel.Name
-				info.resolved = true
-				decl = c.methodDecl(recvType, typed.Sel.Name)
-				break
-			}
+	case *ast.SelectorExpr, *ast.Ident:
+		var ident *ast.Ident
+		switch named := typed.(type) {
+		case *ast.SelectorExpr:
+			ident = named.Sel
+		case *ast.Ident:
+			ident = named
+		}
+		fn, _ := env.info().Uses[ident].(*types.Func)
+		switch {
+		case fn == nil:
 			info.kind = handlerKindExpression
 			info.identity = c.set.exprText(inner)
-			break
-		}
-		if importPath := importPathFor(env.file, base.Name); importPath != "" {
-			info.kind = handlerKindFunc
-			info.identity = importPath + "." + typed.Sel.Name
-			info.resolved = true
-			if pkg := c.set.byImport[importPath]; pkg != nil {
-				decl = pkg.funcs[typed.Sel.Name]
-			}
-			break
-		}
-		if recvType := env.varTypes[base.Name]; recvType != "" {
+		case fn.Signature().Recv() != nil:
 			info.kind = handlerKindMethod
-			info.identity = "(" + recvType + ")." + typed.Sel.Name
+			info.identity = "(" + typeIdentity(fn.Signature().Recv().Type()) + ")." + fn.Name()
 			info.resolved = true
-			decl = c.methodDecl(recvType, typed.Sel.Name)
-			break
+			decl = c.set.funcDecls[fn]
+		default:
+			info.kind = handlerKindFunc
+			info.identity = fn.Pkg().Path() + "." + fn.Name()
+			info.resolved = true
+			decl = c.set.funcDecls[fn]
 		}
-		info.kind = handlerKindExpression
-		info.identity = c.set.exprText(inner)
-	case *ast.Ident:
-		info.kind = handlerKindFunc
-		info.identity = env.pkg.ImportPath + "." + typed.Name
-		info.resolved = true
-		decl = env.pkg.funcs[typed.Name]
 	default:
 		info.kind = handlerKindExpression
 		info.identity = c.set.exprText(inner)
@@ -163,7 +141,7 @@ func (c *classifier) describe(handler ast.Expr, method, fullPath string, env *wa
 	case decl != nil:
 		evidence = c.evidenceForDecl(decl)
 	case body != nil:
-		evidence = c.evidenceForBody(body, env.pkg, env.file, 0)
+		evidence = c.evidenceForBody(body, env.pkg, 0)
 	}
 	info.requestKind, info.responseKind, info.websocket = resolveKinds(evidence, method)
 	info.identity = c.short(info.identity)
@@ -172,23 +150,10 @@ func (c *classifier) describe(handler ast.Expr, method, fullPath string, env *wa
 
 // short drops the module prefix so identities read as `internal/api/handlers.X`.
 func (c *classifier) short(identity string) string {
-	if c.owner == nil || c.owner.cfg.ModulePath == "" {
+	if c.set.modulePath == "" {
 		return identity
 	}
-	return strings.ReplaceAll(identity, c.owner.cfg.ModulePath+"/", "")
-}
-
-func (c *classifier) methodDecl(recvType, name string) *ast.FuncDecl {
-	trimmed := strings.TrimPrefix(recvType, "*")
-	dot := strings.LastIndex(trimmed, ".")
-	if dot < 0 {
-		return nil
-	}
-	pkg := c.set.byImport[trimmed[:dot]]
-	if pkg == nil {
-		return nil
-	}
-	return pkg.methods[trimmed[dot+1:]+"."+name]
+	return strings.ReplaceAll(identity, c.set.modulePath+"/", "")
 }
 
 // unwrapHandler strips the wrappers a registration site puts around a handler
@@ -249,25 +214,20 @@ func (c *classifier) evidenceForDecl(decl *ast.FuncDecl) *bodyEvidence {
 		c.cache[decl] = &bodyEvidence{}
 		return c.cache[decl]
 	}
+	pkg := c.set.declPkg[decl]
+	if c.set.packages[pkg.Dir] == nil {
+		// Handler bodies are read only inside the analyzed packages; a
+		// handler declared elsewhere stays `unknown` rather than guessed.
+		return nil
+	}
 	// Seed the cache first so mutual recursion terminates.
 	c.cache[decl] = &bodyEvidence{}
-	pkg, file := c.declContext(decl)
-	evidence := c.evidenceForBody(decl.Body, pkg, file, 0)
+	evidence := c.evidenceForBody(decl.Body, pkg, 0)
 	c.cache[decl] = evidence
 	return evidence
 }
 
-func (c *classifier) declContext(decl *ast.FuncDecl) (*pkgSource, *ast.File) {
-	for _, dir := range sortedKeys(c.set.packages) {
-		pkg := c.set.packages[dir]
-		if file, ok := pkg.fileOf[decl]; ok {
-			return pkg, file
-		}
-	}
-	return nil, nil
-}
-
-func (c *classifier) evidenceForBody(body *ast.BlockStmt, pkg *pkgSource, file *ast.File, depth int) *bodyEvidence {
+func (c *classifier) evidenceForBody(body *ast.BlockStmt, pkg *pkgSource, depth int) *bodyEvidence {
 	evidence := &bodyEvidence{}
 	if body == nil {
 		return evidence
@@ -278,7 +238,7 @@ func (c *classifier) evidenceForBody(body *ast.BlockStmt, pkg *pkgSource, file *
 			return true
 		}
 		name := calleeName(call.Fun)
-		qualified := qualifiedCallee(call.Fun, file)
+		qualified := qualifiedCallee(call.Fun, pkg.info())
 		args := callArgText(c.set, call)
 
 		switch {
@@ -419,25 +379,6 @@ func calleeName(fun ast.Expr) string {
 		return calleeName(typed.Fun)
 	}
 	return ""
-}
-
-// qualifiedCallee renders `pkgimportpath.Func` when the callee is a plain
-// package-level call, so `json.NewDecoder` cannot be confused with a method
-// named NewDecoder on some other type.
-func qualifiedCallee(fun ast.Expr, file *ast.File) string {
-	sel, ok := unwrapParen(fun).(*ast.SelectorExpr)
-	if !ok {
-		return ""
-	}
-	ident, ok := unwrapParen(sel.X).(*ast.Ident)
-	if !ok {
-		return ""
-	}
-	importPath := importPathFor(file, ident.Name)
-	if importPath == "" {
-		return ""
-	}
-	return importPath + "." + sel.Sel.Name
 }
 
 func callArgText(set *sourceSet, call *ast.CallExpr) string {

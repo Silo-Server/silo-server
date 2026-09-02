@@ -12,7 +12,7 @@ import (
 func handler(w http.ResponseWriter, r *http.Request) {}
 
 // NewRouter is the fixture listener entry point.
-func NewRouter() chi.Router {
+func NewRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(sub chi.Router) {
 		sub.Get("/visible", handler)

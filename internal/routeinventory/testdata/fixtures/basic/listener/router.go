@@ -32,7 +32,7 @@ func registerExtras(r chi.Router, h *Handlers) {
 }
 
 // NewRouter is the fixture listener entry point.
-func NewRouter(enableAdmin bool, adminHandler *Handlers) chi.Router {
+func NewRouter(enableAdmin bool, adminHandler *Handlers) http.Handler {
 	r := chi.NewRouter()
 	r.Use(baseMiddleware)
 	h := &Handlers{}

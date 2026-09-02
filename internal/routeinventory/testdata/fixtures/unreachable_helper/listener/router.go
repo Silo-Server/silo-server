@@ -16,7 +16,7 @@ func registerHidden(r chi.Router) {
 }
 
 // NewRouter is the fixture listener entry point.
-func NewRouter() chi.Router {
+func NewRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/visible", handler)
 	return r

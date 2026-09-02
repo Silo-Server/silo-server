@@ -6,9 +6,6 @@ import (
 	"path/filepath"
 )
 
-// ModulePath is this repository's Go module path.
-const ModulePath = "github.com/Silo-Server/silo-server"
-
 // ArtifactPath is the committed inventory, relative to the repository root.
 const ArtifactPath = "contracts/api/v2/route-inventory.json"
 
@@ -44,8 +41,7 @@ const (
 // beside it later.
 func DefaultConfig(root string) Config {
 	return Config{
-		Root:       root,
-		ModulePath: ModulePath,
+		Root: root,
 		Listeners: []ListenerSpec{
 			{
 				ID:   ListenerRoot,
@@ -84,10 +80,6 @@ func DefaultConfig(root string) Config {
 			internalTranscodeNodeDir,
 			cmdSiloDir,
 		},
-		// The whole repository is swept. Deriving the set from a hard-coded list
-		// of trees means a router in a tree nobody thought of — contracts/,
-		// migrations/, scripts/, web/ — is never audited.
-		ScanRoots: []string{"."},
 		Exclusions: []RouterExclusion{
 			{
 				File: jellycompatRouterFile,

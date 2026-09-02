@@ -15,7 +15,7 @@ type mounter interface {
 }
 
 // NewRouter hands the router to an interface the analyzer cannot follow.
-func NewRouter(external mounter) chi.Router {
+func NewRouter(external mounter) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Get("/visible", handler)
