@@ -447,6 +447,25 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --info-foreground: oklch(0.98 0.01 250);
   }
 
+  /* ── Contrast-adjustable tokens ─────────────────────────────
+     These seven tokens are the ones high contrast mode lightens.
+     Themes define the literal under `--<token>-base`; the semantic
+     token is an alias. The indirection is required, not stylistic:
+     a custom property whose value references itself is a dependency
+     cycle and is invalid at computed-value time, so the high-contrast
+     block cannot write `--border: color-mix(..., var(--border))`.
+     It reads `--border-base` instead.
+     ───────────────────────────────────────────────────────── */
+  :root {
+    --muted-foreground: var(--muted-foreground-base);
+    --border: var(--border-base);
+    --input: var(--input-base);
+    --surface: var(--surface-base);
+    --surface-hover: var(--surface-hover-base);
+    --surface-raised: var(--surface-raised-base);
+    --accent: var(--accent-base);
+  }
+
   /* ── Midnight Cinema ────────────────────────────────────── */
   /* Inspired by premium streaming UIs: monochromatic, cinematic,
      content-focused. White primary creates an elegant, theater-like
@@ -474,8 +493,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --muted: #1c1c20;
     /* Lightened from #6e6e78 (~3.4:1) to meet WCAG AA: ~6.3:1 on --background,
        ~5.3:1 even on the lightest chip surface (#232328). */
-    --muted-foreground: #9696a0;
-    --accent: #232328;
+    --muted-foreground-base: #9696a0;
+    --accent-base: #232328;
     --accent-foreground: #e8e8ec;
 
     /* Destructive: warm red for danger actions */
@@ -483,8 +502,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --destructive-foreground: #ffffff;
 
     /* Borders: barely visible, just enough structure */
-    --border: #28282e;
-    --input: #1c1c20;
+    --border-base: #28282e;
+    --input-base: #1c1c20;
     --ring: #e8e8ec;
 
     /* Charts: categorical set validated on this theme's card surface —
@@ -508,9 +527,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-ring: #e8e8ec;
 
     /* Surfaces: layered depth */
-    --surface: #1c1c20;
-    --surface-hover: #232328;
-    --surface-raised: #28282e;
+    --surface-base: #1c1c20;
+    --surface-hover-base: #232328;
+    --surface-raised-base: #28282e;
     --ambient: #e8e8ec;
     --ambient-glow-opacity: 0.08;
   }
@@ -538,8 +557,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --muted: #ebebef;
     /* Darkened from #78787f (~4.0:1) to meet WCAG AA on light surfaces
        (~4.9:1 on the #e8e8ec chip, ~5.4:1 on --background). */
-    --muted-foreground: #63636b;
-    --accent: #e8e8ec;
+    --muted-foreground-base: #63636b;
+    --accent-base: #e8e8ec;
     --accent-foreground: #1a1a1e;
 
     /* Destructive: warm red for danger actions */
@@ -547,8 +566,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --destructive-foreground: #ffffff;
 
     /* Borders: soft gray, enough structure without weight */
-    --border: #d8d8de;
-    --input: #e8e8ec;
+    --border-base: #d8d8de;
+    --input-base: #e8e8ec;
     --ring: #1a1a1e;
 
     /* Charts: light-mode steps of the same categorical set, validated against
@@ -571,9 +590,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-ring: #1a1a1e;
 
     /* Surfaces: layered depth */
-    --surface: #ebebef;
-    --surface-hover: #e0e0e6;
-    --surface-raised: #ffffff;
+    --surface-base: #ebebef;
+    --surface-hover-base: #e0e0e6;
+    --surface-raised-base: #ffffff;
     --ambient: #1a1a1e;
     --ambient-glow-opacity: 0.05;
 
@@ -601,13 +620,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #1b2634;
     --secondary-foreground: #d7e2f1;
     --muted: #151e2b;
-    --muted-foreground: #90a0b5;
-    --accent: #203043;
+    --muted-foreground-base: #90a0b5;
+    --accent-base: #203043;
     --accent-foreground: #f4f8ff;
     --destructive: #ef6b73;
     --destructive-foreground: #ffffff;
-    --border: #28384d;
-    --input: #182231;
+    --border-base: #28384d;
+    --input-base: #182231;
     --ring: #78aefc;
     /* Shared dark categorical set (see midnight-cinema). */
     --chart-1: #5f74ee;
@@ -624,9 +643,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-border: #1f2a39;
     --sidebar-section-divider: #283a4e;
     --sidebar-ring: #78aefc;
-    --surface: #151e2b;
-    --surface-hover: #1d2a3b;
-    --surface-raised: #223245;
+    --surface-base: #151e2b;
+    --surface-hover-base: #1d2a3b;
+    --surface-raised-base: #223245;
     --ambient: #78aefc;
     --ambient-glow-opacity: 0.11;
   }
@@ -646,13 +665,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #281d21;
     --secondary-foreground: #decfd2;
     --muted: #20181b;
-    --muted-foreground: #a28e95;
-    --accent: #322228;
+    --muted-foreground-base: #a28e95;
+    --accent-base: #322228;
     --accent-foreground: #f8f2f3;
     --destructive: #f08080;
     --destructive-foreground: #ffffff;
-    --border: #3b2830;
-    --input: #251a1f;
+    --border-base: #3b2830;
+    --input-base: #251a1f;
     --ring: #d16a78;
     /* Shared dark categorical set (see midnight-cinema). */
     --chart-1: #5f74ee;
@@ -669,9 +688,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-border: #2c1d23;
     --sidebar-section-divider: #3a252e;
     --sidebar-ring: #d16a78;
-    --surface: #20181b;
-    --surface-hover: #2a2025;
-    --surface-raised: #34262c;
+    --surface-base: #20181b;
+    --surface-hover-base: #2a2025;
+    --surface-raised-base: #34262c;
     --ambient: #d16a78;
     --ambient-glow-opacity: 0.11;
   }
@@ -691,13 +710,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #1b2824;
     --secondary-foreground: #d1e0d9;
     --muted: #16201d;
-    --muted-foreground: #91a39c;
-    --accent: #20322d;
+    --muted-foreground-base: #91a39c;
+    --accent-base: #20322d;
     --accent-foreground: #f2f8f5;
     --destructive: #f07a7a;
     --destructive-foreground: #ffffff;
-    --border: #284038;
-    --input: #182420;
+    --border-base: #284038;
+    --input-base: #182420;
     --ring: #5bc39d;
     /* Shared dark categorical set (see midnight-cinema). */
     --chart-1: #5f74ee;
@@ -714,9 +733,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-border: #1d2f2a;
     --sidebar-section-divider: #253d35;
     --sidebar-ring: #5bc39d;
-    --surface: #16201d;
-    --surface-hover: #1e2b27;
-    --surface-raised: #263732;
+    --surface-base: #16201d;
+    --surface-hover-base: #1e2b27;
+    --surface-raised-base: #263732;
     --ambient: #5bc39d;
     --ambient-glow-opacity: 0.1;
   }
@@ -758,13 +777,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   html[data-high-contrast="true"] {
     --foreground: #ffffff;
     --ring: oklch(0.95 0 0);
-    --muted-foreground: color-mix(in srgb, white 72%, var(--muted-foreground));
-    --border: color-mix(in srgb, white 34%, var(--border));
-    --input: color-mix(in srgb, white 16%, var(--input));
-    --surface: color-mix(in srgb, white 10%, var(--surface));
-    --surface-hover: color-mix(in srgb, white 16%, var(--surface-hover));
-    --surface-raised: color-mix(in srgb, white 20%, var(--surface-raised));
-    --accent: color-mix(in srgb, white 14%, var(--accent));
+    --muted-foreground: color-mix(in srgb, white 72%, var(--muted-foreground-base));
+    --border: color-mix(in srgb, white 34%, var(--border-base));
+    --input: color-mix(in srgb, white 16%, var(--input-base));
+    --surface: color-mix(in srgb, white 10%, var(--surface-base));
+    --surface-hover: color-mix(in srgb, white 16%, var(--surface-hover-base));
+    --surface-raised: color-mix(in srgb, white 20%, var(--surface-raised-base));
+    --accent: color-mix(in srgb, white 14%, var(--accent-base));
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
