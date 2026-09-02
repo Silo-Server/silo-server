@@ -198,14 +198,14 @@ lint-router-recovery:
 	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
 MIGRATION_LEDGER := contracts/api/v2/migration.json
 
-# Fail when the v2 migration ledger violates its JSON Schema or no longer
-# covers the route inventory one-to-one. Every inventory row needs exactly one
-# ledger entry and every entry needs a row, so a route added without a
-# migration decision, or a decision left behind for a route that is gone,
-# lands here.
+# Fail when the v2 migration ledger violates its JSON Schema, no longer covers
+# the route inventory one-to-one, or breaks a review rule (removed rows are
+# tier 2, ratified rows name an owner, only plugin-proxy handlers claim the
+# dynamic_plugin_proxy override). Runs the whole internal/contractledger
+# package so this named step enforces everything the docs attribute to it.
 verify-migration-ledger:
-	@go test -count=1 -run '^TestLedgerMatchesInventory$$' ./internal/contractledger/ \
-		|| { echo "::error::$(MIGRATION_LEDGER) violates contracts/api/v2/migration.schema.json or disagrees with $(ROUTE_INVENTORY)"; exit 1; }
+	@go test -count=1 ./internal/contractledger/ \
+		|| { echo "::error::$(MIGRATION_LEDGER) violates contracts/api/v2/migration.schema.json or disagrees with $(ROUTE_INVENTORY); see docs/architecture/api-contract.md (Migration ledger)"; exit 1; }
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

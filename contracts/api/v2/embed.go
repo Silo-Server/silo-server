@@ -1,5 +1,7 @@
-// Package apiv2 embeds the committed API v2 contract artifacts so the server
-// binary and the CI gate read the exact bytes that were checked in.
+// Package apiv2 embeds the committed API v2 contract artifacts so the
+// internal/contractledger gate, and any future consumer, reads the exact bytes
+// that were checked in. Nothing in cmd/silo imports this package today; the
+// server binary does not carry or serve these artifacts.
 //
 // This package deliberately contains nothing but the embed directive; loading
 // and validation live in internal/contractledger (migration ledger) and

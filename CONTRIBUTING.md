@@ -93,6 +93,8 @@ make test-web
 # Generated contracts, fixtures, and docs hygiene
 make verify-settings-bindings-all
 make verify-playback-fixtures
+make verify-route-inventory
+make verify-migration-ledger
 make verify-local-paths
 ```
 

@@ -139,6 +139,77 @@ bug, each listener package reconciles a real router at test time through its une
 (exact for root, proxy, transcode; one-way for API). `deferred_fields` are null; `heuristic_fields`
 are evidence, not facts.
 
+### Migration ledger
+
+`contracts/api/v2/migration.json` records the v2 disposition of every row in the route inventory.
+Its key is the inventory row's listener, method, exact path, and `registration_index`: the
+inventory registers twelve method+path pairs twice, under different middleware or conditions
+(for example a rate-limited and an unlimited variant of the same login route), and each
+registration is a separate operation with its own consumers and disposition, so the index
+disambiguates them in registration order. There is exactly one ledger entry per inventory row and
+one row per entry, and the entries follow inventory order.
+
+An entry has two kinds of fields. The first kind is copied from the inventory row — `listener`,
+`namespace`, `method`, `path`, `handler`, `handler_kind`, `source_file`, `route_group`,
+`middleware_chain`, `auth_class`, `auth_traits`, `conditional`, `conditions`, `delegates_to`
+(the inventory's empty string is the ledger's `null`), `request_kind`, `response_media_kind`,
+`streams`, and `upgrades_websocket` — plus `profile_required` and `admin_required`, which are
+projections of `auth_traits`. `make verify-migration-ledger` (the whole `internal/contractledger`
+test package, run in CI) validates the file against `contracts/api/v2/migration.schema.json`,
+reconciles every one of those fields against the inventory, reporting drift per field, and
+enforces the review rules below. The one permitted override is the ten `dynamic_plugin_proxy`
+rows, whose media kinds are recorded as `dynamic_proxy` because a plugin proxy has no static
+request or response shape; the override is anchored to the inventory side, so only a row whose
+inventory handler is one of the two plugin-proxy literals (`/api/v1/plugin-assets/{installation_id}/*`
+and `/api/v1/plugins/{installation_id}/*`) may claim the rule, and any other row that claims it
+fails with `dynamic_plugin_proxy rule on a non-proxy handler`. The gate also prints set problems
+(missing entry, orphan entry, drift) before the order check and reports only the first order
+mismatch, because later ones cascade from it.
+
+The second kind is curated by hand and is what the ledger exists to hold: `consumers` and
+`consumer_call_sites` (including `match: manual` sites), `release_flow`, `tier`, `disposition`,
+`disposition_rule`, `disposition_rationale`, `owner`, `review_state`, `v2`, and `notes`. The
+schema ties them together: each `disposition_rule` names the document or decision that justifies
+it and is therefore allowed only with the disposition it justifies (`maintainer_decision` is the
+escape hatch for any); `removed` and `documented_exclusion` rows carry an all-null `v2`; a
+`ported`, `redesigned`, or `replaced` row can be `ratified` only with a complete `v2` target; and
+every `removed`, `redesigned`, or `replaced` row names an `owner`, which the gate refuses to
+ratify while it is a placeholder (anything starting with `pending`, or `tbd`, `todo`, `unknown`,
+`none`, compared case-insensitively). Tier is a rule, stated in the file's `description` and
+enforced by the gate: tier 1 is the plan's release-critical flows unless the row is `removed`,
+since a removed route has no v2 behavior to baseline, so a removed row in tier 1 fails.
+`release_flow` is derived from route intent, not path prefix: the acting-admin library
+management routes under `/api/v1/libraries/`, the admin scan triggers, and the theme catalog
+refresh are `core_admin`, while the viewer-facing `/api/v1/library/{id}/*` reads are
+`browse_search`. Proxy and transcode-node rows that are `ported` keep `v2` null by design: those
+listeners have no `/api/v2` namespace, so the route is retained at its version-neutral path and
+described through the manual registry, never aliased into v2. Because these fields are decisions
+rather than derivations, the ledger is gated, not regenerated: CI checks the committed file, and
+nothing rewrites it.
+
+Consumer evidence comes from `scripts/apiv2-ledger/`. `extract_consumers.py` scans `web/src`, a
+silo-apple tree, and a silo-android tree for HTTP and WebSocket calls, resolving path literals,
+helper functions that return a path template, templates rooted at the API base URL, Kotlin
+`buildString`/`const val` builders, and Swift `let`/`static let` path bindings;
+`match_consumers.py` maps those sites onto inventory rows by normalized path template and method;
+`sweep_uncredited.py` then greps the last two static segments of every inventory path across all
+three trees and lists every request-shaped hit not already credited, which a maintainer resolves
+by hand. Call-site files are repository-root-relative for their repo (web sites are relative to
+`web/`), and the schema enforces each repo's root so a mis-rooted site fails the gate. Sibling
+sites are pinned: the ledger's `source_trees` header records the silo-apple and silo-android
+commit the sites were extracted from (`build_ledger.py` takes both SHAs as arguments), so a
+site is re-resolved with `git show <sha>:<file>` against that exact tree rather than a moving
+branch. `sweep_uncredited.py`, given the sibling git checkouts, reports a credited file that no
+longer exists at the pin as `stale-against-pinned-tree`, separately from an uncredited hit, and
+`TestSiblingCallSitesResolveAgainstPinnedTrees` does the same for every site when the sibling
+checkouts are present next to this repository (it skips otherwise, so CI is unaffected).
+`build_ledger.py` merges a regenerated inventory and consumer map into the committed ledger by
+key: it refreshes the copied fields and mechanical call sites, preserves every curated field and
+manual site on an existing entry, and seeds defaults only for rows that have no entry yet.
+Running it on an unchanged inventory is a no-op. Server-internal and compat consumers (Go URL
+builders in this repository) are recorded as manual sites. Absence of a first-party consumer is
+not proof of disuse; removal needs an affirmative product decision.
+
 ### Contract foundation
 
 The first implementation slice establishes and tests rules shared by every later operation:

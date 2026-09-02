@@ -5,11 +5,22 @@
   "description": "One entry per row of contracts/api/v2/route-inventory.json. internal/contractledger validates this schema and reconciles the ledger against the inventory in CI.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "description", "source_inventory", "consumer_method", "field_reference", "totals", "entries"],
+  "required": ["schema_version", "description", "source_inventory", "source_trees", "consumer_method", "field_reference", "totals", "entries"],
   "properties": {
     "schema_version": { "const": 1 },
     "description": { "type": "string", "minLength": 1 },
     "source_inventory": { "const": "contracts/api/v2/route-inventory.json" },
+    "source_trees": {
+      "$comment": "The trees the consumer call sites were extracted from. Sibling repos are pinned to the origin/main commit SHA used for extraction so a site can be re-resolved against that exact tree; web and server sites are in this repository at the same commit as the ledger.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["silo-apple", "silo-android", "silo-server"],
+      "properties": {
+        "silo-apple": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "silo-android": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "silo-server": { "const": "this repository" }
+      }
+    },
     "consumer_method": { "type": "string", "minLength": 1 },
     "field_reference": { "type": "string", "minLength": 1 },
     "totals": {
@@ -55,7 +66,6 @@
         "dynamic_plugin_proxy",
         "operator_metrics",
         "listener_delegation",
-        "frontend_shell",
         "deprecation_headers",
         "v1_scope_removals_table",
         "contract_root_probes",
@@ -82,6 +92,50 @@
         "line": { "type": "integer", "minimum": 1 },
         "types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "match": { "$ref": "#/$defs/matchKind" }
+      },
+      "allOf": [
+        {
+          "$comment": "file is repository-root-relative for the named repo: web sites live under web/src of this repository, apple under iosApp/ of silo-apple, android under one of silo-android's four source modules, server anywhere in this repository (Go under cmd/ or internal/, or a container/build file at the root).",
+          "if": { "properties": { "repo": { "const": "web" } } },
+          "then": { "properties": { "file": { "pattern": "^src/" } } }
+        },
+        {
+          "if": { "properties": { "repo": { "const": "apple" } } },
+          "then": { "properties": { "file": { "pattern": "^iosApp/" } } }
+        },
+        {
+          "if": { "properties": { "repo": { "const": "android" } } },
+          "then": { "properties": { "file": { "pattern": "^(shared|android-shared|androidApp|androidTvApp)/" } } }
+        },
+        {
+          "if": { "properties": { "repo": { "const": "server" } } },
+          "then": { "properties": { "file": { "pattern": "^(cmd/|internal/|Dockerfile|docker-compose[A-Za-z0-9_.-]*\\.ya?ml$)" } } }
+        }
+      ]
+    },
+    "v2Unset": {
+      "type": "object",
+      "properties": {
+        "method": { "type": "null" },
+        "path": { "type": "null" },
+        "operation_id": { "type": "null" }
+      }
+    },
+    "v2Set": {
+      "type": "object",
+      "properties": {
+        "method": { "$ref": "#/$defs/method" },
+        "path": { "type": "string", "pattern": "^/" },
+        "operation_id": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }
+      }
+    },
+    "v2Target": {
+      "$comment": "A redesigned probe row records its v2 method and path before an operation ID exists; that partially-filled shape is the only one allowed besides all-null and all-set.",
+      "type": "object",
+      "properties": {
+        "method": { "$ref": "#/$defs/method" },
+        "path": { "type": "string", "pattern": "^/" },
+        "operation_id": { "type": "null" }
       }
     },
     "v2": {
@@ -92,7 +146,20 @@
         "method": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/method" }] },
         "path": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^/" }] },
         "operation_id": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }] }
-      }
+      },
+      "$comment": "The three fields are all null, all set, or (for a proposed redesign) method+path set with operation_id still null.",
+      "oneOf": [
+        { "$ref": "#/$defs/v2Unset" },
+        { "$ref": "#/$defs/v2Set" },
+        { "$ref": "#/$defs/v2Target" }
+      ]
+    },
+    "owner": {
+      "$comment": "Named reviewers are not recorded yet (issue #135, execution input 1); until they are, removed/redesigned/replaced rows carry the pending literal. A pending owner blocks ratification (enforced in internal/contractledger).",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^(pending:#135/execution-input-1|[A-Za-z0-9][A-Za-z0-9 ._@-]*)$" }
+      ]
     },
     "entry": {
       "type": "object",
@@ -108,7 +175,7 @@
         "consumers", "consumer_call_sites",
         "release_flow", "tier",
         "disposition", "disposition_rule", "disposition_rationale",
-        "review_state", "v2", "notes"
+        "owner", "review_state", "v2", "notes"
       ],
       "properties": {
         "listener": { "$ref": "#/$defs/listener" },
@@ -140,6 +207,7 @@
         "disposition": { "$ref": "#/$defs/disposition" },
         "disposition_rule": { "$ref": "#/$defs/dispositionRule" },
         "disposition_rationale": { "type": "string", "minLength": 1 },
+        "owner": { "$ref": "#/$defs/owner" },
         "review_state": { "$ref": "#/$defs/reviewState" },
         "v2": { "$ref": "#/$defs/v2" },
         "notes": { "type": "string" }
@@ -150,12 +218,49 @@
           "then": { "properties": { "consumers": { "maxItems": 1 }, "consumer_call_sites": { "maxItems": 0 } } }
         },
         {
-          "if": { "properties": { "disposition": { "enum": ["removed", "redesigned", "replaced", "compatibility_only", "documented_exclusion"] } } },
-          "then": { "properties": { "disposition_rule": { "not": { "const": "default_ported" } } } }
-        },
-        {
+          "$comment": "disposition_rule -> allowed disposition. Each rule names the document or decision that justifies it and therefore fits exactly one disposition, except maintainer_decision, which is the escape hatch for any disposition.",
           "if": { "properties": { "disposition": { "const": "ported" } } },
           "then": { "properties": { "disposition_rule": { "enum": ["default_ported", "maintainer_decision"] } } }
+        },
+        {
+          "if": { "properties": { "disposition": { "const": "documented_exclusion" } } },
+          "then": { "properties": { "disposition_rule": { "enum": ["dynamic_plugin_proxy", "operator_metrics", "listener_delegation", "maintainer_decision"] } } }
+        },
+        {
+          "if": { "properties": { "disposition": { "const": "removed" } } },
+          "then": { "properties": { "disposition_rule": { "enum": ["v1_scope_removals_table", "deprecation_headers", "maintainer_decision"] } } }
+        },
+        {
+          "if": { "properties": { "disposition": { "const": "redesigned" } } },
+          "then": { "properties": { "disposition_rule": { "enum": ["contract_root_probes", "contract_playback_start_status", "contract_plugin_cookie_path", "maintainer_decision"] } } }
+        },
+        {
+          "if": { "properties": { "disposition": { "const": "replaced" } } },
+          "then": { "properties": { "disposition_rule": { "enum": ["v1_scope_removals_table", "maintainer_decision"] } } }
+        },
+        {
+          "if": { "properties": { "disposition": { "const": "compatibility_only" } } },
+          "then": { "properties": { "disposition_rule": { "enum": ["only_compat_consumer", "maintainer_decision"] } } }
+        },
+        {
+          "$comment": "Nothing to port: a removed or excluded route has no v2 target.",
+          "if": { "properties": { "disposition": { "enum": ["removed", "documented_exclusion"] } } },
+          "then": { "properties": { "v2": { "$ref": "#/$defs/v2Unset" } } }
+        },
+        {
+          "$comment": "A ratified port names its v2 operation completely.",
+          "if": {
+            "properties": {
+              "disposition": { "enum": ["ported", "redesigned", "replaced"] },
+              "review_state": { "const": "ratified" }
+            }
+          },
+          "then": { "properties": { "v2": { "$ref": "#/$defs/v2Set" } } }
+        },
+        {
+          "$comment": "Every removal, redesign, or replacement names an owner.",
+          "if": { "properties": { "disposition": { "enum": ["removed", "redesigned", "replaced"] } } },
+          "then": { "properties": { "owner": { "type": "string" } } }
         }
       ]
     }
