@@ -38,15 +38,16 @@ def non_admin_403(id_prefix, path, body=None):
         req["body"] = body
     return sc(f"{id_prefix}.non_admin", "authorization", "A non-admin account is 403 forbidden.", "primary_profile", req, err(403, "forbidden", "Admin access required"))
 
-def other_account_path(id_prefix, method, path, body=None, message="Profile not found"):
+def other_account_path(id_prefix, method, path, body=None, message="Profile not found", description=None):
     """Member bearer with its own primary profile header targeting a profile
     id the admin account owns in the path. The user store is scoped to the
     bearer's account, so the lookup misses and the handler answers 404."""
     req = {"path": path}
     if body is not None:
         req["body"] = body
-    return sc(f"{id_prefix}.other_account_path", "authorization",
-              f"A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account {method} cannot reach the mutation.",
+    if description is None:
+        description = f"A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account {method} cannot reach the mutation."
+    return sc(f"{id_prefix}.other_account_path", "authorization", description,
               "primary_profile", req, err(404, "not_found", message),
               notes="Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.")
 
@@ -132,10 +133,10 @@ def profiles():
         sc("profiles_list.sorted", "sorting", "Profiles are ordered by creation time ascending (primary first).", "authenticated", {"path": "/api/v1/profiles/"},
            {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 4}, {"pointer": "/profiles", "op": "sorted", "value": {"by": "/created_at", "direction": "asc"}}, {"pointer": "/profiles", "op": "unique_by", "value": "/id"}]}),
         sc("profiles_list.no_profile_needed", "authorization", "The list works without X-Profile-Id: it is what a client calls to pick one.", "authenticated", {"path": "/api/v1/profiles/"}, {"status": 200}),
-        sc("profiles_list.other_account", "authorization", "The admin sees only its own two profiles, never another account's.", "admin", {"path": "/api/v1/profiles/"},
-           {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 2}]}),
+        sc("profiles_list.other_account", "authorization", "The admin sees only its own three profiles, never another account's.", "admin", {"path": "/api/v1/profiles/"},
+           {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 3}]}),
         sc("profiles_list.api_key", "authorization", "An unscoped API key lists its owner's profiles (PIN verification is skipped for keys).", {"class": "api_key"}, {"path": "/api/v1/profiles/"},
-           {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 2}]}),
+           {"status": 200, "body": [{"pointer": "/profiles", "op": "length", "value": 3}]}),
         other_account_profile("profiles_list", "/api/v1/profiles/"),
         unauth("profiles_list", "GET", "/api/v1/profiles/"),
         sc("profiles_list.error_shape", "error", "Refusal envelope shape.", "public", {"path": "/api/v1/profiles/"}, {"status": 401, "body": ERR_SHAPE}),
@@ -232,7 +233,8 @@ def profiles():
         sc("verify_pin.missing", "error", "An empty pin is 400.", "authenticated", {"path": pin_path, "body": {"pin": ""}}, err(400, "bad_request", "PIN is required")),
         sc("verify_pin.malformed", "error", "A non-JSON body is 400.", "authenticated", {"path": pin_path, "raw_body": "x"}, err(400, "bad_request", "Invalid request body")),
         other_account_profile("verify_pin", pin_path, body={"pin": "1"}),
-        other_account_path("verify_pin", "POST", "/api/v1/profiles/${profile_admin_primary}/verify-pin", body={"pin": "${locked_pin}"}, message="Profile not found or has no PIN"),
+        other_account_path("verify_pin", "POST", "/api/v1/profiles/${profile_admin_locked}/verify-pin", body={"pin": "${admin_locked_pin}"}, message="Profile not found or has no PIN",
+                           description="A member's primary profile naming an admin-owned PIN-locked profile id in the path, with that profile's correct PIN, is 404 not_found: the per-account user store never sees the foreign row. The target has a PIN, so the same 404 cannot come from the no-PIN branch; a lookup that dropped the account scope would answer 200 valid."),
         unauth("verify_pin", "POST", pin_path, body={"pin": "1"}),
     ], not_applicable=na(NA_SINGLE, NA_RAW))
     avatar_path = "/api/v1/profiles/${profile_secondary}/avatar"
@@ -387,8 +389,8 @@ def onboarding():
     flow_row = row("GET", "/api/v1/onboarding/flow", [
         sc("flow.ok", "status_headers", "The tour manifest for the web surface: 200 JSON.", "profile", {"path": flow},
            {"status": 200, "headers": JSON_CT, "body": [{"pointer": "", "op": "keys_equal", "value": ["version", "tour_id", "steps"]}]}),
-        sc("flow.meaning", "data_meaning", "The current tour id and version are fixed constants; steps are non-empty and each has id and kind.", "profile", {"path": flow},
-           {"status": 200, "body": [{"pointer": "/tour_id", "op": "equals", "value": "core-2026-07"}, {"pointer": "/version", "op": "equals", "value": 1}, {"pointer": "/steps", "op": "non_empty"},
+        sc("flow.meaning", "data_meaning", "The current tour id and version are fixed constants; steps has at least two entries, each with id and kind, unique by id.", "profile", {"path": flow},
+           {"status": 200, "body": [{"pointer": "/tour_id", "op": "equals", "value": "core-2026-07"}, {"pointer": "/version", "op": "equals", "value": 1}, {"pointer": "/steps", "op": "min_length", "value": 2},
                                     {"pointer": "/steps", "op": "every", "value": {"pointer": "", "op": "keys_include", "value": ["id", "kind"]}}, {"pointer": "/steps", "op": "unique_by", "value": "/id"}]}),
         sc("flow.surface_filter", "filtering", "surface=tv (case-insensitive) drops the steps that need input (the setting_choice steps) and the web-only apps step; the welcome step stays.", "profile", {"path": flow, "query": {"surface": "TV"}},
            {"status": 200, "body": [{"pointer": "/steps", "op": "non_empty"}, {"pointer": "/steps", "op": "none", "value": {"pointer": "/kind", "op": "equals", "value": "setting_choice"}},

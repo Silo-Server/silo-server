@@ -274,31 +274,47 @@ func hasExecutableAssertion(row Row) bool {
 
 // Coverage summarizes the catalogs for reports and tests.
 type Coverage struct {
-	Catalogs    int
-	Rows        int
-	Scenarios   int
-	ByCategory  map[Category]int
-	CIRunnable  int
-	DBGated     int
-	Flagged     int
-	NotApplicab int
+	Catalogs   int
+	Rows       int
+	Scenarios  int
+	ByCategory map[Category]int
+	// OfflineCandidates counts the scenarios OfflineCandidate accepts. It is
+	// an upper bound on what the executor runs without a database; the
+	// executor's own count is authoritative (see the package doc).
+	OfflineCandidates int
+	DBGated           int
+	Flagged           int
+	NotApplicab       int
 }
 
-// Summarize counts rows and scenarios across catalogs.
-func Summarize(catalogs []*Catalog) Coverage {
+// OfflineCandidate reports whether a scenario can run without a database as
+// far as the catalog and ledger can tell: it needs no database itself, does
+// not require the rate limiter, and its row is not the rate-limited
+// registration variant (the executor sends those to the limited live router
+// so the row's real middleware chain is exercised). The executor applies one
+// more test the gate cannot: whether the offline router registers the row at
+// all.
+func OfflineCandidate(s Scenario, entry LedgerEntry) bool {
+	return !s.NeedsDatabase() && !s.HasRequirement("rate_limiter") && !entry.RateLimited()
+}
+
+// Summarize counts rows and scenarios across catalogs. byKey is the ledger
+// (LoadLedger), consulted for the rate-limited registration variants.
+func Summarize(catalogs []*Catalog, byKey map[contractledger.Key]LedgerEntry) Coverage {
 	cov := Coverage{ByCategory: map[Category]int{}}
 	for _, c := range catalogs {
 		cov.Catalogs++
 		for _, row := range c.Rows {
 			cov.Rows++
 			cov.NotApplicab += len(row.NotApplicable)
+			entry := byKey[row.Key()]
 			for _, s := range row.Scenarios {
 				cov.Scenarios++
 				cov.ByCategory[s.Category]++
-				if s.NeedsDatabase() {
-					cov.DBGated++
+				if OfflineCandidate(s, entry) {
+					cov.OfflineCandidates++
 				} else {
-					cov.CIRunnable++
+					cov.DBGated++
 				}
 				if s.Notes != "" {
 					cov.Flagged++

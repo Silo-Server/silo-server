@@ -81,6 +81,27 @@ func TestCollectionPredicatesAreNotVacuous(t *testing.T) {
 	other := `{"pointer": "/other", "op": "empty"}`
 	wantFailure(t, check(expectBody(t, other, sorted), jsonResponse(t, `{"items": [], "other": []}`)), "is vacuous")
 
+	// non_empty pins one element, which satisfies every/none but not an
+	// ordering or uniqueness over a single element; length/min_length do.
+	nonEmpty := `{"pointer": "/items", "op": "non_empty"}`
+	for _, spec := range []string{sorted, unique} {
+		wantFailure(t, check(expectBody(t, nonEmpty, spec), one), "is vacuous")
+	}
+	for _, spec := range []string{every, none} {
+		for _, f := range check(expectBody(t, nonEmpty, spec), empty) {
+			if strings.Contains(f, "is vacuous") {
+				t.Fatalf("%s with a non_empty guard should not be reported vacuous on []: %v", spec, f)
+			}
+		}
+	}
+	for _, guard := range []string{`{"pointer": "/items", "op": "length", "value": 1}`, `{"pointer": "/items", "op": "min_length", "value": 1}`} {
+		for _, spec := range []string{sorted, unique} {
+			if failures := check(expectBody(t, guard, spec), one); len(failures) != 0 {
+				t.Fatalf("%s with guard %s should pass on one element: %v", spec, guard, failures)
+			}
+		}
+	}
+
 	// With enough elements the predicates do their real work.
 	two := jsonResponse(t, `{"items": [{"id": 2}, {"id": 1}]}`)
 	wantFailure(t, check(expectBody(t, sorted), two), "not sorted")

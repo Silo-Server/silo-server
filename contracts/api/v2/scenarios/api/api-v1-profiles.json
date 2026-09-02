@@ -223,7 +223,7 @@
         {
           "id": "profiles_list.other_account",
           "category": "authorization",
-          "description": "The admin sees only its own two profiles, never another account's.",
+          "description": "The admin sees only its own three profiles, never another account's.",
           "principal": {
             "class": "admin"
           },
@@ -236,7 +236,7 @@
               {
                 "pointer": "/profiles",
                 "op": "length",
-                "value": 2
+                "value": 3
               }
             ]
           },
@@ -258,7 +258,7 @@
               {
                 "pointer": "/profiles",
                 "op": "length",
-                "value": 2
+                "value": 3
               }
             ]
           },
@@ -2708,14 +2708,14 @@
         {
           "id": "verify_pin.other_account_path",
           "category": "authorization",
-          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account POST cannot reach the mutation.",
+          "description": "A member's primary profile naming an admin-owned PIN-locked profile id in the path, with that profile's correct PIN, is 404 not_found: the per-account user store never sees the foreign row. The target has a PIN, so the same 404 cannot come from the no-PIN branch; a lookup that dropped the account scope would answer 200 valid.",
           "principal": {
             "class": "primary_profile"
           },
           "request": {
-            "path": "/api/v1/profiles/${profile_admin_primary}/verify-pin",
+            "path": "/api/v1/profiles/${profile_admin_locked}/verify-pin",
             "body": {
-              "pin": "${locked_pin}"
+              "pin": "${admin_locked_pin}"
             }
           },
           "expect": {

@@ -80,23 +80,32 @@ func check(exp scenariocatalog.Expect, resp response) []string {
 	}
 	sized := sizedPointers(exp.Body)
 	for _, a := range exp.Body {
-		if msg := checkBody(a, resp.Doc, sized[a.Pointer]); msg != "" {
+		if msg := checkBody(a, resp.Doc, sized[a.Pointer] >= minElements(a.Op)); msg != "" {
 			failures = append(failures, msg)
 		}
 	}
 	return failures
 }
 
-// sizedPointers collects the pointers whose array size the scenario pins
-// with its own predicate. The collection predicates (every, none, sorted,
-// unique_by) are vacuous on short arrays and only accept one when the
-// scenario says that size is the point.
-func sizedPointers(body []scenariocatalog.BodyAssertion) map[string]bool {
-	out := map[string]bool{}
+// sizedPointers maps each pointer to the strongest size guard the scenario
+// puts on it, in the units of minElements: non_empty pins one element,
+// which is all every and none need; empty, length, and min_length say the
+// scenario means that size, which covers sorted and unique_by as well. The
+// collection predicates are vacuous on short arrays and only accept one
+// under a guard that reaches the elements they need (the documented rule in
+// scenario-catalog.schema.json and docs/architecture/api-contract.md).
+func sizedPointers(body []scenariocatalog.BodyAssertion) map[string]int {
+	out := map[string]int{}
 	for _, a := range body {
+		guard := 0
 		switch a.Op {
-		case opEmpty, opLength, opMinLength, opNonEmpty:
-			out[a.Pointer] = true
+		case opNonEmpty:
+			guard = 1
+		case opEmpty, opLength, opMinLength:
+			guard = 2
+		}
+		if guard > out[a.Pointer] {
+			out[a.Pointer] = guard
 		}
 	}
 	return out
@@ -149,8 +158,9 @@ func checkHeader(h scenariocatalog.HeaderAssertion, headers http.Header) string 
 }
 
 // checkBody evaluates one predicate. sized says the scenario pins the size
-// of the array at the pointer, which lets a collection predicate accept an
-// array too short to test anything.
+// of the array at the pointer strongly enough for this predicate (see
+// sizedPointers), which lets a collection predicate accept an array too
+// short to test anything.
 func checkBody(a scenariocatalog.BodyAssertion, doc any, sized bool) string {
 	label := "body" + a.Pointer
 	if a.Why != "" {
@@ -160,7 +170,11 @@ func checkBody(a scenariocatalog.BodyAssertion, doc any, sized bool) string {
 	switch a.Op {
 	case opEvery, opNone, opSorted, opUniqueBy:
 		if arr, ok := got.([]any); found && ok && len(arr) < minElements(a.Op) && !sized {
-			return fmt.Sprintf("%s: %s over %d element(s) is vacuous; pin the size with empty/length/min_length on the same pointer if that is intended", label, a.Op, len(arr))
+			guards := "empty/length/min_length"
+			if minElements(a.Op) == 1 {
+				guards += "/non_empty"
+			}
+			return fmt.Sprintf("%s: %s over %d element(s) is vacuous; pin the size with %s on the same pointer if that is intended", label, a.Op, len(arr), guards)
 		}
 	}
 	var want any

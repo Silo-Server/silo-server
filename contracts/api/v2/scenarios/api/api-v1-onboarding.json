@@ -52,7 +52,7 @@
         {
           "id": "flow.meaning",
           "category": "data_meaning",
-          "description": "The current tour id and version are fixed constants; steps are non-empty and each has id and kind.",
+          "description": "The current tour id and version are fixed constants; steps has at least two entries, each with id and kind, unique by id.",
           "principal": {
             "class": "profile"
           },
@@ -74,7 +74,8 @@
               },
               {
                 "pointer": "/steps",
-                "op": "non_empty"
+                "op": "min_length",
+                "value": 2
               },
               {
                 "pointer": "/steps",

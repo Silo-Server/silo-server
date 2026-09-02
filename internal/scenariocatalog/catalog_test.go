@@ -18,9 +18,13 @@ func TestCatalogsPassGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cov := Summarize(catalogs)
-	t.Logf("catalogs=%d rows=%d scenarios=%d ci_runnable=%d db_gated=%d flagged=%d not_applicable=%d by_category=%v",
-		cov.Catalogs, cov.Rows, cov.Scenarios, cov.CIRunnable, cov.DBGated, cov.Flagged, cov.NotApplicab, cov.ByCategory)
+	ledger, err := LoadLedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cov := Summarize(catalogs, ledger)
+	t.Logf("catalogs=%d rows=%d scenarios=%d offline_candidates=%d db_gated=%d flagged=%d not_applicable=%d by_category=%v",
+		cov.Catalogs, cov.Rows, cov.Scenarios, cov.OfflineCandidates, cov.DBGated, cov.Flagged, cov.NotApplicab, cov.ByCategory)
 }
 
 func TestGateFailsWhenARowIsMissing(t *testing.T) {

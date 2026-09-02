@@ -133,9 +133,15 @@ const (
 	deviceIDA     = "fixture-device-a"
 	deviceIDB     = "fixture-device-b"
 
+	// adminLockedPIN locks a profile on the admin account so a cross-account
+	// verify-pin probe with the right PIN can only 404 through the account
+	// scope, never through the no-PIN branch.
+	adminLockedPIN = "1357"
+
 	// Profile IDs are fixed UUIDs so catalogs can name them directly.
 	profileAdminPrimary   = "00000000-0000-4000-8000-0000000000a1"
 	profileAdminSecondary = "00000000-0000-4000-8000-0000000000a2"
+	profileAdminLocked    = "00000000-0000-4000-8000-0000000000a3"
 	profilePrimary        = "00000000-0000-4000-8000-0000000000b1"
 	profileSecondary      = "00000000-0000-4000-8000-0000000000b2"
 	profileChild          = "00000000-0000-4000-8000-0000000000b3"
@@ -405,6 +411,18 @@ func (e *Env) Reseed() {
 	// Profiles. The first profile per account becomes primary.
 	e.mustProfile(admin.ID, userstore.Profile{ID: profileAdminPrimary, Name: "Fixture Admin"})
 	e.mustProfile(admin.ID, userstore.Profile{ID: profileAdminSecondary, Name: "Fixture Admin Two"})
+	// The admin's locked profile is only ever named in a path by another
+	// account; admin_secondary stays PIN-free because scenarios declare it
+	// as the acting profile and would otherwise stop at profile_unverified.
+	e.mustProfile(admin.ID, userstore.Profile{ID: profileAdminLocked, Name: "Fixture Admin Locked"})
+	adminPIN := adminLockedPIN
+	adminStore, err := e.stores.ForUser(ctx, admin.ID)
+	if err != nil {
+		e.t.Fatalf("scenario executor: admin store: %v", err)
+	}
+	if err := adminStore.UpdateProfile(ctx, profileAdminLocked, userstore.UpdateProfileInput{PIN: &adminPIN}); err != nil {
+		e.t.Fatalf("scenario executor: lock admin profile: %v", err)
+	}
 	e.mustProfile(member.ID, userstore.Profile{ID: profilePrimary, Name: "Fixture Parent"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileSecondary, Name: "Fixture Teen"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileChild, Name: "Fixture Kid", IsChild: true, MaxContentRating: "PG"})

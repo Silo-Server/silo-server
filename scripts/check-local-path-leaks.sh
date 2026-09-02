@@ -134,11 +134,35 @@ public_tld_host() {
 	return 1
 }
 
+# Source and config file extensions that collide with (or could join) the
+# TLD list: check-local-path-leaks.sh is a script, not a host on .sh.
+file_extensions=' sh py md go ts js json yml yaml txt sql toml '
+# Well-known extensionless file names that take a dotted suffix in practice
+# (Dockerfile.dev, Makefile.io); matched case-sensitively as the first label.
+file_basenames=' Makefile Dockerfile Containerfile Procfile Jenkinsfile Vagrantfile Brewfile Gemfile Rakefile README LICENSE CHANGELOG CONTRIBUTING '
+
+# filename_like succeeds for a dotted token that reads as a file name rather
+# than a host: its last label is a well-known file extension, or its first
+# label is a well-known bare file name.
+filename_like() {
+	local token=$1 ext base
+	ext=${token##*.}
+	ext=$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')
+	case "$file_extensions" in
+		*" $ext "*) return 0 ;;
+	esac
+	base=${token%%.*}
+	case "$file_basenames" in
+		*" $base "*) return 0 ;;
+	esac
+	return 1
+}
+
 # check_hosts is an allowlist: every host-shaped token the line pattern finds
 # is extracted with the token pattern and must satisfy reserved_host. With
-# --tld the token must also have a public TLD before it is judged at all
-# (the bare-hostname rule). ERE has no lookaround, so the filtering happens
-# here rather than in the regex.
+# --tld the token must also have a public TLD, and not read as a file name,
+# before it is judged at all (the bare-hostname rule). ERE has no lookaround,
+# so the filtering happens here rather than in the regex.
 check_hosts() {
 	local need_tld=0
 	if [[ "$1" == "--tld" ]]; then
@@ -168,7 +192,7 @@ check_hosts() {
 			[[ -z "$token" ]] && continue
 			# Strip the one-character context the token pattern needs.
 			token=$(printf '%s' "$token" | sed -E 's/^[^A-Za-z0-9@/[]//; s/[^]A-Za-z0-9.\\:-]+$//')
-			if [[ "$need_tld" -eq 1 ]] && ! public_tld_host "$token"; then
+			if [[ "$need_tld" -eq 1 ]] && { ! public_tld_host "$token" || filename_like "$token"; }; then
 				continue
 			fi
 			if ! reserved_host "$token"; then
@@ -229,13 +253,16 @@ check_hosts \
 	"$catalog_files" "$generator_files"
 
 # Schemeless dotted token: judged a hostname only when its last label is a
-# public TLD (any label count), not preceded by a path/URL/placeholder
-# character. Regex-escaped dots are accepted between labels.
+# public TLD (any label count) and it does not read as a file name, not
+# preceded by a path, URL, or ${...} placeholder character. A colon is
+# ordinary context (host:nas.homelab.cloud is a leak; key: catalog.search
+# passes on its last label, not on the colon). Regex-escaped dots are
+# accepted between labels.
 fqdn='([A-Za-z0-9-]+[\\]*\.)+[A-Za-z]{2,63}'
 check_hosts --tld \
 	"non-reserved bare hostname in a scenario catalog or generator" \
-	"(^|[^A-Za-z0-9._\$/@:\\\\-])${fqdn}([^A-Za-z0-9._-]|\$)" \
-	"(^|[^A-Za-z0-9._\$/@:\\\\-])${fqdn}([^A-Za-z0-9._-]|\$)" \
+	"(^|[^A-Za-z0-9._\$/@{\\\\-])${fqdn}([^A-Za-z0-9._-]|\$)" \
+	"(^|[^A-Za-z0-9._\$/@{\\\\-])${fqdn}([^A-Za-z0-9._-]|\$)" \
 	"$catalog_files" "$generator_files"
 
 # Non-loopback IPv4 literal (first octet 1-126 or 128-255), anchored on

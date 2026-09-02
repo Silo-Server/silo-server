@@ -72,16 +72,15 @@ func (e *Env) Run(t *testing.T, c *scenariocatalog.Catalog, row scenariocatalog.
 	t.Helper()
 	res := Result{Catalog: c.File, Row: row.Key().String(), Scenario: s.ID}
 	defer func() { record(res) }()
-	needsDB := s.NeedsDatabase()
 	dbUnavailable := s.HasRequirement("database_unavailable")
 	// A scenario on the rate-limited registration variant (#1 rows, which
 	// the router only registers with a rate-limit middleware) runs on the
 	// limited router whatever it asserts, so the row's real middleware
 	// chain is the one exercised. requires: rate_limiter forces the same.
 	rateLimited := s.HasRequirement("rate_limiter") || e.rowRateLimited(row)
-	if rateLimited {
-		needsDB = true
-	}
+	// The gate's offline_candidates count applies this same predicate; the
+	// offline-router test below is the one thing the gate cannot see.
+	needsDB := !scenariocatalog.OfflineCandidate(s, e.ledger[row.Key()])
 	if !dbUnavailable && !e.OfflineHas(row.Method, row.Path) {
 		// The row is registered only with a user store / auth middleware
 		// present, so even its public cases need the live router.
@@ -360,6 +359,8 @@ func (e *Env) placeholder(name string) (string, bool) {
 		return browserCodeEx, true
 	case "locked_pin":
 		return lockedPIN, true
+	case "admin_locked_pin":
+		return adminLockedPIN, true
 	case "device_a":
 		return deviceIDA, true
 	case "device_b":
@@ -368,6 +369,8 @@ func (e *Env) placeholder(name string) (string, bool) {
 		return profileAdminPrimary, true
 	case "profile_admin_secondary":
 		return profileAdminSecondary, true
+	case "profile_admin_locked":
+		return profileAdminLocked, true
 	case "profile_primary":
 		return profilePrimary, true
 	case "profile_secondary":

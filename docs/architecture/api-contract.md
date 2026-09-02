@@ -960,9 +960,9 @@ outcome, optional principal) executed after the primary request in the same fixt
 cross-request effect (the device poll after an approval, the GET after a PUT) is asserted rather
 than described. The collection predicates `every`, `none`, `sorted`, and `unique_by` fail on an
 array too short to test (empty for `every`/`none`, fewer than two elements for the others)
-unless the same scenario pins that array's size with `empty`, `length`, `min_length`, or
-`non_empty` on the same pointer; the default `json` body kind fails on a body that does not
-decode, and `text` compares the raw bytes.
+unless the same scenario pins that array's size on the same pointer: `empty`, `length`, or
+`min_length` satisfy all four, `non_empty` only `every`/`none`; the default `json` body kind
+fails on a body that does not decode, and `text` compares the raw bytes.
 
 Fixture privacy follows the contract-fixture rule above: identities, profiles, codes, and
 tokens are deterministic synthetic values under reserved origins; credentials are minted at run

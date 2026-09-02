@@ -14,6 +14,15 @@
 //
 // The executor that runs the scenarios against the real router lives in the
 // executor subpackage so the gate stays free of handler dependencies.
+//
+// Summarize reports coverage counts for the gate's log. Its
+// offline_candidates figure applies OfflineCandidate, which is everything the
+// catalog and ledger can say about running without a database: the scenario
+// needs none itself and its row is not the rate-limited registration variant.
+// The executor's offline run is authoritative and its count is at most the
+// gate's, because the executor also drops rows the offline router never
+// registers (handlers that exist only with a user store), which the gate
+// cannot see without building the router.
 package scenariocatalog
 
 import (
