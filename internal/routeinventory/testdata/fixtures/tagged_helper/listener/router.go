@@ -62,3 +62,8 @@ func newRouter(enableAdmin bool, adminHandler *Handlers) chi.Router {
 	})
 	return r
 }
+
+// handler is the target of the build-constrained registration in arch_amd64.go;
+// it lives here so the fixture type-checks under every GOARCH and the
+// constraint sweep, not a compile error, is what refuses it.
+func handler(w http.ResponseWriter, r *http.Request) {}
