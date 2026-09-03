@@ -149,6 +149,68 @@ func TestApplyCompatMaxStreamingBitrateCap(t *testing.T) {
 	}
 }
 
+func TestCompatLiveTranscodeHonorsMaxStreamingBitrateCap(t *testing.T) {
+	source1080p := PlaybackMediaSource{
+		Version: catalog.FileVersion{FileID: 1, Resolution: "1080p", Bitrate: 20_000},
+	}
+	tests := []struct {
+		name   string
+		opts   playback.TranscodeOpts
+		source PlaybackMediaSource
+		want   bool
+	}{
+		{
+			name:   "no cap always honored",
+			opts:   playback.TranscodeOpts{TargetBitrateKbps: 20_000},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 0},
+			want:   true,
+		},
+		{
+			name:   "video copy exempt from cap",
+			opts:   playback.TranscodeOpts{TargetCodecVideo: compatCopyCodec},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420},
+			want:   true,
+		},
+		{
+			name:   "unset live bitrate does not honor a cap",
+			opts:   playback.TranscodeOpts{TargetCodecVideo: compatTargetVideoCodec, TargetBitrateKbps: 0},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420},
+			want:   false,
+		},
+		{
+			name:   "live bitrate above the new cap does not honor it",
+			opts:   playback.TranscodeOpts{TargetCodecVideo: compatTargetVideoCodec, TargetBitrateKbps: 20_000},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420},
+			want:   false,
+		},
+		{
+			name:   "live bitrate under cap but source resolution not downscaled",
+			opts:   playback.TranscodeOpts{TargetCodecVideo: compatTargetVideoCodec, TargetBitrateKbps: 400},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420},
+			want:   false,
+		},
+		{
+			name:   "live bitrate and resolution both honor the cap",
+			opts:   playback.TranscodeOpts{TargetCodecVideo: compatTargetVideoCodec, TargetBitrateKbps: 400, TargetResolution: "480p"},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420},
+			want:   true,
+		},
+		{
+			name:   "cap loosened by a fresh negotiation is still honored by a tighter live encode",
+			opts:   playback.TranscodeOpts{TargetCodecVideo: compatTargetVideoCodec, TargetBitrateKbps: 4_000, TargetResolution: "720p"},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 10_000},
+			want:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compatLiveTranscodeHonorsMaxStreamingBitrateCap(tt.opts, tt.source); got != tt.want {
+				t.Errorf("compatLiveTranscodeHonorsMaxStreamingBitrateCap() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 	version4K := catalog.FileVersion{
 		FileID:     1,

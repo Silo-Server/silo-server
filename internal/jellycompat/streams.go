@@ -2745,6 +2745,14 @@ func downgradeCompatLocalToneMap(opts *playback.TranscodeOpts, capabilities tone
 	return true
 }
 
+// compatLiveTranscodeMatchesAudioSource reports whether a running transcode
+// still matches the negotiated source: same audio selection, same copy-video
+// choice, and — when the source carries a MaxStreamingBitrate cap — an encode
+// that still honors it. Every call site that decides whether to reuse a live
+// process gates on this function, so a live process minted before the cap
+// took effect (or before a viewer picked an even lower quality) must fail the
+// match here, or the viewer keeps streaming at the stale bitrate/resolution
+// for the rest of playback.
 func compatLiveTranscodeMatchesAudioSource(transcodeSession *playback.TranscodeSession, source PlaybackMediaSource) bool {
 	if transcodeSession == nil {
 		return false
@@ -2752,7 +2760,31 @@ func compatLiveTranscodeMatchesAudioSource(transcodeSession *playback.TranscodeS
 	opts := transcodeSession.Opts()
 	return opts.AudioTrackIndex == compatAudioTrackIndexOrDefault(source) &&
 		opts.SourceAudioChannels == compatHLSRecipeSourceAudioChannels(source) &&
-		opts.CopyVideoMPEGTS == source.HLSRemuxMPEGTS
+		opts.CopyVideoMPEGTS == source.HLSRemuxMPEGTS &&
+		compatLiveTranscodeHonorsMaxStreamingBitrateCap(opts, source)
+}
+
+// compatLiveTranscodeHonorsMaxStreamingBitrateCap reports whether an
+// already-running transcode's bitrate and resolution still satisfy the
+// source's currently negotiated MaxStreamingBitrate cap. No cap (0) or a
+// video-copy transport is always satisfied: a cap that permits copy in the
+// first place doesn't bound an encode that isn't happening.
+func compatLiveTranscodeHonorsMaxStreamingBitrateCap(opts playback.TranscodeOpts, source PlaybackMediaSource) bool {
+	if source.MaxStreamingBitrateKbps <= 0 || opts.TargetCodecVideo == compatCopyCodec {
+		return true
+	}
+	if opts.TargetBitrateKbps <= 0 || opts.TargetBitrateKbps > source.MaxStreamingBitrateKbps {
+		return false
+	}
+	resCap := compatMaxResolutionForBitrateKbps(source.MaxStreamingBitrateKbps)
+	if resCap == "" {
+		return true
+	}
+	sourceHeight := compatSourceVideoHeight(source.Version)
+	if sourceHeight <= 0 || sourceHeight <= compatResolutionCeilingHeight(resCap) {
+		return true
+	}
+	return opts.TargetResolution != "" && compatResolutionCeilingHeight(opts.TargetResolution) <= compatResolutionCeilingHeight(resCap)
 }
 
 func shouldGenerateCompatFullManifest(source PlaybackMediaSource, segmentDuration int) bool {
