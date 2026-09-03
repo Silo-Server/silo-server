@@ -3918,6 +3918,35 @@ func TestBitmapFastStartKeepsDefaultTimelineAndSessionSegments(t *testing.T) {
 	}
 }
 
+func TestV3SessionOutputFormatMatchesDelivery(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	for _, tc := range []struct {
+		name                                string
+		delivery                            playback.DeliveryV3
+		source, target, container, protocol string
+	}{
+		{"hevc-copy-default", playback.DeliveryRemuxHLSV3, "hevc", "", "fmp4", "hls"},
+		{"mpeg2-copy", playback.DeliveryRemuxHLSV3, "mpeg2video", "copy", "mpegts", "hls"},
+		{"video-encode", playback.DeliveryTranscodeHLSV3, "hevc", "h264", "mpegts", "hls"},
+		{"progressive", playback.DeliveryRemuxProgressiveV3, "hevc", "copy", "fmp4", "http"},
+		{"original", playback.DeliveryOriginalHTTPV3, "hevc", "", "mkv", "http"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := playback.PlannerResultV3{
+				Plan: &playback.PlanV3{Delivery: tc.delivery}, TargetVideoCodec: tc.target,
+				FrozenSourceMetadata: &playback.SourceExecutionMetadataV3{VideoCodec: tc.source},
+			}
+			state := handler.v3SessionStreamState(context.Background(), &playback.Session{}, &models.MediaFile{Container: "mkv"}, result, preparedTransportV3{}, mediaAuthModeV3{})
+			if state.OutputContainer != tc.container || state.OutputProtocol != tc.protocol {
+				t.Fatalf("output = %s/%s, want %s/%s", state.OutputContainer, state.OutputProtocol, tc.container, tc.protocol)
+			}
+			if tc.delivery == playback.DeliveryRemuxHLSV3 && state.TargetVideoCodec != "copy" {
+				t.Fatal("remux delivery must report the executor's copy decision")
+			}
+		})
+	}
+}
+
 func TestTransportGenerationV3IsUniqueAndSessionScoped(t *testing.T) {
 	first := transportGenerationV3("session-1", "plan:abcdef")
 	second := transportGenerationV3("session-1", "plan:abcdef")

@@ -172,6 +172,16 @@ type transcodeStreamDetailsSetter interface {
 	SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode) error
 }
 
+type outputFormatSetter interface {
+	SetOutputFormat(sessionID, container, protocol string) error
+}
+
+func (h *PlaybackHandler) recordOutputFormat(sessionID, container, protocol string) {
+	if setter, ok := h.sessionMgr.(outputFormatSetter); ok {
+		_ = setter.SetOutputFormat(sessionID, container, protocol)
+	}
+}
+
 type nodeRoutingAssignmentSetter interface {
 	SetNodeRoutingAssignment(sessionID string, assignment playback.NodeRoutingAssignment) error
 }
@@ -210,6 +220,7 @@ func (h *PlaybackHandler) recordNodeRoutingAssignment(ctx context.Context, playS
 // activity views as a full video transcode. Shared by the local
 // (ensureTranscodeSession) and remote (startRemoteTranscode) paths.
 func (h *PlaybackHandler) recordTranscodeStreamDetails(ctx context.Context, upstreamSessionID string, opts playback.TranscodeOpts) {
+	h.recordOutputFormat(upstreamSessionID, playback.HLSOutputContainer(opts), playback.OutputProtocolHLS)
 	setter, ok := h.sessionMgr.(transcodeStreamDetailsSetter)
 	if !ok {
 		return

@@ -463,6 +463,9 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	// The attach above is a no-op on the first request of a session, which has
 	// no upstream id yet. Now it does, and no byte has been written.
 	attachCompatStream(r.Context(), session, playSession, source.FileID)
+	if method == "remux" {
+		h.recordOutputFormat(playSession.UpstreamSessionID, playback.OutputContainerFMP4, playback.OutputProtocolHTTP)
+	}
 
 	if h.fileResolver == nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")

@@ -13,7 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Film, FileVideo, Users, Play } from "lucide-react";
 import type { AdminSession, AdminStats } from "@/api/types";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
-import { classifyActivityMethod, getSessionClientLabel } from "@/pages/adminActivityPresentation";
+import {
+  activityMethodMeta,
+  classifyActivityMethod,
+  getSessionClientLabel,
+} from "@/pages/adminActivityPresentation";
 import { formatDateTime } from "@/lib/datetime";
 
 export default function AdminStats() {
@@ -125,7 +129,7 @@ function SessionsSection({
                   <TableCell className="font-mono text-xs">{s.session_id.slice(0, 8)}...</TableCell>
                   <TableCell>{s.user_id}</TableCell>
                   <TableCell>{s.media_file_id}</TableCell>
-                  <TableCell className="capitalize">{classifyActivityMethod(s)}</TableCell>
+                  <TableCell>{activityMethodMeta(classifyActivityMethod(s)).label}</TableCell>
                   <TableCell>
                     <span className="inline-flex items-center gap-1.5">
                       {getSessionClientLabel(s) || "—"}

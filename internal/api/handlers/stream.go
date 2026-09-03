@@ -199,6 +199,11 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case playback.PlayRemux:
+		if setter, ok := h.sessionMgr.(interface {
+			SetOutputFormat(string, string, string) error
+		}); ok {
+			_ = setter.SetOutputFormat(sessionID, playback.OutputContainerFMP4, playback.OutputProtocolHTTP)
+		}
 		if err := h.sessionMgr.BeginTransport(sessionID); err == nil {
 			defer func() {
 				_ = h.sessionMgr.EndTransport(sessionID)
