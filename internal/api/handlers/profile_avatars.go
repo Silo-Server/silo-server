@@ -42,6 +42,7 @@ var supportedDiceBearAvatarStyles = map[string]struct{}{
 }
 
 type profileAvatarStore interface {
+	GetObject(ctx context.Context, bucket, key string) ([]byte, error)
 	PutObject(ctx context.Context, bucket, key string, data []byte) error
 	DeleteObject(ctx context.Context, bucket, key string) error
 	ListObjects(ctx context.Context, bucket, prefix string) ([]string, error)

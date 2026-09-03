@@ -709,6 +709,38 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET rating = CASE WHEN EXCLUDED.rated_at >= user_ratings.rated_at THEN EXCLUDED.rating ELSE user_ratings.rating END,
 			    rated_at = GREATEST(user_ratings.rated_at, EXCLUDED.rated_at)`},
+	{"merge rating reactions", `
+			INSERT INTO household_rating_reactions (
+				media_item_id,
+				target_user_id,
+				target_profile_id,
+				reactor_user_id,
+				reactor_profile_id,
+				reaction,
+				reacted_at
+			)
+			SELECT $2,
+			       target_user_id,
+			       target_profile_id,
+			       reactor_user_id,
+			       reactor_profile_id,
+			       reaction,
+			       reacted_at
+			FROM household_rating_reactions
+			WHERE media_item_id = $1
+			ON CONFLICT (
+				media_item_id,
+				target_user_id,
+				target_profile_id,
+				reactor_user_id,
+				reactor_profile_id
+			) DO UPDATE
+			SET reaction = CASE
+					WHEN EXCLUDED.reacted_at >= household_rating_reactions.reacted_at
+					THEN EXCLUDED.reaction
+					ELSE household_rating_reactions.reaction
+				END,
+			    reacted_at = GREATEST(household_rating_reactions.reacted_at, EXCLUDED.reacted_at)`},
 	{"delete source ratings", `DELETE FROM user_ratings WHERE media_item_id = $1`},
 	{"merge progress", `
 			INSERT INTO user_watch_progress (

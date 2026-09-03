@@ -1292,6 +1292,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
   }
 
+  .star-rating-community-fill {
+    color: rgb(250 204 21 / 0.38);
+  }
+
   /* The stored rating is the resting state, so it survives a pointer that is
      inside the pill but not over a star (its padding, the gaps between stars)
      and it still renders where :has() is unsupported. */
@@ -1299,7 +1303,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     color: rgb(250 204 21);
   }
 
-  .star-rating-star[data-filled="true"] svg {
+  .star-rating-star[data-filled="true"] .star-rating-personal {
     fill: currentcolor;
   }
 
@@ -1309,8 +1313,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
   }
 
-  .star-rating:has(.star-rating-star:hover) .star-rating-star svg {
+  .star-rating:has(.star-rating-star:hover) .star-rating-personal {
     fill: none;
+  }
+
+  .star-rating:has(.star-rating-star:hover) .star-rating-community-fill {
+    opacity: 0;
   }
 
   .star-rating:has(.star-rating-star:nth-of-type(1):hover) .star-rating-star:nth-of-type(-n + 1),
@@ -1323,20 +1331,30 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   .star-rating:has(.star-rating-star:nth-of-type(1):hover)
     .star-rating-star:nth-of-type(-n + 1)
-    svg,
+    .star-rating-personal,
   .star-rating:has(.star-rating-star:nth-of-type(2):hover)
     .star-rating-star:nth-of-type(-n + 2)
-    svg,
+    .star-rating-personal,
   .star-rating:has(.star-rating-star:nth-of-type(3):hover)
     .star-rating-star:nth-of-type(-n + 3)
-    svg,
+    .star-rating-personal,
   .star-rating:has(.star-rating-star:nth-of-type(4):hover)
     .star-rating-star:nth-of-type(-n + 4)
-    svg,
+    .star-rating-personal,
   .star-rating:has(.star-rating-star:nth-of-type(5):hover)
     .star-rating-star:nth-of-type(-n + 5)
-    svg {
+    .star-rating-personal {
     fill: currentcolor;
+  }
+
+  /* Community rating cards are deliberately opaque and isolated from the
+     backdrop. Scrolling or reacting never asks the browser to resample a live
+     blur surface. */
+  .household-rating-card {
+    contain: layout paint;
+    background: color-mix(in srgb, var(--surface) 88%, var(--background));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   /* Less-transparent glass for small chips that sit over busy cover art

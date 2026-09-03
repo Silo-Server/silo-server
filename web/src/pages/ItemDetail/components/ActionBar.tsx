@@ -123,6 +123,8 @@ export interface ActionBarProps {
   onSearchSubtitles?: () => void;
   rating?: number | null;
   onRatingChange?: (rating: number | null) => void;
+  communityRatingAverage?: number | null;
+  communityRatingVoteCount?: number;
   qualityPreference?: string | null;
   audioSelectionMode?: "auto" | "explicit";
   explicitAudioTrackIndex?: number | null;
@@ -175,6 +177,8 @@ export default function ActionBar({
   onSearchSubtitles,
   rating,
   onRatingChange,
+  communityRatingAverage,
+  communityRatingVoteCount,
   audioSelectionMode = "auto",
   explicitAudioTrackIndex = null,
   onSelectAudioTrack,
@@ -549,7 +553,13 @@ export default function ActionBar({
         )}
 
         {onRatingChange && (
-          <StarRating value={rating ?? null} onChange={onRatingChange} size={18} />
+          <StarRating
+            value={rating ?? null}
+            onChange={onRatingChange}
+            size={18}
+            communityAverage={communityRatingAverage}
+            communityVoteCount={communityRatingVoteCount}
+          />
         )}
 
         {hasOverflowMenuItems && (

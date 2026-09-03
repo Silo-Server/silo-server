@@ -402,3 +402,72 @@ func TestRun_PreviewRollsBack(t *testing.T) {
 		t.Fatalf("after rollback progress item = %q, want untouched %q", got, from)
 	}
 }
+
+func TestMergeRatingReactionCollisionsDeduplicatesManySourcesToOneDestination(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	sourceOne := fmt.Sprintf("rating-source-one-%d", env.suffix)
+	sourceTwo := fmt.Sprintf("rating-source-two-%d", env.suffix)
+	destination := fmt.Sprintf("rating-destination-%d", env.suffix)
+	reactorProfileID := fmt.Sprintf("reactor-%d", env.suffix)
+
+	if _, err := env.pool.Exec(ctx, `
+		INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
+		VALUES ($1, $2, $3, 3, now() - interval '3 hours'),
+		       ($1, $2, $4, 4, now() - interval '2 hours'),
+		       ($1, $2, $5, 5, now() - interval '1 hour')`,
+		env.userID, env.profileID, sourceOne, sourceTwo, destination,
+	); err != nil {
+		t.Fatalf("seed ratings: %v", err)
+	}
+	if _, err := env.pool.Exec(ctx, `
+		INSERT INTO household_rating_reactions (
+			media_item_id,
+			target_user_id,
+			target_profile_id,
+			reactor_user_id,
+			reactor_profile_id,
+			reaction,
+			reacted_at
+		)
+		VALUES ($1, $3, $4, $3, $5, 1, now() - interval '2 hours'),
+		       ($2, $3, $4, $3, $5, -1, now() - interval '1 hour')`,
+		sourceOne, sourceTwo, env.userID, env.profileID, reactorProfileID,
+	); err != nil {
+		t.Fatalf("seed rating reactions: %v", err)
+	}
+
+	tx, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := mergeRatingReactionCollisions(
+		ctx,
+		tx,
+		[]string{sourceOne, sourceTwo},
+		[]string{destination, destination},
+	); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("merge reactions: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var count, reaction int
+	if err := env.pool.QueryRow(ctx, `
+		SELECT count(*), max(reaction)
+		FROM household_rating_reactions
+		WHERE media_item_id = $1
+		  AND target_user_id = $2
+		  AND target_profile_id = $3
+		  AND reactor_user_id = $2
+		  AND reactor_profile_id = $4`,
+		destination, env.userID, env.profileID, reactorProfileID,
+	).Scan(&count, &reaction); err != nil {
+		t.Fatalf("load destination reaction: %v", err)
+	}
+	if count != 1 || reaction != -1 {
+		t.Fatalf("destination reaction = count %d value %d, want one newest reaction (-1)", count, reaction)
+	}
+}

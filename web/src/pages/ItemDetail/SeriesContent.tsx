@@ -26,6 +26,7 @@ import ExtrasSection from "./components/ExtrasSection";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
 import MediaUserActionBar from "./components/MediaUserActionBar";
+import RatingsSection from "./components/RatingsSection";
 import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
@@ -205,6 +206,8 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
           similarData?.items &&
           similarData.items.length > 0 && <RecommendationGrid items={similarData.items} />
         )}
+
+        <RatingsSection itemId={item.content_id} />
       </div>
       {canCurateMetadata && (
         <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { AdminSession, Profile, CreateProfileRequest, ProfileListResponse } from "@/api/types";
-import { profileKeys } from "./keys";
+import { profileKeys, ratingKeys } from "./keys";
 import { toast } from "sonner";
 
 function replaceProfileInList(profiles: Profile[] | undefined, updatedProfile: Profile) {
@@ -84,6 +84,7 @@ export function useUpdateProfile() {
       });
       toast.success("Profile updated");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
+      queryClient.invalidateQueries({ queryKey: ratingKeys.all });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save profile");
@@ -109,6 +110,7 @@ export function useUploadProfileAvatar() {
       }));
       toast.success("Avatar updated");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
+      queryClient.invalidateQueries({ queryKey: ratingKeys.all });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
@@ -130,6 +132,7 @@ export function useDeleteProfileAvatar() {
       }));
       toast.success("Avatar removed");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
+      queryClient.invalidateQueries({ queryKey: ratingKeys.all });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to remove avatar");
@@ -144,6 +147,7 @@ export function useDeleteProfile() {
     onSuccess: () => {
       toast.success("Profile deleted");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
+      queryClient.invalidateQueries({ queryKey: ratingKeys.all });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to delete");

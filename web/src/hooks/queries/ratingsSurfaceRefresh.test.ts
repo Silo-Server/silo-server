@@ -11,6 +11,11 @@ describe("invalidateRatingSurfaceQueries", () => {
       rating: 4,
       rated_at: "2026-03-23T00:00:00.000Z",
     });
+    queryClient.setQueryData(ratingKeys.community("item-1"), {
+      average_rating: null,
+      vote_count: 0,
+      ratings: [],
+    });
     queryClient.setQueryData(recKeys.forYouMain(), { row: null });
     queryClient.setQueryData(recKeys.forYouRows(), { rows: [] });
     queryClient.setQueryData(recKeys.tasteProfile(), {
@@ -29,6 +34,7 @@ describe("invalidateRatingSurfaceQueries", () => {
     await invalidateRatingSurfaceQueries(queryClient, "item-1");
 
     expect(queryClient.getQueryState(ratingKeys.item("item-1"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(ratingKeys.community("item-1"))?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(recKeys.forYouMain())?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(recKeys.forYouRows())?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(recKeys.tasteProfile())?.isInvalidated).toBe(true);

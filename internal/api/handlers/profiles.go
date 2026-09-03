@@ -36,6 +36,11 @@ type ProfileHandler struct {
 	DeviceLibraryPurger interface {
 		PurgeProfileDevices(ctx context.Context, userID int, profileID string) error
 	}
+	// RatingProfilePurger removes shared PostgreSQL ratings and reactions for
+	// profiles stored outside PostgreSQL.
+	RatingProfilePurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
 	// EventsHub, when set, receives a user_settings.changed event for every
 	// canonical setting row a profile mutation syncs (see
 	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
@@ -623,6 +628,21 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Shared rating data lives in PostgreSQL even when the profile itself lives
+	// in per-user SQLite. Purge it first so a database failure leaves the
+	// profile intact and retryable instead of returning success with an orphaned
+	// community card.
+	if h.RatingProfilePurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+		purgeErr := h.RatingProfilePurger.PurgeProfile(purgeCtx, userID, profileID)
+		cancel()
+		if purgeErr != nil {
+			slog.ErrorContext(r.Context(), "profile rating purge failed before delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to remove profile rating data")
+			return
+		}
+	}
+
 	if err := store.DeleteProfile(r.Context(), profileID); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
 		return
@@ -639,7 +659,6 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 			slog.WarnContext(r.Context(), "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 

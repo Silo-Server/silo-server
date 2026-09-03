@@ -1145,6 +1145,31 @@ export interface ItemExtra {
   file_id?: number;
 }
 
+export type CommunityRatingReaction = "up" | "down";
+
+export interface RatingsCapabilities {
+  community_ratings: boolean;
+  community_rating_reactions: boolean;
+}
+
+export interface CommunityRatingEntry {
+  key: string;
+  display_name: string;
+  avatar_url?: string;
+  rating: number;
+  rated_at: string;
+  up_count: number;
+  down_count: number;
+  viewer_reaction?: CommunityRatingReaction;
+  is_viewer: boolean;
+}
+
+export interface CommunityRatingsResponse {
+  average_rating: number | null;
+  vote_count: number;
+  ratings: CommunityRatingEntry[];
+}
+
 export interface ItemDetail {
   content_id: string;
   play_content_id?: string;
