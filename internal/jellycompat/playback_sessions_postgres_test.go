@@ -126,6 +126,49 @@ func TestDurableStaticAttachmentRejectsStaleWriter(t *testing.T) {
 	}
 }
 
+func TestDurableStaticAttachmentPreservesUncommittedPendingUpdate(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	id := fmt.Sprintf("static-pending-attachment-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
+	first := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	first.Put(PlaybackSession{ID: id, CompatToken: "example-token"})
+	if _, ok := second.Get(id); !ok {
+		t.Fatal("second API instance did not cache the reservation")
+	}
+	second.appendPendingUpdate(id, "example-token", func(session *PlaybackSession) error {
+		session.InitialSeekSeconds = 37
+		return nil
+	})
+	if err := first.Update(id, func(session *PlaybackSession) error {
+		session.UpstreamSessionID = "winner"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := second.Update(id, func(session *PlaybackSession) error {
+		if session.UpstreamSessionID != "" {
+			return errUpstreamReplaced
+		}
+		session.UpstreamSessionID = "loser"
+		return nil
+	})
+	if !errors.Is(err, errUpstreamReplaced) {
+		t.Fatalf("attachment = %v, want rejected compare-and-set", err)
+	}
+	if len(second.pendingUpdatesSnapshot(id)) != 1 {
+		t.Fatal("rollback discarded the unrelated pending update or queued the losing attachment")
+	}
+	if err := second.Update(id, func(*PlaybackSession) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := NewDurableCompatPlaybackStore(pool, time.Hour, nil).Get(id)
+	if !ok || got.UpstreamSessionID != "winner" || got.InitialSeekSeconds != 37 || second.hasPendingUpdates(id) {
+		t.Fatal("pending update was not committed without replacing the winning attachment")
+	}
+}
+
 // BenchmarkDurableStaticReservationReuse measures the reservation transaction,
 // not native playback startup or media delivery. Run only on a test database.
 func BenchmarkDurableStaticReservationReuse(b *testing.B) {

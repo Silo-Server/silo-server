@@ -859,7 +859,9 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 		// reflects any concurrent writer's fields that fn merged on top of.
 		d.mem.Put(*committed)
 		d.markIDValidated(committed.ID)
-		if len(pending) > 0 {
+		// On a rejected CAS this is the authoritative pre-transaction row,
+		// not a commit of the pending mutations. Keep those mutations for retry.
+		if err == nil && len(pending) > 0 {
 			d.consumePendingUpdates(id, pending[len(pending)-1].sequence)
 		}
 	}
