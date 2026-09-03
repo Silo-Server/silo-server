@@ -28,14 +28,26 @@ describe("pointer-capability gating", () => {
   it("overrides Tailwind's hover variant onto the attribute", () => {
     // Without this, every `hover:` and `group-hover:` utility compiles into
     // `@media (hover: hover)` and is inert on the affected devices.
-    expect(css).toMatch(/@custom-variant hover \(:root\[data-fine-pointer="true"\] &:hover\);/);
+    expect(css).toMatch(
+      /@custom-variant hover \(:where\(:root\[data-fine-pointer="true"\]\) &:hover\);/,
+    );
+  });
+
+  it("keeps the gate at zero specificity everywhere it appears", () => {
+    // Tailwind orders its state variants by specificity. An unwrapped gate
+    // would make every hover: utility out-weigh disabled:, active: and
+    // focus-visible: on every device, not just the ones this works around.
+    const all = css.match(/:root\[data-fine-pointer="true"\]/g) ?? [];
+    const wrapped = css.match(/:where\(:root\[data-fine-pointer="true"\]\)/g) ?? [];
+    expect(all.length).toBeGreaterThan(0);
+    expect(wrapped).toHaveLength(all.length);
   });
 
   it("gates the card reveals on the attribute", () => {
     for (const selector of [
-      String.raw`:root\[data-fine-pointer="true"\] \.group\\/card:hover \.media-card-action-trigger`,
-      String.raw`:root\[data-fine-pointer="true"\] \.group\\/media:hover \.media-card-play-trigger`,
-      String.raw`:root\[data-fine-pointer="true"\] \.group\\/media:hover \.media-card-hover-dim`,
+      String.raw`:where\(:root\[data-fine-pointer="true"\]\) \.group\\/card:hover \.media-card-action-trigger`,
+      String.raw`:where\(:root\[data-fine-pointer="true"\]\) \.group\\/media:hover \.media-card-play-trigger`,
+      String.raw`:where\(:root\[data-fine-pointer="true"\]\) \.group\\/media:hover \.media-card-hover-dim`,
     ]) {
       expect(css).toMatch(new RegExp(selector));
     }

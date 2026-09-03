@@ -23,6 +23,27 @@
 const FINE_POINTER_ATTR = "data-fine-pointer";
 const FINE_POINTER_QUERY = "(any-hover: hover) and (any-pointer: fine)";
 
+// Components decide what to mount from this too, not just CSS, so the value has
+// to be subscribable rather than only readable off the DOM.
+const listeners = new Set<() => void>();
+
+/**
+ * The published capability, or undefined when nothing has published one —
+ * server rendering, tests, and any browser where init has not run. Callers keep
+ * their own established default in that case rather than being told "coarse".
+ */
+export function readFinePointer(doc: Document = document): boolean | undefined {
+  const value = doc.documentElement.getAttribute(FINE_POINTER_ATTR);
+  return value === null ? undefined : value === "true";
+}
+
+export function subscribeFinePointer(onChange: () => void): () => void {
+  listeners.add(onChange);
+  return () => {
+    listeners.delete(onChange);
+  };
+}
+
 interface PointerCapabilityDeps {
   doc: Document;
   win: Window;
@@ -35,8 +56,16 @@ export function initPointerCapability(deps?: Partial<PointerCapabilityDeps>): ()
 
   const set = (fine: boolean) => {
     const next = fine ? "true" : "false";
-    if (root.getAttribute(FINE_POINTER_ATTR) !== next) root.setAttribute(FINE_POINTER_ATTR, next);
+    if (root.getAttribute(FINE_POINTER_ATTR) === next) return;
+    root.setAttribute(FINE_POINTER_ATTR, next);
+    listeners.forEach((listener) => listener());
   };
+
+  // Once a real pointer has been seen, the media query stops being evidence:
+  // it is the signal already known to be wrong here, and letting a later
+  // change event promote would overwrite an observed touch and re-enable
+  // tap-emulated hover on a hybrid.
+  let observedPointer = false;
 
   // Seeded synchronously, before first paint, so a mouse-only desktop never
   // flashes its hover controls hidden while waiting for a pointer event.
@@ -44,18 +73,22 @@ export function initPointerCapability(deps?: Partial<PointerCapabilityDeps>): ()
   const query = win.matchMedia?.(FINE_POINTER_QUERY);
   set(query?.matches ?? false);
 
-  // Only ever promotes. A media query that flips to `false` says a device was
-  // detached, which tells us nothing about the pointer in the user's hand, and
-  // on the machines this exists for it is the untrustworthy signal to begin
-  // with.
+  // Only ever promotes, and only until a real pointer is seen. A query that
+  // flips to `false` says a device was detached, which tells us nothing about
+  // the pointer in the user's hand.
   const onQueryChange = (event: MediaQueryListEvent) => {
-    if (event.matches) set(true);
+    if (!observedPointer && event.matches) set(true);
   };
   query?.addEventListener?.("change", onQueryChange);
 
   const onPointer = (event: PointerEvent) => {
-    if (event.pointerType === "mouse" || event.pointerType === "pen") set(true);
-    else if (event.pointerType === "touch") set(false);
+    if (event.pointerType === "mouse" || event.pointerType === "pen") {
+      observedPointer = true;
+      set(true);
+    } else if (event.pointerType === "touch") {
+      observedPointer = true;
+      set(false);
+    }
   };
 
   // `pointerdown` as well as `pointermove` so a mouse that clicks without

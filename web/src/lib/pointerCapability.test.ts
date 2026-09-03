@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initPointerCapability } from "./pointerCapability";
+import { initPointerCapability, readFinePointer, subscribeFinePointer } from "./pointerCapability";
 
 const ATTR = "data-fine-pointer";
 
@@ -85,6 +85,37 @@ describe("initPointerCapability", () => {
     expect(document.documentElement.getAttribute(ATTR)).toBe("false");
     document.dispatchEvent(pointer("mouse"));
     expect(document.documentElement.getAttribute(ATTR)).toBe("true");
+  });
+
+  it("keeps an observed touch when the media query later promotes", () => {
+    // The query is the signal already known to be unreliable on these
+    // machines; once a real pointer has been seen it stops being evidence.
+    const { emit } = start(false);
+    document.dispatchEvent(pointer("touch", "pointerdown"));
+    expect(document.documentElement.getAttribute(ATTR)).toBe("false");
+    emit(true);
+    expect(document.documentElement.getAttribute(ATTR)).toBe("false");
+  });
+
+  it("keeps an observed mouse when the media query later promotes", () => {
+    const { emit } = start(false);
+    document.dispatchEvent(pointer("mouse"));
+    emit(true);
+    expect(document.documentElement.getAttribute(ATTR)).toBe("true");
+  });
+
+  it("publishes the value to subscribers", () => {
+    const seen: Array<boolean | undefined> = [];
+    const unsubscribe = subscribeFinePointer(() => seen.push(readFinePointer()));
+    start(false);
+    document.dispatchEvent(pointer("mouse"));
+    unsubscribe();
+    document.dispatchEvent(pointer("touch", "pointerdown"));
+    expect(seen).toEqual([false, true]);
+  });
+
+  it("reports undefined before anything has been published", () => {
+    expect(readFinePointer()).toBeUndefined();
   });
 
   it("promotes when the media query starts reporting a fine pointer", () => {

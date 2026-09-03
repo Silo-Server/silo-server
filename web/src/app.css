@@ -9,8 +9,15 @@
    Gate on the observed-pointer attribute instead (see lib/pointerCapability.ts,
    which seeds it from the equivalent media query at boot). Behaviour is
    unchanged wherever the media query was already right; touch devices still
-   get no hover styling, because a touch press clears the attribute. */
-@custom-variant hover (:root[data-fine-pointer="true"] &:hover);
+   get no hover styling, because a touch press clears the attribute.
+
+   The gate MUST stay inside :where(). Tailwind orders its state variants by
+   specificity, so an unwrapped `:root[data-fine-pointer="true"]` prefix would
+   make every hover: utility 0-4-0 against 0-2-0 for disabled:, active: and
+   focus-visible: — hover would then beat them on every device, not just the
+   ones this works around. :where() contributes nothing, leaving the compiled
+   selectors at exactly the specificity Tailwind intends. */
+@custom-variant hover (:where(:root[data-fine-pointer="true"]) &:hover);
 
 /* ================================================================
    § 1  THEME BRIDGE — Tailwind ↔ CSS Custom Properties
@@ -1641,11 +1648,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      back to 0: at this specificity it would out-weigh the `[data-state="open"]`
      and `:focus-visible` rules above and hide the trigger while its own menu is
      open on a touch device. Rest state is the base rule's job. */
-  :root[data-fine-pointer="true"] .group\/media:hover .media-card-hover-dim {
+  :where(:root[data-fine-pointer="true"]) .group\/media:hover .media-card-hover-dim {
     opacity: 1;
   }
-  :root[data-fine-pointer="true"] .group\/card:hover .media-card-action-trigger,
-  :root[data-fine-pointer="true"] .group\/media:hover .media-card-play-trigger {
+  :where(:root[data-fine-pointer="true"]) .group\/card:hover .media-card-action-trigger,
+  :where(:root[data-fine-pointer="true"]) .group\/media:hover .media-card-play-trigger {
     opacity: 1;
     pointer-events: auto;
   }
