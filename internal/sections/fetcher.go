@@ -2378,9 +2378,10 @@ func (f *Fetcher) fetchTVRecentlyAdded(
 	}
 
 	targets, total, _, err := catalog.NewRecentTVRepository(f.pool).List(ctx, catalog.RecentTVQuery{
-		LibraryIDs: effectiveLibraryIDs,
-		Access:     filter,
-		Limit:      s.ItemLimit,
+		LibraryIDs:    effectiveLibraryIDs,
+		Access:        filter,
+		Limit:         s.ItemLimit,
+		UniqueTargets: true,
 	})
 	if err != nil {
 		return nil, 0, true, err
