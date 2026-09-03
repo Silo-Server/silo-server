@@ -50,7 +50,8 @@ describe("high-contrast CSS", () => {
     for (const line of css.split("\n")) {
       const decl = /^\s*--([A-Za-z0-9-]+)\s*:\s*(.*)$/.exec(line);
       if (!decl) continue;
-      const [, name, value] = decl;
+      const name = decl[1] ?? "";
+      const value = decl[2] ?? "";
       if (new RegExp(String.raw`var\(\s*--${name}\s*[,)]`).test(value)) {
         selfReferencing.push(line.trim());
       }
@@ -78,7 +79,9 @@ describe("high-contrast CSS", () => {
   it("defines every -base input in all five themes", () => {
     const themes = [...css.matchAll(/\[data-theme="([a-z-]+)"\] \{([\s\S]*?)\n {2}\}/g)];
     expect(themes).toHaveLength(5);
-    for (const [, name, body] of themes) {
+    for (const theme of themes) {
+      const name = theme[1] ?? "";
+      const body = theme[2] ?? "";
       for (const token of CONTRAST_TOKENS) {
         expect(
           new RegExp(String.raw`^\s*--${token}-base:`, "m").test(body),

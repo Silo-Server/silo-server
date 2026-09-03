@@ -457,6 +457,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      It reads `--border-base` instead.
      ───────────────────────────────────────────────────────── */
   :root {
+    /* The direction high contrast pushes toward: away from the page. White on
+       the dark themes, black on a light one. Defaulting here means a theme
+       that forgets to set it degrades to the dark-theme behaviour rather than
+       to an invalid value. */
+    --contrast-boost: #ffffff;
+
     --muted-foreground: var(--muted-foreground-base);
     --border: var(--border-base);
     --input: var(--input-base);
@@ -476,6 +482,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --font-display: "Outfit", sans-serif;
 
     /* Surfaces: near-black with subtle cool undertone */
+    --contrast-boost: #ffffff;
     --background: #141417;
     --foreground: #e8e8ec;
     --card: #1c1c20;
@@ -540,6 +547,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --font-display: "Outfit", sans-serif;
 
     /* Surfaces: warm off-white with cool undertone */
+    --contrast-boost: #000000;
     --background: #f4f4f6;
     --foreground: #1a1a1e;
     --card: #ffffff;
@@ -609,6 +617,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --radius: 0.75rem;
     --font-body: "Outfit", sans-serif;
     --font-display: "Outfit", sans-serif;
+    --contrast-boost: #ffffff;
     --background: #101722;
     --foreground: #f4f8ff;
     --card: #151e2b;
@@ -654,6 +663,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --radius: 0.75rem;
     --font-body: "Outfit", sans-serif;
     --font-display: "Outfit", sans-serif;
+    --contrast-boost: #ffffff;
     --background: #171113;
     --foreground: #f8f2f3;
     --card: #20181b;
@@ -699,6 +709,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --radius: 0.75rem;
     --font-body: "Outfit", sans-serif;
     --font-display: "Outfit", sans-serif;
+    --contrast-boost: #ffffff;
     --background: #101715;
     --foreground: #f2f8f5;
     --card: #16201d;
@@ -774,16 +785,22 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --font-weight-semibold-ui: 600;
     --font-weight-bold-ui: 700;
   }
+  /* Every token here pushes toward --contrast-boost, never toward white
+     directly. Hard-coded white raises contrast on a dark theme and destroys it
+     on a light one: on cinema-light it drove --muted-foreground to 1.36:1 and
+     --foreground to 1.10:1 against the page, i.e. high contrast mode made the
+     theme unreadable. Mixing toward the boost gives 15.49:1 and 19.12:1 there
+     while leaving the dark themes as they were. */
   html[data-high-contrast="true"] {
-    --foreground: #ffffff;
-    --ring: oklch(0.95 0 0);
-    --muted-foreground: color-mix(in srgb, white 72%, var(--muted-foreground-base));
-    --border: color-mix(in srgb, white 34%, var(--border-base));
-    --input: color-mix(in srgb, white 16%, var(--input-base));
-    --surface: color-mix(in srgb, white 10%, var(--surface-base));
-    --surface-hover: color-mix(in srgb, white 16%, var(--surface-hover-base));
-    --surface-raised: color-mix(in srgb, white 20%, var(--surface-raised-base));
-    --accent: color-mix(in srgb, white 14%, var(--accent-base));
+    --foreground: var(--contrast-boost);
+    --ring: var(--contrast-boost);
+    --muted-foreground: color-mix(in srgb, var(--contrast-boost) 72%, var(--muted-foreground-base));
+    --border: color-mix(in srgb, var(--contrast-boost) 34%, var(--border-base));
+    --input: color-mix(in srgb, var(--contrast-boost) 16%, var(--input-base));
+    --surface: color-mix(in srgb, var(--contrast-boost) 10%, var(--surface-base));
+    --surface-hover: color-mix(in srgb, var(--contrast-boost) 16%, var(--surface-hover-base));
+    --surface-raised: color-mix(in srgb, var(--contrast-boost) 20%, var(--surface-raised-base));
+    --accent: color-mix(in srgb, var(--contrast-boost) 14%, var(--accent-base));
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
