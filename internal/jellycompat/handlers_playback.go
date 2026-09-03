@@ -176,10 +176,18 @@ type outputFormatSetter interface {
 	SetOutputFormat(sessionID, container, protocol string) error
 }
 
-func (h *PlaybackHandler) recordOutputFormat(sessionID, container, protocol string) {
-	if setter, ok := h.sessionMgr.(outputFormatSetter); ok {
-		_ = setter.SetOutputFormat(sessionID, container, protocol)
+// recordOutputFormat reports whether it recorded a changed format. Repeated
+// progressive range requests must not trigger an admin-store flush each time.
+func (h *PlaybackHandler) recordOutputFormat(sessionID, container, protocol string) bool {
+	setter, ok := h.sessionMgr.(outputFormatSetter)
+	if !ok {
+		return false
 	}
+	if current, err := h.sessionMgr.GetSession(sessionID); err == nil && current != nil &&
+		current.OutputContainer == container && current.OutputProtocol == protocol {
+		return false
+	}
+	return setter.SetOutputFormat(sessionID, container, protocol) == nil
 }
 
 type nodeRoutingAssignmentSetter interface {
