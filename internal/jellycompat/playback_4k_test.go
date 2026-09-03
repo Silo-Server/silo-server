@@ -166,10 +166,16 @@ func TestCompatLiveTranscodeHonorsMaxStreamingBitrateCap(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "video copy exempt from cap",
+			name:   "video copy exempt from cap when the source still permits copy",
 			opts:   playback.TranscodeOpts{TargetCodecVideo: compatCopyCodec},
-			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420, HLSRemux: true},
 			want:   true,
+		},
+		{
+			name:   "video copy rejected once a lower cap has cleared HLSRemux",
+			opts:   playback.TranscodeOpts{TargetCodecVideo: compatCopyCodec},
+			source: PlaybackMediaSource{Version: source1080p.Version, MaxStreamingBitrateKbps: 420, HLSRemux: false},
+			want:   false,
 		},
 		{
 			name:   "unset live bitrate does not honor a cap",

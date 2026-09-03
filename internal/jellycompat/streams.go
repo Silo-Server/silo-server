@@ -2766,12 +2766,18 @@ func compatLiveTranscodeMatchesAudioSource(transcodeSession *playback.TranscodeS
 
 // compatLiveTranscodeHonorsMaxStreamingBitrateCap reports whether an
 // already-running transcode's bitrate and resolution still satisfy the
-// source's currently negotiated MaxStreamingBitrate cap. No cap (0) or a
-// video-copy transport is always satisfied: a cap that permits copy in the
-// first place doesn't bound an encode that isn't happening.
+// source's currently negotiated MaxStreamingBitrate cap. No cap (0) is always
+// satisfied. A video-copy transport is only exempt from the bitrate/
+// resolution check below when the refreshed source still permits copy at
+// all — a lower cap negotiated since this session started may have cleared
+// HLSRemux and now requires a real transcode, and an unconditional exemption
+// would keep reusing the uncapped copy session forever.
 func compatLiveTranscodeHonorsMaxStreamingBitrateCap(opts playback.TranscodeOpts, source PlaybackMediaSource) bool {
-	if source.MaxStreamingBitrateKbps <= 0 || opts.TargetCodecVideo == compatCopyCodec {
+	if source.MaxStreamingBitrateKbps <= 0 {
 		return true
+	}
+	if opts.TargetCodecVideo == compatCopyCodec {
+		return compatHLSCopiesVideo(source)
 	}
 	if opts.TargetBitrateKbps <= 0 || opts.TargetBitrateKbps > source.MaxStreamingBitrateKbps {
 		return false
