@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +38,8 @@ const (
 	compatRoutingPolicyUnsatisfiedCode = "RoutingPolicyUnsatisfied"
 	compatRouteCapacityUnavailableCode = "RouteCapacityUnavailable"
 	compatPlaybackRouteUnboundCode     = "PlaybackRouteUnbound"
+	compatDeviceIDParameter            = "DeviceId"
+	compatPlaySessionIDParameter       = "PlaySessionId"
 )
 
 // compatRouteOutcomeCode maps an unselected route outcome onto the Jellyfin
@@ -421,16 +424,20 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId"))
 	staticRequest := strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true")
 	playSession, source, err := h.resolvePlaybackRoute(r, session, routeID, mediaSourceID)
-	if err != nil && staticRequest {
+	if errors.Is(err, ErrSessionNotFound) && staticRequest {
 		// Infuse uses Static=true for direct play without calling PlaybackInfo first.
 		// Create an on-the-fly play session so the stream can proceed. The key
 		// lookup must be case-insensitive: SenPlayer sends "static=true"
 		// (lowercase) and a case-sensitive Get("Static") would miss it, dropping
 		// the client to a 404 "Playback session not found" on every direct play.
 		clientPlaySessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
-		playSession, source, err = h.createStaticPlaySession(r.Context(), session, routeID, mediaSourceID, clientPlaySessionID)
+		playSession, source, err = h.createStaticPlaySession(r.Context(), session, routeID, mediaSourceID, clientPlaySessionID, staticPlaybackClientDeviceID(r))
 	}
 	if err != nil {
+		if !errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "Playback session could not be reserved")
+			return
+		}
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
 	}
@@ -2009,11 +2016,18 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		// route-scoped lookup the stream path uses (see resolvePlaybackRoute).
 		// Without either, these reports silently no-op, the admin activity view
 		// position freezes, and stale cleanup drops the still-active session.
-		if stop {
+		var resolveErr error
+		playSession, resolveErr = h.resolveDevicePlaybackAlias(r, session.Token, req.PlaySessionID, req.ItemID, req.MediaSourceID, stop)
+		if resolveErr != nil && !errors.Is(resolveErr, ErrSessionNotFound) {
+			writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "Playback session could not be resolved")
+			return
+		}
+		ok = resolveErr == nil
+		if !ok && stop {
 			playSession, ok = h.playbackStore.FindFinalizableByClientPlaySessionID(
 				session.Token, req.PlaySessionID, req.ItemID, req.MediaSourceID,
 			)
-		} else {
+		} else if !ok {
 			playSession, ok = h.playbackStore.FindByClientPlaySessionID(session.Token, req.PlaySessionID)
 		}
 		if ok && !reportMatchesPlaySession(playSession, req) {
@@ -2031,6 +2045,10 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			}
 			playSession, ok = nil, false
 		}
+	}
+	deviceID := staticPlaybackClientDeviceID(r)
+	if ok && deviceID != "" && playSession.ClientDeviceID != "" && playSession.ClientDeviceID != deviceID {
+		ok = false
 	}
 	if !ok || playSession.UpstreamSessionID == "" {
 		w.WriteHeader(http.StatusNoContent)
@@ -2183,7 +2201,7 @@ func reportMatchesPlaySession(playSession *PlaybackSession, req sessionReportReq
 	if req.ItemID != "" && !mediaSourceIDsEqual(playSession.RouteItemID, req.ItemID) {
 		return false
 	}
-	if req.MediaSourceID != "" && findMediaSource(playSession, req.MediaSourceID) == nil {
+	if req.MediaSourceID != "" && !mediaSourceIDsEqual(req.MediaSourceID, playSession.RouteItemID) && findMediaSource(playSession, req.MediaSourceID) == nil {
 		return false
 	}
 	return true
@@ -2197,8 +2215,8 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 		return nil
 	}
 	source := findMediaSource(playSession, mediaSourceID)
-	if source == nil {
-		source = firstMediaSource(playSession)
+	if source == nil && (mediaSourceID == "" || mediaSourceIDsEqual(mediaSourceID, playSession.RouteItemID)) {
+		source = defaultPlaybackMediaSource(playSession)
 	}
 	if source == nil {
 		return nil
@@ -2351,6 +2369,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			return errUpstreamReplaced
 		}
 		current.UpstreamSessionID = session.ID
+		current.SelectedMediaFileID = source.FileID
 		current.UpstreamPlayMethod = method
 		current.TranscodeStarted = false
 		// A new upstream session has no committed HLS route yet. Retaining the
@@ -3053,7 +3072,7 @@ func (h *PlaybackHandler) compatSegmentDuration() int {
 // Static=true direct play requests that skip PlaybackInfo. clientPlaySessionID
 // is the client's own PlaySessionId (if it sent one) so later playback reports
 // carrying it can resolve this session directly.
-func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *Session, routeID, mediaSourceID, clientPlaySessionID string) (*PlaybackSession, *PlaybackMediaSource, error) {
+func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *Session, routeID, mediaSourceID, clientPlaySessionID, clientDeviceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
 	contentID, err := decodeContentID(h.codec, routeID)
 	if err != nil {
 		return nil, nil, ErrSessionNotFound
@@ -3077,11 +3096,10 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		ItemID:              detail.ContentID,
 		RouteItemID:         routeID,
 		ClientPlaySessionID: clientPlaySessionID,
+		ClientDeviceID:      clientDeviceID,
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
 	}
-	h.playbackStore.Put(*ps)
-
 	var matched *PlaybackMediaSource
 	if mediaSourceID != "" {
 		matched = findMediaSource(ps, mediaSourceID)
@@ -3089,7 +3107,58 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 	if matched == nil {
 		matched = firstMediaSource(ps)
 	}
-	return ps, matched, nil
+	if matched == nil {
+		return nil, nil, ErrSessionNotFound
+	}
+	ps.StaticPlaybackKey = staticPlaybackKey(session, clientDeviceID, clientPlaySessionID, detail.ContentID, matched.ID)
+	stored, err := h.playbackStore.GetOrCreateStatic(ctx, *ps)
+	if err != nil {
+		return nil, nil, err
+	}
+	return stored, findMediaSource(stored, matched.ID), nil
+}
+
+func staticPlaybackClientDeviceID(r *http.Request) string {
+	return stripCompatNUL(firstNonEmpty(
+		firstMediaBrowserAuthorizationValue(r, compatDeviceIDParameter),
+		newCaseInsensitiveQuery(r.URL.Query()).Get(compatDeviceIDParameter),
+	))
+}
+
+func (h *PlaybackHandler) resolveDevicePlaybackAlias(r *http.Request, token, playID, routeID, sourceID string, includeTerminal bool) (*PlaybackSession, error) {
+	if sourceID != "" && mediaSourceIDsEqual(sourceID, routeID) {
+		sourceID = "" // Jellyfin's MediaSource.Id == Item.Id convention.
+	}
+	deviceID := staticPlaybackClientDeviceID(r)
+	if deviceID != "" {
+		if resolver, ok := h.playbackStore.(interface {
+			ResolveDeviceClientPlaySessionID(string, string, string, string, string, bool) (*PlaybackSession, error)
+		}); ok {
+			return resolver.ResolveDeviceClientPlaySessionID(token, playID, deviceID, routeID, sourceID, includeTerminal)
+		}
+	}
+	return nil, ErrSessionNotFound
+}
+
+func staticPlaybackKey(session *Session, deviceID, clientPlayID, contentID, sourceID string) string {
+	// JSON framing preserves field boundaries even when client IDs contain
+	// separators. Content/source IDs come from the catalog, not URL spelling.
+	data, _ := json.Marshal([]string{"static-playback-v1", session.Token, session.ProfileID, deviceID, clientPlayID, contentID, sourceID})
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func staticPlaybackRouteMatches(r *http.Request, caller *Session, session *PlaybackSession, source *PlaybackMediaSource) bool {
+	if session.StaticPlaybackKey == "" {
+		return true
+	}
+	if source == nil {
+		return false
+	}
+	clientPlayID := newCaseInsensitiveQuery(r.URL.Query()).Get(compatPlaySessionIDParameter)
+	if clientPlayID == session.ID {
+		clientPlayID = session.ClientPlaySessionID
+	}
+	return session.StaticPlaybackKey == staticPlaybackKey(caller, staticPlaybackClientDeviceID(r), clientPlayID, session.ItemID, source.ID)
 }
 
 func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *Session, routeID, mediaSourceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
@@ -3107,7 +3176,39 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 			// empty or item-id mediaSourceId.
 			source := findMediaSource(playSession, mediaSourceID)
 			if source == nil && (mediaSourceID == "" || mediaSourceIDsEqual(mediaSourceID, routeID)) {
-				source = firstMediaSource(playSession)
+				source = defaultPlaybackMediaSource(playSession)
+			}
+			if !staticPlaybackRouteMatches(r, compatSession, playSession, source) {
+				return nil, nil, ErrSessionNotFound
+			}
+			return playSession, source, nil
+		}
+		// Static clients use their own ID on subsequent range requests. Resolve
+		// it before route fallback so concurrent plays of one item stay distinct.
+		playSession, resolveErr := h.resolveDevicePlaybackAlias(r, compatSession.Token, clientPlaySessionID, routeID, mediaSourceID, false)
+		if resolveErr != nil && !errors.Is(resolveErr, ErrSessionNotFound) {
+			return nil, nil, resolveErr
+		}
+		ok := resolveErr == nil
+		if resolver, supported := h.playbackStore.(interface {
+			ResolveClientPlaySessionID(string, string) (*PlaybackSession, error)
+		}); !ok && supported {
+			playSession, resolveErr = resolver.ResolveClientPlaySessionID(compatSession.Token, clientPlaySessionID)
+			if resolveErr != nil && !errors.Is(resolveErr, ErrSessionNotFound) {
+				return nil, nil, resolveErr
+			}
+			ok = resolveErr == nil
+		} else if !ok {
+			playSession, ok = h.playbackStore.FindByClientPlaySessionID(compatSession.Token, clientPlaySessionID)
+		}
+		if ok &&
+			mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
+			source := findMediaSource(playSession, mediaSourceID)
+			if source == nil && (mediaSourceID == "" || mediaSourceIDsEqual(mediaSourceID, routeID)) {
+				source = defaultPlaybackMediaSource(playSession)
+			}
+			if !staticPlaybackRouteMatches(r, compatSession, playSession, source) {
+				return nil, nil, ErrSessionNotFound
 			}
 			return playSession, source, nil
 		}
@@ -3125,6 +3226,15 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if !ok {
 		return nil, nil, ErrSessionNotFound
 	}
+	if source == nil && mediaSourceID != "" {
+		source = findMediaSource(playSession, mediaSourceID)
+	}
+	if source == nil {
+		source = defaultPlaybackMediaSource(playSession)
+	}
+	if !staticPlaybackRouteMatches(r, compatSession, playSession, source) {
+		return nil, nil, ErrSessionNotFound
+	}
 	if clientPlaySessionID != "" && playSession.ClientPlaySessionID != clientPlaySessionID {
 		// Remember the client's own PlaySessionId so playback reports carrying
 		// it resolve to this session directly instead of by ambiguous route.
@@ -3135,12 +3245,6 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 			playSession.ClientPlaySessionID = clientPlaySessionID
 		}
 	}
-	if source == nil && mediaSourceID != "" {
-		source = findMediaSource(playSession, mediaSourceID)
-	}
-	if source == nil {
-		source = firstMediaSource(playSession)
-	}
 	return playSession, source, nil
 }
 
@@ -3150,6 +3254,20 @@ func firstMediaSource(session *PlaybackSession) *PlaybackMediaSource {
 	}
 	source := session.MediaSources[0]
 	return &source
+}
+
+// A resumed play keeps its selected edition when the client omits a source or
+// uses Jellyfin's item-as-source alias. Never substitute another known edition.
+func defaultPlaybackMediaSource(session *PlaybackSession) *PlaybackMediaSource {
+	if session != nil && session.SelectedMediaFileID > 0 {
+		for _, source := range session.MediaSources {
+			if source.FileID == session.SelectedMediaFileID {
+				return &source
+			}
+		}
+		return nil
+	}
+	return firstMediaSource(session)
 }
 
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {

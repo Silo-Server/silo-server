@@ -33,7 +33,11 @@ type PlaybackSession struct {
 	// when it differs from ours (Static=true direct play skips PlaybackInfo,
 	// so the client never learns the server id). Playback reports carrying
 	// that id resolve to this session directly instead of by ambiguous route.
-	ClientPlaySessionID        string
+	ClientPlaySessionID string
+	// StaticPlaybackKey identifies one caller/device/play/item/source tuple.
+	// It is a hash, not a credential or a client-visible session identifier.
+	StaticPlaybackKey          string
+	SelectedMediaFileID        int
 	UserID                     string
 	InitialSeekSeconds         float64
 	MediaSources               []PlaybackMediaSource
@@ -45,7 +49,10 @@ type PlaybackSession struct {
 	// Terminal hides a play session from stream and progress routing after
 	// ActiveEncodings cleanup while retaining the authenticated mapping long
 	// enough for a later Stopped report to publish its authoritative position.
-	Terminal              bool
+	Terminal bool
+	// SupersededBy retains a legacy duplicate's canonical mapping without
+	// inventing a playback-stop event or allowing the duplicate to revive.
+	SupersededBy          string
 	TerminalAuthoritative bool
 	TerminalFallbackSent  bool
 	TerminalClaimUntil    time.Time
@@ -112,6 +119,9 @@ type CompatPlaybackStore interface {
 	// PutNegotiated stores a PlaybackInfo negotiation and atomically replaces
 	// older, still-unstarted negotiations for the same client device and item.
 	PutNegotiated(session PlaybackSession)
+	// GetOrCreateStatic atomically reserves one live session for a static play.
+	// Persistence failure must not create an uncoordinated local session.
+	GetOrCreateStatic(ctx context.Context, session PlaybackSession) (*PlaybackSession, error)
 	// Get returns a session when it exists and is not expired.
 	Get(id string) (*PlaybackSession, bool)
 	// Delete removes a session.
@@ -203,6 +213,27 @@ func (s *PlaybackSessionStore) Put(session PlaybackSession) {
 // publishing a stale pause.
 func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) {
 	s.putNegotiatedNormalized(session)
+}
+
+func (s *PlaybackSessionStore) GetOrCreateStatic(ctx context.Context, session PlaybackSession) (*PlaybackSession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if session.CompatToken == "" || session.StaticPlaybackKey == "" {
+		return nil, ErrSessionNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, existing := range s.sessions {
+		if existing.CompatToken == session.CompatToken && existing.StaticPlaybackKey == session.StaticPlaybackKey &&
+			!existing.Terminal && existing.ExpiresAt.After(s.now()) {
+			return &existing, nil
+		}
+	}
+	stored := s.normalizeSession(session)
+	s.sessions[stored.ID] = stored
+	return &stored, nil
 }
 
 // putNormalized stores or replaces a compat playback session and returns the
@@ -366,7 +397,7 @@ func (s *PlaybackSessionStore) StageTerminal(
 	defer s.mu.Unlock()
 
 	session, ok := s.sessions[id]
-	if !ok || session.CompatToken != compatToken {
+	if !ok || session.CompatToken != compatToken || session.SupersededBy != "" {
 		return nil, ErrSessionNotFound
 	}
 	if !session.ExpiresAt.After(s.now()) {
@@ -510,7 +541,7 @@ func (s *PlaybackSessionStore) GetFinalizable(id, compatToken string) (*Playback
 	defer s.mu.Unlock()
 
 	session, ok := s.sessions[id]
-	if !ok || session.CompatToken != compatToken {
+	if !ok || session.CompatToken != compatToken || session.SupersededBy != "" {
 		return nil, false
 	}
 	if !session.ExpiresAt.After(s.now()) {
@@ -548,6 +579,7 @@ func (s *PlaybackSessionStore) Update(id string, fn func(*PlaybackSession) error
 // PlaySessionId across plays makes the alias ambiguous, and the caller should
 // fall back to route matching instead of binding an arbitrary session.
 func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlaySessionID string) (*PlaybackSession, bool) {
+	s.reconcileLegacyStaticDuplicates(compatToken, clientPlaySessionID)
 	return s.findByClientPlaySessionID(compatToken, clientPlaySessionID, "", "", false)
 }
 
@@ -557,6 +589,7 @@ func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlay
 func (s *PlaybackSessionStore) FindFinalizableByClientPlaySessionID(
 	compatToken, clientPlaySessionID, routeItemID, mediaSourceID string,
 ) (*PlaybackSession, bool) {
+	s.reconcileLegacyStaticDuplicates(compatToken, clientPlaySessionID)
 	return s.findByClientPlaySessionID(
 		compatToken, clientPlaySessionID, routeItemID, mediaSourceID, true,
 	)
@@ -569,6 +602,13 @@ func (s *PlaybackSessionStore) findByClientPlaySessionID(
 	mediaSourceID string,
 	includeTerminal bool,
 ) (*PlaybackSession, bool) {
+	return s.findDeviceClientPlaySessionID(compatToken, clientPlaySessionID, "", routeItemID, mediaSourceID, includeTerminal)
+}
+
+func (s *PlaybackSessionStore) findDeviceClientPlaySessionID(
+	compatToken, clientPlaySessionID, deviceID, routeItemID, mediaSourceID string,
+	includeTerminal bool,
+) (*PlaybackSession, bool) {
 	if clientPlaySessionID == "" {
 		return nil, false
 	}
@@ -578,10 +618,13 @@ func (s *PlaybackSessionStore) findByClientPlaySessionID(
 	now := s.now()
 	var match *PlaybackSession
 	for _, session := range s.sessions {
-		if !session.ExpiresAt.After(now) || (!includeTerminal && session.Terminal) {
+		if !session.ExpiresAt.After(now) || session.SupersededBy != "" || (!includeTerminal && session.Terminal) {
 			continue
 		}
 		if session.CompatToken != compatToken {
+			continue
+		}
+		if deviceID != "" && session.ClientDeviceID != deviceID {
 			continue
 		}
 		if routeItemID != "" && !mediaSourceIDsEqual(session.RouteItemID, routeItemID) {
@@ -622,7 +665,7 @@ func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string)
 
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.
 func (s *PlaybackSessionStore) FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool) {
-	return s.findByRoute(compatToken, routeID, false, false)
+	return s.findByRoute(compatToken, routeID, false, true)
 }
 
 // FindFinalizableByRoute includes terminal sessions retained for a stopped
@@ -644,7 +687,7 @@ func (s *PlaybackSessionStore) findByRoute(
 	var matchedSession *PlaybackSession
 	var matchedSource *PlaybackMediaSource
 	for _, session := range s.sessions {
-		if !session.ExpiresAt.After(now) || (!includeTerminal && session.Terminal) {
+		if !session.ExpiresAt.After(now) || session.SupersededBy != "" || (!includeTerminal && session.Terminal) {
 			continue
 		}
 		if compatToken != "" && session.CompatToken != compatToken {
