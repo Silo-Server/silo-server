@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -117,6 +118,41 @@ func TestHandlePlaybackReport_DeviceAliasIgnoresUnresolvedLegacyRecords(t *testi
 				}
 			}
 		})
+	}
+}
+
+func TestHandlePlaybackReport_DeviceAliasRejectsUnscopedLegacySession(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		for _, storedDevice := range []string{"", "other-device"} {
+			for _, playID := range []string{"client-play", "unknown-play", "play-1"} {
+				t.Run(fmt.Sprintf("stop_%t/device_%s/play_%s", stop, storedDevice, playID), func(t *testing.T) {
+					handler, mgr, routeID, sourceID := newReportLivenessHandler("legacy-native", true)
+					if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+						s.ClientPlaySessionID, s.ClientDeviceID = "client-play", storedDevice
+						return nil
+					}); err != nil {
+						t.Fatal(err)
+					}
+					req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(`{"PlaySessionId":"`+playID+`","ItemId":"`+routeID+`","MediaSourceId":"`+sourceID+`","PositionTicks":600000000}`))
+					req.Header.Set("X-Emby-Authorization", `MediaBrowser DeviceId="current-device"`)
+					req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+					rec := httptest.NewRecorder()
+					handler.handlePlaybackReport(rec, req, stop)
+					if rec.Code != http.StatusNoContent {
+						t.Fatalf("status = %d", rec.Code)
+					}
+					// An exact caller-owned server ID remains sufficient for a
+					// legacy record; an alias/route must match the explicit device.
+					allow := playID == "play-1" && storedDevice == ""
+					if !allow && (len(mgr.progressUpdates) != 0 || len(mgr.stopCalls) != 0) {
+						t.Fatal("explicit-device report mutated an unscoped or other-device session")
+					}
+					if allow && ((stop && len(mgr.stopCalls) != 1) || (!stop && len(mgr.progressUpdates) != 1)) {
+						t.Fatal("exact caller-owned legacy session ID stopped working")
+					}
+				})
+			}
+		}
 	}
 }
 

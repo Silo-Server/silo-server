@@ -330,6 +330,33 @@ func TestCreateStaticPlaySessionConcurrentRequestsShareReservation(t *testing.T)
 	}
 }
 
+func TestStaticPlaybackReservationPreservesSelectedSourceBeforeAttachment(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	detail := handler.content.(*stubContentService).detail
+	second := detail.Versions[0]
+	second.FileID = 43
+	detail.Versions = append(detail.Versions, second)
+	sourceID := handler.codec.EncodeIntID(EncodedIDMediaSource, int64(second.FileID))
+	caller := &Session{Token: "token-1", ProfileID: "profile-1"}
+	reserved, _, err := handler.createStaticPlaySession(context.Background(), caller, routeID, sourceID, "client-play", "device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved.UpstreamSessionID != "" {
+		t.Fatal("test must resolve the reservation before native attachment")
+	}
+	for _, sourceParam := range []string{"", routeID} {
+		r := httptest.NewRequest("GET", "/Videos/stream?Static=true&DeviceId=device&PlaySessionId=client-play", nil)
+		got, source, err := handler.resolvePlaybackRoute(r, caller, routeID, sourceParam)
+		if err != nil || got == nil || source == nil || got.ID != reserved.ID || source.FileID != second.FileID {
+			t.Fatalf("pre-attachment request lost the selected edition: %v", err)
+		}
+	}
+	if got := len(handler.playbackStore.(*PlaybackSessionStore).sessions); got != 1 {
+		t.Fatalf("reserved %d sessions, want one selected-edition reservation", got)
+	}
+}
+
 func legacyStaticPair(token string, now time.Time) (PlaybackSession, PlaybackSession) {
 	first := PlaybackSession{
 		ID: token + "-first", CompatToken: token, UserID: "profile-user", ClientDeviceID: "device",

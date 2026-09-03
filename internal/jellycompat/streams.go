@@ -2008,6 +2008,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			playSession, ok = nil, false
 		}
 	}
+	matchedServerPlayID := ok
 	if !ok {
 		// Static=true direct play (Infuse, SenPlayer) skips PlaybackInfo, so the
 		// client reports progress under its own generated PlaySessionId. The
@@ -2047,7 +2048,11 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	deviceID := staticPlaybackClientDeviceID(r)
-	if ok && deviceID != "" && playSession.ClientDeviceID != "" && playSession.ClientDeviceID != deviceID {
+	// An explicit device must match aliases and route fallbacks, including
+	// legacy records with no device. A precise caller-owned server ID remains
+	// sufficient for those legacy records, but never for another known device.
+	if ok && deviceID != "" && playSession.ClientDeviceID != deviceID &&
+		(!matchedServerPlayID || playSession.ClientDeviceID != "") {
 		ok = false
 	}
 	if !ok || playSession.UpstreamSessionID == "" {
@@ -3110,6 +3115,9 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 	if matched == nil {
 		return nil, nil, ErrSessionNotFound
 	}
+	// Preserve the selected edition in the reservation itself: another range
+	// request can resolve this alias before native playback is attached.
+	ps.SelectedMediaFileID = matched.FileID
 	ps.StaticPlaybackKey = staticPlaybackKey(session, clientDeviceID, clientPlaySessionID, detail.ContentID, matched.ID)
 	stored, err := h.playbackStore.GetOrCreateStatic(ctx, *ps)
 	if err != nil {
