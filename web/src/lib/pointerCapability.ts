@@ -31,9 +31,16 @@ const listeners = new Set<() => void>();
  * The published capability, or undefined when nothing has published one —
  * server rendering, tests, and any browser where init has not run. Callers keep
  * their own established default in that case rather than being told "coarse".
+ *
+ * The document is resolved inside the function rather than as a default
+ * parameter: a default is evaluated at the call site, so `readFinePointer()`
+ * where no document exists would throw before it could answer undefined,
+ * contradicting the line above.
  */
-export function readFinePointer(doc: Document = document): boolean | undefined {
-  const value = doc.documentElement.getAttribute(FINE_POINTER_ATTR);
+export function readFinePointer(doc?: Document): boolean | undefined {
+  const target = doc ?? (typeof document === "undefined" ? undefined : document);
+  if (target === undefined) return undefined;
+  const value = target.documentElement.getAttribute(FINE_POINTER_ATTR);
   return value === null ? undefined : value === "true";
 }
 

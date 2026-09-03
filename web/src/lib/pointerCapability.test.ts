@@ -118,6 +118,17 @@ describe("initPointerCapability", () => {
     expect(readFinePointer()).toBeUndefined();
   });
 
+  it("reports undefined where there is no document at all", () => {
+    // A default parameter would be evaluated at the call site and throw here,
+    // which is what the documented server-rendering fallback forbids.
+    vi.stubGlobal("document", undefined);
+    try {
+      expect(readFinePointer()).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("promotes when the media query starts reporting a fine pointer", () => {
     const { emit } = start(false);
     emit(true);
