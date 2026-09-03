@@ -18,7 +18,7 @@ const server = createServer(async (request, response) => {
     if (/^\/(before|after)\/(collapsed|expanded)\.html$/.test(pathname)) {
       const markup = await readFile(join(evidence, pathname), "utf8");
       response.setHeader("content-type", "text/html; charset=utf-8");
-      response.end(`<!doctype html><html class="dark"><head><meta charset="utf-8">${styles.map((name) => `<link rel="stylesheet" href="/assets/${name}">`).join("")}</head><body>${markup}</body></html>`);
+      response.end(`<!doctype html><html lang="en" data-theme="midnight-cinema"><head><meta charset="utf-8"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300..900&display=swap">${styles.map((name) => `<link rel="stylesheet" href="/assets/${name}">`).join("")}</head><body><main style="padding:32px">${markup}</main></body></html>`);
       return;
     }
     const asset = resolve(dist, `.${pathname}`);
@@ -40,6 +40,12 @@ try {
       const result = await page.goto(`${origin}/${version}/${state}.html`, { waitUntil: "networkidle" });
       if (!result.ok()) throw new Error("Fixture could not be served");
       await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(() => {
+        const theme = getComputedStyle(document.documentElement);
+        if (!theme.getPropertyValue("--background").trim() || !theme.getPropertyValue("--destructive").trim()) {
+          throw new Error("Activity evidence must use the application's initialized theme");
+        }
+      });
       await page.screenshot({ path: join(evidence, version, `${state}.png`), fullPage: true });
     }
   }
