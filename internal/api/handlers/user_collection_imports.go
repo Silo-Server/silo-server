@@ -204,7 +204,7 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		return
 	}
 
-	schedule, err := usercollections.ResolveSyncSchedule(shared.SyncSchedule)
+	schedule, err := usercollections.ResolveSyncSchedule(shared.SyncSchedule, apimw.IsAdmin(r.Context()))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

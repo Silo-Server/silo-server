@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 )
@@ -43,6 +44,7 @@ type SchedulerResult struct {
 type dueCollection struct {
 	UserID       int
 	CollectionID string
+	SyncSchedule string
 }
 
 func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
@@ -81,7 +83,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
 
 func (s *Scheduler) listDue(ctx context.Context) ([]dueCollection, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT user_id, id
+		`SELECT user_id, id, sync_schedule
 		 FROM user_personal_collections
 		 WHERE sync_schedule IS NOT NULL
 		   AND next_sync_at IS NOT NULL
@@ -95,7 +97,7 @@ func (s *Scheduler) listDue(ctx context.Context) ([]dueCollection, error) {
 	var out []dueCollection
 	for rows.Next() {
 		var dc dueCollection
-		if err := rows.Scan(&dc.UserID, &dc.CollectionID); err != nil {
+		if err := rows.Scan(&dc.UserID, &dc.CollectionID, &dc.SyncSchedule); err != nil {
 			return nil, err
 		}
 		out = append(out, dc)
@@ -137,13 +139,16 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 	)
 }
 
-// advanceAfterFailure pushes next_sync_at forward by the user-sync minimum
-// interval so a broken source does not thrash the scheduler.
+// advanceAfterFailure follows the collection's natural schedule, matching the
+// admin collection scheduler. Invalid stored schedules are parked for a day so
+// a legacy or manually edited row cannot thrash the scheduler.
 func (s *Scheduler) advanceAfterFailure(ctx context.Context, dc dueCollection, after time.Time) {
-	next := after.Add(time.Duration(MinSyncIntervalHours) * time.Hour)
+	next := nextSyncAfterFailure(dc.SyncSchedule, after)
 	if _, err := s.pool.Exec(ctx,
-		`UPDATE user_personal_collections SET next_sync_at = $1 WHERE user_id = $2 AND id = $3`,
-		next, dc.UserID, dc.CollectionID,
+		`UPDATE user_personal_collections
+		 SET next_sync_at = $1
+		 WHERE user_id = $2 AND id = $3 AND sync_schedule = $4`,
+		next, dc.UserID, dc.CollectionID, dc.SyncSchedule,
 	); err != nil {
 		s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to advance next_sync_at after failure",
 			"user_id", dc.UserID,
@@ -151,6 +156,13 @@ func (s *Scheduler) advanceAfterFailure(ctx context.Context, dc dueCollection, a
 			"error", err,
 		)
 	}
+}
+
+func nextSyncAfterFailure(schedule string, after time.Time) time.Time {
+	if next := catalog.ComputeNextSyncAtFrom(schedule, after); next != nil {
+		return *next
+	}
+	return after.Add(24 * time.Hour)
 }
 
 func (s *Scheduler) IsInFlight(collectionID string) bool {

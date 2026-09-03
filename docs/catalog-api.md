@@ -42,3 +42,14 @@ Check it before saving a Watchlist or Favorites preference. The older
 `collection_sort_preferences` boolean is also true on servers that predate the
 personal-list kinds and reject them with a 400, so it cannot be used to detect
 them. When `sort_preference_kinds` is absent, assume `library` and `user` only.
+
+The same response includes `user_collection_sync_schedule`. Its `presets`
+are the values the current account may send as `sync_schedule` when importing
+or updating a personal collection. `editable` reports support for changing the
+schedule through `PUT /api/v1/collections/{id}`. When `custom_cron` is true,
+the account is a server admin and may use any valid five-field cron expression;
+the advertised presets match the server-collection schedule presets. Regular
+accounts receive the bounded `daily`, `weekly`, and `monthly` values. An empty
+value disables automatic sync. Those bounded values map to the matching server
+presets: daily at 03:00, weekly on Sunday at 03:00, and monthly on the first at
+03:00.

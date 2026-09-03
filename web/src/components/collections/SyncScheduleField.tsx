@@ -32,9 +32,17 @@ interface SyncScheduleFieldProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  label?: string;
+  inputId?: string;
 }
 
-export function SyncScheduleField({ value, onChange, disabled }: SyncScheduleFieldProps) {
+export function SyncScheduleField({
+  value,
+  onChange,
+  disabled,
+  label = "Sync Schedule",
+  inputId,
+}: SyncScheduleFieldProps) {
   const [mode, setMode] = useState<"none" | "preset" | "custom">(() => deriveMode(value));
 
   const selectValue =
@@ -42,7 +50,7 @@ export function SyncScheduleField({ value, onChange, disabled }: SyncScheduleFie
 
   return (
     <div className="space-y-2">
-      <Label>Sync Schedule</Label>
+      <Label htmlFor={inputId}>{label}</Label>
       <Select
         value={selectValue}
         onValueChange={(v) => {
@@ -61,7 +69,7 @@ export function SyncScheduleField({ value, onChange, disabled }: SyncScheduleFie
         }}
         disabled={disabled}
       >
-        <SelectTrigger className="w-full sm:w-[280px]">
+        <SelectTrigger id={inputId} className="w-full sm:w-[280px]">
           <SelectValue placeholder="Select a schedule" />
         </SelectTrigger>
         <SelectContent>
