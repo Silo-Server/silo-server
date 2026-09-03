@@ -200,15 +200,15 @@ jobs:
         env:
           SILO_ACTIVITY_EVIDENCE_DIR: ${{ runner.temp }}/activity-evidence
           SILO_ACTIVITY_BROWSER_DIR: ${{ runner.temp }}/activity-browser
-          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         run: |
           mkdir -p "$SILO_ACTIVITY_EVIDENCE_DIR"
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          git rev-parse HEAD "origin/${BASE_REF}" > "$SILO_ACTIVITY_EVIDENCE_DIR/commits.txt"
+          git fetch --no-tags https://github.com/Silo-Server/silo-server.git refs/heads/main
+          baseline=$(git merge-base HEAD FETCH_HEAD)
+          git rev-parse HEAD "$baseline" > "$SILO_ACTIVITY_EVIDENCE_DIR/commits.txt"
           SILO_ACTIVITY_EVIDENCE_DIR="$SILO_ACTIVITY_EVIDENCE_DIR/after" pnpm --dir web exec vitest run src/pages/AdminActivity.test.tsx -t 'exports synthetic activity screenshot fixtures'
           restore_sources() { git restore --source=HEAD -- web/src/pages/AdminActivity.tsx web/src/pages/adminActivityPresentation.ts; }
           trap restore_sources EXIT
-          git restore --source="origin/${BASE_REF}" -- web/src/pages/AdminActivity.tsx web/src/pages/adminActivityPresentation.ts
+          git restore --source="$baseline" -- web/src/pages/AdminActivity.tsx web/src/pages/adminActivityPresentation.ts
           SILO_ACTIVITY_EVIDENCE_BASELINE=1 SILO_ACTIVITY_EVIDENCE_DIR="$SILO_ACTIVITY_EVIDENCE_DIR/before" pnpm --dir web exec vitest run src/pages/AdminActivity.test.tsx -t 'exports synthetic activity screenshot fixtures'
           restore_sources
           npm install --prefix "$SILO_ACTIVITY_BROWSER_DIR" --no-save --ignore-scripts playwright@1.62.1
