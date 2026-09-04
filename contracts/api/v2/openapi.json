@@ -158,6 +158,263 @@
         ],
         "type": "object"
       },
+      "Profile": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_library_ids": {
+            "description": "Libraries the profile may see when restrictions are enabled",
+            "items": {
+              "description": "Opaque identifier",
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "auto_play_next_preview": {
+            "type": "boolean"
+          },
+          "auto_skip_credits": {
+            "type": "boolean"
+          },
+          "auto_skip_intro": {
+            "type": "boolean"
+          },
+          "auto_skip_recap": {
+            "type": "boolean"
+          },
+          "avatar": {
+            "description": "Avatar reference; empty when none",
+            "type": "string"
+          },
+          "avatar_source": {
+            "enum": [
+              "none",
+              "preset",
+              "upload"
+            ],
+            "type": "string"
+          },
+          "avatar_url": {
+            "description": "Where to fetch the avatar; absent when there is none to fetch",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "has_pin": {
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "minLength": 1,
+            "type": "string"
+          },
+          "is_child": {
+            "type": "boolean"
+          },
+          "is_primary": {
+            "description": "The household parent (not the server admin role)",
+            "type": "boolean"
+          },
+          "language": {
+            "description": "Preferred audio language (ISO 639-1); empty inherits",
+            "type": "string"
+          },
+          "library_restrictions_enabled": {
+            "type": "boolean"
+          },
+          "max_content_rating": {
+            "description": "Content-rating ceiling; empty means none",
+            "type": "string"
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling; empty means none",
+            "enum": [
+              "1080p",
+              "2160p"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "preferred_metadata_language": {
+            "description": "Metadata language (ISO 639-1); empty inherits the library's",
+            "type": "string"
+          },
+          "quality_preference": {
+            "description": "Empty when unset",
+            "enum": [
+              "auto",
+              "original"
+            ],
+            "type": "string"
+          },
+          "show_forced_subtitles": {
+            "type": "boolean"
+          },
+          "subtitle_language": {
+            "description": "Preferred subtitle language (ISO 639-1); empty inherits",
+            "type": "string"
+          },
+          "subtitle_mode": {
+            "description": "Empty when unset",
+            "enum": [
+              "auto",
+              "always",
+              "off"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "avatar",
+          "avatar_source",
+          "has_pin",
+          "is_child",
+          "is_primary",
+          "max_content_rating",
+          "quality_preference",
+          "language",
+          "preferred_metadata_language",
+          "subtitle_language",
+          "subtitle_mode",
+          "auto_skip_intro",
+          "auto_skip_credits",
+          "auto_skip_recap",
+          "auto_play_next_preview",
+          "show_forced_subtitles",
+          "library_restrictions_enabled",
+          "allowed_library_ids",
+          "max_playback_quality",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProfileUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_library_ids": {
+            "description": "Replaces the allowlist; an empty array allows none",
+            "items": {
+              "description": "Opaque identifier",
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "auto_play_next_preview": {
+            "type": "boolean"
+          },
+          "auto_skip_credits": {
+            "type": "boolean"
+          },
+          "auto_skip_intro": {
+            "type": "boolean"
+          },
+          "auto_skip_recap": {
+            "type": "boolean"
+          },
+          "avatar": {
+            "description": "Preset avatar reference; null removes the avatar",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_child": {
+            "type": "boolean"
+          },
+          "language": {
+            "description": "Preferred audio language (ISO 639-1); null inherits",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "library_restrictions_enabled": {
+            "type": "boolean"
+          },
+          "max_content_rating": {
+            "description": "Content-rating ceiling; null removes it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling; null removes it",
+            "enum": [
+              "1080p",
+              "2160p"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "Display name; leading and trailing spaces are trimmed",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pin": {
+            "description": "New PIN; null removes the PIN",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preferred_metadata_language": {
+            "description": "Metadata language (ISO 639-1); null inherits the library's",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quality_preference": {
+            "enum": [
+              "auto",
+              "original"
+            ],
+            "type": "string"
+          },
+          "show_forced_subtitles": {
+            "type": "boolean"
+          },
+          "subtitle_language": {
+            "description": "Preferred subtitle language (ISO 639-1); null inherits",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subtitle_mode": {
+            "enum": [
+              "auto",
+              "always",
+              "off"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ProgressCollection": {
         "additionalProperties": false,
         "properties": {
@@ -469,6 +726,182 @@
           "system"
         ],
         "x-silo-class": "public"
+      }
+    },
+    "/api/v2/profiles/{id}": {
+      "patch": {
+        "operationId": "updateProfile",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The profile to update",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The profile to update",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdate"
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "application/octet-stream",
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a household profile; omitted members are unchanged.",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true
       }
     },
     "/api/v2/progress": {
