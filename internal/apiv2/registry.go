@@ -107,7 +107,7 @@ type Operation struct {
 	// document gains 412 and 428, a required If-Match parameter, and the
 	// ETag header on every success response.
 	Guarded bool
-	// Conditional marks a GET or HEAD that honours If-None-Match: the input
+	// Conditional marks a GET or HEAD that honors If-None-Match: the input
 	// binds `header:"If-None-Match"`, the output carries `header:"ETag"` and
 	// an int Status so the handler can answer 304 through NotModified.
 	Conditional bool

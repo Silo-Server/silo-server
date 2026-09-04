@@ -23,7 +23,7 @@ const (
 	extServiceBacked  = "x-silo-service-backed"
 	// extGuarded and extConditional record the optimistic-concurrency
 	// declarations so a reader of the document can enumerate the operations
-	// that require If-Match or honour If-None-Match.
+	// that require If-Match or honor If-None-Match.
 	extGuarded     = "x-silo-guarded"
 	extConditional = "x-silo-conditional"
 	// extExtensionBag marks the one legitimate use of additionalProperties:
