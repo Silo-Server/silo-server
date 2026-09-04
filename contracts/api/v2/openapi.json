@@ -75,6 +75,23 @@
         ],
         "type": "object"
       },
+      "PageInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "description": "Whether a next page exists",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Opaque cursor for the next page; absent on the last page",
+            "type": "string"
+          }
+        },
+        "required": [
+          "has_more"
+        ],
+        "type": "object"
+      },
       "Problem": {
         "additionalProperties": false,
         "properties": {
@@ -138,6 +155,65 @@
           "location",
           "code",
           "detail"
+        ],
+        "type": "object"
+      },
+      "ProgressCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEntry"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProgressEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "description": "Whether the item counts as watched",
+            "type": "boolean"
+          },
+          "duration_seconds": {
+            "description": "Known runtime; 0 when unknown",
+            "format": "double",
+            "type": "number"
+          },
+          "media_item_id": {
+            "description": "The catalog item",
+            "minLength": 1,
+            "type": "string"
+          },
+          "position_seconds": {
+            "description": "Playback position",
+            "format": "double",
+            "type": "number"
+          },
+          "updated_at": {
+            "description": "When the position last changed",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_item_id",
+          "position_seconds",
+          "duration_seconds",
+          "completed",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -393,6 +469,173 @@
           "system"
         ],
         "x-silo-class": "public"
+      }
+    },
+    "/api/v2/progress": {
+      "get": {
+        "operationId": "listProgress",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries in this state; absent lists every entry",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "Only entries in this state; absent lists every entry",
+              "enum": [
+                "in_progress",
+                "completed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries whose item is in this library",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "Only entries whose item is in this library",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the acting profile's watch progress, newest change first.",
+        "tags": [
+          "progress"
+        ],
+        "x-silo-class": "profile_scoped"
       }
     },
     "/api/v2/system/info": {

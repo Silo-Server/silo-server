@@ -166,6 +166,7 @@ func declaresBody(t reflect.Type) bool {
 func registerAll(reg *Registry) {
 	// Alphabetical by domain file; registration order is deterministic.
 	registerAccount(reg)
+	registerProgress(reg)
 	registerSystem(reg)
 	registerOpenAPIDocument(reg)
 }
