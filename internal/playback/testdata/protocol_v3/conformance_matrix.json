@@ -1978,7 +1978,7 @@
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
         "progress_persistence": "client",
-        "audio_track_id": "file:42:audio:0",
+        "audio_track_id": "file:77:audio:0",
         "audio_track_index": 0,
         "metered": false,
         "client_capabilities": {

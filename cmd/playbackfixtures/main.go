@@ -593,6 +593,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	audioFile := &models.MediaFile{ID: 77, BaseType: "audiobook", FilePath: "/media/audiobook.m4b", Container: containerMP4, CodecAudio: codecAAC, Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
 	audioRequest := conformanceStartRequest()
 	audioRequest.FileID = audioFile.ID
+	audioRequest.AudioTrackID = playback.TrackIDV3(audioFile.ID, "audio", *audioRequest.AudioTrackIndex)
 	audioRequest.PlaybackAttemptID = "attempt-audio-only"
 	audioRequest.Capabilities.Containers = []string{containerMP4}
 	planner = append(planner, makePlannerScenario("audio_only_original", "audio_only_planning", audioRequest, audioFile, nil, settings, registry))
