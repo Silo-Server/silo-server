@@ -26,9 +26,11 @@ export interface SessionDeliveryDisplay {
    */
   noDelivery: boolean;
   /**
-   * Bytes went out, but no session manager claims this session. Gated while the
-   * merged view is incomplete or the session is inside the delivery grace window,
-   * because either condition can temporarily hide the reporting publisher.
+   * Bytes went out, no session manager claims this session, and the viewer edge
+   * has gone quiet. Taken from the server's `unclaimed_idle`, gated only on the
+   * view being readable at all: the server is the side that knows whether bytes
+   * are still moving, and re-deriving this from `evidence` alone painted a red
+   * badge over every normal stream for the whole window after it ended.
    */
   unclaimed: boolean;
   /** The byte total is a known floor, not a measurement. */
@@ -38,14 +40,6 @@ export interface SessionDeliveryDisplay {
   /** More than one address pulled bytes for this session. */
   viewerIpCount: number;
 }
-
-/**
- * Mirrors `noDeliveryGrace` in internal/api/handlers/admin_live_sessions.go. A session is
- * reported the moment playback starts, but nothing has ASKED for a byte yet; measuring it
- * takes a client request, a sweep and a merge. Without this window every ordinary start
- * would render as an anomaly for its first seconds.
- */
-export const SESSION_DELIVERY_GRACE_MS = 30_000;
 
 export interface SessionDeliveryContext {
   /**
@@ -62,14 +56,6 @@ export interface SessionDeliveryContext {
    * context keep their existing behavior.
    */
   viewBlind?: boolean;
-  /** Reading instant. Injectable so tests do not depend on wall-clock. Defaults to Date.now(). */
-  now?: number;
-}
-
-function parseSessionStartedAt(startedAt: string | undefined): number | null {
-  if (!startedAt) return null;
-  const parsed = Date.parse(startedAt);
-  return Number.isNaN(parsed) || parsed <= 0 ? null : parsed;
 }
 
 export function describeSessionDelivery(
@@ -78,9 +64,6 @@ export function describeSessionDelivery(
 ): SessionDeliveryDisplay | null {
   const telemetry = session.telemetry;
   if (!telemetry) return null;
-  const now = context.now ?? Date.now();
-  const startedAtMs = parseSessionStartedAt(session.started_at);
-  const withinGrace = startedAtMs !== null && now - startedAtMs < SESSION_DELIVERY_GRACE_MS;
   const blind = context.viewBlind === true;
   return {
     bytes: formatFileSize(telemetry.viewer_bytes, { fallback: "0 B" }),
@@ -89,7 +72,7 @@ export function describeSessionDelivery(
         ? formatMbpsFromKbps(telemetry.delivery_rate_kbps, "0.0 Mbps")
         : null,
     noDelivery: telemetry.no_delivery === true,
-    unclaimed: telemetry.evidence === "measured" && !blind && !withinGrace,
+    unclaimed: telemetry.unclaimed_idle === true && !blind,
     degraded: telemetry.bytes_degraded === true,
     identityConflict: telemetry.identity_conflict === true,
     viewerIpCount: telemetry.viewer_ips?.length ?? 0,

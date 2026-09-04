@@ -1385,6 +1385,13 @@ observation nor a recent accepted byte. These normally ended sessions are hidden
 by default instead of lingering as red unclaimed-delivery rows; `include_idle`
 reveals them for diagnosis.
 
+Clients render this flag; they do not re-derive it. `evidence == "measured"` is
+true from the first byte of every ordinary stream and stays true for the whole
+retention window after it ends, and only the server can see whether the viewer
+edge is still delivering. The one thing a client may add is suppression while
+`view_complete` is false or `view_stale` is true, which is what the server itself
+does.
+
 `measurement_pruned` means the measuring publisher retired the idle observations
 after `Retention` but retained a bounded memory of the delivered byte total and
 its routes. The total therefore survives measurement retirement, while viewer

@@ -2606,6 +2606,18 @@ export interface AdminSessionTelemetry {
    * because a paused client legitimately stops pulling bytes.
    */
   no_delivery?: boolean;
+  /**
+   * Measured delivery whose reporter has gone away and whose viewer edge is no
+   * longer active. This is the server's own classification — it already knows
+   * whether bytes are still moving at the viewer edge, which no client can work
+   * out from `evidence` alone — so read it rather than re-deriving it.
+   */
+  unclaimed_idle?: boolean;
+  /**
+   * The byte total is bounded memory retained from a retired measurement, not a
+   * publisher still observing the session.
+   */
+  measurement_pruned?: boolean;
   /** Bytes delivered to the viewer at the outermost edge. */
   viewer_bytes: number;
   /** Internal proxy-to-node traffic. Never counts toward a concurrency cap. */

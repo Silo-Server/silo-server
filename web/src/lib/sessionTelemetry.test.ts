@@ -70,20 +70,30 @@ describe("describeSessionDelivery", () => {
 
   it("marks delivery no session manager claims", () => {
     const delivery = describeSessionDelivery(
-      sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      sessionWith({ evidence: "measured", viewer_bytes: 8192, unclaimed_idle: true }),
     );
     expect(delivery?.unclaimed).toBe(true);
     expect(delivery?.noDelivery).toBe(false);
   });
 
-  it("flags measured delivery with a complete view after the grace window", () => {
-    const now = Date.parse("2026-08-27T12:00:00Z");
+  // The regression this pins: `evidence === "measured"` is true from the first byte
+  // of every normal stream and stays true for the whole retention window after it
+  // ends. Only the server knows whether the viewer edge is still delivering, and it
+  // already says so, so a row it has not called unclaimed_idle must not be badged.
+  it("does not badge measured delivery the server has not called unclaimed", () => {
+    const delivery = describeSessionDelivery(
+      sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+    );
+    expect(delivery?.unclaimed).toBe(false);
+  });
+
+  it("badges measured delivery the server called unclaimed while the view is readable", () => {
     const session = {
-      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192, unclaimed_idle: true }),
       started_at: "2026-08-27T11:59:00Z",
     };
 
-    expect(describeSessionDelivery(session, { viewBlind: false, now })?.unclaimed).toBe(true);
+    expect(describeSessionDelivery(session, { viewBlind: false })?.unclaimed).toBe(true);
   });
 
   it("suppresses unclaimed framing when the merged view is merely stale", () => {
@@ -92,47 +102,40 @@ describe("describeSessionDelivery", () => {
     // The server suppresses on `!viewComplete || viewStale` for exactly this reason, so a
     // client that only mirrored completeness would badge every healthy session in the
     // window where the server had already stopped drawing conclusions.
-    const now = Date.parse("2026-08-27T12:00:00Z");
     const session = {
-      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192, unclaimed_idle: true }),
       started_at: "2026-08-27T11:59:00Z",
     };
 
-    expect(describeSessionDelivery(session, { viewBlind: true, now })?.unclaimed).toBe(false);
+    expect(describeSessionDelivery(session, { viewBlind: true })?.unclaimed).toBe(false);
   });
 
   it("suppresses unclaimed framing when the merged view is incomplete", () => {
-    const now = Date.parse("2026-08-27T12:00:00Z");
     const session = {
-      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192, unclaimed_idle: true }),
       started_at: "2026-08-27T11:59:00Z",
     };
-    const delivery = describeSessionDelivery(session, { viewBlind: true, now });
+    const delivery = describeSessionDelivery(session, { viewBlind: true });
 
     expect(delivery?.unclaimed).toBe(false);
     expect(session.telemetry?.evidence).toBe("measured");
     expect(delivery?.noDelivery).toBe(false);
   });
 
+  // The server applies its own grace before it ever sets unclaimed_idle, so
+  // started_at is no longer an input here — including the shapes that used to make
+  // the client guess: a missing, unparseable or future start.
   it.each([
-    ["five seconds ago", "2026-08-27T11:59:55Z", false],
-    ["sixty seconds ago", "2026-08-27T11:59:00Z", true],
-    ["exactly thirty seconds ago", "2026-08-27T11:59:30Z", true],
-    ["a missing start", undefined, true],
-    ["an unparseable start", "not-a-date", true],
-    ["a future start", "2026-08-27T12:00:05Z", false],
-  ])("handles %s when classifying unclaimed delivery", (_label, startedAt, expected) => {
+    ["a missing start", undefined],
+    ["an unparseable start", "not-a-date"],
+    ["a future start", "2026-08-27T12:00:05Z"],
+  ])("ignores %s when the server has classified the row", (_label, startedAt) => {
     const session = {
-      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192, unclaimed_idle: true }),
       started_at: startedAt,
     };
 
-    expect(
-      describeSessionDelivery(session, {
-        viewBlind: false,
-        now: Date.parse("2026-08-27T12:00:00Z"),
-      })?.unclaimed,
-    ).toBe(expected);
+    expect(describeSessionDelivery(session, { viewBlind: false })?.unclaimed).toBe(true);
   });
 
   it("surfaces the degraded, multi-IP and identity-conflict signals", () => {
