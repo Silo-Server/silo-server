@@ -51,6 +51,258 @@
         ],
         "type": "object"
       },
+      "AdminUser": {
+        "additionalProperties": false,
+        "properties": {
+          "access_group_id": {
+            "description": "The access group the account belongs to; null when none",
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_transcode_allowed": {
+            "description": "Override; null inherits",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "download_allowed": {
+            "description": "Override; null inherits",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "download_transcode_allowed": {
+            "description": "Override; null inherits",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "effective_policy": {
+            "$ref": "#/components/schemas/EffectivePolicy",
+            "description": "The resolved policy the server enforces"
+          },
+          "email": {
+            "description": "Contact email; empty when none is set",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_active_at": {
+            "description": "Most recent recorded activity; null when the account has none",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "library_ids": {
+            "description": "Explicit library allowlist; null inherits the group's, empty means none",
+            "items": {
+              "description": "Opaque identifier",
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling override; null inherits, empty string means no ceiling",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_profiles": {
+            "description": "Household profile limit",
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_streams": {
+            "description": "Stream limit override; null inherits, 0 means unlimited",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_transcodes": {
+            "description": "Transcode limit override; null inherits, 0 means unlimited",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "permissions": {
+            "description": "Permissions assigned directly to the account",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requests_allowed": {
+            "description": "Override; null inherits",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          },
+          "transcode_allowed": {
+            "description": "Override; null inherits",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "role",
+          "permissions",
+          "enabled",
+          "library_ids",
+          "max_playback_quality",
+          "max_streams",
+          "max_transcodes",
+          "transcode_allowed",
+          "audio_transcode_allowed",
+          "max_profiles",
+          "download_allowed",
+          "download_transcode_allowed",
+          "requests_allowed",
+          "access_group_id",
+          "effective_policy",
+          "created_at",
+          "updated_at",
+          "last_active_at"
+        ],
+        "type": "object"
+      },
+      "AdminUserCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminUser"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "EffectivePolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_transcode_allowed": {
+            "type": "boolean"
+          },
+          "download_allowed": {
+            "type": "boolean"
+          },
+          "download_transcode_allowed": {
+            "type": "boolean"
+          },
+          "library_ids": {
+            "description": "Libraries the account may see; empty means every library",
+            "items": {
+              "description": "Opaque identifier",
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling; empty means none",
+            "type": "string"
+          },
+          "max_streams": {
+            "description": "Concurrent stream limit; 0 means unlimited",
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_transcodes": {
+            "description": "Concurrent transcode limit; 0 means unlimited",
+            "format": "int64",
+            "type": "integer"
+          },
+          "permissions": {
+            "description": "Effective assignable permissions",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requests_allowed": {
+            "type": "boolean"
+          },
+          "transcode_allowed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "library_ids",
+          "max_playback_quality",
+          "max_streams",
+          "max_transcodes",
+          "transcode_allowed",
+          "audio_transcode_allowed",
+          "download_allowed",
+          "download_transcode_allowed",
+          "requests_allowed",
+          "permissions"
+        ],
+        "type": "object"
+      },
       "Impersonation": {
         "additionalProperties": false,
         "properties": {
@@ -644,6 +896,124 @@
           "account"
         ],
         "x-silo-class": "authenticated"
+      }
+    },
+    "/api/v2/admin/users": {
+      "get": {
+        "operationId": "listAdminUsers",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List every login account with its policy overrides and effective policy.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true
       }
     },
     "/api/v2/openapi.json": {
