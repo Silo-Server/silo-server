@@ -1386,24 +1386,34 @@ func (a *Analyzer) noteSealedListener(binding valueBinding, env *walkEnv) {
 	if !binding.attributed || binding.obj == nil || binding.value == nil || env.sealed == nil {
 		return
 	}
-	call, ok := unwrapParen(binding.value).(*ast.CallExpr)
-	if !ok {
-		return
-	}
-	if id := a.delegatedListenerOfCall(call, env); id != "" {
+	if id := a.sealedListenerValue(binding.value, env); id != "" {
 		env.sealed[binding.obj] = id
 	}
 }
 
-// sealedListenerValue reports the delegated listener a handler expression
-// holds when it is a variable the walk saw bound to that listener's entry
-// call, rather than the call itself.
-func (a *Analyzer) sealedListenerValue(handler ast.Expr, env *walkEnv) string {
-	obj := env.varOf(handler)
-	if obj == nil {
-		return ""
+// sealedListenerValue reports the delegated listener an expression holds
+// without being the entry call at a registration site: a variable the walk
+// saw bound to a sealed value, an alias of such a variable, or a call that
+// receives a sealed value as an argument (a wrapper or middleware around the
+// sealed handler). The mark propagates through those shapes so a registration
+// using any of them is refused rather than recorded as a leaf route.
+func (a *Analyzer) sealedListenerValue(expr ast.Expr, env *walkEnv) string {
+	switch e := unwrapParen(expr).(type) {
+	case *ast.Ident:
+		if obj := env.varOf(e); obj != nil {
+			return env.sealed[obj]
+		}
+	case *ast.CallExpr:
+		if id := a.delegatedListenerOfCall(e, env); id != "" {
+			return id
+		}
+		for _, arg := range e.Args {
+			if id := a.sealedListenerValue(arg, env); id != "" {
+				return id
+			}
+		}
 	}
-	return env.sealed[obj]
+	return ""
 }
 
 // delegatedListener reports the listener a handler expression delegates to:

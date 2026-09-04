@@ -599,12 +599,17 @@ func TestAnalyzeRecordsListenerDelegationAndConsumer(t *testing.T) {
 
 // TestAnalyzeRefusesSealedListenerHandlerThroughAVariable: the delegating
 // listener must build the sealed handler in the registration itself. Bound to
-// a local first, the registration would be recorded as an ordinary leaf route
-// and the delegated listener's operations would vanish from the artifact.
+// a local first, aliased, or wrapped in another call, the registration would
+// be recorded as an ordinary leaf route and the delegated listener's
+// operations would vanish from the artifact.
 func TestAnalyzeRefusesSealedListenerHandlerThroughAVariable(t *testing.T) {
-	_, err := Analyze(consumerFixtureConfig("consumer_sealed_var"))
-	if err == nil || !strings.Contains(err.Error(), "sealed listener handler must be built at the registration site") {
-		t.Fatalf("err = %v, want the sealed-handler refusal", err)
+	for _, fixture := range []string{"consumer_sealed_var", "consumer_sealed_alias", "consumer_sealed_wrapped"} {
+		t.Run(fixture, func(t *testing.T) {
+			_, err := Analyze(consumerFixtureConfig(fixture))
+			if err == nil || !strings.Contains(err.Error(), "sealed listener handler must be built at the registration site") {
+				t.Fatalf("err = %v, want the sealed-handler refusal", err)
+			}
+		})
 	}
 }
 
