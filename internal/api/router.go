@@ -761,7 +761,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		// Request lifecycle notifications (submitted / approved / declined):
 		// server-channel broadcasts plus personal deliveries to the requester
-		// on approve/decline. Fulfilled rides the reconcile service's
+		// on manual approve/decline. Fulfilled rides the reconcile service's
 		// fulfillment notifier instead.
 		if lifecycle := notifications.NewRequestLifecycleNotifier(deps.Notifications); lifecycle != nil {
 			requestSvc.SetLifecycleNotifier(lifecycle)

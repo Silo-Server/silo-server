@@ -756,7 +756,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if req.Status == StatusApproved {
 		// Auto-approval is a real approval transition; channels subscribed to
 		// approvals see it alongside the submission.
-		s.notifyLifecycle(ctx, *req, LifecycleNotifier.RequestApproved)
+		s.notifyApproval(ctx, *req, ApprovalOriginAutomatic)
 		return s.submitApprovedRequest(ctx, *req, viewer, nil)
 	}
 	return req, nil
@@ -893,7 +893,7 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
-	s.notifyLifecycle(ctx, *approved, LifecycleNotifier.RequestApproved)
+	s.notifyApproval(ctx, *approved, ApprovalOriginManual)
 	return s.submitApprovedRequest(ctx, *approved, viewer, nil)
 }
 

@@ -18,6 +18,15 @@ type FulfillmentNotifier interface {
 // service. Optional; without it completed requests are never notified.
 func (s *Service) SetFulfillmentNotifier(n FulfillmentNotifier) { s.notifier = n }
 
+// ApprovalOrigin identifies how an approval transition was initiated so
+// notification destinations can distinguish policy from administrator action.
+type ApprovalOrigin string
+
+const (
+	ApprovalOriginManual    ApprovalOrigin = "manual"
+	ApprovalOriginAutomatic ApprovalOrigin = "automatic"
+)
+
 // LifecycleNotifier observes request lifecycle transitions (submitted,
 // approved, declined) for broadcast destinations such as admin server
 // channels. Implementations must be fast and non-blocking (dispatch async)
@@ -28,7 +37,7 @@ func (s *Service) SetFulfillmentNotifier(n FulfillmentNotifier) { s.notifier = n
 // reconcile service rather than the API service.
 type LifecycleNotifier interface {
 	RequestSubmitted(ctx context.Context, req Request)
-	RequestApproved(ctx context.Context, req Request)
+	RequestApproved(ctx context.Context, req Request, origin ApprovalOrigin)
 	RequestDeclined(ctx context.Context, req Request)
 }
 
@@ -45,6 +54,12 @@ func (s *Service) notifyLifecycle(ctx context.Context, req Request, notify func(
 	}
 	s.populateRequesterIdentity(ctx, &req)
 	notify(s.lifecycle, ctx, req)
+}
+
+func (s *Service) notifyApproval(ctx context.Context, req Request, origin ApprovalOrigin) {
+	s.notifyLifecycle(ctx, req, func(notifier LifecycleNotifier, ctx context.Context, req Request) {
+		notifier.RequestApproved(ctx, req, origin)
+	})
 }
 
 // notifyFulfilledLimit bounds one notification pass; the remainder lands on
