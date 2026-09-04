@@ -120,9 +120,13 @@ func (ID) Schema(_ huma.Registry) *huma.Schema {
 // wire; the named type only lets array items carry a schema example.
 type Permission string
 
+// examplePermission is the fictional permission the schema examples and the
+// pilot fixtures use.
+const examplePermission Permission = "marker_edit"
+
 // Schema describes Permission as a plain string.
 func (Permission) Schema(_ huma.Registry) *huma.Schema {
-	return &huma.Schema{Type: huma.TypeString, Description: "Assignable permission name", Examples: []any{"marker_edit"}}
+	return &huma.Schema{Type: huma.TypeString, Description: "Assignable permission name", Examples: []any{string(examplePermission)}}
 }
 
 // permissionsOf renders permission names; the result is never null.

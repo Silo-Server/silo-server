@@ -318,12 +318,20 @@ verify-apiv2-fixtures-siblings:
 		root=$${dest%%/iosApp/*}; root=$${root%%/shared/*}; \
 		if [ ! -d "$$root" ]; then echo "skipping $$dest: $$root not checked out"; continue; fi; \
 		if [ ! -d "$$dest" ]; then echo "$$dest: not vendored yet; run make apiv2-fixtures-sync"; status=1; continue; fi; \
-		for f in $(APIV2_FIXTURE_DIR)/*.json contracts/api/v2/fixtures.schema.json; do \
-			cmp -s "$$f" "$$dest/$$(basename "$$f")" || { echo "$$dest/$$(basename "$$f") is stale"; status=1; }; \
-		done; \
+		cmp -s contracts/api/v2/fixtures.schema.json "$$dest/fixtures.schema.json" || { echo "$$dest/fixtures.schema.json is stale"; status=1; }; \
+		names=""; \
 		for f in "$$dest"/*.json; do \
-			b=$$(basename "$$f"); [ -e "$(APIV2_FIXTURE_DIR)/$$b" ] || [ "$$b" = fixtures.schema.json ] || { echo "$$f has no server counterpart"; status=1; }; \
+			b=$$(basename "$$f"); \
+			case "$$b" in fixtures.schema.json|index.json) continue;; esac; \
+			names="$$names $${b%.json}"; \
+			if [ -e "$(APIV2_FIXTURE_DIR)/$$b" ]; then cmp -s "$(APIV2_FIXTURE_DIR)/$$b" "$$f" || { echo "$$f is stale"; status=1; }; \
+			else echo "$$f has no server counterpart"; status=1; fi; \
 		done; \
+		if command -v jq >/dev/null 2>&1; then \
+			want=$$(jq -S --arg names "$$names" '.fixtures |= map(select(.name as $$n | ($$names | split(" ")) | index($$n)))' $(APIV2_FIXTURE_DIR)/index.json); \
+			have=$$(jq -S . "$$dest/index.json" 2>/dev/null); \
+			[ "$$want" = "$$have" ] || { echo "$$dest/index.json is stale (entries differ from the server index for the vendored fixtures)"; status=1; }; \
+		else echo "jq not installed; skipped the $$dest/index.json entry check"; fi; \
 	done; \
 	[ "$$status" -eq 0 ] && echo "sibling v2 fixture copies are current" || exit 1
 
