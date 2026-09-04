@@ -256,7 +256,7 @@ export async function bootstrapAccessToken(fetchImpl: typeof fetch = fetch): Pro
   }
 }
 
-async function refreshAccessToken(
+export async function refreshAccessToken(
   refreshToken: string,
   fetchImpl: typeof fetch,
 ): Promise<RefreshResponse | null> {
@@ -369,53 +369,6 @@ function apiClientErrorFrom(status: number, parsed: ParsedApiError): ApiClientEr
   const err = new ApiClientError(status, parsed.apiErr.error, parsed.apiErr.message, parsed.apiErr);
   err.body = parsed.raw;
   return err;
-}
-
-export interface RestoredUserSession<TUser> {
-  user: TUser;
-  accessToken: string;
-  refreshToken: string;
-}
-
-export async function restoreUserSession<TUser>({
-  accessToken,
-  refreshToken,
-  fetchImpl = fetch,
-}: {
-  accessToken: string;
-  refreshToken: string;
-  fetchImpl?: typeof fetch;
-}): Promise<RestoredUserSession<TUser>> {
-  let restoredAccessToken = accessToken;
-  let restoredRefreshToken = refreshToken;
-
-  const requestUser = (token: string) =>
-    fetchImpl("/api/v1/auth/me", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-  let res = await requestUser(restoredAccessToken);
-
-  if (res.status === 401) {
-    const refreshed = await refreshAccessToken(restoredRefreshToken, fetchImpl);
-    if (refreshed) {
-      restoredAccessToken = refreshed.access_token;
-      restoredRefreshToken = refreshed.refresh_token;
-      res = await requestUser(restoredAccessToken);
-    }
-  }
-
-  if (!res.ok) {
-    throw apiClientErrorFrom(res.status, await parseApiError(res));
-  }
-
-  return {
-    user: (await res.json()) as TUser,
-    accessToken: restoredAccessToken,
-    refreshToken: restoredRefreshToken,
-  };
 }
 
 async function readApiResponse<T>(res: Response): Promise<T> {

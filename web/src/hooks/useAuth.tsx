@@ -6,7 +6,6 @@ import {
   bootstrapAccessToken,
   getAccessToken,
   onProfileUnverified,
-  restoreUserSession,
   setAccessToken,
   setProfileId,
   setProfileToken,
@@ -22,7 +21,8 @@ import type {
   User,
   VerifyPinResponse,
 } from "@/api/types";
-import { v2, type V2Result } from "@/api/v2/request";
+import { v2 } from "@/api/v2/request";
+import { restoreUserSession, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import {
   clearStoredImpersonationAdminSession,
@@ -30,30 +30,6 @@ import {
   saveStoredImpersonationAdminSession,
   type StoredImpersonationAdminSession,
 } from "@/lib/impersonationSession";
-
-/**
- * Projects the v2 account onto the session's `User` shape. Login, signup, and
- * session restore still answer on v1 with numeric ids, so the one account
- * state keeps that shape until those operations move; the v2 id is the same
- * account id rendered as a string.
- */
-function userFromAccount(account: V2Result<"GET /api/v2/account/me">): User {
-  return {
-    id: Number(account.id),
-    username: account.username,
-    email: account.email,
-    role: account.role,
-    permissions: account.permissions,
-    download_allowed: account.download_allowed,
-    impersonation: account.impersonation
-      ? {
-          active: account.impersonation.active,
-          impersonator_user_id: Number(account.impersonation.impersonator_user_id),
-          impersonator_username: account.impersonation.impersonator_username,
-        }
-      : null,
-  };
-}
 
 interface AuthState {
   user: User | null;
@@ -284,7 +260,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const restoreAdminUser = useCallback(
     async (storedSession: { accessToken: string; refreshToken: string }) => {
-      const restoredSession = await restoreUserSession<User>(storedSession);
+      const restoredSession = await restoreUserSession(storedSession);
       clearProfile();
       queryClient.clear();
       setAccessToken(restoredSession.accessToken);

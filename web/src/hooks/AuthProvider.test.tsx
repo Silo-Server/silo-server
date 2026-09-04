@@ -28,12 +28,16 @@ vi.mock("@/api/client", async () => {
     bootstrapAccessToken: bootstrapAccessTokenMock,
     getAccessToken: getAccessTokenMock,
     onProfileUnverified: onProfileUnverifiedMock,
-    restoreUserSession: restoreUserSessionMock,
     setAccessToken: setAccessTokenMock,
     setProfileId: setProfileIdMock,
     setProfileToken: setProfileTokenMock,
     setRefreshToken: setRefreshTokenMock,
   };
+});
+
+vi.mock("@/api/v2/account", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/account")>("@/api/v2/account");
+  return { ...actual, restoreUserSession: restoreUserSessionMock };
 });
 
 vi.mock("@/api/v2/request", async () => {

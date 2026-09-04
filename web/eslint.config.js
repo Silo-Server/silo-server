@@ -44,6 +44,7 @@ export default tseslint.config(
       "src/hooks/queries/progress.ts",
       "src/hooks/queries/profiles.ts",
       "src/hooks/queries/admin/users.ts",
+      "src/pages/OAuthComplete.tsx",
     ],
     rules: {
       "no-restricted-syntax": [

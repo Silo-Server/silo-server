@@ -237,7 +237,6 @@ export async function v2<K extends V2OperationKey>(
   key: K,
   ...args: RequestArgs<K>
 ): Promise<V2Result<K>> {
-  const operationId: string = v2Operations[key];
   const [method, route] = key.split(" ", 2) as [string, string];
   const options = (args[0] ?? {}) as CommonOptions & {
     path?: Record<string, string | number>;
@@ -260,6 +259,31 @@ export async function v2<K extends V2OperationKey>(
     init,
   );
 
+  try {
+    return await decodeV2Response(key, res);
+  } catch (err) {
+    if (
+      err instanceof V2ProblemError &&
+      err.status === 403 &&
+      err.problemType === "profile_verification_required"
+    ) {
+      reportProfileUnverified(requestProfileId, requestProfileToken);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Decodes one v2 response for the operation `key`: the branded success body,
+ * or a thrown `V2ProblemError` / `V2TransportError`. Exposed for the few
+ * callers that must issue the fetch themselves (an explicit bearer token
+ * outside the shared session) and still want contract-shaped answers.
+ */
+export async function decodeV2Response<K extends V2OperationKey>(
+  key: K,
+  res: Response,
+): Promise<V2Result<K>> {
+  const operationId: string = v2Operations[key];
   if (res.ok) {
     const decoded = await readBody(res, operationId);
     return brand(decoded as SuccessOf<OperationOf<K>>);
@@ -273,9 +297,5 @@ export async function v2<K extends V2OperationKey>(
       "the error response is not a problem document",
     );
   }
-  const problem = new V2ProblemError(operationId, body);
-  if (problem.status === 403 && problem.problemType === "profile_verification_required") {
-    reportProfileUnverified(requestProfileId, requestProfileToken);
-  }
-  throw problem;
+  throw new V2ProblemError(operationId, body);
 }

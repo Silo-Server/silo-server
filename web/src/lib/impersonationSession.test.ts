@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getAccessToken, restoreUserSession, setAccessToken } from "../api/client";
+import { getAccessToken, setAccessToken } from "../api/client";
+import { restoreUserSession } from "../api/v2/account";
 import {
   clearStoredImpersonationAdminSession,
   loadStoredImpersonationAdminSession,
@@ -102,13 +103,21 @@ describe("impersonationSession", () => {
       });
 
       if (
-        url.endsWith("/auth/me") &&
+        url === "/api/v2/account/me" &&
         headers.get("Authorization") === "Bearer expired-admin-access"
       ) {
-        return new Response(JSON.stringify({ error: "unauthorized", message: "expired" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            type: "https://silo.example/problems/authentication_required",
+            title: "Authentication required",
+            status: 401,
+            detail: "expired",
+          }),
+          {
+            status: 401,
+            headers: { "Content-Type": "application/problem+json" },
+          },
+        );
       }
 
       if (url.endsWith("/auth/refresh")) {
@@ -126,16 +135,17 @@ describe("impersonationSession", () => {
       }
 
       if (
-        url.endsWith("/auth/me") &&
+        url === "/api/v2/account/me" &&
         headers.get("Authorization") === "Bearer fresh-admin-access"
       ) {
         return new Response(
           JSON.stringify({
-            id: 1,
+            id: "1",
             username: "admin",
             email: "admin@example.com",
             role: "admin",
-            impersonation: null,
+            permissions: [],
+            download_allowed: true,
           }),
           {
             status: 200,
@@ -161,13 +171,15 @@ describe("impersonationSession", () => {
         username: "admin",
         email: "admin@example.com",
         role: "admin",
+        permissions: [],
+        download_allowed: true,
         impersonation: null,
       },
     });
     expect(getAccessToken()).toBe("impersonated-access");
     expect(fetchCalls).toEqual([
       {
-        url: "/api/v1/auth/me",
+        url: "/api/v2/account/me",
         authorization: "Bearer expired-admin-access",
       },
       {
@@ -175,7 +187,7 @@ describe("impersonationSession", () => {
         authorization: null,
       },
       {
-        url: "/api/v1/auth/me",
+        url: "/api/v2/account/me",
         authorization: "Bearer fresh-admin-access",
       },
     ]);

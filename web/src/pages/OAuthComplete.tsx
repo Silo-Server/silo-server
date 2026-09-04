@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { setAccessToken, setRefreshToken } from "@/api/client";
-import { api } from "@/api/client";
-import type { RefreshResponse, User } from "@/api/types";
+import type { RefreshResponse } from "@/api/types";
+import { userFromAccount } from "@/api/v2/account";
+import { v2 } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 
-type OAuthCompleteResponse = RefreshResponse & {
+type OAuthCompletion = RefreshResponse & {
   next: string;
 };
 
-async function completeOAuthCode(code: string): Promise<OAuthCompleteResponse> {
+async function completeOAuthCode(code: string): Promise<OAuthCompletion> {
   const res = await fetch("/api/v1/auth/oauth/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -19,7 +20,7 @@ async function completeOAuthCode(code: string): Promise<OAuthCompleteResponse> {
   if (!res.ok) {
     throw new Error("Sign-in response expired. Please try again.");
   }
-  return (await res.json()) as OAuthCompleteResponse;
+  return (await res.json()) as OAuthCompletion;
 }
 
 export default function OAuthComplete() {
@@ -46,7 +47,7 @@ export default function OAuthComplete() {
         const next = sanitizeAuthRedirect(tokens.next) || "/";
         setAccessToken(tokens.access_token);
         setRefreshToken(tokens.refresh_token);
-        const user = await api<User>("/auth/me");
+        const user = userFromAccount(await v2("GET /api/v2/account/me"));
         if (cancelled) return;
         completeLogin({
           access_token: tokens.access_token,
