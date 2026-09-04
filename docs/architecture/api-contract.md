@@ -413,11 +413,28 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `concurrency: if_match` field names the rows that will register `Guarded`; the gate limits
   it to tier-1 ported mutation rows and reconciles every guarded registration against it. No
   production resource is guarded yet; the first section that guards one adds its row version.
+- **Mutation retry safety is encoded.** The ledger's curated `retry_safety` field classifies
+  every tier-1 ported mutation row (POST, PUT, PATCH, DELETE) by one of the seven strategies
+  above, spelled `natural_idempotent`, `unique_constraint`, `domain_identity`, `coalescing`,
+  `durable_dispatch`, `idempotency_key`, `non_retryable`; an optional `retry_safety_note` (at
+  most 300 characters) explains a non-obvious choice and is required for `idempotency_key` and
+  `non_retryable`. `migration.schema.json` forbids both fields on any other row and
+  `internal/contractledger` requires the value on every classified group (a temporary
+  allow-list names the groups the classification pass has not reached). `apiv2.Operation`
+  carries the same enum as `RetrySafety`: `Register` panics when a mutating operation omits it
+  or a GET/HEAD declares it, and the document records it as `x-silo-retry-safety`.
+  `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
+  classified legacy row or disagrees with it. No operation declares `idempotency_key` and no
+  generic key store exists; `documentDeclaration` panics if an input binds the
+  `Idempotency-Key` header under any other strategy, so the field is never advertised
+  unimplemented. Inventory answer so far: no residual group justifies a shared implementation
+  (the one `non_retryable` row, invite-code top-up, folds into an absolute PUT); the remaining
+  groups are classified in the follow-up pass.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
-  tracked on #882: per-operation mutation retry / idempotency classification; the durable
-  `202` job acceptance and its monitor/cancel shape; the atomic-versus-per-item bulk contract;
-  and the RFC 9745 / RFC 8594 deprecation, link, and sunset headers.
+  tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the
+  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
+  sunset headers.
 
 ### Problem Details
 
