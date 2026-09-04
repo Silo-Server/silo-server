@@ -108,13 +108,9 @@ type Registry struct {
 	lastPublishWarnUnixNano            atomic.Int64
 	sequence                           atomic.Uint64
 	reportingPublisherID               atomic.Value
-	startOnce                          sync.Once
-	stopOnce                           sync.Once
-	stop                               chan struct{}
-	done                               chan struct{}
-	started                            atomic.Bool
-	leaveMu                            sync.Mutex
-	left                               bool
+	// loop is the publish-on-a-ticker lifecycle, shared with ReportedPublisher so
+	// both of a process's publishers start, stop and leave the roster identically.
+	loop *publishLoop
 }
 
 func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry {
@@ -133,7 +129,7 @@ func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry
 	cfg.resolve()
 	r := &Registry{cfg: cfg, store: store, logger: logger, seed: maphash.MakeSeed(),
 		transfers: make(map[string]*transfer), transfersBySubject: make(map[string]int64),
-		stop: make(chan struct{}), done: make(chan struct{})}
+		loop: newPublishLoop()}
 	for i := range r.shards {
 		r.shards[i].sessions = make(map[string]*logicalSession)
 		r.shards[i].tombstones = make(map[string]sessionTombstone)
@@ -631,54 +627,20 @@ func (r *Registry) Start(ctx context.Context) {
 	if r == nil || !r.cfg.Enabled {
 		return
 	}
-	r.startOnce.Do(func() {
-		r.started.Store(true)
-		go func() {
-			defer close(r.done)
-			ticker := time.NewTicker(r.cfg.SweepInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-r.stop:
-					return
-				case sweepStart := <-ticker.C:
-					snapshot := r.sweep(sweepStart)
-					snapshot.Sequence = r.sequence.Add(1)
-					if err := r.store.Publish(ctx, snapshot); err != nil {
-						r.warnRateLimited("failed to publish stream telemetry snapshot", &r.lastPublishWarnUnixNano, "error", err)
-					}
-				}
-			}
-		}()
+	r.loop.run(ctx, r.cfg.SweepInterval, func(ctx context.Context, sweepStart time.Time) {
+		snapshot := r.sweep(sweepStart)
+		snapshot.Sequence = r.sequence.Add(1)
+		if err := r.store.Publish(ctx, snapshot); err != nil {
+			r.warnRateLimited("failed to publish stream telemetry snapshot", &r.lastPublishWarnUnixNano, "error", err)
+		}
 	})
 }
 
 func (r *Registry) Stop(ctx context.Context) error {
-	if r == nil || !r.cfg.Enabled || !r.started.Load() {
+	if r == nil || !r.cfg.Enabled {
 		return nil
 	}
-	r.stopOnce.Do(func() { close(r.stop) })
-	select {
-	case <-r.done:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	global, ok := r.store.(GlobalSnapshotStore)
-	if !ok {
-		return nil
-	}
-	r.leaveMu.Lock()
-	defer r.leaveMu.Unlock()
-	if r.left {
-		return nil
-	}
-	if err := global.Leave(ctx); err != nil {
-		return err
-	}
-	r.left = true
-	return nil
+	return r.loop.halt(ctx, r.store)
 }
 
 func (r *Registry) Sweep() Snapshot { return r.sweep(now()) }

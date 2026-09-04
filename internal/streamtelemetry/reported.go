@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -68,15 +67,9 @@ type ReportedPublisher struct {
 	logger *slog.Logger
 
 	sequence atomic.Uint64
-	started  atomic.Bool
-
-	startOnce sync.Once
-	stopOnce  sync.Once
-	stop      chan struct{}
-	done      chan struct{}
-
-	leaveMu sync.Mutex
-	left    bool
+	// loop is the publish-on-a-ticker lifecycle, shared with Registry so both of
+	// a process's publishers start, stop and leave the roster identically.
+	loop *publishLoop
 
 	lastPublishWarnUnixNano atomic.Int64
 }
@@ -97,7 +90,7 @@ func NewReportedPublisher(cfg Config, source ReportedSessionSource, store Snapsh
 	}
 	cfg.PublisherID = ReportedPublisherIDFor(cfg.PublisherID)
 	return &ReportedPublisher{cfg: cfg, source: source, store: store, logger: logger,
-		stop: make(chan struct{}), done: make(chan struct{})}
+		loop: newPublishLoop()}
 }
 
 // Enabled reports whether this publisher will do anything.
@@ -164,60 +157,21 @@ func (p *ReportedPublisher) Start(ctx context.Context) {
 	if !p.Enabled() {
 		return
 	}
-	p.startOnce.Do(func() {
-		p.started.Store(true)
-		go func() {
-			defer close(p.done)
-			ticker := time.NewTicker(p.cfg.SweepInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-p.stop:
-					return
-				case capturedAt := <-ticker.C:
-					snapshot := p.SnapshotAt(capturedAt)
-					snapshot.Sequence = p.sequence.Add(1)
-					if err := p.store.Publish(ctx, snapshot); err != nil {
-						warnRateLimited(p.logger, &p.lastPublishWarnUnixNano,
-							"failed to publish reported session snapshot", "error", err)
-					}
-				}
-			}
-		}()
+	p.loop.run(ctx, p.cfg.SweepInterval, func(ctx context.Context, capturedAt time.Time) {
+		snapshot := p.SnapshotAt(capturedAt)
+		snapshot.Sequence = p.sequence.Add(1)
+		if err := p.store.Publish(ctx, snapshot); err != nil {
+			warnRateLimited(p.logger, &p.lastPublishWarnUnixNano,
+				"failed to publish reported session snapshot", "error", err)
+		}
 	})
 }
 
-// Stop ends publishing, waits for the loop to exit, and leaves the roster.
-//
-// Leaving matters as much as stopping. A publisher that goes away without
-// removing itself keeps its last snapshot readable until freshness expires and
-// then lingers in the roster until membership does, so a graceful shutdown would
-// show operators ghost live sessions followed by a degraded view — the exact
-// thing this publisher exists to eliminate.
+// Stop ends publishing, waits for the loop to exit, and leaves the roster. Why
+// leaving matters as much as stopping is documented on publishLoop.halt.
 func (p *ReportedPublisher) Stop(ctx context.Context) error {
-	if p == nil || !p.started.Load() {
+	if p == nil {
 		return nil
 	}
-	p.stopOnce.Do(func() { close(p.stop) })
-	select {
-	case <-p.done:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	global, ok := p.store.(GlobalSnapshotStore)
-	if !ok {
-		return nil
-	}
-	p.leaveMu.Lock()
-	defer p.leaveMu.Unlock()
-	if p.left {
-		return nil
-	}
-	if err := global.Leave(ctx); err != nil {
-		return err
-	}
-	p.left = true
-	return nil
+	return p.loop.halt(ctx, p.store)
 }

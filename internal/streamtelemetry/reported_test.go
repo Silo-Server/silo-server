@@ -201,7 +201,7 @@ func TestReportedPublisherLeavesTheRosterOnStop(t *testing.T) {
 	}, store, nil)
 
 	publisher.Start(t.Context())
-	publisher.started.Store(true)
+	publisher.loop.started.Store(true)
 	if err := publisher.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
