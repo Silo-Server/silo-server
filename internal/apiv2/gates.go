@@ -265,7 +265,12 @@ func normalizeAccept(ctx huma.Context, next func(huma.Context)) {
 	next(ctx)
 }
 
+// acceptsJSON reports whether an Accept header admits application/json under
+// RFC 9110 §12.5.1: the media range that matches JSON most specifically
+// decides, so "application/json;q=0, */*" refuses JSON even though the
+// wildcard would accept it, and "*/*;q=0, application/json" accepts it.
 func acceptsJSON(accept string) bool {
+	bestSpecificity, bestQ := 0, 0.0
 	for _, part := range strings.Split(accept, ",") {
 		fields := strings.Split(part, ";")
 		mt := strings.ToLower(strings.TrimSpace(fields[0]))
@@ -278,14 +283,22 @@ func acceptsJSON(accept string) bool {
 				}
 			}
 		}
-		if q <= 0 {
+		specificity := 0
+		switch mt {
+		case mediaTypeJSON:
+			specificity = 3
+		case "application/*":
+			specificity = 2
+		case "*/*":
+			specificity = 1
+		default:
 			continue
 		}
-		if mt == "*/*" || mt == "application/*" || mt == mediaTypeJSON {
-			return true
+		if specificity > bestSpecificity {
+			bestSpecificity, bestQ = specificity, q
 		}
 	}
-	return false
+	return bestSpecificity > 0 && bestQ > 0
 }
 
 // mediaTypeGuard is the structured-body media-type rule: exactly

@@ -345,6 +345,21 @@ func TestUnacceptableAcceptIs406(t *testing.T) {
 	// A bare "json" is not a media type and must not select the alias.
 	rec = do(t, h, http.MethodGet, "/api/v2/system/info", "", map[string]string{"Accept": "json"})
 	requireProblem(t, rec, TypeNotAcceptable)
+	// The most specific matching range decides: an explicit q=0 on JSON is
+	// not overridden by a later wildcard, and a q=0 wildcard does not veto an
+	// explicit JSON range.
+	for _, accept := range []string{"application/json;q=0, */*;q=1", "application/*;q=0, */*", "application/json;q=0"} {
+		rec := do(t, h, http.MethodGet, "/api/v2/system/info", "", map[string]string{"Accept": accept})
+		if rec.Code != http.StatusNotAcceptable {
+			t.Errorf("Accept %q: %d, want 406", accept, rec.Code)
+		}
+	}
+	for _, accept := range []string{"*/*;q=0, application/json", "*/*;q=0, application/*;q=0.5", "text/html, application/json;q=0.1"} {
+		rec := do(t, h, http.MethodGet, "/api/v2/system/info", "", map[string]string{"Accept": accept})
+		if rec.Code != http.StatusOK {
+			t.Errorf("Accept %q: %d, want 200", accept, rec.Code)
+		}
+	}
 }
 
 func TestMediaTypeGuard(t *testing.T) {
