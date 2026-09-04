@@ -376,10 +376,10 @@ describe("RealtimeEventsProvider", () => {
     });
     expect(liveInvalidationCalls(invalidate)).toHaveLength(1);
 
-    act(() => vi.advanceTimersByTime(5_000));
+    act(() => vi.advanceTimersByTime(15_000));
     expect(liveInvalidationCalls(invalidate)).toHaveLength(1);
 
-    act(() => vi.advanceTimersByTime(5_001));
+    act(() => vi.advanceTimersByTime(15_001));
     expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
   });
 
@@ -393,6 +393,30 @@ describe("RealtimeEventsProvider", () => {
     expect(liveInvalidationCalls(invalidate)).toHaveLength(1);
   });
 
+  // The throttle is worthless unless its window EXCEEDS the cadence of the events it
+  // throttles. The reconciler publishes sessions.replaced every 15s and its change gate
+  // includes position_seconds, so anything playing fires one on essentially every tick.
+  // At the original 10s window every tick cleared the leading edge and the steady-state
+  // refetch rate was exactly what it had been before the throttle existed.
+  it("coalesces the reconciler's own 15s tick cadence", () => {
+    const RECONCILER_TICK_MS = 15_000;
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    renderProvider(queryClient);
+    const socket = FakeWebSocket.instances[0];
+
+    // Four ticks, one minute of a single session playing.
+    act(() => {
+      for (let index = 0; index < 4; index += 1) {
+        emitSessionsReplaced(socket);
+        vi.advanceTimersByTime(RECONCILER_TICK_MS);
+      }
+    });
+
+    // Strictly fewer than one refetch per tick, which is the whole point.
+    expect(liveInvalidationCalls(invalidate).length).toBeLessThan(4);
+  });
+
   it("runs another leading invalidation at the exact throttle boundary", () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
@@ -400,7 +424,7 @@ describe("RealtimeEventsProvider", () => {
     const socket = FakeWebSocket.instances[0];
 
     act(() => emitSessionsReplaced(socket));
-    act(() => vi.advanceTimersByTime(10_000));
+    act(() => vi.advanceTimersByTime(30_000));
     act(() => emitSessionsReplaced(socket));
 
     expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
@@ -415,13 +439,13 @@ describe("RealtimeEventsProvider", () => {
     act(() => {
       emitSessionsReplaced(socket);
       emitSessionsReplaced(socket);
-      vi.advanceTimersByTime(10_000);
+      vi.advanceTimersByTime(30_000);
     });
     expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
 
     act(() => {
       for (let index = 0; index < 10; index += 1) emitSessionsReplaced(socket);
-      vi.advanceTimersByTime(9_999);
+      vi.advanceTimersByTime(29_999);
     });
     expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
 
@@ -469,7 +493,7 @@ describe("RealtimeEventsProvider", () => {
         </QueryClientProvider>,
       );
     });
-    act(() => vi.advanceTimersByTime(10_000));
+    act(() => vi.advanceTimersByTime(30_000));
 
     expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
     expect(liveInvalidationCalls(invalidate)[1]?.[0]).toMatchObject({ refetchType: "none" });

@@ -312,7 +312,18 @@ function handleJobSideEffects(
   }
 }
 
-const LIVE_SESSIONS_INVALIDATE_INTERVAL_MS = 10_000;
+// Must EXCEED the cadence of the events it is throttling, or it throttles nothing.
+// The reconciler publishes sessions.replaced on a 15s ticker
+// (internal/worker/reconciler.go) and its change gate includes position_seconds, so
+// anything playing fires one on essentially every tick. At a 10s window every tick
+// cleared the leading edge and the steady-state refetch rate was exactly what it was
+// before the throttle existed; only sub-10s bursts coalesced.
+//
+// 30s is ADMIN_STALE_TIME: refetching an endpoint more often than its own data is
+// considered fresh cannot tell the operator anything new, and this one builds a merged
+// telemetry view and then runs a seven-LEFT-JOIN lookup. Start and stop transitions
+// still feel immediate — they arrive on the leading edge.
+const LIVE_SESSIONS_INVALIDATE_INTERVAL_MS = 30_000;
 
 interface LiveSessionsInvalidationState {
   lastRunAt: number | null;
