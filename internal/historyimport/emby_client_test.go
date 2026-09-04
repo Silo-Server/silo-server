@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -38,9 +40,14 @@ func TestEmbyFetchItems_RequestsUserDataFieldsTheImporterReads(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
+			// The handler runs on the server's goroutine; guard the capture so
+			// reading it back here has a happens-before edge.
+			var mu sync.Mutex
 			var gotFields string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
 				gotFields = r.URL.Query().Get("Fields")
+				mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				if err := json.NewEncoder(w).Encode(embyItemsResponse{}); err != nil {
 					t.Errorf("encode response: %v", err)
@@ -53,10 +60,17 @@ func TestEmbyFetchItems_RequestsUserDataFieldsTheImporterReads(t *testing.T) {
 				t.Fatalf("fetch returned error: %v", err)
 			}
 
-			fields := strings.Split(gotFields, ",")
+			mu.Lock()
+			captured := gotFields
+			mu.Unlock()
+
+			fields := strings.Split(captured, ",")
+			for i, field := range fields {
+				fields[i] = strings.TrimSpace(field)
+			}
 			for _, want := range []string{"ProviderIds", "UserDataLastPlayedDate", "UserDataPlayCount"} {
-				if !containsField(fields, want) {
-					t.Errorf("Fields = %q, missing %q", gotFields, want)
+				if !slices.Contains(fields, want) {
+					t.Errorf("Fields = %q, missing %q", captured, want)
 				}
 			}
 		})
@@ -104,13 +118,4 @@ func TestNormalizeEmbyItem_CarriesLastPlayedDateAndPlayCount(t *testing.T) {
 	if record.UpdatedAt.IsZero() {
 		t.Error("record.UpdatedAt is zero, want the last-played time")
 	}
-}
-
-func containsField(fields []string, want string) bool {
-	for _, field := range fields {
-		if strings.TrimSpace(field) == want {
-			return true
-		}
-	}
-	return false
 }
