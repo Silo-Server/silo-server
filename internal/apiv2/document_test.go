@@ -317,8 +317,9 @@ func registerConcurrencyDocProbes(reg *Registry) {
 			o.Responses = map[string]*huma.Response{"2XX": {Description: "any success"}}
 			return o
 		}(),
-		Class:   ClassPublic,
-		Guarded: true,
+		Class:       ClassPublic,
+		Guarded:     true,
+		RetrySafety: RetrySafetyNaturalIdempotent,
 	}, func(_ context.Context, in *struct {
 		ID          string `path:"id"`
 		IfMatch     string `header:"If-Match"`
@@ -331,9 +332,10 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
 	})
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodDelete, Prefix+"/docprobe/{id}", "deleteDocProbe", "probe", "guarded delete"),
-		Class:     ClassPublic,
-		Guarded:   true,
+		Operation:   humaOp(http.MethodDelete, Prefix+"/docprobe/{id}", "deleteDocProbe", "probe", "guarded delete"),
+		Class:       ClassPublic,
+		Guarded:     true,
+		RetrySafety: RetrySafetyNaturalIdempotent,
 	}, func(_ context.Context, in *struct {
 		ID          string `path:"id"`
 		IfMatch     string `header:"If-Match"`
@@ -345,9 +347,10 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		return &struct{}{}, nil
 	})
 	Register(reg, Operation{
-		Operation:  humaOp(http.MethodPut, Prefix+"/docprobe/created/{id}", "putCreatedDocProbe", "probe", "create-only"),
-		Class:      ClassPublic,
-		CreateOnly: true,
+		Operation:   humaOp(http.MethodPut, Prefix+"/docprobe/created/{id}", "putCreatedDocProbe", "probe", "create-only"),
+		Class:       ClassPublic,
+		CreateOnly:  true,
+		RetrySafety: RetrySafetyUniqueConstraint,
 	}, func(_ context.Context, in *struct {
 		ID          string `path:"id"`
 		IfMatch     string `header:"If-Match"`
@@ -398,6 +401,9 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	put := doc.Paths[Prefix+"/docprobe/{id}"]["put"]
 	if ext("put", extGuarded) != true || ext("put", extConditional) != nil {
 		t.Fatalf("put extensions: guarded=%v conditional=%v", ext("put", extGuarded), ext("put", extConditional))
+	}
+	if ext("put", extRetrySafety) != string(RetrySafetyNaturalIdempotent) || ext("get", extRetrySafety) != nil {
+		t.Fatalf("retry safety extensions: put=%v get=%v", ext("put", extRetrySafety), ext("get", extRetrySafety))
 	}
 	ifMatch := false
 	for _, p := range put.Parameters {
@@ -596,13 +602,13 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		ETag   string `header:"ETag"`
 	}
 	guarded := func(method string) Operation {
-		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, Guarded: true}
+		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	}
 	conditional := func(method string) Operation {
 		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, Conditional: true}
 	}
 	createOnly := func(method string) Operation {
-		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, CreateOnly: true}
+		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, CreateOnly: true, RetrySafety: RetrySafetyUniqueConstraint}
 	}
 	cases := map[string]struct {
 		op   Operation
@@ -815,4 +821,36 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 			Register(reg, conditional(method), func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}})
 	}
+}
+
+// TestIdempotencyKeyHeaderNeedsTheDeclaration pins the forward guard: an
+// input may bind Idempotency-Key only on an operation whose retry safety is
+// idempotency_key, so the document never advertises a field the server
+// ignores.
+func TestIdempotencyKeyHeaderNeedsTheDeclaration(t *testing.T) {
+	type keyed struct {
+		IdempotencyKey string `header:"Idempotency-Key"`
+		Body           probeBody
+	}
+	register := func(safety RetrySafety) {
+		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+			Register(reg, Operation{
+				Operation:   humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""),
+				Class:       ClassPublic,
+				RetrySafety: safety,
+			}, func(context.Context, *keyed) (*probeOutput, error) { return nil, nil })
+		}})
+	}
+	t.Run("refused without idempotency_key", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil || !strings.Contains(r.(string), idempotencyKeyField) {
+				t.Fatalf("recover = %v", r)
+			}
+		}()
+		register(RetrySafetyUniqueConstraint)
+	})
+	t.Run("accepted with idempotency_key", func(t *testing.T) {
+		register(RetrySafetyIdempotencyKey)
+	})
 }

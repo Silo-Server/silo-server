@@ -56,7 +56,56 @@ const (
 	metaGuarded         = "silo.guarded"
 	metaConditional     = "silo.conditional"
 	metaCreateOnly      = "silo.create_only"
+	metaRetrySafety     = "silo.retry_safety"
 )
+
+// RetrySafety is the mutation retry-safety strategy an operation declares
+// (docs/architecture/api-contract.md, "Mutation retry safety"): what keeps a
+// duplicate submission, or a retry after a lost response, from doing harm.
+// One value per contract bullet; the migration ledger's retry_safety field
+// carries the same set and the reconcile test compares the two.
+type RetrySafety string
+
+const (
+	// RetrySafetyNaturalIdempotent: a PUT or DELETE that converges on one
+	// resource state however often it runs.
+	RetrySafetyNaturalIdempotent RetrySafety = "natural_idempotent"
+	// RetrySafetyUniqueConstraint: a natural key or client-supplied resource
+	// identity enforced by a database uniqueness constraint.
+	RetrySafetyUniqueConstraint RetrySafety = "unique_constraint"
+	// RetrySafetyDomainIdentity: a durable domain operation identity such as a
+	// playback attempt, upload, job, or webhook delivery id.
+	RetrySafetyDomainIdentity RetrySafety = "domain_identity"
+	// RetrySafetyCoalescing: the command returns the already-active scan,
+	// refresh, sync, or similar job.
+	RetrySafetyCoalescing RetrySafety = "coalescing"
+	// RetrySafetyDurableDispatch: durable state-gated or transactional-outbox
+	// dispatch of an external side effect.
+	RetrySafetyDurableDispatch RetrySafety = "durable_dispatch"
+	// RetrySafetyIdempotencyKey: a generic Idempotency-Key, allowed only for an
+	// operation that implements and documents its semantics. No operation
+	// declares it today; documentDeclaration refuses the header otherwise.
+	RetrySafetyIdempotencyKey RetrySafety = "idempotency_key"
+	// RetrySafetyNonRetryable: an explicitly documented exception that clients
+	// never retry automatically after an uncertain response.
+	RetrySafetyNonRetryable RetrySafety = "non_retryable"
+)
+
+// knownRetrySafety is the closed declaration set.
+var knownRetrySafety = map[RetrySafety]bool{
+	RetrySafetyNaturalIdempotent: true,
+	RetrySafetyUniqueConstraint:  true,
+	RetrySafetyDomainIdentity:    true,
+	RetrySafetyCoalescing:        true,
+	RetrySafetyDurableDispatch:   true,
+	RetrySafetyIdempotencyKey:    true,
+	RetrySafetyNonRetryable:      true,
+}
+
+// idempotencyKeyField is the request header the contract reserves for the
+// generic strategy. It may be declared only by an operation whose
+// RetrySafety is RetrySafetyIdempotencyKey.
+const idempotencyKeyField = "Idempotency-Key"
 
 // knownPermissions is the policy permission set an operation may name. It is
 // the policy engine's own vocabulary: a name outside it decides nothing.
@@ -118,6 +167,11 @@ type Operation struct {
 	// response. Exclusive with Guarded: a guarded PUT already requires
 	// If-Match and has no create path.
 	CreateOnly bool
+	// RetrySafety is required on every POST, PUT, PATCH and DELETE and
+	// forbidden on GET and HEAD: the strategy that makes a duplicate
+	// submission or a retry after a lost response safe. Documented as
+	// x-silo-retry-safety.
+	RetrySafety RetrySafety
 }
 
 // Registry is the deterministic registration surface. Domain files call
@@ -140,6 +194,7 @@ type Declared struct {
 	Guarded     bool
 	Conditional bool
 	CreateOnly  bool
+	RetrySafety RetrySafety
 }
 
 // Declared lists every registered operation, sorted by method then path.
@@ -184,6 +239,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaGuarded] = op.Guarded
 	op.Metadata[metaConditional] = op.Conditional
 	op.Metadata[metaCreateOnly] = op.CreateOnly
+	op.Metadata[metaRetrySafety] = string(op.RetrySafety)
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {
@@ -202,7 +258,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	}
 	reg.mu.Lock()
 	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
-		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly})
+		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly, RetrySafety: op.RetrySafety})
 	reg.mu.Unlock()
 	huma.Register(reg.api, op.Operation, handler)
 	documentConcurrencyResponses(reg.api.OpenAPI(), op)
@@ -258,7 +314,25 @@ func checkOperation(op Operation) error {
 	if op.CreateOnly && op.Guarded {
 		return fmt.Errorf("create-only and guarded are exclusive: a guarded PUT requires If-Match and has no create path")
 	}
+	switch {
+	case isMutatingMethod(op.Method) && op.RetrySafety == "":
+		return fmt.Errorf("retry safety is required on %s: declare how a duplicate submission or a retry after a lost response stays safe", op.Method)
+	case isMutatingMethod(op.Method) && !knownRetrySafety[op.RetrySafety]:
+		return fmt.Errorf("unknown retry safety %q", op.RetrySafety)
+	case !isMutatingMethod(op.Method) && op.RetrySafety != "":
+		return fmt.Errorf("retry safety is for POST, PUT, PATCH and DELETE; %s has no durable effect to classify", op.Method)
+	}
 	return nil
+}
+
+// isMutatingMethod reports whether a method carries a durable effect the
+// contract classifies for retry safety.
+func isMutatingMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
 }
 
 // checkConcurrencyShape requires the transport fields a guarded,

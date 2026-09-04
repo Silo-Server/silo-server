@@ -1085,3 +1085,48 @@ func TestRetrySafetyPlacement(t *testing.T) {
 		}
 	}
 }
+
+// TestDeclaredRetrySafetyMatchesTheLedger reconciles the v2 registry with the
+// ledger: every mutating operation the registry declares must map (through
+// v2.operation_id) to at least one classified legacy row, and each such row's
+// retry_safety must equal the declaration. Today the registry's mutating set
+// is empty (only probes register mutations, and they live in test files), so
+// the loop is a no-op; the test still runs against the real registry so the
+// first section PR that ports a mutation cannot skip the classification.
+func TestDeclaredRetrySafetyMatchesTheLedger(t *testing.T) {
+	ledger, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byOperation := map[string][]Entry{}
+	for _, e := range ledger.Entries {
+		if e.V2.OperationID != nil {
+			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
+		}
+	}
+	declared := apiv2registry.DeclaredOperations()
+	if len(declared) == 0 {
+		t.Fatal("the v2 registry declares nothing")
+	}
+	for _, op := range declared {
+		mutating := isMutatingMethod(op.Method)
+		if !mutating {
+			if op.RetrySafety != "" {
+				t.Errorf("read operation %s declares retry safety %q", op.OperationID, op.RetrySafety)
+			}
+			continue
+		}
+		if !retrySafetyValues[string(op.RetrySafety)] {
+			t.Errorf("mutating operation %s declares retry safety %q, not one of the ledger's values", op.OperationID, op.RetrySafety)
+		}
+		rows := byOperation[op.OperationID]
+		if len(rows) == 0 {
+			t.Errorf("mutating operation %s maps to no legacy row; a ported mutation records its v2 operation and retry_safety in the ledger", op.OperationID)
+		}
+		for _, e := range rows {
+			if e.RetrySafety != string(op.RetrySafety) {
+				t.Errorf("%s: ledger retry_safety %q, registry declares %q for %s", e.key(), e.RetrySafety, op.RetrySafety, op.OperationID)
+			}
+		}
+	}
+}
