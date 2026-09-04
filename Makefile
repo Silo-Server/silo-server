@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -220,6 +220,25 @@ SCENARIO_CATALOG_DIR := contracts/api/v2/scenarios
 verify-scenario-catalogs:
 	@go test -count=1 -run '^TestCatalogsPassGate$$' ./internal/scenariocatalog/ \
 		|| { echo "::error::$(SCENARIO_CATALOG_DIR) violates scenario-catalog.schema.json or leaves a tier-1 row uncovered"; exit 1; }
+
+APIV2_OPENAPI := contracts/api/v2/openapi.json
+
+# Regenerate the native API v2 OpenAPI artifact from the Go registries. The
+# generator opens no database or network and reads no environment, so the
+# output is byte-identical on every machine.
+apiv2-openapi:
+	go run ./cmd/apiv2-openapi -out $(APIV2_OPENAPI)
+
+# Fail when the committed artifact differs from a fresh generation. The
+# generator writes to a temporary directory and the two files are
+# byte-compared, so a stale artifact, a reordered key or a stray timestamp all
+# land here.
+verify-apiv2-openapi:
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		go run ./cmd/apiv2-openapi -out "$$tmp/openapi.json" && \
+		cmp -s "$$tmp/openapi.json" $(APIV2_OPENAPI) \
+		|| { echo "::error::$(APIV2_OPENAPI) is stale; run make apiv2-openapi"; exit 1; }
+	@echo "$(APIV2_OPENAPI) is current"
 
 OFFLINE_ROUTES := contracts/api/v2/offline-routes.txt
 

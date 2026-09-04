@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net"
@@ -15,6 +17,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/policy"
@@ -364,14 +368,92 @@ func TestSliceQueryUsesRepeatedKeys(t *testing.T) {
 
 func TestNoBuiltInDocsRoutes(t *testing.T) {
 	h := newTestHandler(t, Dependencies{})
-	for _, path := range []string{"/api/v2/docs", "/api/v2/openapi.json", "/api/v2/openapi.yaml", "/api/v2/schemas/Problem.json", "/docs", "/openapi.json"} {
+	for _, path := range []string{"/api/v2/docs", "/api/v2/openapi.yaml", "/api/v2/schemas/Problem.json", "/docs", "/openapi.json"} {
 		rec := do(t, h, http.MethodGet, path, "", nil)
 		if rec.Code != 404 {
 			t.Errorf("%s served %d", path, rec.Code)
 		}
 	}
-	// TODO(phase2-review): /api/v2/openapi.json is served by stage B from the
-	// committed artifact; until then it is 404 like any unregistered path.
+	// /api/v2/openapi.json is Silo's own operation (getOpenAPIDocument), not
+	// Huma's built-in route: TestOpenAPIDocumentIsTheEmbeddedArtifact.
+}
+
+// TestOpenAPIDocumentIsTheEmbeddedArtifact: the served bytes are the committed
+// artifact exactly, and the digest the discovery document reports is the
+// digest of those bytes.
+func TestOpenAPIDocumentIsTheEmbeddedArtifact(t *testing.T) {
+	h := newTestHandler(t, Dependencies{})
+	rec := do(t, h, http.MethodGet, "/api/v2/openapi.json", "", nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=300" {
+		t.Fatalf("Cache-Control = %q", cc)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), contracts.OpenAPI) {
+		t.Fatal("served bytes differ from the embedded artifact")
+	}
+	sum := sha256.Sum256(rec.Body.Bytes())
+	digest := hex.EncodeToString(sum[:])
+	if digest != ContractDigest() {
+		t.Fatalf("served digest %s != embedded %s", digest, ContractDigest())
+	}
+	if rec.Header().Get("ETag") != `"`+digest+`"` {
+		t.Fatalf("ETag = %q", rec.Header().Get("ETag"))
+	}
+	var info SystemInfo
+	if err := json.Unmarshal(do(t, h, http.MethodGet, "/api/v2/system/info", "", nil).Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.ContractDigest != digest {
+		t.Fatalf("system/info digest %s != served %s", info.ContractDigest, digest)
+	}
+	// The artifact is a parseable OpenAPI 3.1 document with the operation
+	// that serves it.
+	var doc struct {
+		OpenAPI string                    `json:"openapi"`
+		Paths   map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.OpenAPI != "3.1.0" || doc.Paths["/api/v2/openapi.json"]["get"] == nil {
+		t.Fatalf("unexpected document: %s", rec.Body.String())
+	}
+}
+
+// TestGenerateOpenAPIIsDeterministic: two generations in one process and the
+// document's own hygiene rules (no servers, no examples, nothing
+// build-specific).
+func TestGenerateOpenAPIIsDeterministic(t *testing.T) {
+	a, err := GenerateOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := GenerateOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Fatal("generation is not deterministic")
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(a, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"servers", "webhooks", "externalDocs"} {
+		if _, ok := doc[forbidden]; ok {
+			t.Errorf("document carries %q", forbidden)
+		}
+	}
+	for _, needle := range []string{"\"example\"", "\"examples\"", "/Users/", "/home/", "localhost"} {
+		if bytes.Contains(a, []byte(needle)) {
+			t.Errorf("document contains %s", needle)
+		}
+	}
 }
 
 func TestBodyCapIsEnforcedBeforeDecoding(t *testing.T) {

@@ -75,6 +75,9 @@ type Dependencies struct {
 	bodyReadTimeout time.Duration
 	// testRegister registers probe operations; tests only.
 	testRegister func(*Registry)
+	// testRawHandshakes are manual-registry entries a test adds alongside a
+	// raw route it registers itself; tests only.
+	testRawHandshakes []RawHandshake
 }
 
 // sealedHandler is what NewHandler hands out: the finished router behind an
@@ -110,7 +113,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	api.UseMiddleware(defaultHeaders, classGate(deps), normalizeAccept, mediaTypeGuard, queryGuard)
 
 	reg := &Registry{api: api, deps: deps}
-	registerSystem(reg)
+	registerAll(reg)
 	if deps.testRegister != nil {
 		deps.testRegister(reg)
 	}
@@ -131,10 +134,17 @@ func humaConfig() huma.Config {
 			Info:    &huma.Info{Title: "Silo API", Version: fmt.Sprintf("%d", APIMajor)},
 			Components: &huma.Components{
 				Schemas: huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer),
+				SecuritySchemes: map[string]*huma.SecurityScheme{
+					securitySchemeBearer: {
+						Type:        "http",
+						Scheme:      "bearer",
+						Description: "A session token or an API key in the Authorization header. The server decides which it holds.",
+					},
+				},
 			},
 		},
 		// Built-in spec, docs and schema routes are disabled: Silo serves the
-		// committed artifact itself (stage B) and nothing else.
+		// committed artifact itself (getOpenAPIDocument) and nothing else.
 		OpenAPIPath: "",
 		DocsPath:    "",
 		SchemasPath: "",

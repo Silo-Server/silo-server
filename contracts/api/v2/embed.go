@@ -27,8 +27,9 @@ const OfflineRoutesPath = "offline-routes.txt"
 // OpenAPI is the committed contracts/api/v2/openapi.json, byte for byte. The
 // server serves these bytes at /api/v2/openapi.json and reports their SHA-256
 // as the contract digest in /api/v2/system/info; it never regenerates the
-// document from runtime wiring. Stage B of the foundation generates the file
-// from the Go registries; until then it is a placeholder.
+// document from runtime wiring. cmd/apiv2-openapi generates the file from the
+// Go registries (make apiv2-openapi); make verify-apiv2-openapi and
+// TestCommittedArtifactMatchesRouter in internal/apiv2 fail when it is stale.
 //
 //go:embed openapi.json
 var OpenAPI []byte

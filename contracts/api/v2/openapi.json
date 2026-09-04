@@ -1,9 +1,284 @@
 {
-  "openapi": "3.1.0",
+  "components": {
+    "schemas": {
+      "Problem": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "description": "Safe occurrence-specific explanation; not for control flow",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Field-level validation details",
+            "items": {
+              "$ref": "#/components/schemas/ProblemError"
+            },
+            "type": "array"
+          },
+          "instance": {
+            "description": "urn:silo:request:\u003crequest-id\u003e, matching the X-Request-ID response header",
+            "format": "uri",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP status code, equal to the response status",
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Short summary fixed for the problem type",
+            "type": "string"
+          },
+          "type": {
+            "description": "Stable problem type URI; the final segment is the problem identifier",
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance"
+        ],
+        "type": "object"
+      },
+      "ProblemError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Stable machine-readable code for the failure",
+            "type": "string"
+          },
+          "detail": {
+            "description": "Safe human-readable explanation; never the rejected value",
+            "type": "string"
+          },
+          "location": {
+            "description": "Where the error occurred: body.*, query.*, path.* or header.*",
+            "type": "string"
+          }
+        },
+        "required": [
+          "location",
+          "code",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "SystemInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "api_major": {
+            "description": "The native API major this server serves at this path",
+            "format": "int64",
+            "type": "integer"
+          },
+          "contract_digest": {
+            "description": "SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it.",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/SystemInfoLinks",
+            "description": "Stable links to the contract and to capability documents"
+          },
+          "server_version": {
+            "description": "Server build identity (short revision, +dirty when built from a modified tree, or \"unavailable\"). Diagnostic only: never feature-detect on it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_version",
+          "api_major",
+          "contract_digest",
+          "links"
+        ],
+        "type": "object"
+      },
+      "SystemInfoLinks": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "description": "Path prefix of the per-domain capability documents",
+            "type": "string"
+          },
+          "openapi": {
+            "description": "Path of the committed OpenAPI artifact",
+            "type": "string"
+          }
+        },
+        "required": [
+          "openapi",
+          "capabilities"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "description": "A session token or an API key in the Authorization header. The server decides which it holds.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
   "info": {
     "title": "Silo API",
-    "version": "2",
-    "description": "Placeholder artifact. Phase 2 stage B generates this file from the Go registries; until then it exists so the server binary can embed and digest the committed bytes."
+    "version": "2"
   },
-  "paths": {}
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v2/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPIDocument",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "description": "An OpenAPI 3.1 document. Its members are fixed by the OpenAPI specification, not by this contract.",
+                  "type": "object",
+                  "x-silo-extension-bag": "openapi-document"
+                }
+              }
+            },
+            "description": "The OpenAPI 3.1 document, exactly the committed contracts/api/v2/openapi.json bytes.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get the committed OpenAPI document this server was built from.",
+        "tags": [
+          "system"
+        ],
+        "x-silo-class": "public"
+      }
+    },
+    "/api/v2/system/info": {
+      "get": {
+        "operationId": "getSystemInfo",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfo"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get server and contract identity for discovery before login.",
+        "tags": [
+          "system"
+        ],
+        "x-silo-class": "public"
+      }
+    }
+  }
 }
