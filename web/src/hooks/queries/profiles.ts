@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { AdminSession, Profile, CreateProfileRequest, ProfileListResponse } from "@/api/types";
-import { v2, type V2Body, type V2Response } from "@/api/v2/request";
+import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 import { profileKeys } from "./keys";
 import { toast } from "sonner";
 
@@ -31,7 +31,7 @@ export type ProfileUpdate = V2Body<"PATCH /api/v2/profiles/{id}">;
  * session, and the editor still read from v1 (list, create, avatar, and
  * delete stay on v1 in the pilot). Library ids are the same ids as strings.
  */
-export function profileFromV2(profile: V2Response<"PATCH /api/v2/profiles/{id}">): Profile {
+export function profileFromV2(profile: V2Result<"PATCH /api/v2/profiles/{id}">): Profile {
   return {
     id: profile.id,
     name: profile.name,
@@ -65,8 +65,10 @@ const HOUSEHOLD_SESSIONS_POLL_MS = 10_000;
 export function useHouseholdSessions(enabled = true) {
   return useQuery({
     queryKey: profileKeys.householdSessions(),
-    queryFn: () =>
-      api<AdminSession[]>("/profiles/household/sessions").then((sessions) => sessions ?? []),
+    queryFn: async (): Promise<AdminSession[]> => {
+      const sessions: AdminSession[] | null = await api("/profiles/household/sessions");
+      return sessions ?? [];
+    },
     enabled,
     staleTime: HOUSEHOLD_SESSIONS_POLL_MS,
     refetchInterval: HOUSEHOLD_SESSIONS_POLL_MS,
@@ -76,7 +78,7 @@ export function useHouseholdSessions(enabled = true) {
 export function useProfiles() {
   const query = useQuery({
     queryKey: profileKeys.list(),
-    queryFn: () => api<ProfileListResponse>("/profiles"),
+    queryFn: (): Promise<ProfileListResponse> => api("/profiles"),
   });
 
   return {
@@ -89,8 +91,8 @@ export function useProfiles() {
 export function useCreateProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateProfileRequest) =>
-      api<Profile>("/profiles", {
+    mutationFn: (body: CreateProfileRequest): Promise<Profile> =>
+      api("/profiles", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -129,10 +131,10 @@ export function useUpdateProfile() {
 export function useUploadProfileAvatar() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+    mutationFn: async ({ id, file }: { id: string; file: File }): Promise<Profile> => {
       const body = new FormData();
       body.set("avatar", file);
-      return api<Profile>(`/profiles/${id}/avatar`, {
+      return api(`/profiles/${id}/avatar`, {
         method: "PUT",
         body,
       });
@@ -154,8 +156,8 @@ export function useUploadProfileAvatar() {
 export function useDeleteProfileAvatar() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<Profile>(`/profiles/${id}/avatar`, {
+    mutationFn: (id: string): Promise<Profile> =>
+      api(`/profiles/${id}/avatar`, {
         method: "DELETE",
       }),
     onSuccess: (updatedProfile) => {

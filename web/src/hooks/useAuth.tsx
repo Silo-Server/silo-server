@@ -22,7 +22,7 @@ import type {
   User,
   VerifyPinResponse,
 } from "@/api/types";
-import { v2, type V2Response } from "@/api/v2/request";
+import { v2, type V2Result } from "@/api/v2/request";
 import { queryClient } from "@/lib/query-client";
 import {
   clearStoredImpersonationAdminSession,
@@ -37,7 +37,7 @@ import {
  * state keeps that shape until those operations move; the v2 id is the same
  * account id rendered as a string.
  */
-function userFromAccount(account: V2Response<"GET /api/v2/account/me">): User {
+function userFromAccount(account: V2Result<"GET /api/v2/account/me">): User {
   return {
     id: Number(account.id),
     username: account.username,
@@ -349,7 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyProfilePin = useCallback(
     async (profileId: string, pin: string): Promise<VerifyPinResponse> => {
-      return api<VerifyPinResponse>(`/profiles/${profileId}/verify-pin`, {
+      return api(`/profiles/${profileId}/verify-pin`, {
         method: "POST",
         body: JSON.stringify({ pin }),
       });
@@ -382,9 +382,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function initialize() {
       try {
+        const providersRequest: Promise<AuthProviderOption[]> = api("/auth/providers");
         const [status, availableProviders] = await Promise.all([
           v2("GET /api/v2/system/setup"),
-          api<AuthProviderOption[]>("/auth/providers"),
+          providersRequest,
         ]);
         if (cancelled) {
           return;
@@ -471,7 +472,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     soleProfileBootstrapRef.current = bootstrapKey;
 
     let cancelled = false;
-    api<{ profiles: Profile[] }>("/profiles")
+    const profilesRequest: Promise<{ profiles: Profile[] }> = api("/profiles");
+    profilesRequest
       .then((data) => {
         if (cancelled) {
           return;
@@ -490,7 +492,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string, provider?: string) => {
-      const data = await api<LoginResponse>("/auth/login", {
+      const data: LoginResponse = await api("/auth/login", {
         method: "POST",
         body: JSON.stringify({ username, password, provider }),
       });
@@ -507,7 +509,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         create_default_profile: true,
       };
-      const data = await api<LoginResponse>("/auth/setup", {
+      const data: LoginResponse = await api("/auth/setup", {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -525,7 +527,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         invite_code: inviteCode,
         create_default_profile: true,
       };
-      const data = await api<LoginResponse>("/auth/signup", {
+      const data: LoginResponse = await api("/auth/signup", {
         method: "POST",
         body: JSON.stringify(body),
       });

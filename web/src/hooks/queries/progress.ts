@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
-import { v2, type V2Response } from "@/api/v2/request";
+import { v2, type V2Result } from "@/api/v2/request";
 import { catalogKeys, progressKeys } from "./keys";
 import { fetchCatalogItemDetail } from "./catalogRead";
 
@@ -10,7 +10,7 @@ interface ContinueWatchingOptions {
 }
 
 /** The first page of the profile's progress list as the v2 contract returns it. */
-export type ProgressList = V2Response<"GET /api/v2/progress">;
+export type ProgressList = V2Result<"GET /api/v2/progress">;
 export type ProgressListEntry = ProgressList["items"][number];
 
 export function useProgressList(libraryId?: number, options?: ContinueWatchingOptions) {

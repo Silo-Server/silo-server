@@ -25,7 +25,7 @@ import {
   problemId,
   v2,
   type V2Body,
-  type V2Response,
+  type V2Result,
 } from "./request";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -295,8 +295,8 @@ describe("v2 request boundary", () => {
 
 describe("v2 type separation", () => {
   it("keeps v1 mirror types out of v2 parameters", () => {
-    type Me = V2Response<"GET /api/v2/account/me">;
-    type AdminUsers = V2Response<"GET /api/v2/admin/users">;
+    type Me = V2Result<"GET /api/v2/account/me">;
+    type AdminUsers = V2Result<"GET /api/v2/admin/users">;
 
     const v1User: User = {
       id: 1,

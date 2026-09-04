@@ -83,7 +83,7 @@ function brand<T>(value: T): V2<T> {
 }
 
 /** The 2xx response type of a v2 operation. */
-export type V2Response<K extends V2OperationKey> = V2<SuccessOf<OperationOf<K>>>;
+export type V2Result<K extends V2OperationKey> = V2<SuccessOf<OperationOf<K>>>;
 
 /** The JSON request body type of a v2 operation (`never` when it has none). */
 export type V2Body<K extends V2OperationKey> = BodyOf<OperationOf<K>>;
@@ -236,7 +236,7 @@ async function readBody(res: Response, operationId: string): Promise<unknown> {
 export async function v2<K extends V2OperationKey>(
   key: K,
   ...args: RequestArgs<K>
-): Promise<V2Response<K>> {
+): Promise<V2Result<K>> {
   const operationId: string = v2Operations[key];
   const [method, route] = key.split(" ", 2) as [string, string];
   const options = (args[0] ?? {}) as CommonOptions & {
@@ -262,7 +262,7 @@ export async function v2<K extends V2OperationKey>(
 
   if (res.ok) {
     const decoded = await readBody(res, operationId);
-    return brand(decoded) as V2Response<K>;
+    return brand(decoded as SuccessOf<OperationOf<K>>);
   }
 
   const body = await readBody(res, operationId);
