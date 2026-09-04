@@ -30,8 +30,9 @@ const (
 	// that resolves, through viewer access, to a profile of the caller's
 	// account that is verified (unlocked) for this request.
 	ClassProfileScoped Class = "profile_scoped"
-	// ClassActingAdmin is ClassAuthenticated plus the admin role exercised
-	// through the account's primary profile.
+	// ClassActingAdmin is ClassAuthenticated plus the admin role; a declared
+	// X-Profile-Id must be the account's primary profile, and an absent one
+	// is accepted, exactly as v1's RequireActingAdmin decides.
 	ClassActingAdmin Class = "acting_admin"
 	// ClassPermissionGated is ClassAuthenticated plus one named permission
 	// (Operation.Permission) decided by the policy engine.

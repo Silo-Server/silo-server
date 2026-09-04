@@ -60,14 +60,32 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	}
 	op.Security = []map[string][]string{{securitySchemeBearer: {}}}
 	if resolvesProfile(op.Class) {
-		op.Parameters = append(op.Parameters, &huma.Param{
-			Name:        profileHeader,
-			In:          "header",
-			Required:    true,
-			Description: "The household profile acting for this request; it must belong to the authenticated account.",
-			Schema:      &huma.Schema{Type: "string"},
-		})
+		op.Parameters = append(op.Parameters, profileHeaderParam(op.Class))
 	}
+}
+
+// profileHeaderParam documents X-Profile-Id the way the class's gate chain
+// really reads it. Only ClassProfileScoped runs RequireProfile, so only it
+// requires the header. The acting-admin and permission gates accept an
+// absent header exactly as v1's RequireActingAdmin does, and judge a present
+// one: it must name a profile of the caller's account, and for acting_admin
+// the account's primary profile.
+func profileHeaderParam(class Class) *huma.Param {
+	p := &huma.Param{
+		Name:   profileHeader,
+		In:     "header",
+		Schema: &huma.Schema{Type: "string"},
+	}
+	switch class {
+	case ClassProfileScoped:
+		p.Required = true
+		p.Description = "The household profile acting for this request; it must belong to the authenticated account."
+	case ClassActingAdmin:
+		p.Description = "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted."
+	default:
+		p.Description = "Optional. When present, it must name a profile of the authenticated account."
+	}
+	return p
 }
 
 // resolvesProfile reports whether the class runs viewer access and so needs
