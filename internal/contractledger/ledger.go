@@ -162,6 +162,16 @@ type Entry struct {
 	Owner             *string    `json:"owner"`
 	ReviewState       string     `json:"review_state"`
 	Tier              int        `json:"tier"`
+	V2                V2Target   `json:"v2"`
+}
+
+// V2Target is the v2 operation an entry maps to. All three are nil until the
+// port is ratified (or method+path for a proposed redesign); the schema
+// enforces the combinations.
+type V2Target struct {
+	Method      *string `json:"method"`
+	Path        *string `json:"path"`
+	OperationID *string `json:"operation_id"`
 }
 
 // CallSite is one consumer location. File is repository-root-relative for

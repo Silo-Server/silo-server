@@ -17499,13 +17499,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/admin/users",
+        "operation_id": "listAdminUsers"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (acting_admin, demo-guarded). Bare array became {items:[...]}; ids are string IDs; instants are UTC ms; role carries an enum."
     },
     {
       "listener": "api",
@@ -19815,13 +19815,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/account/me",
+        "operation_id": "getCurrentUser"
       },
-      "notes": "Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (authenticated). id is a string ID; role carries an enum; permissions stays []string; impersonation is omitted when absent."
     },
     {
       "listener": "api",
@@ -20362,13 +20362,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/system/setup",
+        "operation_id": "getSetupStatus"
       },
-      "notes": "Conditionally registered: authHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (public). Same {needs_setup} shape; registered unconditionally."
     },
     {
       "listener": "api",
@@ -35885,13 +35885,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PATCH",
+        "path": "/api/v2/profiles/{id}",
+        "operation_id": "updateProfile"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Enums strict (no 4K/UHD aliases); every string member always emitted."
     },
     {
       "listener": "api",
@@ -36162,13 +36162,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/progress",
+        "operation_id": "listProgress"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; progressHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (profile_scoped). Offset pagination replaced by limit+opaque cursor; offset/since rejected (422). The v1 ?since= delta pull is a separate operation in a later section."
     },
     {
       "listener": "api",
