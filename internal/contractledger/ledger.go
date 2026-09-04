@@ -218,34 +218,7 @@ var retrySafetyValues = map[string]bool{
 // ledger group by group. A group leaves this list in the same commit that
 // classifies its rows. TODO(api-v2/wave1-idempotency): empty this list and
 // delete it together with retrySafetyExempt.
-var retrySafetyUnclassifiedGroups = map[string]bool{
-	"/api/v1/audio-prefs":            true,
-	"/api/v1/collections":            true,
-	"/api/v1/downloads":              true,
-	"/api/v1/ebooks":                 true,
-	"/api/v1/favorites":              true,
-	"/api/v1/history":                true,
-	"/api/v1/home/dismissals":        true,
-	"/api/v1/library-playback-prefs": true,
-	"/api/v1/markers":                true,
-	"/api/v1/notifications":          true,
-	"/api/v1/notifications/web-push": true,
-	"/api/v1/notifications/webhooks": true,
-	"/api/v1/onboarding":             true,
-	"/api/v1/playback":               true,
-	"/api/v1/profile/sections":       true,
-	"/api/v1/ratings":                true,
-	"/api/v1/recommendations":        true,
-	"/api/v1/requests":               true,
-	"/api/v1/settings":               true,
-	"/api/v1/subtitle-prefs":         true,
-	"/api/v1/subtitles":              true,
-	"/api/v1/sync":                   true,
-	"/api/v1/watch-providers":        true,
-	"/api/v1/watch-together":         true,
-	"/api/v1/watched":                true,
-	"/api/v1/watchlist":              true,
-}
+var retrySafetyUnclassifiedGroups = map[string]bool{}
 
 // retrySafetyExempt reports whether an unclassified row is tolerated by the
 // temporary allow-list. The /api/v1/admin group is split: its api-keys and
