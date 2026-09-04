@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -155,6 +156,182 @@ func registerProbes(reg *Registry) {
 		z := Instant{}
 		return &probeOutput{Body: probeEcho{Tags: []string{}, Labels: map[string]int{}, When: &z}}, nil
 	})
+	registerGuardedProbes(newGuardedProbeStore())(reg)
+}
+
+// The guarded probe: an in-memory versioned resource behind the real router,
+// exercising every optimistic-concurrency outcome the contract ratifies.
+
+// guardedProbeScope is the representation scope the probe's ETag carries.
+const guardedProbeScope = "probe.guarded"
+
+// guardedProbeReservedName is the stored name that makes a PUT conflict with
+// domain state after its precondition passed (the 409 case).
+const guardedProbeReservedName = "reserved"
+
+type guardedProbeRow struct {
+	Name    string
+	Version int64
+}
+
+// guardedProbeStore is the storage side of the probe. Update and Delete are
+// the compare-and-update: they return ErrStaleVersion when the expected
+// version is no longer current, the way a `WHERE version = $expected` write
+// reports zero rows.
+type guardedProbeStore struct {
+	mu   sync.Mutex
+	rows map[string]guardedProbeRow
+}
+
+func newGuardedProbeStore() *guardedProbeStore {
+	return &guardedProbeStore{rows: map[string]guardedProbeRow{
+		"a":        {Name: "alpha", Version: 1},
+		"reserved": {Name: guardedProbeReservedName, Version: 1},
+	}}
+}
+
+func (s *guardedProbeStore) Get(id string) (guardedProbeRow, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, ok := s.rows[id]
+	return row, ok
+}
+
+func (s *guardedProbeStore) Update(id string, expected int64, name string) (guardedProbeRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, ok := s.rows[id]
+	if !ok || row.Version != expected {
+		return guardedProbeRow{}, ErrStaleVersion
+	}
+	row.Name = name
+	row.Version++
+	s.rows[id] = row
+	return row, nil
+}
+
+func (s *guardedProbeStore) Delete(id string, expected int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, ok := s.rows[id]
+	if !ok || row.Version != expected {
+		return ErrStaleVersion
+	}
+	delete(s.rows, id)
+	return nil
+}
+
+type guardedProbeReadInput struct {
+	ID          string `path:"id" doc:"Probe resource id"`
+	IfNoneMatch string `header:"If-None-Match" doc:"Entity tags the client already holds"`
+}
+
+type guardedProbeWriteInput struct {
+	ID      string `path:"id" doc:"Probe resource id"`
+	IfMatch string `header:"If-Match" doc:"The resource's current ETag"`
+	Body    struct {
+		Name string `json:"name" minLength:"1"`
+	}
+}
+
+type guardedProbeDeleteInput struct {
+	ID      string `path:"id" doc:"Probe resource id"`
+	IfMatch string `header:"If-Match" doc:"The resource's current ETag"`
+}
+
+type guardedProbeBody struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Version int64  `json:"version"`
+}
+
+type guardedProbeReadOutput struct {
+	Status int
+	ETag   string `header:"ETag"`
+	Body   guardedProbeBody
+}
+
+type guardedProbeWriteOutput struct {
+	ETag string `header:"ETag"`
+	Body guardedProbeBody
+}
+
+type guardedProbeDeleteOutput struct {
+	ETag string `header:"ETag"`
+}
+
+func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
+	return func(reg *Registry) {
+		Register(reg, Operation{
+			Operation:   humaOp(http.MethodGet, Prefix+"/probe/guarded/{id}", "getGuardedProbe", "probe", "conditional read"),
+			Class:       ClassPublic,
+			Conditional: true,
+		}, func(_ context.Context, in *guardedProbeReadInput) (*guardedProbeReadOutput, error) {
+			row, ok := store.Get(in.ID)
+			if !ok {
+				return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
+			}
+			current := RenderETag(row.Version, guardedProbeScope)
+			out := &guardedProbeReadOutput{ETag: current.String(), Body: guardedProbeBody{ID: in.ID, Name: row.Name, Version: row.Version}}
+			matched, p := EvaluateIfNoneMatch(in.IfNoneMatch, current)
+			if p != nil {
+				return nil, p
+			}
+			if matched {
+				return NotModified(out, current), nil
+			}
+			return out, nil
+		})
+		Register(reg, Operation{
+			Operation: humaOp(http.MethodPut, Prefix+"/probe/guarded/{id}", "putGuardedProbe", "probe", "guarded replace"),
+			Class:     ClassPublic,
+			Guarded:   true,
+		}, func(_ context.Context, in *guardedProbeWriteInput) (*guardedProbeWriteOutput, error) {
+			// Load first: a missing resource is 404 before any precondition.
+			row, ok := store.Get(in.ID)
+			if !ok {
+				return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
+			}
+			current := RenderETag(row.Version, guardedProbeScope)
+			if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+				return nil, p
+			}
+			// The precondition passed; domain state may still refuse.
+			if row.Name == guardedProbeReservedName {
+				return nil, NewProblem(TypeConflict, "A reserved probe resource cannot be replaced.")
+			}
+			updated, err := store.Update(in.ID, row.Version, in.Body.Name)
+			if err != nil {
+				// The compare-and-update lost a race with another writer.
+				latest, _ := store.Get(in.ID)
+				return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+			}
+			return &guardedProbeWriteOutput{
+				ETag: RenderETag(updated.Version, guardedProbeScope).String(),
+				Body: guardedProbeBody{ID: in.ID, Name: updated.Name, Version: updated.Version},
+			}, nil
+		})
+		Register(reg, Operation{
+			Operation: humaOp(http.MethodDelete, Prefix+"/probe/guarded/{id}", "deleteGuardedProbe", "probe", "guarded delete"),
+			Class:     ClassPublic,
+			Guarded:   true,
+		}, func(_ context.Context, in *guardedProbeDeleteInput) (*guardedProbeDeleteOutput, error) {
+			row, ok := store.Get(in.ID)
+			if !ok {
+				return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
+			}
+			current := RenderETag(row.Version, guardedProbeScope)
+			if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+				return nil, p
+			}
+			if err := store.Delete(in.ID, row.Version); err != nil {
+				latest, _ := store.Get(in.ID)
+				return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+			}
+			// The deleted representation has no ETag: 204 with no validator.
+			return &guardedProbeDeleteOutput{}, nil
+		})
+	}
 }
 
 func lowerCamelFrom(snake string) string {

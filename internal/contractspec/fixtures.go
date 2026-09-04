@@ -34,15 +34,16 @@ type FixtureIndex struct {
 
 // Fixture is one index entry.
 type Fixture struct {
-	Name              string            `json:"name"`
-	OperationID       *string           `json:"operation_id"`
-	Scenario          string            `json:"scenario"`
-	Request           FixtureRequest    `json:"request"`
-	ExpectedStatus    int               `json:"expected_status"`
-	ResponseHeaders   map[string]string `json:"response_headers"`
-	ResponseMediaType string            `json:"response_media_type"`
-	Schema            string            `json:"schema"`
-	BodyFile          string            `json:"body_file"`
+	Name            string            `json:"name"`
+	OperationID     *string           `json:"operation_id"`
+	Scenario        string            `json:"scenario"`
+	Request         FixtureRequest    `json:"request"`
+	ExpectedStatus  int               `json:"expected_status"`
+	ResponseHeaders map[string]string `json:"response_headers"`
+	// The three are null on a 304, which carries no representation.
+	ResponseMediaType *string `json:"response_media_type"`
+	Schema            *string `json:"schema"`
+	BodyFile          *string `json:"body_file"`
 }
 
 // FixtureRequest is the request an entry was generated from.
@@ -127,10 +128,29 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			fail("%s: duplicate fixture name", where)
 		}
 		names[f.Name] = true
-		if f.BodyFile != f.Name+".json" {
-			fail("%s: body_file %q must be %s.json", where, f.BodyFile, f.Name)
+		if f.ExpectedStatus == 304 {
+			if f.BodyFile != nil || f.Schema != nil || f.ResponseMediaType != nil {
+				fail("%s: a 304 fixture has no representation: body_file, schema and response_media_type must be null", where)
+			}
+			if f.ResponseHeaders["ETag"] == "" {
+				fail("%s: a 304 fixture must record ETag", where)
+			}
+			if f.OperationID != nil {
+				if info, ok := ops[*f.OperationID]; !ok || !info.statuses["304"] {
+					fail("%s: openapi.json does not document status 304 on %s", where, *f.OperationID)
+				}
+			}
+			continue
 		}
-		indexed[f.BodyFile] = true
+		if f.BodyFile == nil || f.Schema == nil || f.ResponseMediaType == nil {
+			fail("%s: body_file, schema and response_media_type are required outside a 304", where)
+			continue
+		}
+		bodyFile, schemaRef, mediaType := *f.BodyFile, *f.Schema, *f.ResponseMediaType
+		if bodyFile != f.Name+".json" {
+			fail("%s: body_file %q must be %s.json", where, bodyFile, f.Name)
+		}
+		indexed[bodyFile] = true
 		if f.OperationID != nil {
 			info, ok := ops[*f.OperationID]
 			switch {
@@ -146,8 +166,8 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		if f.ExpectedStatus >= 400 {
 			wantMedia = mediaProblem
 		}
-		if f.ResponseMediaType != wantMedia {
-			fail("%s: response_media_type %q, want %q for status %d", where, f.ResponseMediaType, wantMedia, f.ExpectedStatus)
+		if mediaType != wantMedia {
+			fail("%s: response_media_type %q, want %q for status %d", where, mediaType, wantMedia, f.ExpectedStatus)
 		}
 		if ct := f.ResponseHeaders["Content-Type"]; !strings.HasPrefix(ct, wantMedia) {
 			fail("%s: response_headers.Content-Type %q does not match the media type", where, ct)
@@ -155,14 +175,14 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		if f.ExpectedStatus == 429 && f.ResponseHeaders["Retry-After"] == "" {
 			fail("%s: a 429 fixture must record Retry-After", where)
 		}
-		body, err := fs.ReadFile(fsys, path.Join(contracts.FixturesDir, f.BodyFile))
+		body, err := fs.ReadFile(fsys, path.Join(contracts.FixturesDir, bodyFile))
 		if err != nil {
 			fail("%s: %v", where, err)
 			continue
 		}
-		schema, err := compiler.Compile(openAPIResourceID + f.Schema)
+		schema, err := compiler.Compile(openAPIResourceID + schemaRef)
 		if err != nil {
-			fail("%s: schema %s: %v", where, f.Schema, err)
+			fail("%s: schema %s: %v", where, schemaRef, err)
 			continue
 		}
 		bodyInstance, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
@@ -171,7 +191,7 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			continue
 		}
 		if err := schema.Validate(bodyInstance); err != nil {
-			fail("%s: body violates %s: %v", where, f.Schema, err)
+			fail("%s: body violates %s: %v", where, schemaRef, err)
 		}
 		if wantMedia == mediaProblem {
 			var p struct {

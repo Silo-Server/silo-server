@@ -236,6 +236,26 @@
       "body_file": "not_found.json"
     },
     {
+      "name": "not_modified",
+      "operation_id": null,
+      "scenario": "A conditional read whose If-None-Match matches the current ETag: 304 with the validator, no body.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/probe/guarded/a",
+        "headers": {
+          "If-None-Match": "\"23305467.1x02i55143o12\""
+        }
+      },
+      "expected_status": 304,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "ETag": "\"23305467.1x02i55143o12\""
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "payload_too_large",
       "operation_id": null,
       "scenario": "A JSON body over the operation's declared limit (256 bytes on this probe), refused before decoding.",
@@ -252,6 +272,46 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "payload_too_large.json"
+    },
+    {
+      "name": "precondition_failed",
+      "operation_id": null,
+      "scenario": "A guarded mutation whose If-Match names a stale version: nothing changes and ETag carries the current validator to retry with.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/probe/guarded/a",
+        "headers": {
+          "If-Match": "\"23305467.1x02i55143o13\""
+        },
+        "body": "{\"name\":\"fixture\"}"
+      },
+      "expected_status": 412,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json",
+        "ETag": "\"23305467.1x02i55143o12\""
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "precondition_failed.json"
+    },
+    {
+      "name": "precondition_required",
+      "operation_id": null,
+      "scenario": "A guarded mutation without If-Match: the server refuses before touching the resource and names the field to send.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/probe/guarded/a",
+        "body": "{\"name\":\"fixture\"}"
+      },
+      "expected_status": 428,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "precondition_required.json"
     },
     {
       "name": "profile_verification_required",

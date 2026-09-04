@@ -135,6 +135,20 @@ func fixtureCases() []fixtureCase {
 			scenario: "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
 			method:   http.MethodGet, path: "/api/v2/admin/users?offset=50", headers: bearer(adminToken),
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: TypePreconditionRequired.ID,
+			scenario: "A guarded mutation without If-Match: the server refuses before touching the resource and names the field to send.",
+			method:   http.MethodPut, path: "/api/v2/probe/guarded/a", body: `{"name":"fixture"}`,
+			status: http.StatusPreconditionRequired, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: TypePreconditionFailed.ID,
+			scenario: "A guarded mutation whose If-Match names a stale version: nothing changes and ETag carries the current validator to retry with.",
+			method:   http.MethodPut, path: "/api/v2/probe/guarded/a", body: `{"name":"fixture"}`,
+			headers: map[string]string{"If-Match": RenderETag(0, guardedProbeScope).String()},
+			status:  http.StatusPreconditionFailed, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: problem},
+		{name: "not_modified",
+			scenario: "A conditional read whose If-None-Match matches the current ETag: 304 with the validator, no body.",
+			method:   http.MethodGet, path: "/api/v2/probe/guarded/a",
+			headers: map[string]string{"If-None-Match": RenderETag(1, guardedProbeScope).String()},
+			status:  http.StatusNotModified, assertHeaders: []string{"Cache-Control", "ETag"}},
 	}
 }
 
@@ -162,15 +176,16 @@ func fixtureDeps() Dependencies {
 }
 
 type fixtureIndexEntry struct {
-	Name              string            `json:"name"`
-	OperationID       *string           `json:"operation_id"`
-	Scenario          string            `json:"scenario"`
-	Request           fixtureRequest    `json:"request"`
-	ExpectedStatus    int               `json:"expected_status"`
-	ResponseHeaders   map[string]string `json:"response_headers"`
-	ResponseMediaType string            `json:"response_media_type"`
-	Schema            string            `json:"schema"`
-	BodyFile          string            `json:"body_file"`
+	Name            string            `json:"name"`
+	OperationID     *string           `json:"operation_id"`
+	Scenario        string            `json:"scenario"`
+	Request         fixtureRequest    `json:"request"`
+	ExpectedStatus  int               `json:"expected_status"`
+	ResponseHeaders map[string]string `json:"response_headers"`
+	// The three are null on a 304, which carries no representation.
+	ResponseMediaType *string `json:"response_media_type"`
+	Schema            *string `json:"schema"`
+	BodyFile          *string `json:"body_file"`
 }
 
 type fixtureRequest struct {
@@ -221,14 +236,24 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			}
 			headers[name] = v
 		}
-		mediaType := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])
-		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, rec.Body.Bytes(), "", "  "); err != nil {
-			t.Fatalf("%s: body is not JSON: %v", c.name, err)
+		var mediaType, schema, bodyFile *string
+		if c.status == http.StatusNotModified {
+			// A 304 has no representation: no body file, no media type, no
+			// schema. The index entry records the headers alone.
+			if rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "" {
+				t.Fatalf("%s: 304 carries a body %q or Content-Type %q", c.name, rec.Body.String(), rec.Header().Get("Content-Type"))
+			}
+		} else {
+			mt := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])
+			var pretty bytes.Buffer
+			if err := json.Indent(&pretty, rec.Body.Bytes(), "", "  "); err != nil {
+				t.Fatalf("%s: body is not JSON: %v", c.name, err)
+			}
+			pretty.WriteByte('\n')
+			name := c.name + ".json"
+			files[name] = pretty.Bytes()
+			mediaType, schema, bodyFile = &mt, &c.schema, &name
 		}
-		pretty.WriteByte('\n')
-		bodyFile := c.name + ".json"
-		files[bodyFile] = pretty.Bytes()
 		var opID *string
 		if c.operationID != "" {
 			id := c.operationID
@@ -238,7 +263,7 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			Name: c.name, OperationID: opID, Scenario: c.scenario,
 			Request:        fixtureRequest{Method: c.method, Path: c.path, Headers: c.headers, Body: c.body},
 			ExpectedStatus: c.status, ResponseHeaders: headers, ResponseMediaType: mediaType,
-			Schema: c.schema, BodyFile: bodyFile,
+			Schema: schema, BodyFile: bodyFile,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })

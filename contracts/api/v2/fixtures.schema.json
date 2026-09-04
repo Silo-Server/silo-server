@@ -50,13 +50,37 @@
           "description": "The response headers a client should assert on. X-Request-ID is present on every v2 response and omitted here; its value is the fixture's synthetic request id, which also names the problem instance.",
           "additionalProperties": { "type": "string" }
         },
-        "response_media_type": { "type": "string", "enum": ["application/json", "application/problem+json"] },
-        "schema": {
-          "type": "string",
-          "pattern": "^#/components/schemas/[A-Z][A-Za-z0-9]*$",
-          "description": "JSON pointer into contracts/api/v2/openapi.json naming the schema the body satisfies."
+        "response_media_type": {
+          "type": ["string", "null"],
+          "enum": ["application/json", "application/problem+json", null],
+          "description": "Null only on a 304, which carries no representation."
         },
-        "body_file": { "type": "string", "pattern": "^[a-z][a-z0-9_]*\\.json$" }
+        "schema": {
+          "type": ["string", "null"],
+          "pattern": "^#/components/schemas/[A-Z][A-Za-z0-9]*$",
+          "description": "JSON pointer into contracts/api/v2/openapi.json naming the schema the body satisfies; null only on a 304."
+        },
+        "body_file": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9_]*\\.json$",
+          "description": "The committed body, <name>.json; null only on a 304, which has no body file."
+        }
+      },
+      "if": { "properties": { "expected_status": { "const": 304 } } },
+      "then": {
+        "properties": {
+          "response_media_type": { "type": "null" },
+          "schema": { "type": "null" },
+          "body_file": { "type": "null" },
+          "response_headers": { "required": ["ETag"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "response_media_type": { "type": "string" },
+          "schema": { "type": "string" },
+          "body_file": { "type": "string" }
+        }
       }
     }
   }

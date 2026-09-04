@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/precondition_required",
+  "title": "Precondition required",
+  "status": 428,
+  "detail": "This operation requires the If-Match header field carrying the resource's current ETag.",
+  "instance": "urn:silo:request:00000000000000000000000b"
+}
+
