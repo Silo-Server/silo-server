@@ -419,17 +419,22 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `durable_dispatch`, `idempotency_key`, `non_retryable`; an optional `retry_safety_note` (at
   most 300 characters) explains a non-obvious choice and is required for `idempotency_key` and
   `non_retryable`. `migration.schema.json` forbids both fields on any other row and
-  `internal/contractledger` requires the value on every classified group (a temporary
-  allow-list names the groups the classification pass has not reached). `apiv2.Operation`
+  `internal/contractledger` requires the value on every such row. `apiv2.Operation`
   carries the same enum as `RetrySafety`: `Register` panics when a mutating operation omits it
   or a GET/HEAD declares it, and the document records it as `x-silo-retry-safety`.
   `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
   classified legacy row or disagrees with it. No operation declares `idempotency_key` and no
   generic key store exists; `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy, so the field is never advertised
-  unimplemented. Inventory answer so far: no residual group justifies a shared implementation
-  (the one `non_retryable` row, invite-code top-up, folds into an absolute PUT); the remaining
-  groups are classified in the follow-up pass.
+  unimplemented. Inventory answer: all 224 tier-1 ported mutation rows are classified
+  (161 `natural_idempotent`, 35 `unique_constraint`, 15 `domain_identity`, 9 `coalescing`,
+  4 `non_retryable`, 0 `idempotency_key`) and no residual group justifies a shared
+  generic-key implementation. The four `non_retryable` rows (invite-code top-up, admin
+  session message, webhook rotate-secret, webhook test) are each either a one-shot display
+  or a secret shown once, which a key store would not make safe. Five rows carry a `DEFECT`
+  note where v1 gates on process-local state or fires an external effect inline (task run,
+  collection sync, trailer refresh, person refresh, email-address verification); their v2
+  port must move the gate to shared durable state before the declared strategy holds.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
   tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the

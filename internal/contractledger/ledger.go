@@ -64,10 +64,6 @@ const (
 	// the schema refuse the same note.
 	retrySafetyNoteMaxLen = 300
 
-	// adminRouteGroup is the one route group the temporary retry_safety
-	// allow-list splits by path (see retrySafetyExempt).
-	adminRouteGroup = "/api/v1/admin"
-
 	// removedTier is the only tier a removed row may hold: there is no v2
 	// behavior to baseline, so it never sits in tier 1.
 	removedTier = 2
@@ -210,28 +206,6 @@ var retrySafetyValues = map[string]bool{
 	RetrySafetyDurableDispatch:   true,
 	RetrySafetyIdempotencyKey:    true,
 	RetrySafetyNonRetryable:      true,
-}
-
-// retrySafetyUnclassifiedGroups is TEMPORARY: the route groups whose tier-1
-// ported mutation rows may still lack retry_safety while the classification
-// pass (branch api-v2/wave1-idempotency and its follow-up) works through the
-// ledger group by group. A group leaves this list in the same commit that
-// classifies its rows. TODO(api-v2/wave1-idempotency): empty this list and
-// delete it together with retrySafetyExempt.
-var retrySafetyUnclassifiedGroups = map[string]bool{}
-
-// retrySafetyExempt reports whether an unclassified row is tolerated by the
-// temporary allow-list. The /api/v1/admin group is split: its api-keys and
-// devices rows were classified with wave 1, so only its other paths are
-// exempt.
-func retrySafetyExempt(e Entry) bool {
-	if !retrySafetyUnclassifiedGroups[e.RouteGroup] {
-		return false
-	}
-	if e.RouteGroup == adminRouteGroup {
-		return !strings.Contains(e.Path, "/api-keys") && !strings.Contains(e.Path, "/devices")
-	}
-	return true
 }
 
 // requiresRetrySafety reports whether a row must carry retry_safety: a
@@ -527,12 +501,12 @@ func reviewRules(k Key, e Entry, r inventoryRoute) []string {
 }
 
 // retrySafetyRules enforces the classification's placement: required on a
-// tier-1 ported mutation row (outside the temporary allow-list), forbidden
-// elsewhere, a known value, and a note where the value needs one.
+// tier-1 ported mutation row, forbidden elsewhere, a known value, and a note
+// where the value needs one.
 func retrySafetyRules(k Key, e Entry) []string {
 	var out []string
 	switch {
-	case e.RetrySafety == "" && requiresRetrySafety(e) && !retrySafetyExempt(e):
+	case e.RetrySafety == "" && requiresRetrySafety(e):
 		out = append(out, fmt.Sprintf("tier-1 ported mutation row has no retry_safety: %s", k))
 	case e.RetrySafety == "":
 		if e.RetrySafetyNote != "" {

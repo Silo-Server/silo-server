@@ -999,8 +999,8 @@ func concurrencyMismatches(entries []Entry, declared []apiv2registry.Declared, e
 }
 
 // TestRetrySafetyPlacement pins where the curated retry_safety field may
-// appear: required on a tier-1 ported row with a mutating method (outside
-// the temporary unclassified allow-list), forbidden on every other row, one
+// appear: required on a tier-1 ported row with a mutating method, forbidden
+// on every other row, one
 // of the seven contract values, and accompanied by a note for
 // idempotency_key and non_retryable.
 func TestRetrySafetyPlacement(t *testing.T) {
@@ -1016,25 +1016,14 @@ func TestRetrySafetyPlacement(t *testing.T) {
 			t.Errorf("%s: retry_safety %q on tier %d %s %s", e.key(), e.RetrySafety, e.Tier, e.Disposition, e.Method)
 		}
 	}
-	for _, g := range []string{"/api/v1/auth", "/api/v1/auth/oauth/{install_id}", "/api/v1/profiles", "/api/v1/api-keys", "/api/v1/devices", "/api/v1/invitations/{token}", "/api/v1/admin/invitations", "/api/v1/admin/invite-codes", "/api/v1/admin/system"} {
-		if retrySafetyUnclassifiedGroups[g] {
-			t.Errorf("wave-1 group %s is still on the temporary unclassified allow-list", g)
+	// Every tier-1 ported mutation row is classified; there is no allow-list
+	// any more, so the ledger itself carries no counter-example.
+	for _, e := range ledger.Entries {
+		if requiresRetrySafety(e) && e.RetrySafety == "" {
+			t.Errorf("%s: tier-1 ported mutation row without retry_safety", e.key())
 		}
 	}
-	// The /api/v1/admin group is fully classified: neither its api-keys
-	// paths nor the rest of the group is exempt any more.
-	admin := Entry{Tier: 1, Disposition: DispositionPorted}
-	admin.Method = http.MethodPost
-	admin.RouteGroup = adminRouteGroup
-	for _, p := range []string{"/api/v1/admin/api-keys", "/api/v1/admin/users"} {
-		admin.Path = p
-		if retrySafetyExempt(admin) {
-			t.Errorf("%s must not be exempt", p)
-		}
-	}
-	// The required direction, against a row in a group the allow-list does
-	// not cover: the real ledger cannot carry such a row while the list is
-	// non-empty, so the rule is exercised directly.
+	// The required direction, exercised directly against a synthetic row.
 	unlisted := Entry{Tier: 1, Disposition: DispositionPorted}
 	unlisted.Method = http.MethodPost
 	unlisted.RouteGroup = "/api/v1/not-a-real-group"
