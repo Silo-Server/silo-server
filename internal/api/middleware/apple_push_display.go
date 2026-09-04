@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
@@ -55,6 +56,13 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 			if err != nil || !valid {
 				writeUnauthorized(w, "Session is no longer valid")
 				return
+			}
+			// Same attribution RequireAuth performs, so display fetches are
+			// not anonymous in the activity and request logs.
+			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+				uid := claims.UserID
+				lc.UserID = &uid
+				lc.SessionID = claims.SessionID
 			}
 			ctx := SetClaims(r.Context(), claims)
 			ctx = SetProfileID(ctx, claims.ProfileID)

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
@@ -19,6 +20,7 @@ func (f *fakeSessionValidator) IsValid(_ context.Context, id string) (bool, erro
 
 func TestRequireApplePushDisplayAuth(t *testing.T) {
 	jwt := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
+	var lastLog *activitylog.LogContext
 	sessions := &fakeSessionValidator{valid: map[string]bool{"sess-live": true}}
 	am := NewAuthMiddleware(jwt, sessions, nil, nil)
 
@@ -36,11 +38,16 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 		})
 	}
 	fallback := func(next http.Handler) http.Handler { return am.RequireAuth(afterAuth(RequireProfile(next))) }
-	handler := am.RequireApplePushDisplayAuth(fallback, afterAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	inner := am.RequireApplePushDisplayAuth(fallback, afterAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotProfile = GetProfileID(r.Context())
 		gotClaims = GetClaims(r.Context())
 		w.WriteHeader(http.StatusNoContent)
 	}))
+	// Stand in for the activitylog middleware so attribution can be checked.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastLog = &activitylog.LogContext{}
+		inner.ServeHTTP(w, r.WithContext(activitylog.SetLogContext(r.Context(), lastLog)))
+	})
 
 	display, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-live", "profile-1")
 	if err != nil {
@@ -102,6 +109,9 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 			}
 			if tt.wantStatus == http.StatusNoContent && afterAuthSawClaims != 1 {
 				t.Fatalf("afterAuth saw claims %d times, want exactly 1", afterAuthSawClaims)
+			}
+			if tt.wantStatus == http.StatusNoContent && (lastLog.UserID == nil || *lastLog.UserID != 42 || lastLog.SessionID != "sess-live") {
+				t.Fatalf("activity log context not attributed: %+v", lastLog)
 			}
 		})
 	}
