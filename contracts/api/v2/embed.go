@@ -13,10 +13,12 @@ import (
 	_ "embed"
 )
 
-// FS holds route-inventory.json, migration.json, migration.schema.json, and
-// offline-routes.txt.
+// FS holds route-inventory.json, migration.json, migration.schema.json,
+// offline-routes.txt, and the breaking-change approvals with their schema.
+// The post-lock marker LOCKED is deliberately not embedded: it is read from
+// the working tree by the diff command, never by the binary.
 //
-//go:embed route-inventory.json migration.json migration.schema.json offline-routes.txt
+//go:embed route-inventory.json migration.json migration.schema.json offline-routes.txt breaking-approvals.json breaking-approvals.schema.json
 var FS embed.FS
 
 // OfflineRoutesPath is the file inside FS that pins which API listener rows

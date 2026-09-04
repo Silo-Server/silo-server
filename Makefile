@@ -240,6 +240,24 @@ verify-apiv2-openapi:
 		|| { echo "::error::$(APIV2_OPENAPI) is stale; run make apiv2-openapi"; exit 1; }
 	@echo "$(APIV2_OPENAPI) is current"
 
+# Semantic diff and spec lint over the committed artifact. BASE_REF names the
+# merge base the diff compares against (CI passes the PR's base). The diff
+# tool is the oasdiff Go module pinned in go.mod/go.sum; no binary is
+# downloaded. A breaking change fails unless contracts/api/v2/
+# breaking-approvals.json approves that exact operation and fingerprint;
+# once contracts/api/v2/LOCKED exists no approval applies. The spec lint is
+# the internal/contractspec tests, which also run the seeded breaking fixture
+# through the tool so an upgrade that stops detecting it fails here.
+BASE_REF ?= origin/main
+verify-apiv2-contract:
+	@go test -count=1 ./internal/contractspec/ \
+		|| { echo "::error::$(APIV2_OPENAPI) fails the spec lint or the diff tool no longer detects the seeded breaking fixture"; exit 1; }
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		base=$$(git merge-base $(BASE_REF) HEAD) && \
+		{ git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" 2>/dev/null || : ; } && \
+		go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
+		|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }
+
 OFFLINE_ROUTES := contracts/api/v2/offline-routes.txt
 
 # The scenario executor decides run-vs-skip for a public scenario by whether
