@@ -841,7 +841,12 @@ describe("VideoPlayer translation handoff", () => {
   it("selects the refreshed downloaded track and clears the live overlay", async () => {
     const onRefreshSubtitles = vi.fn();
     const onSubtitleChanged = vi.fn();
-    const { rerenderPlayer } = renderPlayer({ onRefreshSubtitles, onSubtitleChanged });
+    const onSubtitleTrackChange = vi.fn();
+    const { rerenderPlayer } = renderPlayer({
+      onRefreshSubtitles,
+      onSubtitleChanged,
+      onSubtitleTrackChange,
+    });
 
     act(() => {
       realtimeOptions.current?.onEvent?.({
@@ -859,6 +864,7 @@ describe("VideoPlayer translation handoff", () => {
         },
       });
     });
+    expect(onSubtitleTrackChange).not.toHaveBeenCalledWith(1_000_000, expect.any(Number));
     expect(controls.current?.activeSubtitleIndex).toBe(1_000_000);
     expect(controls.current?.subtitleTracks.some((track) => track.live)).toBe(true);
 
@@ -879,6 +885,7 @@ describe("VideoPlayer translation handoff", () => {
       });
     });
     expect(onRefreshSubtitles).toHaveBeenCalledOnce();
+    expect(onSubtitleTrackChange).not.toHaveBeenCalledWith(1_000_000, expect.any(Number));
     expect(controls.current?.activeSubtitleIndex).toBe(1_000_000);
 
     const downloadedTrack: PlayerSubtitleInfo = {
@@ -902,6 +909,7 @@ describe("VideoPlayer translation handoff", () => {
     });
 
     await waitFor(() => expect(onSubtitleChanged).toHaveBeenCalledWith(4, undefined));
+    expect(onSubtitleTrackChange).toHaveBeenCalledWith(4, expect.any(Number));
     expect(controls.current?.activeSubtitleIndex).toBe(4);
     expect(controls.current?.subtitleTracks).toEqual([downloadedTrack]);
   });

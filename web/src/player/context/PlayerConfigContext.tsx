@@ -16,6 +16,10 @@ export interface PlayerConfig {
   getProfileToken?: () => string | null;
   /** Stable device identity used for device-scoped playback settings. */
   getDeviceId: () => string;
+  /** Optional async token refresh callback on 401 response. */
+  refreshToken?: () => Promise<boolean>;
+  /** Account/server generation; unchanged by automatic token rotation. */
+  getAuthContext?: () => unknown;
 }
 
 const PlayerConfigCtx = createContext<PlayerConfig | null>(null);

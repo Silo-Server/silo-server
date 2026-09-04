@@ -63,3 +63,25 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 		t.Fatalf("expected snapshot arg at index 2, got %#v", args[2])
 	}
 }
+
+func TestHistoryDateViewedUsesWatchEventOrder(t *testing.T) {
+	for _, order := range []string{"asc", "desc"} {
+		t.Run(order, func(t *testing.T) {
+			req := CatalogRequest{Source: CatalogSourceHistory, Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: order}}}
+			if !historySourceCanUseOptimizedPageQuery(req) {
+				t.Fatal("explicit date_viewed must retain episode-to-series watch-event ordering")
+			}
+			if historyDateViewedAscending(req) != (order == "asc") {
+				t.Fatal("incorrect watch-event sort direction")
+			}
+			req.SearchQuery = "series"
+			if historySourceCanUseOptimizedPageQuery(req) {
+				t.Fatal("filtered history must apply its overlay before pagination")
+			}
+			req.Source = CatalogSourceFavorites
+			if historyDateViewedAscending(req) {
+				t.Fatal("history ordering must not override other sources")
+			}
+		})
+	}
+}

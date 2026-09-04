@@ -7,8 +7,19 @@ import (
 	"time"
 )
 
+const (
+	historyDateViewedSort = "date_viewed"
+	historyAscendingOrder = "asc"
+	historySQLAscending   = "ASC"
+	historySQLDescending  = "DESC"
+)
+
+func historyDateViewedAscending(req CatalogRequest) bool {
+	return req.Source == CatalogSourceHistory && req.Query.Sort.Field == historyDateViewedSort && req.Query.Sort.Order == historyAscendingOrder
+}
+
 func historySourceCanUseOptimizedPageQuery(req CatalogRequest) bool {
-	if req.Source != CatalogSourceHistory || !req.UseSourceOrder {
+	if req.Source != CatalogSourceHistory || (!req.UseSourceOrder && req.Query.Sort.Field != historyDateViewedSort) {
 		return false
 	}
 	if strings.TrimSpace(req.SearchQuery) != "" || strings.TrimSpace(req.NamePrefix) != "" {
@@ -38,6 +49,7 @@ func (r *CatalogResolver) resolveHistorySourcePage(
 		req.Offset,
 		!req.SkipTotal,
 		&snapshot,
+		historyDateViewedAscending(req),
 	)
 	if err != nil {
 		return nil, err
@@ -64,6 +76,7 @@ func (r *CatalogResolver) loadHistoryDisplayPage(
 	offset int,
 	includeTotal bool,
 	snapshot *time.Time,
+	ascending bool,
 ) ([]string, int, bool, error) {
 	if r == nil || r.itemRepo == nil || r.itemRepo.pool == nil {
 		return nil, 0, false, fmt.Errorf("catalog resolver requires an item repository")
@@ -107,13 +120,18 @@ func (r *CatalogResolver) loadHistoryDisplayPage(
 		args = append(args, offset)
 	}
 
+	direction := historySQLDescending
+	if ascending {
+		direction = historySQLAscending
+	}
 	pageQuery := fmt.Sprintf(
 		`WITH history_display AS (%s)
 		SELECT display_id
 		FROM history_display
-		ORDER BY watched_at DESC, display_id ASC
+		ORDER BY watched_at %s, display_id ASC
 		LIMIT $%d%s`,
 		baseQuery,
+		direction,
 		limitArgIdx,
 		offsetClause,
 	)

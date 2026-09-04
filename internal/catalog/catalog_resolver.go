@@ -237,7 +237,7 @@ func (r *CatalogResolver) Resolve(ctx context.Context, req CatalogRequest, acces
 		}
 		return r.resolveUserCollectionSource(ctx, req, access)
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		return r.resolvePersonalSource(ctx, req, access)
@@ -752,6 +752,11 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 }
 
 func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
+	// History dates belong to watch events, including episodes displayed as a
+	// series. Preserve that order rather than sorting series by direct watches.
+	if req.Source == CatalogSourceHistory && req.Query.Sort.Field == historyDateViewedSort {
+		req.UseSourceOrder = true
+	}
 	if historySourceCanUseOptimizedPageQuery(req) {
 		return r.resolveHistorySourcePage(ctx, req, access)
 	}
@@ -1037,7 +1042,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 			return nil, err
 		}
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
@@ -1141,7 +1146,7 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 			return nil, err
 		}
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
@@ -1434,13 +1439,13 @@ func validateCatalogQueryRequest(req CatalogRequest, allowPersonalizedSorts bool
 	)
 }
 
-func validateCatalogPersonalRequest(req CatalogRequest) error {
+func validateCatalogPersonalRequest(req CatalogRequest, allowPersonalizedSorts bool) error {
 	switch req.Source {
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
 	default:
 		return fmt.Errorf("%w: source %q is not supported", ErrInvalidCatalogRequest, req.Source)
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, catalogPersonalSortFields(), false)
+	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, QuerySortFieldSet(allowPersonalizedSorts), false)
 }
 
 func validateCatalogPersonRequest(req CatalogRequest) error {
@@ -1620,10 +1625,6 @@ var catalogPersonalRuleFields = map[string]bool{
 }
 
 func catalogQuerySortFields() map[string]bool {
-	return QuerySortFieldSet(false)
-}
-
-func catalogPersonalSortFields() map[string]bool {
 	return QuerySortFieldSet(false)
 }
 
@@ -1985,10 +1986,19 @@ func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store users
 		}
 		// The episode scope shows history at episode granularity; every other
 		// scope collapses episode watch events into their series display item.
+		var ids []string
 		if isEpisodeCatalogScope(req.Query.MediaScope) {
-			return HistoryEpisodeScopeIDs(entries), nil
+			ids = HistoryEpisodeScopeIDs(entries)
+		} else {
+			ids, err = ResolveHistoryDisplayIDs(ctx, entries, NewEpisodeRepository(r.itemRepo.pool))
+			if err != nil {
+				return nil, err
+			}
 		}
-		return ResolveHistoryDisplayIDs(ctx, entries, NewEpisodeRepository(r.itemRepo.pool))
+		if historyDateViewedAscending(req) {
+			slices.Reverse(ids)
+		}
+		return ids, nil
 	default:
 		return nil, fmt.Errorf("%w: source %q is not a personal source", ErrInvalidCatalogRequest, req.Source)
 	}

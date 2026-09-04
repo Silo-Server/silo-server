@@ -62,6 +62,7 @@ interface PlayerControlsProps {
   onSubtitleSelect: (index: number | null) => void;
   subtitleDelayMs: number;
   onSubtitleDelayChange: (ms: number) => void;
+  preferredSubtitleLanguage?: string | null;
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
@@ -128,6 +129,7 @@ export function PlayerControls({
   onSubtitleSelect,
   subtitleDelayMs,
   onSubtitleDelayChange,
+  preferredSubtitleLanguage,
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
@@ -295,6 +297,7 @@ export function PlayerControls({
             </div>
             <SubtitleMenu
               tracks={subtitleTracks}
+              preferredSubtitleLanguage={preferredSubtitleLanguage}
               activeIndex={activeSubtitleIndex}
               onSelect={onSubtitleSelect}
               delayMs={subtitleDelayMs}
@@ -467,6 +470,7 @@ export function PlayerControls({
 
               <SubtitleMenu
                 tracks={subtitleTracks}
+                preferredSubtitleLanguage={preferredSubtitleLanguage}
                 activeIndex={activeSubtitleIndex}
                 onSelect={onSubtitleSelect}
                 delayMs={subtitleDelayMs}

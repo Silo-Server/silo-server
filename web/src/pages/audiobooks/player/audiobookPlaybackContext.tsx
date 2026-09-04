@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { getAccessToken, getOrCreateDeviceId, getProfileToken } from "@/api/client";
+import {
+  getAccessToken,
+  getAuthContextVersion,
+  getOrCreateDeviceId,
+  getProfileToken,
+  refreshAuthentication,
+} from "@/api/client";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import { storage } from "@/utils/storage";
@@ -51,6 +57,8 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
       getDeviceId: () => getOrCreateDeviceId(),
+      refreshToken: refreshAuthentication,
+      getAuthContext: getAuthContextVersion,
     }),
     [],
   );

@@ -206,6 +206,20 @@ function getDeviceHeaders(): Record<string, string> {
   };
 }
 
+/** Share one token rotation across player and ordinary API requests. */
+export function refreshAuthentication(): Promise<boolean> {
+  if (!refreshPromise) {
+    refreshPromise = attemptRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+export function getAuthContextVersion(): number {
+  return authContextVersion;
+}
+
 async function attemptRefresh(): Promise<boolean> {
   const rt = getRefreshToken();
   if (!rt) return false;
@@ -504,12 +518,7 @@ async function apiResponseInternal(
     if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
       throw new StaleApiRequestContextError();
     }
-    if (!refreshPromise) {
-      refreshPromise = attemptRefresh().finally(() => {
-        refreshPromise = null;
-      });
-    }
-    const refreshed = await refreshPromise;
+    const refreshed = await refreshAuthentication();
     if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
       throw new StaleApiRequestContextError();
     }

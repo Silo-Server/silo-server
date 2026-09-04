@@ -110,7 +110,13 @@ export default function CatalogFiltersPanel({
         resultCountLabel={resultCountLabel}
         resultCountLoading={resultCountLoading}
         sourceOrderLabel={
-          isCollectionSource ? "Collection Order" : supportsSourceOrder ? "List Order" : undefined
+          isCollectionSource
+            ? "Collection Order"
+            : state.source === "history"
+              ? "Watch History"
+              : supportsSourceOrder
+                ? "List Order"
+                : undefined
         }
         allowEpisodeMediaScope={!isCollectionSource}
       />
