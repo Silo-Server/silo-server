@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -29,7 +31,8 @@ func historySourceCanUseOptimizedPageQuery(req CatalogRequest) bool {
 	def := req.Query.Normalize()
 	return def.MediaScope == "" &&
 		len(def.LibraryIDs) == 0 &&
-		len(def.Groups) == 0
+		len(def.Groups) == 0 &&
+		def.Limit == nil
 }
 
 func (r *CatalogResolver) resolveHistorySourcePage(
@@ -91,7 +94,7 @@ func (r *CatalogResolver) loadHistoryDisplayPage(
 		offset = 0
 	}
 
-	baseQuery, baseArgs := buildHistoryDisplayBaseQuery(access, snapshot)
+	baseQuery, baseArgs := buildHistoryDisplayBaseQuery(access, snapshot, false)
 
 	total := 0
 	if includeTotal {
@@ -165,7 +168,29 @@ func (r *CatalogResolver) loadHistoryDisplayPage(
 	return displayIDs, 0, hasMore, nil
 }
 
-func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (string, []any) {
+// Filtered history needs every candidate before overlays and query limits are
+// applied. Read deduplicated IDs in watch-event order, rather than truncating
+// raw events and losing older matches or repeated views of the same series.
+func (r *CatalogResolver) loadHistorySourceIDs(ctx context.Context, req CatalogRequest, access AccessFilter) ([]string, error) {
+	baseQuery, args := buildHistoryDisplayBaseQuery(access, req.SnapshotAt, isEpisodeCatalogScope(req.Query.MediaScope))
+	direction := historySQLDescending
+	if historyDateViewedAscending(req) {
+		direction = historySQLAscending
+	}
+	query := fmt.Sprintf(`WITH history_display AS (%s)
+		SELECT display_id FROM history_display ORDER BY watched_at %s, display_id ASC`, baseQuery, direction)
+	rows, err := r.itemRepo.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying history source IDs: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting history source IDs: %w", err)
+	}
+	return ids, nil
+}
+
+func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time, episodeScope bool) (string, []any) {
 	args := []any{access.UserID, access.ProfileID}
 	argIdx := 3
 
@@ -192,7 +217,11 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 		if len(access.AllowedContentIDs) == 0 {
 			conditions = append(conditions, "1 = 0")
 		} else {
-			conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
+			contentIDExpr := "mi.content_id"
+			if episodeScope {
+				contentIDExpr = "h.media_item_id"
+			}
+			conditions = append(conditions, fmt.Sprintf("%s = ANY($%d)", contentIDExpr, argIdx))
 			args = append(args, access.AllowedContentIDs)
 			argIdx++
 		}
@@ -238,6 +267,11 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 		seriesFromAnchoredEpisodeExpr("h.media_item_id"),
 	)
 
+	historyIDExpr := displayIDExpr
+	if episodeScope {
+		historyIDExpr = "h.media_item_id"
+	}
+
 	// Null-poison the episodes join key for fully-formed anchored episode ids so
 	// the planner skips the episodes_pkey probe for them; everything else (legacy
 	// Sonyflake, local, malformed) still falls back to the lookup.
@@ -249,7 +283,7 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 	return fmt.Sprintf(
 		`SELECT DISTINCT ON (history_events.display_id) history_events.display_id, history_events.watched_at
 		FROM (
-			SELECT %[1]s AS display_id, h.watched_at
+			SELECT %[4]s AS display_id, h.watched_at
 			FROM user_watch_history h
 			LEFT JOIN episodes e
 				ON e.content_id = %[3]s
@@ -260,6 +294,7 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 		displayIDExpr,
 		strings.Join(conditions, " AND "),
 		episodeJoinKey,
+		historyIDExpr,
 	), args
 }
 

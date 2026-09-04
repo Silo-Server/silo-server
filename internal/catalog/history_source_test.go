@@ -31,7 +31,7 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 		AllowedLibraryIDs:  []int{11, 12},
 		DisabledLibraryIDs: []int{99},
 		MaxContentRating:   "PG-13",
-	}, &snapshot)
+	}, &snapshot, false)
 
 	expectedFragments := []string{
 		"h.user_id = $1",
@@ -83,5 +83,21 @@ func TestHistoryDateViewedUsesWatchEventOrder(t *testing.T) {
 				t.Fatal("history ordering must not override other sources")
 			}
 		})
+	}
+}
+
+func TestHistoryQueryLimitUsesFilteredPath(t *testing.T) {
+	for _, field := range []string{"", "date_viewed"} {
+		req := CatalogRequest{Source: CatalogSourceHistory, UseSourceOrder: field == "", Query: QueryDefinition{Sort: QuerySort{Field: field}, Limit: new(10)}}
+		if historySourceCanUseOptimizedPageQuery(req) {
+			t.Fatalf("query limit must apply before pagination for sort %q", field)
+		}
+	}
+}
+
+func TestHistoryEpisodeIDsPreserveParentAccessChecks(t *testing.T) {
+	query, _ := buildHistoryDisplayBaseQuery(AccessFilter{UserID: 7, ProfileID: "profile-1"}, nil, true)
+	if !strings.Contains(query, "SELECT h.media_item_id AS display_id") || !strings.Contains(query, "JOIN media_items mi ON mi.content_id = COALESCE(") {
+		t.Fatal("episode IDs must retain access checks on the parent media item")
 	}
 }

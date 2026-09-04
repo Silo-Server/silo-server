@@ -770,7 +770,7 @@ func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req Catalog
 		return nil, err
 	}
 
-	contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access.ProfileID)
+	contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access)
 	if err != nil {
 		return nil, err
 	}
@@ -1052,7 +1052,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 		if err != nil {
 			return nil, err
 		}
-		contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access.ProfileID)
+		contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access)
 		if err != nil {
 			return nil, err
 		}
@@ -1156,7 +1156,7 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 		if err != nil {
 			return nil, err
 		}
-		contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access.ProfileID)
+		contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access)
 		if err != nil {
 			return nil, err
 		}
@@ -1946,7 +1946,8 @@ func (r *CatalogResolver) watchlistVisibility() *WatchlistVisibility {
 	return NewWatchlistVisibilityFromRepos(r.itemRepo, episodes)
 }
 
-func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store userstore.UserStore, req CatalogRequest, profileID string) ([]string, error) {
+func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store userstore.UserStore, req CatalogRequest, access AccessFilter) ([]string, error) {
+	profileID := access.ProfileID
 	switch req.Source {
 	case CatalogSourceFavorites:
 		entries, err := store.ListFavorites(ctx, profileID, 10000, 0)
@@ -1980,25 +1981,7 @@ func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store users
 		}
 		return OrderPersonalListIDs(listed, req.Query.Sort), nil
 	case CatalogSourceHistory:
-		entries, err := store.ListHistory(ctx, profileID, 10000, 0)
-		if err != nil {
-			return nil, err
-		}
-		// The episode scope shows history at episode granularity; every other
-		// scope collapses episode watch events into their series display item.
-		var ids []string
-		if isEpisodeCatalogScope(req.Query.MediaScope) {
-			ids = HistoryEpisodeScopeIDs(entries)
-		} else {
-			ids, err = ResolveHistoryDisplayIDs(ctx, entries, NewEpisodeRepository(r.itemRepo.pool))
-			if err != nil {
-				return nil, err
-			}
-		}
-		if historyDateViewedAscending(req) {
-			slices.Reverse(ids)
-		}
-		return ids, nil
+		return r.loadHistorySourceIDs(ctx, req, access)
 	default:
 		return nil, fmt.Errorf("%w: source %q is not a personal source", ErrInvalidCatalogRequest, req.Source)
 	}

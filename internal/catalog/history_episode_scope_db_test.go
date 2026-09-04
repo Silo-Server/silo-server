@@ -22,7 +22,7 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
@@ -55,6 +55,7 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 		t.Fatalf("seed profile: %v", err)
 	}
 	t.Cleanup(func() {
+		ctx := context.Background()
 		_, _ = pool.Exec(ctx, `DELETE FROM user_watch_history WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_profiles WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
@@ -92,7 +93,7 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store for user: %v", err)
 	}
-	base := time.Now().UTC().Add(-time.Hour)
+	base := time.Now().UTC().Add(-24 * time.Hour)
 	// ep1 watched first, then ep2: most-recent-first order is ep2, ep1.
 	for i, epID := range []string{ep1, ep2} {
 		if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{
@@ -143,4 +144,60 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 	if len(seriesResult.Items) != 1 || seriesResult.Items[0].ContentID != seriesID {
 		t.Fatalf("unscoped history = %+v, want single series item %s", seriesResult.Items, seriesID)
 	}
+	// A matching movie predates more than 10,000 repeated episode watches.
+	// Candidate loading must deduplicate the full history before filtering.
+	olderMovieID := fmt.Sprintf("hes-older-%d", suffix)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres)
+		VALUES ($1, 'movie', 'HES Earlier', 'matched', '{}'::text[])`, olderMovieID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, olderMovieID)
+	})
+	if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{ProfileID: profileID, MediaItemID: olderMovieID, WatchedAt: base.Add(-time.Minute).Format(time.RFC3339), Completed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed, duration_seconds)
+		SELECT $1 || '-' || n::text, $2, $3, $4, $5::timestamptz + n * interval '1 second', true, 0
+		FROM generate_series(1,10001) n`, fmt.Sprintf("hes-bulk-%d", suffix), userID, profileID, ep2, base.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		allowedIDs []string
+		req        CatalogRequest
+		want       []string
+		total      int
+	}{
+		{name: "oldest filtered beyond event cap", req: CatalogRequest{SearchQuery: "HES", Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{olderMovieID, seriesID}, total: 2},
+		{name: "newest filtered deduplicates series", req: CatalogRequest{SearchQuery: "HES", Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "desc"}}}, want: []string{seriesID, olderMovieID}, total: 2},
+		{name: "episode content allowlist", allowedIDs: []string{ep1}, req: CatalogRequest{Query: QueryDefinition{MediaScope: "episode", Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{ep1}, total: 1},
+		{name: "oldest episodes beyond event cap", req: CatalogRequest{Query: QueryDefinition{MediaScope: "episode", Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{ep1, ep2}, total: 2},
+		{name: "query limit before pagination", req: CatalogRequest{Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "asc"}, Limit: new(1)}}, want: []string{olderMovieID}, total: 1},
+		{name: "offset past query limit", req: CatalogRequest{Offset: 1, Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "asc"}, Limit: new(1)}}, total: 1},
+		{name: "snapshot excludes later episode watches", req: CatalogRequest{SnapshotAt: new(base.Add(30 * time.Second)), Query: QueryDefinition{MediaScope: "episode", Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{ep1}, total: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.req.Source = CatalogSourceHistory
+			tc.req.Limit = 60
+			caseAccess := access
+			caseAccess.AllowedContentIDs = tc.allowedIDs
+			result, err := resolver.Resolve(t.Context(), tc.req, caseAccess)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Total != tc.total || len(result.Items) != len(tc.want) {
+				t.Fatalf("got total=%d items=%d, want total=%d items=%d", result.Total, len(result.Items), tc.total, len(tc.want))
+			}
+			for i, id := range tc.want {
+				if result.Items[i].ContentID != id {
+					t.Fatalf("item %d=%s, want %s", i, result.Items[i].ContentID, id)
+				}
+			}
+			if result.HasMore {
+				t.Fatal("complete or exhausted query-limited page must not advertise more results")
+			}
+		})
+	}
+
 }

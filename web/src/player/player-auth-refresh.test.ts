@@ -65,3 +65,52 @@ it("shares one refresh between concurrent player and ordinary API requests", asy
   ).toHaveLength(1);
   expect(fetchMock).toHaveBeenCalledTimes(7);
 });
+
+it.each(["account", "server"])(
+  "starts a separate refresh after a %s change and preserves it when the old refresh finishes",
+  async (change) => {
+    vi.stubGlobal("location", { origin: "https://first.example" });
+    setAccessToken("first-account");
+    setRefreshToken("first-refresh");
+    let finishOld!: (value: Response) => void;
+    let finishNew!: (value: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => {
+      finishOld = resolve;
+    });
+    const newResponse = new Promise<Response>((resolve) => {
+      finishNew = resolve;
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockReturnValueOnce(oldResponse)
+      .mockReturnValueOnce(newResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const oldRefresh = refreshAuthentication();
+    if (change === "account") setAccessToken("second-account");
+    else vi.stubGlobal("location", { origin: "https://second.example" });
+    setRefreshToken("second-refresh");
+    const newRefresh = refreshAuthentication();
+    try {
+      finishOld(
+        new Response(JSON.stringify({ access_token: "stale", refresh_token: "stale-refresh" })),
+      );
+      await expect(oldRefresh).resolves.toBe(false);
+      expect(getAccessToken()).toBe(change === "account" ? "second-account" : "first-account");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).refresh_token).toBe(
+        "second-refresh",
+      );
+      expect(refreshAuthentication()).toBe(newRefresh);
+      finishNew(
+        new Response(JSON.stringify({ access_token: "fresh", refresh_token: "fresh-refresh" })),
+      );
+      await expect(newRefresh).resolves.toBe(true);
+      expect(getAccessToken()).toBe("fresh");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      finishOld(new Response(null, { status: 401 }));
+      finishNew(new Response(null, { status: 401 }));
+      await Promise.all([oldRefresh, newRefresh]);
+    }
+  },
+);
