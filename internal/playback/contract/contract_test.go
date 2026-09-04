@@ -139,8 +139,10 @@ var (
 func TestValidFixtures(t *testing.T) {
 	schemas := compileSchemasV3(t)
 	fixtures := mustGlob(t, filepath.Join(schemaRootV3, "v3", "fixtures", "valid", "*.json"))
-	if len(fixtures) != len(fixtureSchemasV3) {
-		t.Fatalf("valid fixtures = %d, want one per schema (%d)", len(fixtures), len(fixtureSchemasV3))
+	for name := range fixtureSchemasV3 {
+		if _, err := os.Stat(filepath.Join(schemaRootV3, "v3", "fixtures", "valid", name)); err != nil {
+			t.Fatalf("missing canonical valid fixture %s: %v", name, err)
+		}
 	}
 
 	for _, fixture := range fixtures {
@@ -410,6 +412,7 @@ func TestResponseSchemaRequiredFieldsMatchGoTags(t *testing.T) {
 		{"decision-response.schema.json", []string{"$defs", "claims", "properties", "subtitles"}, playback.SubtitleClaimsV3{}},
 		{"decision-response.schema.json", []string{"$defs", "subtitle_decision"}, playback.SubtitleDecisionV3{}},
 		{"decision-response.schema.json", []string{"$defs", "subtitle_decision", "properties", "artifact"}, playback.SubtitleArtifactV3{}},
+		{"decision-response.schema.json", []string{"$defs", "subtitle_decision", "properties", "embedded"}, playback.EmbeddedSubtitleV3{}},
 		{"decision-response.schema.json", []string{"$defs", "subtitle_inventory_item"}, playback.SubtitleInventoryItemV3{}},
 		{"decision-response.schema.json", []string{"$defs", "applied_quirk"}, playback.AppliedQuirkV3{}},
 		{"decision-response.schema.json", []string{"$defs", "available_quality"}, playback.AvailableQualityV3{}},

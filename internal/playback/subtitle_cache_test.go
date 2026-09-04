@@ -11,9 +11,166 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestServeExtractTextCacheVariants(t *testing.T) {
+	c, source := newTestCache(t)
+	for _, target := range []string{"", "vtt", ""} {
+		opts := StreamExtractOpts{InputPath: source, SourceCodec: "ass", TargetFormat: target}
+		_, format := streamExtractOutput(opts.SourceCodec, opts.TargetFormat)
+		payload := "complete " + format + " track"
+		calls := 0
+		extract := func(_ context.Context, opts StreamExtractOpts) error {
+			calls++
+			_, err := io.WriteString(opts.Writer, payload)
+			return err
+		}
+		for range 2 {
+			rec := httptest.NewRecorder()
+			if err := c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, extract); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Body.String() != payload {
+				t.Fatalf("format %q body = %q, want %q", target, rec.Body.String(), payload)
+			}
+		}
+		if calls > 1 {
+			t.Fatalf("format %q extracted %d times, want at most once", target, calls)
+		}
+	}
+	// Both current variants must survive another variant's commit.
+	for _, format := range []string{"ass", "vtt"} {
+		f, _, ok := c.lookup(source, 0, format)
+		if !ok {
+			t.Fatalf("missing %s variant", format)
+		}
+		_ = f.Close()
+	}
+}
+
+func TestServeExtractTextWindowDoesNotPoisonFullTrack(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip", DurationSeconds: 600}
+	rec := httptest.NewRecorder()
+	if err := c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
+		_, err := io.WriteString(opts.Writer, "partial window")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f, _, ok := c.lookup(source, 0, "vtt"); ok {
+		_ = f.Close()
+		t.Fatal("window was cached as a complete track")
+	}
+}
+
+type subtitleWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *subtitleWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func TestServeExtractTextConcurrentFill(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}
+	started, finish := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	extract := func(_ context.Context, opts StreamExtractOpts) error {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-finish
+		_, err := io.WriteString(opts.Writer, "WEBVTT\n\ncomplete track")
+		return err
+	}
+	first, second := httptest.NewRecorder(), httptest.NewRecorder()
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		firstDone <- c.ServeExtract(first, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, extract)
+	}()
+	<-started
+	waitCtx := &subtitleWaitContext{Context: t.Context(), waiting: make(chan struct{})}
+	go func() {
+		secondDone <- c.ServeExtract(second, httptest.NewRequestWithContext(waitCtx, http.MethodGet, "/subtitle", nil), opts, extract)
+	}()
+	<-waitCtx.waiting
+	close(finish)
+	for _, done := range []chan error{firstDone, secondDone} {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 || first.Body.String() != second.Body.String() {
+		t.Fatalf("requests did not share complete extract: calls=%d first=%q second=%q", calls.Load(), first.Body.String(), second.Body.String())
+	}
+}
+
+func TestServeExtractTextCancelledWaiterDoesNotDiscardFill(t *testing.T) {
+	c, source := newTestCache(t)
+	fill, _ := c.beginFill(source, 0, "vtt")
+	if fill == nil {
+		t.Fatal("failed to reserve fill")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	waitCtx := &subtitleWaitContext{Context: ctx, waiting: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		done <- c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(waitCtx, http.MethodGet, "/subtitle", nil),
+			StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}, func(context.Context, StreamExtractOpts) error {
+				return errors.New("waiter must not extract")
+			})
+	}()
+	<-waitCtx.waiting
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("wait error = %v, want cancellation", err)
+	}
+	if _, err := fill.Tee(io.Discard).Write([]byte("complete track")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fill.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	f, _, ok := c.lookup(source, 0, "vtt")
+	if !ok {
+		t.Fatal("canceled waiter discarded the active fill")
+	}
+	_ = f.Close()
+}
+
+func TestServeExtractTextFailedFillRetries(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}
+	for _, fail := range []bool{true, false} {
+		err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
+			if _, err := io.WriteString(opts.Writer, "partial track"); err != nil {
+				return err
+			}
+			if fail {
+				return errors.New("demux interrupted")
+			}
+			return nil
+		})
+		if (err != nil) != fail {
+			t.Fatalf("fail=%v extract error=%v", fail, err)
+		}
+		f, _, ok := c.lookup(source, 0, "vtt")
+		if ok {
+			_ = f.Close()
+		}
+		if ok == fail {
+			t.Fatalf("fail=%v cache hit=%v", fail, ok)
+		}
+	}
+}
 
 // newTestCache builds a cache rooted under a temp transcode dir and returns
 // it with the path of a fake source media file.
@@ -575,6 +732,19 @@ func TestWarmInBackgroundSemaphoreDrop(t *testing.T) {
 		t.Fatal("dropped warm must not populate the cache")
 	}
 
+	// A committed file is visible before the worker releases its warm slot.
+	// Acquire every slot to wait for those deferred releases, then return them.
+	for range subtitleCacheWarmSlots {
+		select {
+		case c.warmSem <- struct{}{}:
+		case <-time.After(5 * time.Second):
+			t.Fatal("completed warms did not release their slots")
+		}
+	}
+	for range subtitleCacheWarmSlots {
+		<-c.warmSem
+	}
+
 	// With slots free again, the overflow track's warm goes through.
 	c.WarmInBackground(supExtractOpts(source, overflow), extract)
 	waitForCacheEntry(t, c, source, overflow)
@@ -671,7 +841,7 @@ func entryPath(t *testing.T, c *SubtitleCache, source string, track int) string 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(c.dir(), subtitleCacheKey(source, track, src.ModTime(), src.Size()))
+	return filepath.Join(c.dir(), subtitleCacheFormatKey(source, track, src.ModTime(), src.Size(), "sup"))
 }
 
 // countCacheEntries counts committed .sup entries in the cache dir.

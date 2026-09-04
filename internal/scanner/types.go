@@ -104,15 +104,16 @@ type AudioTrackInfo struct {
 
 // SubtitleTrackInfo describes an embedded subtitle track from probing.
 type SubtitleTrackInfo struct {
-	Index           int
-	Language        string
-	Codec           string
-	Title           string
-	EmbeddedTitle   string
-	Resolution      string
-	Forced          bool
-	Default         bool
-	HearingImpaired bool
+	ContainerTrackID string
+	Index            int
+	Language         string
+	Codec            string
+	Title            string
+	EmbeddedTitle    string
+	Resolution       string
+	Forced           bool
+	Default          bool
+	HearingImpaired  bool
 }
 
 // ExternalSubtitleInfo describes a discovered sidecar subtitle file.

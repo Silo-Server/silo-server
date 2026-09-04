@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useASSSubtitles } from "./useASSSubtitles";
 import type { PlayerSubtitleInfo } from "../types";
@@ -225,4 +225,97 @@ describe("useASSSubtitles time offset", () => {
 
     await waitFor(() => expect(instances[0]!.timeOffset).toBe(28));
   });
+});
+
+describe("ASS subtitle loading recovery", () => {
+  it("reports a failed fetch and retries without a track change", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const state = vi.fn();
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValue(mockFetchResponse("[Script Info]"));
+    const videoRef = makeVideoRef();
+    const { unmount } = renderHook(() =>
+      useASSSubtitles(videoRef, [germanTrack], 6, false, 0, 0, state),
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(state).toHaveBeenLastCalledWith("error");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(constructorOpts).toHaveLength(1);
+      expect(state).toHaveBeenLastCalledWith("ready");
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards an old track response after subtitles are switched off", async () => {
+    let resolve!: (response: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const state = vi.fn();
+    const videoRef = makeVideoRef();
+    const { rerender } = renderHook(
+      ({ index }: { index: number | null }) =>
+        useASSSubtitles(videoRef, [germanTrack], index, false, 0, 0, state),
+      { initialProps: { index: 6 as number | null } },
+    );
+    rerender({ index: null });
+    await act(async () => {
+      resolve(mockFetchResponse("[Script Info]"));
+    });
+    expect(constructorOpts).toHaveLength(0);
+    expect(state).toHaveBeenLastCalledWith("idle");
+  });
+});
+
+it("keeps a slowly progressing ASS extraction alive beyond 30 seconds", async () => {
+  vi.useFakeTimers();
+  const state = vi.fn();
+  let reads = 0;
+  vi.mocked(fetch).mockResolvedValue({
+    ok: true,
+    body: {
+      getReader: () => ({
+        read: () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve(
+                  ++reads <= 3
+                    ? { done: false, value: new TextEncoder().encode("[Script Info]\n") }
+                    : { done: true },
+                ),
+              15_000,
+            );
+          }),
+      }),
+    },
+  } as unknown as Response);
+  const videoRef = makeVideoRef();
+  const { unmount } = renderHook(() =>
+    useASSSubtitles(videoRef, [germanTrack], 6, false, 0, 0, state),
+  );
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(constructorOpts).toHaveLength(1);
+    expect(state).toHaveBeenLastCalledWith("ready");
+    expect(state).not.toHaveBeenCalledWith("error");
+  } finally {
+    unmount();
+    vi.useRealTimers();
+  }
 });

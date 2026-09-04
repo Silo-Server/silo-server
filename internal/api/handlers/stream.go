@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -57,7 +59,7 @@ type StreamHandler struct {
 	// Optional — without it a revived remux is gated on the persisted row alone
 	// and no race is started here.
 	CopySafetyRacer PlaybackCopySafetyRacer
-	// SubtitleCache stores full-track PGS (.sup) extracts under the transcode
+	// SubtitleCache stores complete embedded subtitle extracts under the transcode
 	// dir so repeat selections skip the whole-file ffmpeg demux. May be nil
 	// (tests / minimal setups) — extraction then always streams uncached.
 	SubtitleCache *playback.SubtitleCache
@@ -246,7 +248,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 // HandleSubtitle extracts a subtitle track from the media file associated with
 // a playback session and serves it as WebVTT or raw ASS depending on the
 // URL extension (e.g. /subtitles/2.ass or /subtitles/2.vtt).
-func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
+func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -287,6 +289,16 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	file, err := h.fileResolver.GetByID(r.Context(), fileID)
 	if err != nil || file == nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
+		return
+	}
+
+	trackIndex, err = subtitleRouteIndex(file, trackIndex, r.URL.Query())
+	if err != nil {
+		if errors.Is(err, errSubtitleIdentityInvalid) {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		} else {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+		}
 		return
 	}
 
@@ -393,7 +405,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		// demuxed, so the first byte lands within ~1s even on network
 		// storage. Works identically for direct-play, remux, and
 		// transcode because it doesn't depend on any other ffmpeg.
-		h.streamEmbeddedSubtitle(w, r, file, embeddedIndex, session, requestedFormat)
+		h.streamEmbeddedSubtitle(w, r, file, embeddedIndex, requestedFormat)
 		return
 	}
 
@@ -574,6 +586,15 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid subtitle track index")
 		return
 	}
+	trackIndex, err = subtitleRouteIndex(file, trackIndex, r.URL.Query())
+	if err != nil {
+		if errors.Is(err, errSubtitleIdentityInvalid) {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		} else {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+		}
+		return
+	}
 
 	embeddedIndex := trackIndex - len(file.ExternalSubtitles)
 	if embeddedIndex < 0 || embeddedIndex >= len(file.SubtitleTracks) {
@@ -661,10 +682,10 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 }
 
 // streamEmbeddedSubtitle runs a dedicated ffmpeg for a single embedded
-// track, seeked to the best-known playback position, and pipes its
+// track, optionally windowed by explicit client parameters, and pipes its
 // stdout directly to w. Because this ffmpeg is independent of the video
 // pipeline, it works the same for direct play, remux, and transcode.
-func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, session *playback.Session, requestedFormat ...string) {
+func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, requestedFormat ...string) {
 	track := file.SubtitleTracks[embeddedIndex]
 	outFormat := "vtt"
 	switch {
@@ -674,22 +695,15 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		outFormat = subtitleFormatSUP
 	}
 
-	// ASS is fetched exactly once and consumed whole by its client-side
-	// renderer (JASSUB), so it must never be windowed. PGS defaults to
-	// the same whole-track behavior, but a client that manages its own
-	// sliding window (the web player's libpgs hook) opts in explicitly
-	// with ?windowed=1 + ?position=/?duration=; there is deliberately no
-	// session-position fallback for sup — an implicit window would
-	// silently drop cues for clients that fetch once. Note
-	// subtitleSeekPosition falls back to the session's last reported
-	// position even without a ?position= query — relying on
-	// StreamExtractSubtitle's codec guard alone would still log a
-	// misleading nonzero seek here.
+	// A subtitle URL describes the complete track unless the caller supplies
+	// an explicit window. Native players fetch once and must retain cues beyond
+	// ten minutes and before a resumed playback position. ASS stays whole;
+	// PGS window consumers opt in with windowed=1.
 	var seek, duration float64
 	var allowWindow bool
 	switch outFormat {
 	case "vtt":
-		seek = subtitleSeekPosition(r, session)
+		seek = subtitleSeekPosition(r)
 		duration = subtitleWindowDuration(r)
 	case subtitleFormatSUP:
 		allowWindow, seek, duration = playback.PGSWindowRequest(r.URL.Query())
@@ -725,69 +739,46 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 			return
 		}
 		opts.TargetFormat = "vtt"
-		outFormat = "vtt"
 	}
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// Full-track PGS extracts are expensive (whole-file demux) and byte-
-	// identical across requests, so they are served from / teed into the
-	// subtitle cache; windowed PGS requests extract their slice from the
-	// cached full track when present (warming it in the background when
-	// not). All other formats stream uncached: VTT is already windowed
-	// and fast, ASS is small.
-	if outFormat == subtitleFormatSUP {
-		err := h.SubtitleCache.ServeSUPExtract(w, r, opts, playback.StreamExtractSubtitle)
+	// Only complete successful extracts enter the cache; explicit windows
+	// remain streamed. Keep failures distinguishable from a clean subtitle EOF.
+	response := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+	if err := h.SubtitleCache.ServeExtract(response, r, opts, playback.StreamExtractSubtitle); err != nil {
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
-		return
-	}
-
-	switch outFormat {
-	case subtitleFormatASS:
-		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	default:
-		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-
-	opts.Writer = w
-	if err := playback.StreamExtractSubtitle(r.Context(), opts); err != nil {
-		// Headers already committed — best we can do is log and let
-		// the client see a truncated response.
-		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
+		if r.Context().Err() != nil {
+			return
+		}
+		if response.Status() == 0 {
+			writeError(w, http.StatusInternalServerError, "subtitle_extract_failed", "Failed to extract subtitles")
+			return
+		}
+		// A successful HTTP EOF would make clients accept the partial track.
+		panic(http.ErrAbortHandler)
 	}
 }
 
-// subtitleSeekPosition picks the best-known starting position for a
-// subtitle extract. A caller-supplied ?position= query wins (the player
-// has the most accurate clock), falling back to the session's last
-// reported position, then to 0.
-func subtitleSeekPosition(r *http.Request, session *playback.Session) float64 {
+// subtitleSeekPosition uses only the caller's explicit position. Session
+// progress must never silently remove cues from a complete subtitle artifact.
+func subtitleSeekPosition(r *http.Request) float64 {
 	if raw := r.URL.Query().Get("position"); raw != "" {
-		if v, err := strconv.ParseFloat(raw, 64); err == nil && v >= 0 {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil && v >= 0 && !math.IsInf(v, 0) && !math.IsNaN(v) {
 			return v
 		}
-	}
-	if session != nil && session.Position > 0 {
-		return session.Position
 	}
 	return 0
 }
 
-// subtitleWindowDuration picks the bounded extract length. The client
-// overrides via ?duration=; absent that we use a 10-minute window,
-// which is long enough that a single fetch covers many minutes of
-// uninterrupted playback but short enough that the ffmpeg process
-// finishes (and frees its input handle) well before the next window
-// is requested.
+// subtitleWindowDuration bounds extraction only when the client explicitly
+// requests a valid duration. Ordinary artifact consumers fetch the whole track.
 func subtitleWindowDuration(r *http.Request) float64 {
-	const defaultDuration = 600.0
 	const maxDuration = 3600.0
 	if raw := r.URL.Query().Get("duration"); raw != "" {
 		if v, err := strconv.ParseFloat(raw, 64); err == nil && v > 0 && v <= maxDuration {
 			return v
 		}
 	}
-	return defaultDuration
+	return 0
 }

@@ -202,16 +202,27 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	}
 	// Subtitle renderability is delivery-specific, so every candidate route is
 	// validated against the capabilities of the delivery class that would
-	// execute it. The original_http delivery remains the canonical policy for
-	// source-preserving routes and for the up-front terminal decision.
+	// execute it. A refusal on original_http must not suppress a viable
+	// progressive or HLS subtitle renderer.
 	subtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassOriginalHTTPV3, input.AdditionalSubtitles)
-	if subtitle.Terminal != nil {
-		return PlannerResultV3{Terminal: subtitle.Terminal, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
-	}
 	remuxSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassProgressiveV3, input.AdditionalSubtitles)
 	hlsSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassHLSV3, input.AdditionalSubtitles)
+	if subtitle.Terminal != nil && remuxSubtitle.Terminal != nil && hlsSubtitle.Terminal != nil {
+		return PlannerResultV3{Terminal: subtitle.Terminal, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
+	}
+	// Every policy addresses the same selected source track. Preserve that
+	// identity even when the original delivery's refusal carries no selection;
+	// each candidate still applies its own rendering decision and claims.
+	selectedSubtitle := subtitle
+	if selectedSubtitle.Terminal != nil {
+		selectedSubtitle = remuxSubtitle
+		if selectedSubtitle.Terminal != nil {
+			selectedSubtitle = hlsSubtitle
+		}
+	}
 	// A remux route cannot burn subtitles, so it is only viable when its own
 	// delivery can present the selected subtitle without one.
+	originalSubtitleOK := subtitle.Terminal == nil && !subtitle.RequiresBurn
 	remuxSubtitleOK := remuxSubtitle.Terminal == nil && !remuxSubtitle.RequiresBurn
 	hlsRemuxSubtitleOK := hlsSubtitle.Terminal == nil && !hlsSubtitle.RequiresBurn
 	quality := ResolveQualityPolicyV3(input.Request, source)
@@ -294,7 +305,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	base := PlanV3{
 		ProtocolVersion:        ProtocolV3,
 		ExpiresAt:              NewPlanExpiryV3(input.Now),
-		SelectedTracks:         selectedTracksForPlanV3(file, input.AudioTrackIndex, subtitle),
+		SelectedTracks:         selectedTracksForPlanV3(file, input.AudioTrackIndex, selectedSubtitle),
 		EffectiveRecipe:        recipeFromSourceV3(source),
 		Claims:                 ValidationClaimsV3{Video: videoClaims, Audio: audioClaims, Subtitles: subtitle.Claims},
 		Subtitle:               subtitle.Decision,
@@ -347,7 +358,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	// transcode route entirely), deliver the source at original quality with a
 	// degradation warning instead of refusing playback. Explicit user-selected
 	// rungs keep the existing terminals.
-	if quality.RequiresTranscode && !quality.ExplicitRung && !subtitle.RequiresBurn && videoOK &&
+	if quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
 		(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
 		!videoTranscodeExecutableV3(input, source) {
 		warnings := append(quality.Warnings, DegradationWarningV3{
@@ -361,7 +372,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 
 	if quality.RequiresTranscode || !videoOK ||
 		(!originalRangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) ||
-		(subtitle.RequiresBurn && !remuxSubtitleOK && !hlsRemuxSubtitleOK) {
+		(!originalSubtitleOK && !remuxSubtitleOK && !hlsRemuxSubtitleOK) {
 		reasonOverride := ""
 		if !quality.RequiresTranscode && !videoOK && videoEvidenceInsufficient {
 			// The only reason this route adapts is the evidence tier, not a
@@ -373,7 +384,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		// other route condition still permits a source-preserving delivery.
 		subtitleForcedAdaptation := !quality.RequiresTranscode && videoOK &&
 			(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
-			subtitle.RequiresBurn && !remuxSubtitleOK && !hlsRemuxSubtitleOK
+			!originalSubtitleOK && !remuxSubtitleOK && !hlsRemuxSubtitleOK
 		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, reasonOverride, subtitleForcedAdaptation)
 	}
 
@@ -381,7 +392,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	// source. A decoder profile/max-instance claim alone is not proof of native
 	// dual-layer output, so the default Android route mirrors Silo Apple: P8.1
 	// base-layer Dolby Vision first, then same-file HDR10.
-	if source.DVProfile == 7 && quality.PreservesSource && videoOK && containerOK && audioOK && originalAudioSelectionOK && !subtitle.RequiresBurn {
+	if source.DVProfile == 7 && quality.PreservesSource && videoOK && containerOK && audioOK && originalAudioSelectionOK && originalSubtitleOK {
 		if clientDV81Eligible {
 			plan := base
 			plan.Delivery = DeliveryOriginalHTTPV3
@@ -434,7 +445,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 	}
 
-	if source.DVProfile != 7 && deliveryAvailableV3(input.Request, DeliveryClassOriginalHTTPV3) && containerOK && videoOK && originalRangeOK && audioOK && originalAudioSelectionOK && quality.PreservesSource && !subtitle.RequiresBurn {
+	if source.DVProfile != 7 && deliveryAvailableV3(input.Request, DeliveryClassOriginalHTTPV3) && containerOK && videoOK && originalRangeOK && audioOK && originalAudioSelectionOK && quality.PreservesSource && originalSubtitleOK {
 		plan := base
 		plan.Delivery = DeliveryOriginalHTTPV3
 		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}

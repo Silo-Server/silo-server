@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -205,6 +206,41 @@ func TestHandleSubtitleStreamAllowsAPIAuxiliaryResourceForProxyRoutedSession(t *
 
 			if recorder.Code != http.StatusOK || recorder.Body.String() != subtitleBody {
 				t.Fatalf("response = %d %q, want API-origin subtitle", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestSubtitleExtractionUsesConfiguredFFmpeg(t *testing.T) {
+	ffmpeg := filepath.Join(t.TempDir(), "configured-ffmpeg")
+	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\ncase \"$*\" in *'-f srt'*) printf '1\\n00:00:01,000 --> 00:00:02,000\\nConfigured binary\\n';; *) printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nConfigured binary\\n';; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, external := range []bool{false, true} {
+		t.Run(fmt.Sprintf("external=%v", external), func(t *testing.T) {
+			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/movie.mkv", SubtitleTracks: []models.SubtitleTrack{{Index: 1, Codec: "subrip"}}}
+			if external {
+				file.SubtitleTracks = nil
+				file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/synthetic/movie.ass", Format: "ass"}}
+			}
+			source := PlaybackMediaSource{ID: "source-42", FileID: 42}
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1", MediaSources: []PlaybackMediaSource{source}})
+			handler := &PlaybackHandler{playbackStore: store, fileResolver: testCompatFileResolver{file: file}, FFmpegPath: ffmpeg}
+			route := chi.NewRouteContext()
+			route.URLParams.Add("routeItemId", "item-1")
+			route.URLParams.Add("routeMediaSourceId", source.ID)
+			index := "1"
+
+			route.URLParams.Add("routeIndex", index)
+			route.URLParams.Add("routeFormat", "vtt")
+			ctx := context.WithValue(t.Context(), chi.RouteCtxKey, route)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 7})
+			request := httptest.NewRequest(http.MethodGet, "/Videos/item-1/source-42/Subtitles/"+index+"/stream.vtt?PlaySessionId=play-1&api_key=token-1", nil).WithContext(ctx)
+			recorder := httptest.NewRecorder()
+			handler.HandleSubtitleStream(recorder, request)
+			if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "Configured binary") {
+				t.Fatalf("configured extraction = %d %q", recorder.Code, recorder.Body.String())
 			}
 		})
 	}

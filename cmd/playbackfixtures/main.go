@@ -696,6 +696,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	for _, deliveryClass := range []string{playback.DeliveryClassOriginalHTTPV3, playback.DeliveryClassProgressiveV3, playback.DeliveryClassHLSV3} {
 		delivery := assRequest.ClientPlaybackContext.Deliveries[deliveryClass]
 		delivery.Subtitles.EmbeddedText = true
+		delivery.Subtitles.SidecarText = true
 		delivery.Subtitles.ASSStyling = true
 		delivery.Subtitles.FontAttachments = true
 		assRequest.ClientPlaybackContext.Deliveries[deliveryClass] = delivery

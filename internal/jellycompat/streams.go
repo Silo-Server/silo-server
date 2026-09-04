@@ -1407,7 +1407,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeSubtitleResponse(w, requestedFormat, data)
 				return
 			}
-			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format)
+			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
 			if subErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 				return
@@ -1447,7 +1447,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				return
 			}
 
-			vttData, convErr := playback.ConvertToVTT(data, string(dl.Format))
+			vttData, convErr := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.FFmpegPath)
 			if convErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
 				return
@@ -1478,7 +1478,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	data, format, subErr := playback.ExtractSubtitle(r.Context(), file.FilePath, embeddedOrdinal)
+	data, format, subErr := playback.ExtractSubtitle(r.Context(), file.FilePath, embeddedOrdinal, h.FFmpegPath)
 	if subErr != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 		return

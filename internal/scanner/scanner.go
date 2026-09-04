@@ -3850,15 +3850,16 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 	subtitleTracks := make([]models.SubtitleTrack, len(probe.SubtitleTracks))
 	for i, st := range probe.SubtitleTracks {
 		subtitleTracks[i] = models.SubtitleTrack{
-			Index:           st.Index,
-			Language:        st.Language,
-			Codec:           st.Codec,
-			Title:           st.Title,
-			EmbeddedTitle:   st.EmbeddedTitle,
-			Resolution:      st.Resolution,
-			Forced:          st.Forced,
-			Default:         st.Default,
-			HearingImpaired: st.HearingImpaired,
+			ContainerTrackID: st.ContainerTrackID,
+			Index:            st.Index,
+			Language:         st.Language,
+			Codec:            st.Codec,
+			Title:            st.Title,
+			EmbeddedTitle:    st.EmbeddedTitle,
+			Resolution:       st.Resolution,
+			Forced:           st.Forced,
+			Default:          st.Default,
+			HearingImpaired:  st.HearingImpaired,
 		}
 	}
 	mf.SubtitleTracks = subtitleTracks
