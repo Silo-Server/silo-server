@@ -265,10 +265,45 @@ The foundation configures the framework rather than inheriting convenience defau
 - disable the built-in OpenAPI, documentation, and schema routes and remove the default schema-link
   response transformer; Silo serves the exact committed artifact and omits production `$schema`
   additions as specified above; and
-- choose and document an explicit structured-body read timeout before the foundation PR merges.
-  The audited Huma default is five seconds and can supersede the server's current 30-second read
-  timeout, so it is not adopted accidentally. The chosen deadline, timeout boundary, and Silo
-  `408` Problem Details response receive integration tests.
+- set the structured-body read deadline to 30 seconds, the server's own `ReadTimeout` baseline,
+  rather than inheriting Huma's audited five-second default, which would silently supersede it.
+  The deadline, its boundary, and Silo's `408` Problem Details response have integration tests.
+
+#### Foundation
+
+The foundation is `internal/apiv2`. Four facts about it are not derivable from the rules above:
+
+- **Operation classes.** Every v2 operation declares one class at registration — `public`,
+  `authenticated`, `profile_scoped`, `acting_admin`, or `permission_gated` (the last with the
+  policy permission it needs) — and the listener composes the existing `internal/api/middleware`
+  gates onto it per class, in the order the v1 authenticated group runs them: auth, then demo
+  mode for operations marked demo-restricted, then the rate limiter, then viewer access for
+  every class that resolves a profile (`profile_scoped`, `acting_admin`, `permission_gated`),
+  then the profile, acting-admin, or permission gate. A gate's denial is re-rendered as the
+  matching Problem Details document by switching on the v1 body's machine-readable `error` and
+  `reason`; the decision itself is the v1 gate's, and a locked profile keeps its own
+  `profile_verification_required` type so clients still know to ask for the PIN. A gate the
+  wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
+  removes them from the route table. Handlers read claims, profile, and viewer scope from the
+  request context and never from headers.
+- **The delegation row.** The API listener hands the `/api/v2/` subtree to the sealed
+  `apiv2` handler with one wildcard registration, built in the registration itself. The route
+  inventory records that as a delegation row per method (`delegates_to: api_v2`, namespace
+  `api_v2`) and lists `api_v2` as a listener with zero rows: its router is handed exactly once
+  to the Huma adapter (`RouterConsumer` in the generator config), and only as the constructor's
+  own root router at the constructor's top level — never a router derived by `Group()`,
+  `Route()` or `With()`, and never inside a closure, a helper function, or a condition. The
+  operations behind it are described by `contracts/api/v2/openapi.json`. `TestRuntimeReconcile`
+  in `internal/apiv2` asserts the routes the assembled router serves are exactly the set the
+  registry declares. The wildcard covers `/api/v2/` and everything under it; the namespace root
+  `/api/v2`, with no trailing slash, is outside the v2 surface and is answered by the legacy
+  listener like any other unrouted path.
+- **The body read timeout.** `apiv2.BodyReadTimeout` is the server's 30 s `ReadTimeout`
+  baseline, not Huma's 5 s default. Ratified on #135, 2026-09-02; the constant is the one
+  place to change it.
+- **Request IDs.** v1 routes set no request-ID response header; v2 sets `X-Request-ID` from the
+  same context value `apimw.RequestID` already stored, so the request log, activity log, and the
+  Problem Details `instance` name the same request.
 
 ### Problem Details
 
@@ -304,11 +339,11 @@ and adds regression tests for those call sites; existing key-based filtering is 
 proof that every current message is safe.
 
 The initial shared type catalog includes malformed request, validation failure, authentication
-required, invalid token, session expired, permission denied, resource not found, method not
-allowed, resource conflict, idempotency conflict, payload too large, unsupported media type, rate
-limit exceeded, capability disabled, dependency unavailable, client upgrade required, and
-internal error. Domain-specific types are added only when a client needs distinct corrective
-behavior.
+required, invalid token, session expired, permission denied, profile verification required,
+resource not found, method not allowed, resource conflict, idempotency conflict, payload too
+large, unsupported media type, rate limit exceeded, capability disabled, dependency unavailable,
+client upgrade required, and internal error. Domain-specific types are added only when a client
+needs distinct corrective behavior.
 
 The foundation adapter replaces Huma's default problem output where necessary: every response has
 a Silo type and instance; validation details add stable codes and omit Huma's rejected `value`;
