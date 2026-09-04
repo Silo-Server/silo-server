@@ -2147,7 +2147,15 @@ func NewRouter(deps Dependencies) chi.Router {
 				}
 				return authMiddleware.RequireAuth(chain)
 			}
-			r.With(authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth)).Get(
+			displayMiddlewares := []func(http.Handler) http.Handler{
+				authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth),
+			}
+			if deps.RateLimitMW != nil {
+				// Same limiter the authenticated group applies; the route
+				// only left that group to accept the display token type.
+				displayMiddlewares = append(displayMiddlewares, deps.RateLimitMW.Handler)
+			}
+			r.With(displayMiddlewares...).Get(
 				"/notifications/push/apple/display/{delivery_id}",
 				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,
 			)

@@ -356,6 +356,10 @@ type capabilityPush struct {
 	Available      bool     `json:"available"`
 	Provider       string   `json:"provider"`
 	SupportedModes []string `json:"supported_modes"`
+	// DisplayToken is true when Apple push registration returns a
+	// long-lived display token for the Notification Service extension.
+	// Additive; Android registration never carries one.
+	DisplayToken bool `json:"display_token,omitempty"`
 }
 
 type capabilityWebhooks struct {
@@ -420,6 +424,7 @@ func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.R
 				Available:      true,
 				Provider:       notifications.PushProviderSiloRelay,
 				SupportedModes: []string{notifications.PushModePrivatePush, notifications.PushModeInAppOnly},
+				DisplayToken:   h.displayTokens != nil,
 			}
 		}
 		if h.system.Settings.AndroidPushDeliveryEnabled(r.Context()) {

@@ -142,24 +142,12 @@ func (h *NotificationsHandler) HandleRegisterPushDevice(w http.ResponseWriter, r
 		return
 	}
 
-	response := applePushRegisterResponse{
+	writeJSON(w, http.StatusOK, applePushRegisterResponse{
 		ID:             device.ID,
 		ServerDeviceID: device.ServerDeviceID,
 		Enabled:        device.Enabled,
 		PushMode:       device.PushMode,
-	}
-	if claims := apimw.GetClaims(r.Context()); claims != nil && h.displayTokens != nil && claims.SessionID != "" {
-		token, expiresAt, err := h.displayTokens.GenerateApplePushDisplayToken(
-			claims.UserID, claims.Role, claims.SessionID, apimw.GetProfileID(r.Context()),
-		)
-		if err == nil {
-			response.DisplayToken = token
-			response.DisplayTokenExpiresAt = expiresAt.UTC().Format(time.RFC3339)
-		}
-		// A minting failure is not a registration failure: the device is
-		// registered and the extension keeps its access-token fallback.
-	}
-	writeJSON(w, http.StatusOK, response)
+	})
 }
 
 // HandleUnregisterPushDevice handles DELETE /notifications/push/devices/{device_id}.

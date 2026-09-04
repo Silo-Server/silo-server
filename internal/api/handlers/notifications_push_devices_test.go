@@ -185,6 +185,9 @@ func TestHandleRegisterPushDeviceAndroid(t *testing.T) {
 	handler := NewNotificationsHandler(&notifications.System{
 		PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
 	}, nil)
+	// The Apple display token is Apple-only: Android registration must never
+	// receive one even when an issuer is configured.
+	handler.SetApplePushDisplayTokenIssuer(auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour))
 
 	token := strings.Repeat("F", 140)
 	body := `{
