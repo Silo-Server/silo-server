@@ -242,6 +242,14 @@ jobs:
         working-directory: .
         run: make verify-settings-bindings-web
 
+      # The web v2 contract types are generated from the committed OpenAPI
+      # artifact with the pinned openapi-typescript; this byte-compares a
+      # fresh generation so the typed request boundary never drifts from the
+      # spec the server serves.
+      - name: Verify the generated web v2 contract types are current
+        working-directory: .
+        run: make verify-apiv2-web-types
+
   docs:
     name: Docs hygiene
     runs-on: ubuntu-latest

@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -239,6 +239,25 @@ verify-apiv2-openapi:
 		cmp -s "$$tmp/openapi.json" $(APIV2_OPENAPI) \
 		|| { echo "::error::$(APIV2_OPENAPI) is stale; run make apiv2-openapi"; exit 1; }
 	@echo "$(APIV2_OPENAPI) is current"
+
+# Regenerate the web contract types from the committed OpenAPI artifact.
+# openapi-typescript is pinned exactly in web/package.json, and the output is
+# run through the repository prettier config, so the artifact is byte-stable.
+APIV2_WEB_TYPES_DIR := web/src/api/v2
+apiv2-web-types:
+	cd web && pnpm run --silent generate:apiv2
+
+# Fail when the committed web types disagree with a fresh generation from the
+# committed OpenAPI artifact: a spec change that does not regenerate would
+# leave the web client typed against a contract the server no longer serves.
+verify-apiv2-web-types:
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		( cd web && node scripts/generate-apiv2.mjs --out-dir "$$tmp" ) && \
+		for f in schema.ts operations.ts; do \
+			cmp -s "$$tmp/$$f" $(APIV2_WEB_TYPES_DIR)/$$f \
+			|| { echo "::error::$(APIV2_WEB_TYPES_DIR)/$$f is stale; run make apiv2-web-types"; exit 1; }; \
+		done
+	@echo "$(APIV2_WEB_TYPES_DIR) is current"
 
 # Semantic diff and spec lint over the committed artifact. BASE_REF names the
 # merge base the diff compares against (CI passes the PR's base). The diff
