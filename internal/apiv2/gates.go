@@ -283,7 +283,7 @@ func acceptsJSON(accept string) bool {
 				}
 			}
 		}
-		specificity := 0
+		var specificity int
 		switch mt {
 		case mediaTypeJSON:
 			specificity = 3
