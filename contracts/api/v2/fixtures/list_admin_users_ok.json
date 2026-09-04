@@ -1,0 +1,80 @@
+{
+  "items": [
+    {
+      "id": "1",
+      "username": "laura",
+      "email": "laura@example.test",
+      "role": "user",
+      "permissions": [],
+      "enabled": true,
+      "library_ids": null,
+      "max_playback_quality": null,
+      "max_streams": 2,
+      "max_transcodes": null,
+      "transcode_allowed": null,
+      "audio_transcode_allowed": null,
+      "max_profiles": 5,
+      "download_allowed": true,
+      "download_transcode_allowed": null,
+      "requests_allowed": null,
+      "access_group_id": "2",
+      "effective_policy": {
+        "library_ids": [
+          "3"
+        ],
+        "max_playback_quality": "1080p",
+        "max_streams": 2,
+        "max_transcodes": 0,
+        "transcode_allowed": true,
+        "audio_transcode_allowed": false,
+        "download_allowed": false,
+        "download_transcode_allowed": false,
+        "requests_allowed": false,
+        "permissions": []
+      },
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z",
+      "last_active_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "id": "2",
+      "username": "ada",
+      "email": "",
+      "role": "admin",
+      "permissions": [
+        "marker_edit"
+      ],
+      "enabled": true,
+      "library_ids": [],
+      "max_playback_quality": null,
+      "max_streams": null,
+      "max_transcodes": null,
+      "transcode_allowed": null,
+      "audio_transcode_allowed": null,
+      "max_profiles": 5,
+      "download_allowed": null,
+      "download_transcode_allowed": null,
+      "requests_allowed": null,
+      "access_group_id": null,
+      "effective_policy": {
+        "library_ids": [],
+        "max_playback_quality": "",
+        "max_streams": 0,
+        "max_transcodes": 0,
+        "transcode_allowed": false,
+        "audio_transcode_allowed": false,
+        "download_allowed": false,
+        "download_transcode_allowed": false,
+        "requests_allowed": false,
+        "permissions": [
+          "marker_edit",
+          "metadata_curation"
+        ]
+      },
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z",
+      "last_active_at": null
+    }
+  ]
+}
+
