@@ -2,9 +2,11 @@ package tmdb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1136,5 +1138,122 @@ func TestGetCertificationSingleflightsConcurrentCallers(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("upstream calls = %d, want 1 (singleflight)", got)
+	}
+}
+
+func TestNormalizeMovieDetailGenreIDs(t *testing.T) {
+	resp := &movieDetailResponse{
+		ID:               603,
+		Title:            "The Matrix",
+		OriginalLanguage: "en",
+		Genres: []genreEntry{
+			{ID: 28, Name: "Action"},
+			{ID: 878, Name: "Science Fiction"},
+		},
+	}
+	detail := normalizeMovieDetail(resp)
+
+	if detail.MediaType != "movie" {
+		t.Fatalf("MediaType = %q, want movie", detail.MediaType)
+	}
+	if len(detail.Genres) != 2 || detail.Genres[0] != "Action" || detail.Genres[1] != "Science Fiction" {
+		t.Fatalf("Genres = %v, want [Action Science Fiction]", detail.Genres)
+	}
+	if len(detail.GenreIDs) != 2 || detail.GenreIDs[0] != 28 || detail.GenreIDs[1] != 878 {
+		t.Fatalf("GenreIDs = %v, want [28 878]", detail.GenreIDs)
+	}
+	if detail.OriginalLanguage != "en" {
+		t.Fatalf("OriginalLanguage = %q, want en", detail.OriginalLanguage)
+	}
+}
+
+func TestNormalizeTVDetailGenreIDs(t *testing.T) {
+	resp := &tvDetailResponse{
+		ID:               1396,
+		Name:             "Breaking Bad",
+		OriginalLanguage: "en",
+		Genres: []genreEntry{
+			{ID: 18, Name: "Drama"},
+			{ID: 80, Name: "Crime"},
+		},
+	}
+	detail := normalizeTVDetail(resp)
+
+	if detail.MediaType != "series" {
+		t.Fatalf("MediaType = %q, want series", detail.MediaType)
+	}
+	if len(detail.Genres) != 2 || detail.Genres[0] != "Drama" || detail.Genres[1] != "Crime" {
+		t.Fatalf("Genres = %v, want [Drama Crime]", detail.Genres)
+	}
+	if len(detail.GenreIDs) != 2 || detail.GenreIDs[0] != 18 || detail.GenreIDs[1] != 80 {
+		t.Fatalf("GenreIDs = %v, want [18 80]", detail.GenreIDs)
+	}
+}
+
+func TestNormalizeMovieDetailGenreIDsPreservesAnimation(t *testing.T) {
+	resp := &movieDetailResponse{
+		ID:               999,
+		Title:            "Gun Girls",
+		OriginalLanguage: "zh",
+		Genres: []genreEntry{
+			{ID: 16, Name: "Animation"},
+			{ID: 10759, Name: "Action & Adventure"},
+		},
+	}
+	detail := normalizeMovieDetail(resp)
+
+	if len(detail.GenreIDs) != 2 || detail.GenreIDs[0] != 16 || detail.GenreIDs[1] != 10759 {
+		t.Fatalf("GenreIDs = %v, want [16 10759]", detail.GenreIDs)
+	}
+	if detail.OriginalLanguage != "zh" {
+		t.Fatalf("OriginalLanguage = %q, want zh", detail.OriginalLanguage)
+	}
+	if len(detail.Genres) != 2 || detail.Genres[0] != "Animation" {
+		t.Fatalf("Genres = %v, want [Animation Action & Adventure]", detail.Genres)
+	}
+}
+
+func TestNormalizeTVDetailEmptyGenresNilIDs(t *testing.T) {
+	resp := &tvDetailResponse{
+		ID:               500,
+		Name:             "No Genre Show",
+		OriginalLanguage: "en",
+		Genres:           nil,
+	}
+	detail := normalizeTVDetail(resp)
+
+	if detail.Genres != nil {
+		t.Fatalf("Genres = %v, want nil", detail.Genres)
+	}
+	if detail.GenreIDs != nil {
+		t.Fatalf("GenreIDs = %v, want nil", detail.GenreIDs)
+	}
+}
+
+func TestMediaDetailGenreIDsNotInJSON(t *testing.T) {
+	detail := &MediaDetail{
+		MediaType:        "movie",
+		ID:               603,
+		Title:            "The Matrix",
+		Genres:           []string{"Animation"},
+		GenreIDs:         []int{16, 28, 878},
+		OriginalLanguage: "zh",
+		KeywordIDs:       []int{210024},
+	}
+
+	data, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	s := string(data)
+	if strings.Contains(s, "GenreIDs") {
+		t.Fatalf("GenreIDs leaked into JSON output: %s", s)
+	}
+	if strings.Contains(s, "genre_ids") {
+		t.Fatalf("genre_ids leaked into JSON output: %s", s)
+	}
+	if !strings.Contains(s, `"Title":"The Matrix"`) {
+		t.Fatalf("expected Title in JSON, got: %s", s)
 	}
 }
