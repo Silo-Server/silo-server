@@ -806,9 +806,28 @@ func TestDoFloorsRetryAfterWhenRetriesExhausted(t *testing.T) {
 	if attempts != maxRetryAttempts+1 {
 		t.Fatalf("got %d attempts, want %d", attempts, maxRetryAttempts+1)
 	}
-	// The short Retry-After hints proved untrustworthy, so the deferral must
-	// be floored rather than parroting the last 1s hint.
 	if rle.RetryAfter != defaultRetryAfter {
 		t.Fatalf("got retry-after %s, want floored %s", rle.RetryAfter, defaultRetryAfter)
+	}
+}
+
+func TestProviderTransportErrorOmitsAPIKey(t *testing.T) {
+	secretKey := "mdblist-secret-provider-key-999"
+	p := NewProvider(http.DefaultClient, "http://127.0.0.1:0")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := p.fetchUser(ctx, secretKey)
+	if err == nil {
+		t.Fatal("expected transport error, got nil")
+	}
+
+	errStr := err.Error()
+	if strings.Contains(errStr, secretKey) {
+		t.Fatalf("provider transport error leaked API key! error string: %s", errStr)
+	}
+	if !strings.Contains(errStr, "REDACTED") {
+		t.Fatalf("expected REDACTED in sanitized provider transport error: %s", errStr)
 	}
 }
