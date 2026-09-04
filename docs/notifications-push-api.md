@@ -98,5 +98,5 @@ Authentication rules for this route only:
 | Refresh token or API key | `401` / normal API key handling; neither is a display credential. |
 
 `404 not_found` is returned when the delivery does not belong to the
-authenticated profile. The route is rate limited like other authenticated
+authenticated profile. The route is rate-limited like other authenticated
 routes.

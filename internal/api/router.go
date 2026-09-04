@@ -2140,22 +2140,25 @@ func NewRouter(deps Dependencies) chi.Router {
 		// display token is not an access token; RequireApplePushDisplayAuth
 		// still validates the session and binds the profile from the claims.
 		if authMiddleware != nil && deps.Notifications != nil {
+			// Same order as the authenticated group: auth, then the limiter
+			// (it needs claims for per-API-key budgets), then viewer access
+			// so rejected profile or PIN resolutions still consume budget.
+			// The route only left that group to accept the display token.
+			var limiter func(http.Handler) http.Handler
+			if deps.RateLimitMW != nil {
+				limiter = deps.RateLimitMW.Handler
+			}
 			standardDisplayAuth := func(next http.Handler) http.Handler {
 				chain := apimw.RequireProfile(next)
 				if viewerAccessMiddleware != nil {
 					chain = viewerAccessMiddleware.RequireViewerAccess(chain)
 				}
+				if limiter != nil {
+					chain = limiter(chain)
+				}
 				return authMiddleware.RequireAuth(chain)
 			}
-			// Limiter first, as in the authenticated group, so rejected
-			// profile or PIN resolutions still consume budget. The route
-			// only left that group to accept the display token type.
-			var displayMiddlewares []func(http.Handler) http.Handler
-			if deps.RateLimitMW != nil {
-				displayMiddlewares = append(displayMiddlewares, deps.RateLimitMW.Handler)
-			}
-			displayMiddlewares = append(displayMiddlewares, authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth))
-			r.With(displayMiddlewares...).Get(
+			r.With(authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, limiter)).Get(
 				"/notifications/push/apple/display/{delivery_id}",
 				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,
 			)

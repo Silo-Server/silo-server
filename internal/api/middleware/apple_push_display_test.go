@@ -24,8 +24,19 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 
 	var gotProfile string
 	var gotClaims *auth.Claims
-	fallback := func(next http.Handler) http.Handler { return am.RequireAuth(RequireProfile(next)) }
-	handler := am.RequireApplePushDisplayAuth(fallback)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// afterAuth stands in for the rate limiter: it must observe claims on
+	// both the display-token path and the access-token fallback.
+	var afterAuthSawClaims int
+	afterAuth := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if GetClaims(r.Context()) != nil {
+				afterAuthSawClaims++
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	fallback := func(next http.Handler) http.Handler { return am.RequireAuth(afterAuth(RequireProfile(next))) }
+	handler := am.RequireApplePushDisplayAuth(fallback, afterAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotProfile = GetProfileID(r.Context())
 		gotClaims = GetClaims(r.Context())
 		w.WriteHeader(http.StatusNoContent)
@@ -66,7 +77,7 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotProfile, gotClaims = "", nil
+			gotProfile, gotClaims, afterAuthSawClaims = "", nil, 0
 			target := "/api/v1/notifications/push/apple/display/d1"
 			if strings.HasPrefix(tt.token, "?") {
 				target += "?token=" + strings.TrimPrefix(tt.token, "?")
@@ -88,6 +99,9 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 			}
 			if tt.wantStatus == http.StatusNoContent && (gotClaims == nil || gotClaims.UserID != 42) {
 				t.Fatalf("claims = %+v", gotClaims)
+			}
+			if tt.wantStatus == http.StatusNoContent && afterAuthSawClaims != 1 {
+				t.Fatalf("afterAuth saw claims %d times, want exactly 1", afterAuthSawClaims)
 			}
 		})
 	}

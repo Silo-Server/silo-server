@@ -11,16 +11,26 @@ import (
 // endpoint. It accepts the long-lived, profile-scoped display token minted at
 // Apple push registration; any other bearer credential is handed to
 // `fallback`, which should be the ordinary access-token chain (RequireAuth,
-// viewer access, RequireProfile) so normal sessions keep working unchanged.
+// rate limiting, viewer access, RequireProfile) so normal sessions keep
+// working unchanged. `afterAuth` runs on the display-token path once claims
+// are set, so the same rate limiter can sit after authentication on both
+// paths (it needs claims to apply per-key budgets). Pass nil to skip it.
 //
 // The display token path deliberately bypasses viewer-access PIN checks: the
 // token was issued to an already-verified profile session, carries that
 // profile in its claims, and only unlocks compact notification text. The
 // profile in the claims is authoritative; the X-Profile-Id header is ignored
 // so a token cannot be replayed against another profile's inbox.
-func (am *AuthMiddleware) RequireApplePushDisplayAuth(fallback func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+func (am *AuthMiddleware) RequireApplePushDisplayAuth(
+	fallback func(http.Handler) http.Handler,
+	afterAuth func(http.Handler) http.Handler,
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		standard := fallback(next)
+		display := next
+		if afterAuth != nil {
+			display = afterAuth(next)
+		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Header only. extractBearerToken also accepts ?token= for media
 			// elements, but a credential that lives as long as a refresh
@@ -48,7 +58,7 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(fallback func(http.Handler
 			}
 			ctx := SetClaims(r.Context(), claims)
 			ctx = SetProfileID(ctx, claims.ProfileID)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			display.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
