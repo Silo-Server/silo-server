@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
 // DatePredicate is a function that reports whether a given time falls within
 // the seasonal window.
 type DatePredicate func(time.Time) bool
+
+const familyMovieNightTitle = "Family Movie Night"
 
 // inMonth returns a predicate that matches any time within the given month.
 func inMonth(m time.Month) DatePredicate {
@@ -91,6 +94,20 @@ var SeasonalThemeOrder = []string{
 	"summer",
 }
 
+// seasonalThemeDefaultTitles maps supported theme keys to the display names
+// used when a section does not configure a per-theme title.
+var seasonalThemeDefaultTitles = map[string]string{
+	"valentines":         "Valentine's Day",
+	"st_patricks":        "St. Patrick's Day",
+	"thanksgiving":       "Thanksgiving",
+	"christmas":          "Christmas",
+	"halloween":          "Halloween",
+	"saturday_morning":   "Saturday Morning Cartoons",
+	"family_movie_night": familyMovieNightTitle,
+	"summer_blockbuster": "Summer Blockbusters",
+	"summer":             "Summer",
+}
+
 // SeasonalThemedParams configures the seasonal_themed resolver.
 //
 // There are two modes of use:
@@ -107,10 +124,9 @@ var SeasonalThemeOrder = []string{
 //
 // EnabledThemes takes precedence when both fields are populated.
 //
-// ThemeTitles is an optional per-theme display-name override. When the active
-// theme has a non-empty entry here, the API replaces the section's saved Title
-// with it for the duration of the in-season window — letting one section read
-// "Halloween Picks" in October and "Christmas Movies" in December.
+// ThemeTitles is an optional per-theme display-name override. While a theme is
+// active, the API uses its custom title when it contains non-whitespace
+// characters and otherwise uses the theme's default display name.
 type SeasonalThemedParams struct {
 	EnabledThemes []string          `json:"enabled_themes,omitempty"`
 	ThemeTitles   map[string]string `json:"theme_titles,omitempty"`
@@ -190,7 +206,7 @@ func (seasonalRecipe) Definition() RecipeDefinition {
 			},
 			{
 				Key:              "se_family_movie_night",
-				DisplayName:      "Family Movie Night",
+				DisplayName:      familyMovieNightTitle,
 				Icon:             "🍿",
 				DescriptionShort: "Family picks on Friday and Saturday evenings.",
 				DefaultParams:    json.RawMessage(`{"enabled_themes":["family_movie_night"]}`),
@@ -199,12 +215,10 @@ func (seasonalRecipe) Definition() RecipeDefinition {
 	}
 }
 
-// SeasonalTitleOverride returns the per-theme display name for the active
-// theme, or "" when no override is configured (or no theme is active). The
-// fetcher applies the override only when non-empty, so callers can fall back
-// to the section's saved Title. The usable filter must match the one passed
-// to ActiveSeasonalThemeWhere so the override tracks the theme that actually
-// resolved; pass nil to consider every theme usable.
+// SeasonalTitleOverride returns the custom or default display name for the
+// active theme, or "" when no theme is active. The usable filter must match
+// the one passed to ActiveSeasonalThemeWhere so the title tracks the theme
+// that actually resolved; pass nil to consider every theme usable.
 func SeasonalTitleOverride(p SeasonalThemedParams, now time.Time, usable func(theme string) bool) string {
 	var theme string
 	switch {
@@ -220,7 +234,10 @@ func SeasonalTitleOverride(p SeasonalThemedParams, now time.Time, usable func(th
 	if theme == "" {
 		return ""
 	}
-	return p.ThemeTitles[theme]
+	if title := p.ThemeTitles[theme]; strings.TrimSpace(title) != "" {
+		return title
+	}
+	return seasonalThemeDefaultTitles[theme]
 }
 
 // ActiveSeasonalTheme returns the highest-priority enabled theme whose

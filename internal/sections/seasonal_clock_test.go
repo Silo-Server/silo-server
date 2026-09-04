@@ -118,3 +118,20 @@ func TestSeasonalThemedInSeasonAttemptsQuery(t *testing.T) {
 		t.Fatal("in-season auto mode should have attempted the query (reached SQL path); clean nil result suggests off-season suppression triggered incorrectly")
 	}
 }
+
+// TestSeasonalTitleOverrideWithoutCustomTitles verifies the fetcher still
+// resolves the active theme's default label when theme_titles is omitted.
+func TestSeasonalTitleOverrideWithoutCustomTitles(t *testing.T) {
+	f := &Fetcher{
+		Clock: recipes.FixedClock(time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)),
+	}
+	section := ResolvedSection{
+		SectionType: SectionSeasonalThemed,
+		Title:       "Seasonal Picks",
+		Config:      json.RawMessage(`{"enabled_themes":["summer_blockbuster"]}`),
+	}
+
+	if got := f.seasonalTitleOverride(section); got != "Summer Blockbusters" {
+		t.Fatalf("seasonalTitleOverride() = %q, want Summer Blockbusters", got)
+	}
+}

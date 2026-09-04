@@ -325,7 +325,7 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		return SectionWithItems{}, err
 	}
 
-	// Apply seasonal title override when the active theme has a custom name.
+	// Apply the active seasonal theme's custom or default title.
 	// Done here (rather than inside fetchSeasonalThemed) so the section's
 	// stored Title is preserved as the fallback used by callers that bypass
 	// SectionWithItems construction.
@@ -367,17 +367,14 @@ func (f *Fetcher) logSlowSectionFetch(resolved ResolvedSection, libraryID *int, 
 	slog.Warn("slow section fetch", attrs...)
 }
 
-// seasonalTitleOverride returns the per-theme display name override for a
-// seasonal section, or "" when no override applies.
+// seasonalTitleOverride returns the custom or default display name for a
+// seasonal section's active theme, or "" when no theme is active.
 func (f *Fetcher) seasonalTitleOverride(resolved ResolvedSection) string {
 	if len(resolved.Config) == 0 {
 		return ""
 	}
 	var p recipes.SeasonalThemedParams
 	if err := json.Unmarshal(resolved.Config, &p); err != nil {
-		return ""
-	}
-	if len(p.ThemeTitles) == 0 {
 		return ""
 	}
 	now := time.Now()
