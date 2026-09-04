@@ -49,11 +49,12 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 		inner.ServeHTTP(w, r.WithContext(activitylog.SetLogContext(r.Context(), lastLog)))
 	})
 
-	display, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-live", "profile-1")
+	admin := 7
+	display, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-live", "profile-1", &admin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	revoked, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-dead", "profile-1")
+	revoked, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-dead", "profile-1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +113,9 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 			}
 			if tt.wantStatus == http.StatusNoContent && (lastLog.UserID == nil || *lastLog.UserID != 42 || lastLog.SessionID != "sess-live") {
 				t.Fatalf("activity log context not attributed: %+v", lastLog)
+			}
+			if tt.token == display && (lastLog.ImpersonatorUserID == nil || *lastLog.ImpersonatorUserID != 7) {
+				t.Fatalf("impersonator not carried through display token: %+v", lastLog)
 			}
 		})
 	}

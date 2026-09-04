@@ -119,8 +119,10 @@ func (j *JWTService) GeneratePluginAccessToken(
 // profile that the notification display endpoint accepts. Its lifetime
 // follows the refresh token: the session must still be valid at use time,
 // so revoking the session revokes the display token too.
+// impersonatorUserID is carried so display fetches made under an
+// impersonated session stay attributed to the acting admin.
 func (j *JWTService) GenerateApplePushDisplayToken(
-	userID int, role, sessionID, profileID string,
+	userID int, role, sessionID, profileID string, impersonatorUserID *int,
 ) (string, time.Time, error) {
 	if sessionID == "" {
 		return "", time.Time{}, fmt.Errorf("%w: session is required", ErrInvalidToken)
@@ -133,10 +135,11 @@ func (j *JWTService) GenerateApplePushDisplayToken(
 		ttl = 30 * 24 * time.Hour
 	}
 	token, err := j.generateToken(Claims{
-		UserID:    userID,
-		Role:      role,
-		SessionID: sessionID,
-		ProfileID: profileID,
+		UserID:             userID,
+		Role:               role,
+		SessionID:          sessionID,
+		ProfileID:          profileID,
+		ImpersonatorUserID: impersonatorUserID,
 	}, TokenTypeApplePushDisplay, ttl)
 	if err != nil {
 		return "", time.Time{}, err

@@ -34,7 +34,7 @@ type NotificationsHandler struct {
 // ApplePushDisplayTokenIssuer mints the profile-scoped token the iOS
 // Notification Service extension presents to the display endpoint.
 type ApplePushDisplayTokenIssuer interface {
-	GenerateApplePushDisplayToken(userID int, role, sessionID, profileID string) (string, time.Time, error)
+	GenerateApplePushDisplayToken(userID int, role, sessionID, profileID string, impersonatorUserID *int) (string, time.Time, error)
 }
 
 // SetApplePushDisplayTokenIssuer wires the token issuer used by

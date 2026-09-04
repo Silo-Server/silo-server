@@ -83,7 +83,7 @@ func (h *NotificationsHandler) HandleRegisterApplePushDevice(w http.ResponseWrit
 	}
 	if claims := apimw.GetClaims(r.Context()); claims != nil && h.displayTokens != nil && claims.SessionID != "" {
 		token, expiresAt, err := h.displayTokens.GenerateApplePushDisplayToken(
-			claims.UserID, claims.Role, claims.SessionID, apimw.GetProfileID(r.Context()),
+			claims.UserID, claims.Role, claims.SessionID, apimw.GetProfileID(r.Context()), claims.ImpersonatorUserID,
 		)
 		if err == nil {
 			response.DisplayToken = token

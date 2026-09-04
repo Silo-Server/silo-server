@@ -62,6 +62,7 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 				uid := claims.UserID
 				lc.UserID = &uid
+				lc.ImpersonatorUserID = claims.ImpersonatorUserID
 				lc.SessionID = claims.SessionID
 			}
 			ctx := SetClaims(r.Context(), claims)
