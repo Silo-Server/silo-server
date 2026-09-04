@@ -313,6 +313,27 @@ The foundation is `internal/apiv2`. Four facts about it are not derivable from t
   `/metrics` probes are operator-facing and deliberately absent from the artifact and from
   generated native clients; deployments restrict their exposure through proxy or network
   policy.
+- **The fixtures.** `contracts/api/v2/fixtures/` is generated through the assembled v2 router
+  by `TestContractFixtures` in `internal/apiv2` (`make apiv2-fixtures`), never edited: each
+  body is what the server answered a synthetic request with a fixed request id and fake
+  credentials, and `index.json` (schema `contracts/api/v2/fixtures.schema.json`) records the
+  operation id, scenario, request, expected status, asserted headers, media type and the
+  component-schema pointer the body satisfies. `make verify-apiv2-fixtures` fails on a stale
+  tree and then validates every body against the committed artifact
+  (`contractspec.ValidateFixtures`); the local-path leak scan covers the tree. `make
+  apiv2-fixtures-sync` vendors the tree into the sibling client checkouts with a `SOURCE`
+  file naming the server commit, as the playback-v3 fixtures are.
+- **Observability.** The v2 listener records each request once (`internal/apiv2/observe.go`)
+  with bounded labels — `api_major`, `operation_id` (never a raw path; `none` for the router
+  fallbacks), `method`, `status_class`, `error_code` (the problem type identifier),
+  `auth_class` (`public`, `anonymous`, `session`, `api_key`, `plugin`) and a clamped client
+  name — on `streamapp_apiv2_requests_total` and `streamapp_apiv2_request_duration_seconds`,
+  and the same attributes plus the request id on the `apiv2 request` log line. The v1
+  request logger and metrics skip `/api/v2/` so nothing is counted twice.
+  `streamapp_apiv2_validation_failures_total` counts `validation_failed` problems per
+  operation; `streamapp_apiv1_tombstone_requests_total` is registered now and incremented by
+  `apiv2.RecordV1Tombstone` once the tombstone exists. No URL, query string, body or
+  credential header is logged.
 - **The body read timeout.** `apiv2.BodyReadTimeout` is the server's 30 s `ReadTimeout`
   baseline, not Huma's 5 s default. Ratified on #135, 2026-09-02; the constant is the one
   place to change it.

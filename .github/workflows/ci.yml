@@ -144,6 +144,39 @@ jobs:
       - name: Verify the offline route set matches the API router
         run: make verify-offline-routes
 
+      # The v2 OpenAPI artifact is rendered from the Go registries and the
+      # binary serves the committed bytes, so a registration change that does
+      # not regenerate leaves clients reading a contract the server no longer
+      # matches. This byte-compares a fresh generation.
+      - name: Verify the v2 OpenAPI artifact is current
+        run: make verify-apiv2-openapi
+
+      # Spec lint and the semantic diff against the PR's base. A breaking
+      # change fails unless contracts/api/v2/breaking-approvals.json names
+      # that exact operation, rule and fingerprint; after the LOCKED marker
+      # nothing is approvable. On a push to main the base is main itself and
+      # the diff is empty by construction; the lint still runs. The base is
+      # read through the environment, as the lint step does, never
+      # interpolated into the script.
+      - name: Verify the v2 contract diff and spec lint
+        env:
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          make verify-apiv2-contract BASE_REF="origin/${BASE_REF}"
+
+      # The v2 fixtures are generated through the real router and every body
+      # is validated against the committed OpenAPI schema its index names, so
+      # a client testing against them tests against what the server sends.
+      - name: Verify the v2 contract fixtures are current and valid
+        run: make verify-apiv2-fixtures
+
+      # Router-to-artifact reconciliation in both directions: every route the
+      # assembled v2 router serves is in openapi.json or the typed raw
+      # handshake registry, and every documented operation is served.
+      - name: Verify the v2 router matches the committed artifact
+        run: go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and
