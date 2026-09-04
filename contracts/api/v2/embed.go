@@ -1,15 +1,17 @@
-// Package apiv2 embeds the committed API v2 contract artifacts so the
-// internal/contractledger gate, and any future consumer, reads the exact bytes
-// that were checked in. Nothing in cmd/silo imports this package today; the
-// server binary does not carry or serve these artifacts.
+// Package apiv2 embeds the committed API v2 contract artifacts so every
+// consumer reads the exact bytes that were checked in: the
+// internal/contractledger gate, internal/routeinventory, internal/scenariocatalog,
+// and the server binary, which serves and digests the OpenAPI artifact through
+// internal/apiv2.
 //
-// This package deliberately contains nothing but the embed directive; loading
-// and validation live in internal/contractledger (migration ledger),
-// internal/routeinventory (route inventory), and internal/scenariocatalog
-// (offline route set).
+// This package deliberately contains nothing but the embed directives; loading
+// and validation live in the packages above.
 package apiv2
 
-import "embed"
+import (
+	"embed"
+	_ "embed"
+)
 
 // FS holds route-inventory.json, migration.json, migration.schema.json, and
 // offline-routes.txt.
@@ -21,3 +23,12 @@ var FS embed.FS
 // the scenario executor's offline router registers. TestOfflineRouteSet in
 // internal/api generates it; internal/scenariocatalog decodes it.
 const OfflineRoutesPath = "offline-routes.txt"
+
+// OpenAPI is the committed contracts/api/v2/openapi.json, byte for byte. The
+// server serves these bytes at /api/v2/openapi.json and reports their SHA-256
+// as the contract digest in /api/v2/system/info; it never regenerates the
+// document from runtime wiring. Stage B of the foundation generates the file
+// from the Go registries; until then it is a placeholder.
+//
+//go:embed openapi.json
+var OpenAPI []byte

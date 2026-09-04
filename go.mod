@@ -23,6 +23,7 @@ require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.34
+	github.com/danielgtaylor/huma/v2 v2.38.0
 	github.com/go-chi/cors v1.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/h2non/bimg v1.1.9

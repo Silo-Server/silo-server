@@ -1,0 +1,9 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Silo API",
+    "version": "2",
+    "description": "Placeholder artifact. Phase 2 stage B generates this file from the Go registries; until then it exists so the server binary can embed and digest the committed bytes."
+  },
+  "paths": {}
+}
