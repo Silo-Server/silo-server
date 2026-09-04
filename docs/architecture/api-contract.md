@@ -101,10 +101,11 @@ The same artifact is published publicly under the project-controlled `siloserver
 `https://siloserver.org/api/v2/openapi.json` tracks the current stable v2 release, while
 `https://siloserver.org/api/v2/releases/<server-version>/openapi.json` is an immutable release
 snapshot. Prereleases publish only their versioned snapshot and do not advance the stable alias.
-The release workflow copies the exact committed bytes and verifies their SHA-256 rather than asking
-the website to regenerate them. `https://siloserver.org/docs/api/v2/` may provide a browsable UI,
-but it is presentation over the raw JSON, not another source of truth. The hosting provider may
-change without changing these canonical project URLs.
+The release workflow attaches the exact committed bytes and their SHA-256 to each GitHub release as
+assets; the `siloserver.org` copies are taken from those assets rather than regenerated, and
+publishing them is a post-1.0 follow-up. `https://siloserver.org/docs/api/v2/` may provide a
+browsable UI, but it is presentation over the raw JSON, not another source of truth. The hosting
+provider may change without changing these canonical project URLs.
 
 ### Legacy native route inventory
 
@@ -240,7 +241,8 @@ The first implementation slice establishes and tests rules shared by every later
 - response models that first-party clients decode leniently: clients ignore unknown response
   fields and preserve an unknown-enum fallback;
 - auth, profile, acting-admin, rate-limit, demo-mode, and request-ID middleware behavior identical
-  in strength to the existing router.
+  in strength to the existing router (v2 additionally returns the canonical ID in `X-Request-ID`;
+  see Foundation).
 
 The exact shared schemas and status mapping land in the foundation pull request before domain
 operations begin. Huma defaults are not accepted implicitly: generated validation errors, schema
@@ -271,7 +273,7 @@ The foundation configures the framework rather than inheriting convenience defau
 
 #### Foundation
 
-The foundation is `internal/apiv2`. Four facts about it are not derivable from the rules above:
+The foundation is `internal/apiv2`. These facts about it are not derivable from the rules above:
 
 - **Operation classes.** Every v2 operation declares one class at registration — `public`,
   `authenticated`, `profile_scoped`, `acting_admin`, or `permission_gated` (the last with the
@@ -340,6 +342,13 @@ The foundation is `internal/apiv2`. Four facts about it are not derivable from t
 - **Request IDs.** v1 routes set no request-ID response header; v2 sets `X-Request-ID` from the
   same context value `apimw.RequestID` already stored, so the request log, activity log, and the
   Problem Details `instance` name the same request.
+- **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
+  yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
+  tracked on #882: opt-in optimistic concurrency (strong ETag, `If-Match`, the `428`/`412`
+  separation, and RFC parser conformance tests); per-operation mutation retry / idempotency
+  classification; the durable `202` job acceptance and its monitor/cancel shape; the
+  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
+  sunset headers.
 
 ### Problem Details
 
