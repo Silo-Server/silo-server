@@ -12,6 +12,7 @@ import (
 	"testing/fstest"
 
 	apiv2 "github.com/Silo-Server/silo-server/contracts/api/v2"
+	apiv2registry "github.com/Silo-Server/silo-server/internal/apiv2"
 )
 
 // TestLedgerMatchesInventory is the CI gate: the committed ledger must satisfy
@@ -789,4 +790,75 @@ func TestSchemaRejectsUnusedRowWithCallSites(t *testing.T) {
 		e["consumer_call_sites"] = []any{map[string]any{"repo": "web", "file": "src/x.ts", "line": 1, "types": []any{}, "match": "manual"}}
 	})
 	expectFailure(t, fsys, "violates")
+}
+
+// TestConcurrencyMarkingIsRestricted pins where the curated concurrency
+// field may appear: tier-1 ported rows with a mutating method, and only the
+// if_match value.
+func TestConcurrencyMarkingIsRestricted(t *testing.T) {
+	ledger, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := 0
+	for _, e := range ledger.Entries {
+		if e.Concurrency == "" {
+			continue
+		}
+		marked++
+		if e.Concurrency != ConcurrencyIfMatch || e.Tier != 1 || e.Disposition != DispositionPorted || !isMutatingMethod(e.Method) {
+			t.Errorf("%s: concurrency %q on tier %d %s %s", e.key(), e.Concurrency, e.Tier, e.Disposition, e.Method)
+		}
+	}
+	if marked == 0 {
+		t.Fatal("the contract's initial if_match set is not marked")
+	}
+	isMarked := func(e map[string]any) bool { c, _ := e["concurrency"].(string); return c != "" }
+	notMarked := func(e map[string]any) bool { return !isMarked(e) }
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		entryWhere(t, doc, isMarked)["concurrency"] = "domain"
+	}), "value must be 'if_match'") // the schema refuses it before the review rule runs
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isMarked)
+		e["disposition"] = DispositionCompatibilityOnly
+		e["disposition_rule"] = "maintainer_decision"
+	}), "only for tier-1 ported rows")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, func(e map[string]any) bool {
+			return notMarked(e) && e["method"] == "GET" && e["tier"] == float64(1) && e["disposition"] == "ported"
+		})
+		e["concurrency"] = ConcurrencyIfMatch
+	}), "only for a mutating method")
+}
+
+// TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
+// ledger: every operation registered Guarded must have each legacy row that
+// maps to it marked if_match. The Guarded set is empty until the first
+// section PR guards a resource; the test still runs against the real
+// registry so that PR cannot forget the marking.
+func TestGuardedOperationsAreMarkedIfMatch(t *testing.T) {
+	ledger, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byOperation := map[string][]Entry{}
+	for _, e := range ledger.Entries {
+		if e.V2.OperationID != nil {
+			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
+		}
+	}
+	declared := apiv2registry.DeclaredOperations()
+	if len(declared) == 0 {
+		t.Fatal("the v2 registry declares nothing")
+	}
+	for _, op := range declared {
+		if !op.Guarded {
+			continue
+		}
+		for _, e := range byOperation[op.OperationID] {
+			if e.Concurrency != ConcurrencyIfMatch {
+				t.Errorf("%s maps to guarded v2 operation %s but is not marked concurrency %s", e.key(), op.OperationID, ConcurrencyIfMatch)
+			}
+		}
+	}
 }

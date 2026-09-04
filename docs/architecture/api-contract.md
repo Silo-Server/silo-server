@@ -350,13 +350,29 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Request IDs.** v1 routes set no request-ID response header; v2 sets `X-Request-ID` from the
   same context value `apimw.RequestID` already stored, so the request log, activity log, and the
   Problem Details `instance` name the same request.
+- **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
+  DELETE only) or `Conditional` (GET, HEAD only); `Register` panics when a guarded input does
+  not bind a string `header:"If-Match"` or its output a string `header:"ETag"`, and when a
+  conditional input does not bind `header:"If-None-Match"` with a string `ETag` and an int
+  `Status` on the output. A guarded operation documents `412` and `428`, a required `If-Match`
+  parameter, and the `ETag` header on every `2xx`; a conditional read documents `304` with
+  `ETag`; both carry `x-silo-guarded` / `x-silo-conditional` so a reader can enumerate them.
+  `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(version, scope)` (strong,
+  quoted, opaque; the scope keeps redacted representations from sharing a validator),
+  `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),
+  `StrongMatch` / `WeakMatch`, `EvaluateIfMatch` (nil, `428`, `412` with the current `ETag`, or
+  `400 malformed_request` without echoing the value), `EvaluateIfNoneMatch` and `NotModified`
+  for `304`, `EvaluateCreateOnly` for `If-None-Match: *`, and the `ErrStaleVersion` sentinel a
+  storage compare-and-update returns, mapped by `StaleVersionProblem`. The handler loads
+  first (`404` before any precondition), evaluates, then writes. The ledger's optional
+  `concurrency: if_match` field names the rows that will register `Guarded`; the gate limits
+  it to tier-1 ported mutation rows and reconciles every guarded registration against it. No
+  production resource is guarded yet; the first section that guards one adds its row version.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
-  tracked on #882: opt-in optimistic concurrency (strong ETag, `If-Match`, the `428`/`412`
-  separation, and RFC parser conformance tests); per-operation mutation retry / idempotency
-  classification; the durable `202` job acceptance and its monitor/cancel shape; the
-  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
-  sunset headers.
+  tracked on #882: per-operation mutation retry / idempotency classification; the durable
+  `202` job acceptance and its monitor/cancel shape; the atomic-versus-per-item bulk contract;
+  and the RFC 9745 / RFC 8594 deprecation, link, and sunset headers.
 
 ### Problem Details
 

@@ -28,7 +28,11 @@ will pin rather than pointing the scripts at a working checkout.
   entry. The two SHAs (`git rev-parse origin/main` in each sibling after
   `git fetch`) are written to the ledger's `source_trees` header and must be
   the commits the trees were exported from. Re-running on an unchanged
-  inventory and consumer map rewrites the ledger byte for byte.
+  inventory and consumer map rewrites the ledger byte for byte. The optional
+  curated field `concurrency` (`if_match`: the row's v2 operation is
+  registered Guarded and requires `If-Match`) is preserved on rows that carry
+  it and never seeded; `internal/contractledger` restricts it to tier-1 ported
+  mutation rows and reconciles the set against the v2 registry.
 
 Two call-site annotations refine what the pinned-tree test
 (`TestSiblingCallSitesResolveAgainstPinnedTrees` in `internal/contractledger`)

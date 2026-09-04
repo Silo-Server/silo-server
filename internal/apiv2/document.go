@@ -299,6 +299,16 @@ func registerAll(reg *Registry) {
 	registerOpenAPIDocument(reg)
 }
 
+// DeclaredOperations lists what the domain registrations declare, without a
+// router, database or network: the same registrations GenerateOpenAPI
+// documents. The migration ledger's reconcile test reads the Guarded set
+// from it.
+func DeclaredOperations() []Declared {
+	reg := &Registry{api: huma.NewAPI(humaConfig(), noopAdapter{})}
+	registerAll(reg)
+	return reg.Declared()
+}
+
 // GenerateOpenAPI renders the contract document from the registries alone:
 // no database, network, credentials, optional providers or environmental
 // branching reach it, and nothing in it varies between builds (no timestamps,

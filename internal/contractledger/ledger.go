@@ -41,6 +41,11 @@ const (
 	pluginAssetsProxyPrefix  = "/api/v1/plugin-assets/{installation_id}/"
 	pluginPagesProxyPrefix   = "/api/v1/plugins/{installation_id}/"
 
+	// ConcurrencyIfMatch is the one concurrency marking the ledger knows: the
+	// row's v2 operation requires If-Match (apiv2.Operation.Guarded). It may
+	// appear only on a tier-1 ported row with a mutating method.
+	ConcurrencyIfMatch = "if_match"
+
 	// removedTier is the only tier a removed row may hold: there is no v2
 	// behavior to baseline, so it never sits in tier 1.
 	removedTier = 2
@@ -164,6 +169,9 @@ type Entry struct {
 	ReviewState       string     `json:"review_state"`
 	Tier              int        `json:"tier"`
 	V2                V2Target   `json:"v2"`
+	// Concurrency is the optional curated optimistic-concurrency marking:
+	// ConcurrencyIfMatch on a row whose v2 operation is registered Guarded.
+	Concurrency string `json:"concurrency,omitempty"`
 }
 
 // V2Target is the v2 operation an entry maps to. All three are nil until the
@@ -438,7 +446,25 @@ func reviewRules(k Key, e Entry, r inventoryRoute) []string {
 	if e.DispositionRule == dynamicProxyRule && !isPluginProxyRoute(r) {
 		out = append(out, fmt.Sprintf("dynamic_plugin_proxy rule on a non-proxy handler: %s (inventory handler %q)", k, r.Handler))
 	}
+	if e.Concurrency != "" {
+		switch {
+		case e.Concurrency != ConcurrencyIfMatch:
+			out = append(out, fmt.Sprintf("unknown concurrency marking %q: %s", e.Concurrency, k))
+		case e.Tier != 1 || e.Disposition != DispositionPorted:
+			out = append(out, fmt.Sprintf("concurrency %s is only for tier-1 ported rows; row is tier %d %s: %s", e.Concurrency, e.Tier, e.Disposition, k))
+		case !isMutatingMethod(e.Method):
+			out = append(out, fmt.Sprintf("concurrency %s is only for a mutating method (POST, PUT, PATCH, DELETE), not %s: %s", e.Concurrency, e.Method, k))
+		}
+	}
 	return out
+}
+
+func isMutatingMethod(method string) bool {
+	switch method {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	}
+	return false
 }
 
 // normalize maps inventory spellings onto ledger spellings so the comparison
