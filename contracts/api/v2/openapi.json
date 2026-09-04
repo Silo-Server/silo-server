@@ -1,6 +1,80 @@
 {
   "components": {
     "schemas": {
+      "Account": {
+        "additionalProperties": false,
+        "properties": {
+          "download_allowed": {
+            "description": "Whether the effective policy permits downloads",
+            "type": "boolean"
+          },
+          "email": {
+            "description": "Contact email; empty when none is set",
+            "type": "string"
+          },
+          "id": {
+            "description": "Account identifier",
+            "minLength": 1,
+            "type": "string"
+          },
+          "impersonation": {
+            "$ref": "#/components/schemas/Impersonation",
+            "description": "Present only while an administrator impersonates this account"
+          },
+          "permissions": {
+            "description": "Effective assignable permissions; empty for a disabled account",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role": {
+            "description": "Server-wide role",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "Login name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "role",
+          "permissions",
+          "download_allowed"
+        ],
+        "type": "object"
+      },
+      "Impersonation": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "Always true when the object is present",
+            "type": "boolean"
+          },
+          "impersonator_user_id": {
+            "description": "The administrator account acting as this account",
+            "minLength": 1,
+            "type": "string"
+          },
+          "impersonator_username": {
+            "description": "The administrator's username; empty when the account no longer exists",
+            "type": "string"
+          }
+        },
+        "required": [
+          "active",
+          "impersonator_user_id",
+          "impersonator_username"
+        ],
+        "type": "object"
+      },
       "Problem": {
         "additionalProperties": false,
         "properties": {
@@ -142,6 +216,103 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v2/account/me": {
+      "get": {
+        "operationId": "getCurrentUser",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the authenticated caller's login account.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated"
+      }
+    },
     "/api/v2/openapi.json": {
       "get": {
         "operationId": "getOpenAPIDocument",
