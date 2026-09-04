@@ -15,53 +15,53 @@ import (
 
 // Profile is one household member.
 type Profile struct {
-	ID                         ID      `json:"id"`
-	Name                       string  `json:"name"`
-	Avatar                     string  `json:"avatar" doc:"Avatar reference; empty when none"`
-	AvatarURL                  string  `json:"avatar_url,omitempty" doc:"Where to fetch the avatar; absent when there is none to fetch"`
-	AvatarSource               string  `json:"avatar_source" enum:"none,preset,upload"`
-	HasPIN                     bool    `json:"has_pin"`
-	IsChild                    bool    `json:"is_child"`
-	IsPrimary                  bool    `json:"is_primary" doc:"The household parent (not the server admin role)"`
-	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none"`
-	QualityPreference          string  `json:"quality_preference" doc:"Canonical values: auto, original; empty when unset. Older profiles may carry other stored values"`
-	Language                   string  `json:"language" doc:"Preferred audio language (ISO 639-1); empty inherits"`
-	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" doc:"Metadata language (ISO 639-1); empty inherits the library's"`
-	SubtitleLanguage           string  `json:"subtitle_language" doc:"Preferred subtitle language (ISO 639-1); empty inherits"`
-	SubtitleMode               string  `json:"subtitle_mode" doc:"Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values"`
-	AutoSkipIntro              bool    `json:"auto_skip_intro"`
-	AutoSkipCredits            bool    `json:"auto_skip_credits"`
-	AutoSkipRecap              bool    `json:"auto_skip_recap"`
-	AutoPlayNextPreview        bool    `json:"auto_play_next_preview"`
-	ShowForcedSubtitles        bool    `json:"show_forced_subtitles"`
-	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled"`
+	ID                         ID      `json:"id" example:"1"`
+	Name                       string  `json:"name" example:"Alice"`
+	Avatar                     string  `json:"avatar" doc:"Avatar reference; empty when none" example:"preset:fox"`
+	AvatarURL                  string  `json:"avatar_url,omitempty" doc:"Where to fetch the avatar; absent when there is none to fetch" example:"/avatars/presets/fox.png"`
+	AvatarSource               string  `json:"avatar_source" enum:"none,preset,upload" example:"preset"`
+	HasPIN                     bool    `json:"has_pin" example:"false"`
+	IsChild                    bool    `json:"is_child" example:"false"`
+	IsPrimary                  bool    `json:"is_primary" doc:"The household parent (not the server admin role)" example:"true"`
+	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none" example:"PG-13"`
+	QualityPreference          string  `json:"quality_preference" doc:"Canonical values: auto, original; empty when unset. Older profiles may carry other stored values" example:"auto"`
+	Language                   string  `json:"language" doc:"Preferred audio language (ISO 639-1); empty inherits" example:"en"`
+	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" doc:"Metadata language (ISO 639-1); empty inherits the library's" example:"en"`
+	SubtitleLanguage           string  `json:"subtitle_language" doc:"Preferred subtitle language (ISO 639-1); empty inherits" example:"en"`
+	SubtitleMode               string  `json:"subtitle_mode" doc:"Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values" example:"auto"`
+	AutoSkipIntro              bool    `json:"auto_skip_intro" example:"true"`
+	AutoSkipCredits            bool    `json:"auto_skip_credits" example:"false"`
+	AutoSkipRecap              bool    `json:"auto_skip_recap" example:"false"`
+	AutoPlayNextPreview        bool    `json:"auto_play_next_preview" example:"false"`
+	ShowForcedSubtitles        bool    `json:"show_forced_subtitles" example:"false"`
+	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled" example:"false"`
 	AllowedLibraryIDs          []ID    `json:"allowed_library_ids" doc:"Libraries the profile may see when restrictions are enabled"`
-	MaxPlaybackQuality         string  `json:"max_playback_quality" doc:"Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values"`
-	CreatedAt                  Instant `json:"created_at"`
-	UpdatedAt                  Instant `json:"updated_at"`
+	MaxPlaybackQuality         string  `json:"max_playback_quality" doc:"Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values" example:"1080p"`
+	CreatedAt                  Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
+	UpdatedAt                  Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 }
 
 // ProfileUpdate is the updateProfile body. Every member is optional: omitted
 // leaves the field unchanged; null clears a nullable one.
 type ProfileUpdate struct {
-	Name                       *string       `json:"name,omitempty" nullable:"false" minLength:"1" maxLength:"64" doc:"Display name; leading and trailing spaces are trimmed"`
-	Avatar                     Patch[string] `json:"avatar,omitzero" doc:"Preset avatar reference; null removes the avatar"`
-	PIN                        Patch[string] `json:"pin,omitzero" doc:"New PIN; null removes the PIN"`
-	IsChild                    *bool         `json:"is_child,omitempty" nullable:"false"`
-	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it"`
-	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" enum:"auto,original"`
-	Language                   Patch[string] `json:"language,omitzero" doc:"Preferred audio language (ISO 639-1); null inherits"`
-	PreferredMetadataLanguage  Patch[string] `json:"preferred_metadata_language,omitzero" doc:"Metadata language (ISO 639-1); null inherits the library's"`
-	SubtitleLanguage           Patch[string] `json:"subtitle_language,omitzero" doc:"Preferred subtitle language (ISO 639-1); null inherits"`
-	SubtitleMode               *string       `json:"subtitle_mode,omitempty" nullable:"false" enum:"auto,always,off"`
-	AutoSkipIntro              *bool         `json:"auto_skip_intro,omitempty" nullable:"false"`
-	AutoSkipCredits            *bool         `json:"auto_skip_credits,omitempty" nullable:"false"`
-	AutoSkipRecap              *bool         `json:"auto_skip_recap,omitempty" nullable:"false"`
-	AutoPlayNextPreview        *bool         `json:"auto_play_next_preview,omitempty" nullable:"false"`
-	ShowForcedSubtitles        *bool         `json:"show_forced_subtitles,omitempty" nullable:"false"`
-	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false"`
+	Name                       *string       `json:"name,omitempty" nullable:"false" minLength:"1" maxLength:"64" doc:"Display name; leading and trailing spaces are trimmed" example:"Alice"`
+	Avatar                     Patch[string] `json:"avatar,omitzero" doc:"Preset avatar reference; null removes the avatar" example:"preset:fox"`
+	PIN                        Patch[string] `json:"pin,omitzero" doc:"New PIN; null removes the PIN" example:"1234"`
+	IsChild                    *bool         `json:"is_child,omitempty" nullable:"false" example:"false"`
+	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
+	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" enum:"auto,original" example:"auto"`
+	Language                   Patch[string] `json:"language,omitzero" doc:"Preferred audio language (ISO 639-1); null inherits" example:"en"`
+	PreferredMetadataLanguage  Patch[string] `json:"preferred_metadata_language,omitzero" doc:"Metadata language (ISO 639-1); null inherits the library's" example:"en"`
+	SubtitleLanguage           Patch[string] `json:"subtitle_language,omitzero" doc:"Preferred subtitle language (ISO 639-1); null inherits" example:"en"`
+	SubtitleMode               *string       `json:"subtitle_mode,omitempty" nullable:"false" enum:"auto,always,off" example:"auto"`
+	AutoSkipIntro              *bool         `json:"auto_skip_intro,omitempty" nullable:"false" example:"true"`
+	AutoSkipCredits            *bool         `json:"auto_skip_credits,omitempty" nullable:"false" example:"false"`
+	AutoSkipRecap              *bool         `json:"auto_skip_recap,omitempty" nullable:"false" example:"false"`
+	AutoPlayNextPreview        *bool         `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
+	ShowForcedSubtitles        *bool         `json:"show_forced_subtitles,omitempty" nullable:"false" example:"false"`
+	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
 	AllowedLibraryIDs          *[]ID         `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Replaces the allowlist; an empty array allows none"`
-	MaxPlaybackQuality         Patch[string] `json:"max_playback_quality,omitzero" enum:"1080p,2160p" doc:"Playback ceiling; null removes it"`
+	MaxPlaybackQuality         Patch[string] `json:"max_playback_quality,omitzero" enum:"1080p,2160p" doc:"Playback ceiling; null removes it" example:"1080p"`
 }
 
 // ProfileUpdateInput is the updateProfile request.

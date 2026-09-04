@@ -123,11 +123,20 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     Account: {
-      /** @description Whether the effective policy permits downloads */
+      /**
+       * @description Whether the effective policy permits downloads
+       * @example true
+       */
       download_allowed: boolean;
-      /** @description Contact email; empty when none is set */
+      /**
+       * @description Contact email; empty when none is set
+       * @example alice@example.test
+       */
       email: string;
-      /** @description Account identifier */
+      /**
+       * @description Account identifier
+       * @example 1
+       */
       id: string;
       /** @description Present only while an administrator impersonates this account */
       impersonation?: components["schemas"]["Impersonation"];
@@ -135,70 +144,112 @@ export interface components {
       permissions: string[];
       /**
        * @description Server-wide role
+       * @example user
        * @enum {string}
        */
       role: "admin" | "user";
-      /** @description Login name */
+      /**
+       * @description Login name
+       * @example alice
+       */
       username: string;
     };
     AdminUser: {
-      /** @description The access group the account belongs to; null when none */
+      /**
+       * @description The access group the account belongs to; null when none
+       * @example 2
+       */
       access_group_id: string | null;
-      /** @description Override; null inherits */
+      /**
+       * @description Override; null inherits
+       * @example false
+       */
       audio_transcode_allowed: boolean | null;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.678Z
        */
       created_at: string;
-      /** @description Override; null inherits */
+      /**
+       * @description Override; null inherits
+       * @example true
+       */
       download_allowed: boolean | null;
-      /** @description Override; null inherits */
+      /**
+       * @description Override; null inherits
+       * @example false
+       */
       download_transcode_allowed: boolean | null;
       /** @description The resolved policy the server enforces */
       effective_policy: components["schemas"]["EffectivePolicy"];
-      /** @description Contact email; empty when none is set */
+      /**
+       * @description Contact email; empty when none is set
+       * @example alice@example.test
+       */
       email: string;
+      /** @example true */
       enabled: boolean;
-      /** @description Opaque identifier */
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
       id: string;
       /**
        * Format: date-time
        * @description Most recent recorded activity; null when the account has none
+       * @example 2026-01-02T03:04:05.678Z
        */
       last_active_at: string | null;
       /** @description Explicit library allowlist; null inherits the group's, empty means none */
       library_ids: string[] | null;
-      /** @description Playback ceiling override; null inherits, empty string means no ceiling */
+      /**
+       * @description Playback ceiling override; null inherits, empty string means no ceiling
+       * @example 1080p
+       */
       max_playback_quality: string | null;
       /**
        * Format: int64
        * @description Household profile limit
+       * @example 5
        */
       max_profiles: number;
       /**
        * Format: int64
        * @description Stream limit override; null inherits, 0 means unlimited
+       * @example 2
        */
       max_streams: number | null;
       /**
        * Format: int64
        * @description Transcode limit override; null inherits, 0 means unlimited
+       * @example 0
        */
       max_transcodes: number | null;
       /** @description Permissions assigned directly to the account */
       permissions: string[];
-      /** @description Override; null inherits */
+      /**
+       * @description Override; null inherits
+       * @example false
+       */
       requests_allowed: boolean | null;
-      /** @enum {string} */
+      /**
+       * @example user
+       * @enum {string}
+       */
       role: "admin" | "user";
-      /** @description Override; null inherits */
+      /**
+       * @description Override; null inherits
+       * @example true
+       */
       transcode_allowed: boolean | null;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.678Z
        */
       updated_at: string;
+      /** @example alice */
       username: string;
     };
     AdminUserCollection: {
@@ -208,34 +259,53 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     EffectivePolicy: {
+      /** @example false */
       audio_transcode_allowed: boolean;
+      /** @example true */
       download_allowed: boolean;
+      /** @example false */
       download_transcode_allowed: boolean;
       /** @description Libraries the account may see; empty means every library */
       library_ids: string[];
-      /** @description Playback ceiling; empty means none */
+      /**
+       * @description Playback ceiling; empty means none
+       * @example 1080p
+       */
       max_playback_quality: string;
       /**
        * Format: int64
        * @description Concurrent stream limit; 0 means unlimited
+       * @example 2
        */
       max_streams: number;
       /**
        * Format: int64
        * @description Concurrent transcode limit; 0 means unlimited
+       * @example 0
        */
       max_transcodes: number;
       /** @description Effective assignable permissions */
       permissions: string[];
+      /** @example false */
       requests_allowed: boolean;
+      /** @example true */
       transcode_allowed: boolean;
     };
     Impersonation: {
-      /** @description Always true when the object is present */
+      /**
+       * @description Always true when the object is present
+       * @example true
+       */
       active: boolean;
-      /** @description The administrator account acting as this account */
+      /**
+       * @description The administrator account acting as this account
+       * @example 7
+       */
       impersonator_user_id: string;
-      /** @description The administrator's username; empty when the account no longer exists */
+      /**
+       * @description The administrator's username; empty when the account no longer exists
+       * @example alice
+       */
       impersonator_username: string;
     };
     PageInfo: {
@@ -278,82 +348,164 @@ export interface components {
     Profile: {
       /** @description Libraries the profile may see when restrictions are enabled */
       allowed_library_ids: string[];
+      /** @example false */
       auto_play_next_preview: boolean;
+      /** @example false */
       auto_skip_credits: boolean;
+      /** @example true */
       auto_skip_intro: boolean;
+      /** @example false */
       auto_skip_recap: boolean;
-      /** @description Avatar reference; empty when none */
+      /**
+       * @description Avatar reference; empty when none
+       * @example preset:fox
+       */
       avatar: string;
-      /** @enum {string} */
+      /**
+       * @example preset
+       * @enum {string}
+       */
       avatar_source: "none" | "preset" | "upload";
-      /** @description Where to fetch the avatar; absent when there is none to fetch */
+      /**
+       * @description Where to fetch the avatar; absent when there is none to fetch
+       * @example /avatars/presets/fox.png
+       */
       avatar_url?: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.000Z
        */
       created_at: string;
+      /** @example false */
       has_pin: boolean;
-      /** @description Opaque identifier */
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
       id: string;
+      /** @example false */
       is_child: boolean;
-      /** @description The household parent (not the server admin role) */
+      /**
+       * @description The household parent (not the server admin role)
+       * @example true
+       */
       is_primary: boolean;
-      /** @description Preferred audio language (ISO 639-1); empty inherits */
+      /**
+       * @description Preferred audio language (ISO 639-1); empty inherits
+       * @example en
+       */
       language: string;
+      /** @example false */
       library_restrictions_enabled: boolean;
-      /** @description Content-rating ceiling; empty means none */
+      /**
+       * @description Content-rating ceiling; empty means none
+       * @example PG-13
+       */
       max_content_rating: string;
-      /** @description Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values */
+      /**
+       * @description Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values
+       * @example 1080p
+       */
       max_playback_quality: string;
+      /** @example Alice */
       name: string;
-      /** @description Metadata language (ISO 639-1); empty inherits the library's */
+      /**
+       * @description Metadata language (ISO 639-1); empty inherits the library's
+       * @example en
+       */
       preferred_metadata_language: string;
-      /** @description Canonical values: auto, original; empty when unset. Older profiles may carry other stored values */
+      /**
+       * @description Canonical values: auto, original; empty when unset. Older profiles may carry other stored values
+       * @example auto
+       */
       quality_preference: string;
+      /** @example false */
       show_forced_subtitles: boolean;
-      /** @description Preferred subtitle language (ISO 639-1); empty inherits */
+      /**
+       * @description Preferred subtitle language (ISO 639-1); empty inherits
+       * @example en
+       */
       subtitle_language: string;
-      /** @description Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values */
+      /**
+       * @description Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values
+       * @example auto
+       */
       subtitle_mode: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.000Z
        */
       updated_at: string;
     };
     ProfileUpdate: {
       /** @description Replaces the allowlist; an empty array allows none */
       allowed_library_ids?: string[];
+      /** @example false */
       auto_play_next_preview?: boolean;
+      /** @example false */
       auto_skip_credits?: boolean;
+      /** @example true */
       auto_skip_intro?: boolean;
+      /** @example false */
       auto_skip_recap?: boolean;
-      /** @description Preset avatar reference; null removes the avatar */
+      /**
+       * @description Preset avatar reference; null removes the avatar
+       * @example preset:fox
+       */
       avatar?: string | null;
+      /** @example false */
       is_child?: boolean;
-      /** @description Preferred audio language (ISO 639-1); null inherits */
+      /**
+       * @description Preferred audio language (ISO 639-1); null inherits
+       * @example en
+       */
       language?: string | null;
+      /** @example false */
       library_restrictions_enabled?: boolean;
-      /** @description Content-rating ceiling; null removes it */
+      /**
+       * @description Content-rating ceiling; null removes it
+       * @example PG-13
+       */
       max_content_rating?: string | null;
       /**
        * @description Playback ceiling; null removes it
+       * @example 1080p
        * @enum {string|null}
        */
       max_playback_quality?: "1080p" | "2160p" | null;
-      /** @description Display name; leading and trailing spaces are trimmed */
+      /**
+       * @description Display name; leading and trailing spaces are trimmed
+       * @example Alice
+       */
       name?: string;
-      /** @description New PIN; null removes the PIN */
+      /**
+       * @description New PIN; null removes the PIN
+       * @example 1234
+       */
       pin?: string | null;
-      /** @description Metadata language (ISO 639-1); null inherits the library's */
+      /**
+       * @description Metadata language (ISO 639-1); null inherits the library's
+       * @example en
+       */
       preferred_metadata_language?: string | null;
-      /** @enum {string} */
+      /**
+       * @example auto
+       * @enum {string}
+       */
       quality_preference?: "auto" | "original";
+      /** @example false */
       show_forced_subtitles?: boolean;
-      /** @description Preferred subtitle language (ISO 639-1); null inherits */
+      /**
+       * @description Preferred subtitle language (ISO 639-1); null inherits
+       * @example en
+       */
       subtitle_language?: string | null;
-      /** @enum {string} */
+      /**
+       * @example auto
+       * @enum {string}
+       */
       subtitle_mode?: "auto" | "always" | "off";
     };
     ProgressCollection: {
@@ -363,28 +515,40 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     ProgressEntry: {
-      /** @description Whether the item counts as watched */
+      /**
+       * @description Whether the item counts as watched
+       * @example false
+       */
       completed: boolean;
       /**
        * Format: double
        * @description Known runtime; 0 when unknown
+       * @example 5400
        */
       duration_seconds: number;
-      /** @description The catalog item */
+      /**
+       * @description The catalog item
+       * @example movie-8f2c1a
+       */
       media_item_id: string;
       /**
        * Format: double
        * @description Playback position
+       * @example 1325.5
        */
       position_seconds: number;
       /**
        * Format: date-time
        * @description When the position last changed
+       * @example 2026-01-02T03:04:05.000Z
        */
       updated_at: string;
     };
     SetupStatus: {
-      /** @description True until the first administrator account exists */
+      /**
+       * @description True until the first administrator account exists
+       * @example false
+       */
       needs_setup: boolean;
     };
     SystemInfo: {

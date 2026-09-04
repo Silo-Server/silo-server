@@ -12,19 +12,19 @@ import (
 
 // Impersonation says an administrator is acting as this account.
 type Impersonation struct {
-	Active               bool   `json:"active" doc:"Always true when the object is present"`
-	ImpersonatorUserID   ID     `json:"impersonator_user_id" doc:"The administrator account acting as this account"`
-	ImpersonatorUsername string `json:"impersonator_username" doc:"The administrator's username; empty when the account no longer exists"`
+	Active               bool   `json:"active" doc:"Always true when the object is present" example:"true"`
+	ImpersonatorUserID   ID     `json:"impersonator_user_id" doc:"The administrator account acting as this account" example:"7"`
+	ImpersonatorUsername string `json:"impersonator_username" doc:"The administrator's username; empty when the account no longer exists" example:"alice"`
 }
 
 // Account is the authenticated caller's login account.
 type Account struct {
-	ID              ID             `json:"id" doc:"Account identifier"`
-	Username        string         `json:"username" doc:"Login name"`
-	Email           string         `json:"email" doc:"Contact email; empty when none is set"`
-	Role            string         `json:"role" enum:"admin,user" doc:"Server-wide role"`
+	ID              ID             `json:"id" doc:"Account identifier" example:"1"`
+	Username        string         `json:"username" doc:"Login name" example:"alice"`
+	Email           string         `json:"email" doc:"Contact email; empty when none is set" example:"alice@example.test"`
+	Role            string         `json:"role" enum:"admin,user" doc:"Server-wide role" example:"user"`
 	Permissions     []string       `json:"permissions" doc:"Effective assignable permissions; empty for a disabled account"`
-	DownloadAllowed bool           `json:"download_allowed" doc:"Whether the effective policy permits downloads"`
+	DownloadAllowed bool           `json:"download_allowed" doc:"Whether the effective policy permits downloads" example:"true"`
 	Impersonation   *Impersonation `json:"impersonation,omitempty" doc:"Present only while an administrator impersonates this account"`
 }
 

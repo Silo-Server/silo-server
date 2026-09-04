@@ -13,41 +13,41 @@ import (
 // layered on its access group's values.
 type EffectivePolicy struct {
 	LibraryIDs               []ID     `json:"library_ids" doc:"Libraries the account may see; empty means every library"`
-	MaxPlaybackQuality       string   `json:"max_playback_quality" doc:"Playback ceiling; empty means none"`
-	MaxStreams               int      `json:"max_streams" doc:"Concurrent stream limit; 0 means unlimited"`
-	MaxTranscodes            int      `json:"max_transcodes" doc:"Concurrent transcode limit; 0 means unlimited"`
-	TranscodeAllowed         bool     `json:"transcode_allowed"`
-	AudioTranscodeAllowed    bool     `json:"audio_transcode_allowed"`
-	DownloadAllowed          bool     `json:"download_allowed"`
-	DownloadTranscodeAllowed bool     `json:"download_transcode_allowed"`
-	RequestsAllowed          bool     `json:"requests_allowed"`
+	MaxPlaybackQuality       string   `json:"max_playback_quality" doc:"Playback ceiling; empty means none" example:"1080p"`
+	MaxStreams               int      `json:"max_streams" doc:"Concurrent stream limit; 0 means unlimited" example:"2"`
+	MaxTranscodes            int      `json:"max_transcodes" doc:"Concurrent transcode limit; 0 means unlimited" example:"0"`
+	TranscodeAllowed         bool     `json:"transcode_allowed" example:"true"`
+	AudioTranscodeAllowed    bool     `json:"audio_transcode_allowed" example:"false"`
+	DownloadAllowed          bool     `json:"download_allowed" example:"true"`
+	DownloadTranscodeAllowed bool     `json:"download_transcode_allowed" example:"false"`
+	RequestsAllowed          bool     `json:"requests_allowed" example:"false"`
 	Permissions              []string `json:"permissions" doc:"Effective assignable permissions"`
 }
 
 // AdminUser is one login account with its own policy overrides (null =
 // inherit from the access group) and the effective result.
 type AdminUser struct {
-	ID                       ID              `json:"id"`
-	Username                 string          `json:"username"`
-	Email                    string          `json:"email" doc:"Contact email; empty when none is set"`
-	Role                     string          `json:"role" enum:"admin,user"`
+	ID                       ID              `json:"id" example:"1"`
+	Username                 string          `json:"username" example:"alice"`
+	Email                    string          `json:"email" doc:"Contact email; empty when none is set" example:"alice@example.test"`
+	Role                     string          `json:"role" enum:"admin,user" example:"user"`
 	Permissions              []string        `json:"permissions" doc:"Permissions assigned directly to the account"`
-	Enabled                  bool            `json:"enabled"`
+	Enabled                  bool            `json:"enabled" example:"true"`
 	LibraryIDs               []ID            `json:"library_ids" nullable:"true" doc:"Explicit library allowlist; null inherits the group's, empty means none"`
-	MaxPlaybackQuality       *string         `json:"max_playback_quality" nullable:"true" doc:"Playback ceiling override; null inherits, empty string means no ceiling"`
-	MaxStreams               *int            `json:"max_streams" nullable:"true" doc:"Stream limit override; null inherits, 0 means unlimited"`
-	MaxTranscodes            *int            `json:"max_transcodes" nullable:"true" doc:"Transcode limit override; null inherits, 0 means unlimited"`
-	TranscodeAllowed         *bool           `json:"transcode_allowed" nullable:"true" doc:"Override; null inherits"`
-	AudioTranscodeAllowed    *bool           `json:"audio_transcode_allowed" nullable:"true" doc:"Override; null inherits"`
-	MaxProfiles              int             `json:"max_profiles" doc:"Household profile limit"`
-	DownloadAllowed          *bool           `json:"download_allowed" nullable:"true" doc:"Override; null inherits"`
-	DownloadTranscodeAllowed *bool           `json:"download_transcode_allowed" nullable:"true" doc:"Override; null inherits"`
-	RequestsAllowed          *bool           `json:"requests_allowed" nullable:"true" doc:"Override; null inherits"`
-	AccessGroupID            *ID             `json:"access_group_id" nullable:"true" doc:"The access group the account belongs to; null when none"`
+	MaxPlaybackQuality       *string         `json:"max_playback_quality" nullable:"true" doc:"Playback ceiling override; null inherits, empty string means no ceiling" example:"1080p"`
+	MaxStreams               *int            `json:"max_streams" nullable:"true" doc:"Stream limit override; null inherits, 0 means unlimited" example:"2"`
+	MaxTranscodes            *int            `json:"max_transcodes" nullable:"true" doc:"Transcode limit override; null inherits, 0 means unlimited" example:"0"`
+	TranscodeAllowed         *bool           `json:"transcode_allowed" nullable:"true" doc:"Override; null inherits" example:"true"`
+	AudioTranscodeAllowed    *bool           `json:"audio_transcode_allowed" nullable:"true" doc:"Override; null inherits" example:"false"`
+	MaxProfiles              int             `json:"max_profiles" doc:"Household profile limit" example:"5"`
+	DownloadAllowed          *bool           `json:"download_allowed" nullable:"true" doc:"Override; null inherits" example:"true"`
+	DownloadTranscodeAllowed *bool           `json:"download_transcode_allowed" nullable:"true" doc:"Override; null inherits" example:"false"`
+	RequestsAllowed          *bool           `json:"requests_allowed" nullable:"true" doc:"Override; null inherits" example:"false"`
+	AccessGroupID            *ID             `json:"access_group_id" nullable:"true" doc:"The access group the account belongs to; null when none" example:"2"`
 	EffectivePolicy          EffectivePolicy `json:"effective_policy" doc:"The resolved policy the server enforces"`
-	CreatedAt                Instant         `json:"created_at"`
-	UpdatedAt                Instant         `json:"updated_at"`
-	LastActiveAt             NullableInstant `json:"last_active_at" doc:"Most recent recorded activity; null when the account has none"`
+	CreatedAt                Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
+	UpdatedAt                Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
+	LastActiveAt             NullableInstant `json:"last_active_at" doc:"Most recent recorded activity; null when the account has none" example:"2026-01-02T03:04:05.678Z"`
 }
 
 // AdminUserCollectionOutput is the listAdminUsers response: a bounded

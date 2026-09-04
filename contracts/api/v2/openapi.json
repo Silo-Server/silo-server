@@ -6,14 +6,23 @@
         "properties": {
           "download_allowed": {
             "description": "Whether the effective policy permits downloads",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "email": {
             "description": "Contact email; empty when none is set",
+            "examples": [
+              "alice@example.test"
+            ],
             "type": "string"
           },
           "id": {
             "description": "Account identifier",
+            "examples": [
+              "1"
+            ],
             "minLength": 1,
             "type": "string"
           },
@@ -34,10 +43,16 @@
               "admin",
               "user"
             ],
+            "examples": [
+              "user"
+            ],
             "type": "string"
           },
           "username": {
             "description": "Login name",
+            "examples": [
+              "alice"
+            ],
             "type": "string"
           }
         },
@@ -56,6 +71,9 @@
         "properties": {
           "access_group_id": {
             "description": "The access group the account belongs to; null when none",
+            "examples": [
+              "2"
+            ],
             "minLength": 1,
             "type": [
               "string",
@@ -64,6 +82,9 @@
           },
           "audio_transcode_allowed": {
             "description": "Override; null inherits",
+            "examples": [
+              false
+            ],
             "type": [
               "boolean",
               "null"
@@ -71,6 +92,9 @@
           },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -78,6 +102,9 @@
           },
           "download_allowed": {
             "description": "Override; null inherits",
+            "examples": [
+              true
+            ],
             "type": [
               "boolean",
               "null"
@@ -85,6 +112,9 @@
           },
           "download_transcode_allowed": {
             "description": "Override; null inherits",
+            "examples": [
+              false
+            ],
             "type": [
               "boolean",
               "null"
@@ -96,18 +126,30 @@
           },
           "email": {
             "description": "Contact email; empty when none is set",
+            "examples": [
+              "alice@example.test"
+            ],
             "type": "string"
           },
           "enabled": {
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "id": {
             "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
             "minLength": 1,
             "type": "string"
           },
           "last_active_at": {
             "description": "Most recent recorded activity; null when the account has none",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -130,6 +172,9 @@
           },
           "max_playback_quality": {
             "description": "Playback ceiling override; null inherits, empty string means no ceiling",
+            "examples": [
+              "1080p"
+            ],
             "type": [
               "string",
               "null"
@@ -137,11 +182,17 @@
           },
           "max_profiles": {
             "description": "Household profile limit",
+            "examples": [
+              5
+            ],
             "format": "int64",
             "type": "integer"
           },
           "max_streams": {
             "description": "Stream limit override; null inherits, 0 means unlimited",
+            "examples": [
+              2
+            ],
             "format": "int64",
             "type": [
               "integer",
@@ -150,6 +201,9 @@
           },
           "max_transcodes": {
             "description": "Transcode limit override; null inherits, 0 means unlimited",
+            "examples": [
+              0
+            ],
             "format": "int64",
             "type": [
               "integer",
@@ -165,6 +219,9 @@
           },
           "requests_allowed": {
             "description": "Override; null inherits",
+            "examples": [
+              false
+            ],
             "type": [
               "boolean",
               "null"
@@ -175,10 +232,16 @@
               "admin",
               "user"
             ],
+            "examples": [
+              "user"
+            ],
             "type": "string"
           },
           "transcode_allowed": {
             "description": "Override; null inherits",
+            "examples": [
+              true
+            ],
             "type": [
               "boolean",
               "null"
@@ -186,12 +249,18 @@
           },
           "updated_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.678Z"
+            ],
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "username": {
+            "examples": [
+              "alice"
+            ],
             "type": "string"
           }
         },
@@ -244,12 +313,21 @@
         "additionalProperties": false,
         "properties": {
           "audio_transcode_allowed": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "download_allowed": {
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "download_transcode_allowed": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "library_ids": {
@@ -263,15 +341,24 @@
           },
           "max_playback_quality": {
             "description": "Playback ceiling; empty means none",
+            "examples": [
+              "1080p"
+            ],
             "type": "string"
           },
           "max_streams": {
             "description": "Concurrent stream limit; 0 means unlimited",
+            "examples": [
+              2
+            ],
             "format": "int64",
             "type": "integer"
           },
           "max_transcodes": {
             "description": "Concurrent transcode limit; 0 means unlimited",
+            "examples": [
+              0
+            ],
             "format": "int64",
             "type": "integer"
           },
@@ -283,9 +370,15 @@
             "type": "array"
           },
           "requests_allowed": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "transcode_allowed": {
+            "examples": [
+              true
+            ],
             "type": "boolean"
           }
         },
@@ -308,15 +401,24 @@
         "properties": {
           "active": {
             "description": "Always true when the object is present",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "impersonator_user_id": {
             "description": "The administrator account acting as this account",
+            "examples": [
+              "7"
+            ],
             "minLength": 1,
             "type": "string"
           },
           "impersonator_username": {
             "description": "The administrator's username; empty when the account no longer exists",
+            "examples": [
+              "alice"
+            ],
             "type": "string"
           }
         },
@@ -423,19 +525,34 @@
             "type": "array"
           },
           "auto_play_next_preview": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "auto_skip_credits": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "auto_skip_intro": {
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "auto_skip_recap": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "avatar": {
             "description": "Avatar reference; empty when none",
+            "examples": [
+              "preset:fox"
+            ],
             "type": "string"
           },
           "avatar_source": {
@@ -444,73 +561,127 @@
               "preset",
               "upload"
             ],
+            "examples": [
+              "preset"
+            ],
             "type": "string"
           },
           "avatar_url": {
             "description": "Where to fetch the avatar; absent when there is none to fetch",
+            "examples": [
+              "/avatars/presets/fox.png"
+            ],
             "type": "string"
           },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "has_pin": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "id": {
             "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
             "minLength": 1,
             "type": "string"
           },
           "is_child": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "is_primary": {
             "description": "The household parent (not the server admin role)",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "language": {
             "description": "Preferred audio language (ISO 639-1); empty inherits",
+            "examples": [
+              "en"
+            ],
             "type": "string"
           },
           "library_restrictions_enabled": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "max_content_rating": {
             "description": "Content-rating ceiling; empty means none",
+            "examples": [
+              "PG-13"
+            ],
             "type": "string"
           },
           "max_playback_quality": {
             "description": "Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values",
+            "examples": [
+              "1080p"
+            ],
             "type": "string"
           },
           "name": {
+            "examples": [
+              "Alice"
+            ],
             "type": "string"
           },
           "preferred_metadata_language": {
             "description": "Metadata language (ISO 639-1); empty inherits the library's",
+            "examples": [
+              "en"
+            ],
             "type": "string"
           },
           "quality_preference": {
             "description": "Canonical values: auto, original; empty when unset. Older profiles may carry other stored values",
+            "examples": [
+              "auto"
+            ],
             "type": "string"
           },
           "show_forced_subtitles": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "subtitle_language": {
             "description": "Preferred subtitle language (ISO 639-1); empty inherits",
+            "examples": [
+              "en"
+            ],
             "type": "string"
           },
           "subtitle_mode": {
             "description": "Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values",
+            "examples": [
+              "auto"
+            ],
             "type": "string"
           },
           "updated_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -557,39 +728,66 @@
             "type": "array"
           },
           "auto_play_next_preview": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "auto_skip_credits": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "auto_skip_intro": {
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "auto_skip_recap": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "avatar": {
             "description": "Preset avatar reference; null removes the avatar",
+            "examples": [
+              "preset:fox"
+            ],
             "type": [
               "string",
               "null"
             ]
           },
           "is_child": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "language": {
             "description": "Preferred audio language (ISO 639-1); null inherits",
+            "examples": [
+              "en"
+            ],
             "type": [
               "string",
               "null"
             ]
           },
           "library_restrictions_enabled": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "max_content_rating": {
             "description": "Content-rating ceiling; null removes it",
+            "examples": [
+              "PG-13"
+            ],
             "type": [
               "string",
               "null"
@@ -601,6 +799,9 @@
               "1080p",
               "2160p"
             ],
+            "examples": [
+              "1080p"
+            ],
             "type": [
               "string",
               "null"
@@ -608,12 +809,18 @@
           },
           "name": {
             "description": "Display name; leading and trailing spaces are trimmed",
+            "examples": [
+              "Alice"
+            ],
             "maxLength": 64,
             "minLength": 1,
             "type": "string"
           },
           "pin": {
             "description": "New PIN; null removes the PIN",
+            "examples": [
+              "1234"
+            ],
             "type": [
               "string",
               "null"
@@ -621,6 +828,9 @@
           },
           "preferred_metadata_language": {
             "description": "Metadata language (ISO 639-1); null inherits the library's",
+            "examples": [
+              "en"
+            ],
             "type": [
               "string",
               "null"
@@ -631,13 +841,22 @@
               "auto",
               "original"
             ],
+            "examples": [
+              "auto"
+            ],
             "type": "string"
           },
           "show_forced_subtitles": {
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "subtitle_language": {
             "description": "Preferred subtitle language (ISO 639-1); null inherits",
+            "examples": [
+              "en"
+            ],
             "type": [
               "string",
               "null"
@@ -648,6 +867,9 @@
               "auto",
               "always",
               "off"
+            ],
+            "examples": [
+              "auto"
             ],
             "type": "string"
           }
@@ -679,25 +901,40 @@
         "properties": {
           "completed": {
             "description": "Whether the item counts as watched",
+            "examples": [
+              false
+            ],
             "type": "boolean"
           },
           "duration_seconds": {
             "description": "Known runtime; 0 when unknown",
+            "examples": [
+              5400
+            ],
             "format": "double",
             "type": "number"
           },
           "media_item_id": {
             "description": "The catalog item",
+            "examples": [
+              "movie-8f2c1a"
+            ],
             "minLength": 1,
             "type": "string"
           },
           "position_seconds": {
             "description": "Playback position",
+            "examples": [
+              1325.5
+            ],
             "format": "double",
             "type": "number"
           },
           "updated_at": {
             "description": "When the position last changed",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -718,6 +955,9 @@
         "properties": {
           "needs_setup": {
             "description": "True until the first administrator account exists",
+            "examples": [
+              false
+            ],
             "type": "boolean"
           }
         },

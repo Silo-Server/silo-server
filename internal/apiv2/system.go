@@ -53,7 +53,7 @@ func ContractDigest() string { return contractDigest }
 
 // SetupStatus reports whether the server still needs its first administrator.
 type SetupStatus struct {
-	NeedsSetup bool `json:"needs_setup" doc:"True until the first administrator account exists"`
+	NeedsSetup bool `json:"needs_setup" doc:"True until the first administrator account exists" example:"false"`
 }
 
 // SetupStatusOutput is the getSetupStatus response.

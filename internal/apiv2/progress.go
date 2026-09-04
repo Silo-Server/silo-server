@@ -20,11 +20,11 @@ const (
 
 // ProgressEntry is one item's watch position for the acting profile.
 type ProgressEntry struct {
-	MediaItemID     ID      `json:"media_item_id" doc:"The catalog item"`
-	PositionSeconds float64 `json:"position_seconds" doc:"Playback position"`
-	DurationSeconds float64 `json:"duration_seconds" doc:"Known runtime; 0 when unknown"`
-	Completed       bool    `json:"completed" doc:"Whether the item counts as watched"`
-	UpdatedAt       Instant `json:"updated_at" doc:"When the position last changed"`
+	MediaItemID     ID      `json:"media_item_id" doc:"The catalog item" example:"movie-8f2c1a"`
+	PositionSeconds float64 `json:"position_seconds" doc:"Playback position" example:"1325.5"`
+	DurationSeconds float64 `json:"duration_seconds" doc:"Known runtime; 0 when unknown" example:"5400"`
+	Completed       bool    `json:"completed" doc:"Whether the item counts as watched" example:"false"`
+	UpdatedAt       Instant `json:"updated_at" doc:"When the position last changed" example:"2026-01-02T03:04:05.000Z"`
 }
 
 // ProgressListInput is the listProgress query.
