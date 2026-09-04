@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import type { AdminLiveSessionsResponse, AdminSession } from "@/api/types";
@@ -63,7 +64,9 @@ const envelope: AdminLiveSessionsResponse = {
 describe("AdminActivity", () => {
   it("renders sessions from the live endpoint including idle rows", () => {
     mocks.useAdminLiveSessions.mockReturnValue({
-      data: envelope,
+      // no_delivery_shown false is what the server actually answers this page,
+      // which asks for the live-only list.
+      data: { ...envelope, no_delivery_shown: false },
       isLoading: false,
       refetch: vi.fn(),
     });
@@ -79,5 +82,38 @@ describe("AdminActivity", () => {
     expect(mocks.useAdminLiveSessions).toHaveBeenCalledWith(false);
     expect(screen.getAllByText("Live Endpoint Movie")).not.toHaveLength(0);
     expect(screen.getByText("measured")).toBeInTheDocument();
+    // Nothing is being withheld, so there is nothing to offer to reveal.
+    expect(screen.queryByRole("button", { name: /delivering nothing/i })).toBeNull();
+  });
+
+  // The dashboard links here with a live count and its own reveal control. Landing
+  // on a page that hides the same rows with no way to ask for them left the
+  // operator unable to see a no_delivery or unclaimed_idle row at all from here.
+  it("offers a reveal control for withheld rows and re-requests them", async () => {
+    const refetch = vi.fn();
+    mocks.useAdminLiveSessions.mockReturnValue({
+      data: {
+        ...envelope,
+        no_delivery_count: 2,
+        unclaimed_idle_count: 1,
+        no_delivery_shown: false,
+      },
+      isLoading: false,
+      refetch,
+    });
+
+    render(
+      <MemoryRouter>
+        <AdminActivity />
+      </MemoryRouter>,
+    );
+
+    const reveal = screen.getByRole("button", { name: "Show 3 delivering nothing" });
+    await userEvent.click(reveal);
+
+    expect(mocks.useAdminLiveSessions).toHaveBeenLastCalledWith(true);
+    expect(
+      screen.getByRole("button", { name: "Hide sessions delivering nothing" }),
+    ).toBeInTheDocument();
   });
 });

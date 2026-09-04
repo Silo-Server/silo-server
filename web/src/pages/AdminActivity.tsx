@@ -76,7 +76,16 @@ function routeSortValue(session: AdminSession): string {
 }
 
 export default function AdminActivity() {
-  const { data: liveSessions, isLoading, refetch: refresh } = useAdminLiveSessions(false);
+  // Live-only by default, matching the dashboard: an ended-but-still-measured or
+  // claimed-but-undelivered row is not something streaming now. The reveal control
+  // below exists because the dashboard links here with a live count — without it an
+  // operator moved from a page that can show the withheld rows to one that could not.
+  const [showHiddenSessions, setShowHiddenSessions] = useState(false);
+  const {
+    data: liveSessions,
+    isLoading,
+    refetch: refresh,
+  } = useAdminLiveSessions(showHiddenSessions);
   const sessions = liveSessions?.sessions ?? [];
   const sessionsSource = describeLiveSessionsSource(liveSessions);
   const { connectionState } = useRealtimeEvents();
@@ -277,6 +286,17 @@ export default function AdminActivity() {
               Realtime Updates
             </div>
             <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
+            {sessionsSource.canRevealHidden ? (
+              <button
+                type="button"
+                onClick={() => setShowHiddenSessions((shown) => !shown)}
+                className="text-muted-foreground hover:text-primary block w-full text-right text-[11px] transition-colors"
+              >
+                {showHiddenSessions
+                  ? "Hide sessions delivering nothing"
+                  : `Show ${sessionsSource.hiddenCount} delivering nothing`}
+              </button>
+            ) : null}
             {sessionsSource.label ? (
               <span className="text-muted-foreground text-[11px]" title={sessionsSource.detail}>
                 {sessionsSource.label}
