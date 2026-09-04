@@ -219,16 +219,6 @@ var retrySafetyValues = map[string]bool{
 // classifies its rows. TODO(api-v2/wave1-idempotency): empty this list and
 // delete it together with retrySafetyExempt.
 var retrySafetyUnclassifiedGroups = map[string]bool{
-	"/":                                 true,
-	"/api/v1":                           true,
-	adminRouteGroup:                     true,
-	"/api/v1/admin/diagnostics/reports": true,
-	"/api/v1/admin/jobs":                true,
-	"/api/v1/admin/libraries/{libraryID}/collection-groups": true,
-	"/api/v1/admin/nodes":            true,
-	"/api/v1/admin/policy":           true,
-	"/api/v1/admin/rate-limits":      true,
-	"/api/v1/admin/tasks":            true,
 	"/api/v1/audio-prefs":            true,
 	"/api/v1/collections":            true,
 	"/api/v1/downloads":              true,
@@ -236,7 +226,6 @@ var retrySafetyUnclassifiedGroups = map[string]bool{
 	"/api/v1/favorites":              true,
 	"/api/v1/history":                true,
 	"/api/v1/home/dismissals":        true,
-	"/api/v1/libraries":              true,
 	"/api/v1/library-playback-prefs": true,
 	"/api/v1/markers":                true,
 	"/api/v1/notifications":          true,

@@ -823,6 +823,10 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 		e := entryWhere(t, doc, isMarked)
 		e["disposition"] = DispositionCompatibilityOnly
 		e["disposition_rule"] = "maintainer_decision"
+		// Drop the retry classification too, so the concurrency review rule
+		// is what fails rather than the schema's retry_safety placement.
+		delete(e, "retry_safety")
+		delete(e, "retry_safety_note")
 	}), "only for tier-1 ported rows")
 	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
 		e := entryWhere(t, doc, func(e map[string]any) bool {
@@ -1017,18 +1021,16 @@ func TestRetrySafetyPlacement(t *testing.T) {
 			t.Errorf("wave-1 group %s is still on the temporary unclassified allow-list", g)
 		}
 	}
-	// The /api/v1/admin group is split: its api-keys and devices paths are
-	// classified, the rest is still exempt.
+	// The /api/v1/admin group is fully classified: neither its api-keys
+	// paths nor the rest of the group is exempt any more.
 	admin := Entry{Tier: 1, Disposition: DispositionPorted}
 	admin.Method = http.MethodPost
 	admin.RouteGroup = adminRouteGroup
-	admin.Path = "/api/v1/admin/api-keys"
-	if retrySafetyExempt(admin) {
-		t.Error("/api/v1/admin/api-keys must not be exempt")
-	}
-	admin.Path = "/api/v1/admin/users"
-	if !retrySafetyExempt(admin) {
-		t.Error("/api/v1/admin/users is still exempt until its group is classified")
+	for _, p := range []string{"/api/v1/admin/api-keys", "/api/v1/admin/users"} {
+		admin.Path = p
+		if retrySafetyExempt(admin) {
+			t.Errorf("%s must not be exempt", p)
+		}
 	}
 	// The required direction, against a row in a group the allow-list does
 	// not cover: the real ledger cannot carry such a row while the list is
