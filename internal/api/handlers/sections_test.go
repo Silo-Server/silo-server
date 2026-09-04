@@ -143,6 +143,7 @@ func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
 				ContentID: "episode-1",
 				Type:      "episode",
 				Title:     "Dumbston Checks In",
+				Tagline:   "A short featured quote.",
 				Status:    "matched",
 			}},
 		},
@@ -163,6 +164,9 @@ func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
 	}
 	if item.EpisodeNumber == nil || *item.EpisodeNumber != 1 {
 		t.Fatalf("episode number = %v, want 1", item.EpisodeNumber)
+	}
+	if item.Tagline != "A short featured quote." {
+		t.Fatalf("tagline = %q, want %q", item.Tagline, "A short featured quote.")
 	}
 }
 

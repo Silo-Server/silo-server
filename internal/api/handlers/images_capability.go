@@ -49,10 +49,31 @@ type imagesCapabilityResponse struct {
 	// OriginalMaxWidthPx bounds the "original" size: cached originals are
 	// downscaled to this on ingest, so asking for original never yields more.
 	OriginalMaxWidthPx int `json:"original_max_width_px"`
+	// TextlessPoster is present only when the viewer-facing endpoint is wired
+	// in this deployment. Clients feature-detect it instead of guessing from a
+	// server version.
+	TextlessPoster *textlessPosterCapability `json:"textless_poster,omitempty"`
+}
+
+type textlessPosterCapability struct {
+	Endpoint       string   `json:"endpoint"`
+	SupportedTypes []string `json:"supported_types"`
 }
 
 // HandleImagesCapability reports the image_size contract.
 func HandleImagesCapability(w http.ResponseWriter, r *http.Request) {
+	handleImagesCapability(w, false)
+}
+
+// NewImagesCapabilityHandler returns a capability handler whose optional
+// fields reflect the routes actually wired by this deployment.
+func NewImagesCapabilityHandler(textlessPosterEnabled bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		handleImagesCapability(w, textlessPosterEnabled)
+	}
+}
+
+func handleImagesCapability(w http.ResponseWriter, textlessPosterEnabled bool) {
 	widths := make(map[string]imageSizeWidths, len(imageTypesWithWidths))
 	for _, imageType := range imageTypesWithWidths {
 		widths[imageType] = imageSizeWidths{
@@ -62,14 +83,22 @@ func HandleImagesCapability(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(imagesCapabilityResponse{
+	response := imagesCapabilityResponse{
 		SchemaVersion:      1,
 		Param:              imagesize.QueryParam,
 		Sizes:              imagesize.All,
 		Widths:             widths,
 		OriginalMaxWidthPx: imageutil.MaxCachedOriginalDimension,
-	})
+	}
+	if textlessPosterEnabled {
+		response.TextlessPoster = &textlessPosterCapability{
+			Endpoint:       "/api/v1/catalog/items/{id}/images/textless-poster",
+			SupportedTypes: []string{textlessPosterMovieType, textlessPosterSeriesType},
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // variantWidthPx reports the pixel width a size resolves to for an image type.

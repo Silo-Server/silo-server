@@ -89,12 +89,46 @@ GET /api/v1/images/capability
     "logo": { "small": 500, "medium": 500, "large": 1280 },
     "profile": { "small": 300, "medium": 500, "large": 500 }
   },
-  "original_max_width_px": 1920
+  "original_max_width_px": 1920,
+  "textless_poster": {
+    "endpoint": "/api/v1/catalog/items/{id}/images/textless-poster",
+    "supported_types": ["movie", "series"]
+  }
 }
 ```
 
 A `404` here means the server predates `image_size`. Keep using the server's
 defaults rather than sending a parameter it will ignore.
+
+`textless_poster` is optional and appears only when the deployment has wired
+the provider-backed viewer route. Mobile clients should use it for portrait
+featured cards and fall back to the item's normal poster/backdrop when the
+field is absent or the response has no `poster_url`.
+
+## Textless featured poster
+
+```http
+GET /api/v1/catalog/items/{id}/images/textless-poster
+```
+
+```json
+{
+  "poster_url": "https://example.invalid/resolved-provider-image"
+}
+```
+
+The route is authenticated and applies the same library/content-rating scope
+as catalog item detail before contacting metadata providers. It supports movie
+and series items. Selection prefers an explicit provider
+`includes_text=false` signal, then a provider's language-neutral portrait
+poster when the provider does not expose that flag. A successful response may
+omit `poster_url` when no textless portrait exists; that is a normal client
+fallback state, not a missing item.
+
+Selected provider paths are cached in a bounded in-process cache and concurrent
+misses for the same item are collapsed. Returned provider paths are resolved
+with the `featured` variant at response time so expiring URLs are not retained
+in that cache.
 
 ## Fallback while artwork is being regenerated
 

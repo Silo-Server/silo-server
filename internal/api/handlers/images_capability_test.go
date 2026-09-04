@@ -27,6 +27,9 @@ func TestHandleImagesCapability(t *testing.T) {
 	if got.SchemaVersion != 1 {
 		t.Errorf("schema_version = %d, want 1", got.SchemaVersion)
 	}
+	if got.TextlessPoster != nil {
+		t.Errorf("textless_poster = %+v, want omitted when route is unavailable", got.TextlessPoster)
+	}
 	if got.Param != "image_size" {
 		t.Errorf("param = %q, want image_size", got.Param)
 	}
@@ -69,5 +72,27 @@ func TestHandleImagesCapability(t *testing.T) {
 	}
 	if got.Widths["logo"].Large != 1280 {
 		t.Errorf("logo large width = %d, want 1280", got.Widths["logo"].Large)
+	}
+}
+
+func TestImagesCapabilityAdvertisesWiredTextlessPosterRoute(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewImagesCapabilityHandler(true)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/images/capability", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got imagesCapabilityResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.TextlessPoster == nil {
+		t.Fatal("textless_poster is missing")
+	}
+	if got.TextlessPoster.Endpoint != "/api/v1/catalog/items/{id}/images/textless-poster" {
+		t.Errorf("endpoint = %q", got.TextlessPoster.Endpoint)
+	}
+	if len(got.TextlessPoster.SupportedTypes) != 2 || got.TextlessPoster.SupportedTypes[0] != "movie" || got.TextlessPoster.SupportedTypes[1] != "series" {
+		t.Errorf("supported_types = %v, want [movie series]", got.TextlessPoster.SupportedTypes)
 	}
 }
