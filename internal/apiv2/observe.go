@@ -20,9 +20,9 @@ import (
 
 // Observability for the v2 listener. Every v2 request is counted, timed and
 // logged once, here, with labels that are stable across releases and bounded
-// in cardinality: the operation ID (never the raw path), the status class,
-// the problem type identifier, the credential class, and a capped client
-// identity. The v1 request logger and metrics middleware skip the /api/v2/
+// in cardinality: the operation ID (never the raw path), the method folded
+// into the fixed standard set, the status class, the problem type
+// identifier, the credential class, and a capped client identity. The v1 request logger and metrics middleware skip the /api/v2/
 // subtree so a v2 request is not recorded twice with two label vocabularies.
 //
 // Nothing here logs a URL, a query string, a header value other than the
@@ -51,7 +51,8 @@ const (
 	// authClassAnonymous labels a gated operation that established no identity
 	// (no credential, or one the gate refused).
 	authClassAnonymous = "anonymous"
-	// labelOther replaces a client name once the bounded set is full.
+	// labelOther replaces a client name once the bounded set is full, and a
+	// request method outside the standard set.
 	labelOther = "other"
 	// maxClientLabelValues bounds the client label's distinct values per
 	// process; anything past it is labelOther. Logs keep the clamped value.
@@ -151,8 +152,9 @@ func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter 
 func report(r *http.Request, o *observation, status int, elapsed time.Duration) {
 	name, version := clientIdentity(r)
 	major := strconv.Itoa(APIMajor)
-	requestsTotal.WithLabelValues(major, o.operationID, r.Method, statusClass(status), o.errorCode, o.authClass, clientLabel(name)).Inc()
-	requestDuration.WithLabelValues(major, o.operationID, r.Method).Observe(elapsed.Seconds())
+	method := methodLabel(r.Method)
+	requestsTotal.WithLabelValues(major, o.operationID, method, statusClass(status), o.errorCode, o.authClass, clientLabel(name)).Inc()
+	requestDuration.WithLabelValues(major, o.operationID, method).Observe(elapsed.Seconds())
 	if o.errorCode == TypeValidationFailed.ID {
 		validationFailures.WithLabelValues(o.operationID).Inc()
 	}
@@ -162,7 +164,7 @@ func report(r *http.Request, o *observation, status int, elapsed time.Duration) 
 		"request_id", requestIDFrom(r.Context()),
 		labelAPIMajor, APIMajor,
 		labelOperationID, o.operationID,
-		labelMethod, r.Method,
+		labelMethod, method,
 		"path_pattern", o.pathPattern,
 		"status", status,
 		labelStatusClass, statusClass(status),
@@ -181,6 +183,20 @@ func report(r *http.Request, o *observation, status int, elapsed time.Duration) 
 		attrs = append(attrs, "user_id", *o.userID)
 	}
 	slog.InfoContext(r.Context(), "apiv2 request", attrs...)
+}
+
+// methodLabel folds the request method into a bounded label. The observe
+// middleware runs ahead of routing, so it also records the 404 and 405
+// fallbacks, and chi routes any syntactically valid method token to the
+// latter: an unauthenticated caller could otherwise mint a fresh series per
+// invented method. Only the standard methods keep their name; the rest are
+// labelOther, in the metric and in the log line alike.
+func methodLabel(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return method
+	}
+	return labelOther
 }
 
 // statusClass buckets a status for the metric label. A response that was

@@ -176,3 +176,48 @@ func TestClientLabelIsBounded(t *testing.T) {
 	}
 	_ = context.Background()
 }
+
+func TestMethodLabelIsBounded(t *testing.T) {
+	h := newTestHandler(t, Dependencies{})
+	for _, m := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions} {
+		if got := methodLabel(m); got != m {
+			t.Errorf("methodLabel(%q) = %q", m, got)
+		}
+	}
+	if got := methodLabel("BREW"); got != labelOther {
+		t.Fatalf("methodLabel(BREW) = %q", got)
+	}
+
+	// The router answers an invented method with the 405 fallback; the
+	// series it lands on carries "other", and no series names the method.
+	buf := captureLogs(t)
+	labels := prometheus.Labels{"api_major": "2", "operation_id": "none", "method": labelOther,
+		"status_class": "4xx", "error_code": TypeMethodNotAllowed.ID, "auth_class": "anonymous", "client": "none"}
+	before := counterValue(t, requestsTotal, labels)
+	rec := do(t, h, "BREW", "/api/v2/system/info", "", nil)
+	requireProblem(t, rec, TypeMethodNotAllowed)
+	if after := counterValue(t, requestsTotal, labels); after != before+1 {
+		t.Fatalf("other-method series: %v -> %v", before, after)
+	}
+	for _, vec := range []prometheus.Collector{requestsTotal, requestDuration} {
+		ch := make(chan prometheus.Metric)
+		go func() {
+			vec.Collect(ch)
+			close(ch)
+		}()
+		for metric := range ch {
+			var m dto.Metric
+			if err := metric.Write(&m); err != nil {
+				t.Fatal(err)
+			}
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == labelMethod && lp.GetValue() == "BREW" {
+					t.Fatalf("series minted for raw method: %v", metric.Desc())
+				}
+			}
+		}
+	}
+	if line := buf.String(); !strings.Contains(line, `"method":"other"`) || strings.Contains(line, "BREW") {
+		t.Errorf("log line for an invented method: %s", line)
+	}
+}
