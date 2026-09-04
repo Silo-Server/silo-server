@@ -4,8 +4,7 @@ import type { PlayerSubtitleInfo } from "../types";
 import { isASSCodec, isBitmapCodec } from "../utils/subtitleCodecs";
 import { toMediaTime } from "../utils/mediaTimeline";
 
-// Each subtitle fetch covers this many source-time seconds. Matches the
-// server's default `?duration=`; if you raise one, raise the other.
+// Explicitly bound each subtitle fetch to this many source-time seconds.
 const WINDOW_DURATION = 600;
 // Start fetching the next window this many seconds before the current
 // one's requested end, so the new cues are already on hand by the time
@@ -25,6 +24,7 @@ const FETCH_STALL_TIMEOUT_MS = 30_000;
 // Wait this long after a failed window fetch before retrying, so a
 // persistently failing extraction doesn't turn timeupdate into a fetch storm.
 const FETCH_RETRY_BACKOFF_MS = 5_000;
+const FETCH_RETRY_MAX_BACKOFF_MS = 60_000;
 
 /**
  * Cues (in source time) and window coverage snapshotted from a track that is
@@ -73,10 +73,10 @@ function addCuesToTrack(
   }
 }
 
-/** Append or replace the `position` query param on a subtitle URL. */
+/** Request the same bounded interval used by the coverage tracker. */
 function appendPosition(url: string, position: number): string {
   const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}position=${position}`;
+  return `${url}${sep}position=${position}&duration=${WINDOW_DURATION}`;
 }
 
 /**
@@ -241,6 +241,7 @@ export function useSubtitleTracks(
     // Set on a failed (errored or stalled) window fetch; maybeFetch waits out
     // a short backoff before retrying the uncovered range.
     let lastFetchFailureAt = 0;
+    let retryDelay = 0;
 
     function handleCueChange() {
       const active = track.activeCues;
@@ -365,6 +366,8 @@ export function useSubtitleTracks(
         if (succeeded && !cancelled && !superseded) {
           onLoadStateRef.current?.("ready");
           hasFetched = true;
+          retryDelay = 0;
+          lastFetchFailureAt = 0;
           // Commit coverage only after the whole window streamed in. A
           // failed or stalled fetch must leave the range uncovered, or the
           // gap would read as fetched and never be retried — subtitles
@@ -384,7 +387,11 @@ export function useSubtitleTracks(
           // seek superseding this fetch — back off before retrying.
           lastFetchFailureAt = Date.now();
           onLoadStateRef.current?.("error");
-          retryTimer = setTimeout(maybeFetch, FETCH_RETRY_BACKOFF_MS);
+          retryDelay = Math.min(
+            retryDelay ? retryDelay * 2 : FETCH_RETRY_BACKOFF_MS,
+            FETCH_RETRY_MAX_BACKOFF_MS,
+          );
+          retryTimer = setTimeout(maybeFetch, retryDelay);
         }
       }
     }
@@ -417,8 +424,7 @@ export function useSubtitleTracks(
         fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
         return;
       }
-      if (lastFetchFailureAt > 0 && Date.now() - lastFetchFailureAt < FETCH_RETRY_BACKOFF_MS)
-        return;
+      if (lastFetchFailureAt > 0 && Date.now() - lastFetchFailureAt < retryDelay) return;
       if (!hasFetched) {
         fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
         return;

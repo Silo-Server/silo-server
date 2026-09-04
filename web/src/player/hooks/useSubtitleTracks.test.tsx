@@ -190,7 +190,8 @@ describe("useSubtitleTracks", () => {
     });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=1398");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=1398&duration=600");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("token=abc");
   });
 
   it("resets and refetches on a forward seek past the covered window", async () => {
@@ -284,6 +285,50 @@ describe("useSubtitleTracks", () => {
     } finally {
       nowSpy.mockRestore();
       errorSpy.mockRestore();
+    }
+  });
+
+  it("backs off repeated failures, caps the delay, and resets after recovery", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchMock.mockRejectedValue(new Error("extractor unavailable"));
+    const { videoRef, unmount } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      let attempts = 1;
+      for (const delay of [5000, 10000, 20000, 40000, 60000, 60000]) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(delay - 1);
+          videoRef.current!.dispatchEvent(new Event("timeupdate"));
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(attempts);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(++attempts);
+      }
+      fetchMock.mockResolvedValueOnce(
+        vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nrecovered\n\n"),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(createdTracks[0]!.cues).toHaveLength(1);
+      await act(async () => {
+        videoRef.current!.currentTime = 580;
+        videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      });
+      const beforeRetry = fetchMock.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(beforeRetry + 1);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
     }
   });
 

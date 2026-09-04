@@ -220,6 +220,7 @@ export function useASSSubtitles(
         await Promise.race([initJASSUB(controller.signal, progress), stalled]);
       } catch (err) {
         if (cancelled) return;
+        attemptController.abort();
         console.error("[useASSSubtitles] Unable to load subtitles:", err);
         jassubRef.current?.destroy();
         jassubRef.current = null;

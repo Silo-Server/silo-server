@@ -268,7 +268,11 @@ func TestConformanceMatrixEmbeddedWireBodiesSatisfySchemas(t *testing.T) {
 // are published as server output, so a hand-edit here would hand every client a
 // body the server never produced.
 func TestVendoredFixturesMatchGolden(t *testing.T) {
-	for name := range fixtureSchemasV3 {
+	for _, fixture := range mustGlob(t, filepath.Join(goldenRootV3, "*.json")) {
+		name := filepath.Base(fixture)
+		if slices.Contains(nonWireGoldenFixturesV3, name) {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 			vendored := mustReadFile(t, filepath.Join(schemaRootV3, "v3", "fixtures", "valid", name))
 			golden := mustReadFile(t, filepath.Join(goldenRootV3, name))

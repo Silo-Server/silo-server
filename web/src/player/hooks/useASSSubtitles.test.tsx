@@ -256,6 +256,48 @@ describe("ASS subtitle loading recovery", () => {
     }
   });
 
+  it("aborts a pending font request after failure and fetches fresh fonts on retry", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const track = { ...attachedFontTrack, font_bundle_url: "/fonts/retry-after-failure" };
+    let fontSignal: AbortSignal | undefined;
+    let fontRequests = 0;
+    let subtitleRequests = 0;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input) === track.font_bundle_url) {
+        if (++fontRequests > 1) return Promise.resolve(mockFontBundleResponse("fresh-font"));
+        fontSignal = init?.signal as AbortSignal;
+        return new Promise((_, reject) => {
+          fontSignal!.addEventListener("abort", () =>
+            reject(new DOMException("cancelled", "AbortError")),
+          );
+        });
+      }
+      if (++subtitleRequests === 1) return Promise.reject(new Error("extraction failed"));
+      return Promise.resolve(mockFetchResponse("[Script Info]"));
+    });
+    const videoRef = makeVideoRef();
+    const { unmount } = renderHook(() =>
+      useASSSubtitles(videoRef, [track], track.index, false, 0, 0),
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fontSignal?.aborted).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(fontRequests).toBe(2);
+      expect(constructorOpts).toHaveLength(1);
+      expect(constructorOpts[0]!.fonts).toEqual([expect.any(Uint8Array)]);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("discards an old track response after subtitles are switched off", async () => {
     let resolve!: (response: Response) => void;
     vi.mocked(fetch).mockReturnValueOnce(
