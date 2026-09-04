@@ -12,13 +12,25 @@ import (
 )
 
 func TestNativeSubtitleFailureFallsBackWithoutChangingVideoAndStaysDisabled(t *testing.T) {
+	for name, features := range map[string][]string{
+		"canonical":             {playback.FeatureEmbeddedSubtitlesV3},
+		"normalized_duplicates": {playback.FeatureEmbeddedSubtitlesV3, " EMBEDDED_SUBTITLES_V1 ", "Embedded_Subtitles_V1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertNativeSubtitleFailureFallsBackAndStaysDisabled(t, features)
+		})
+	}
+}
+
+func assertNativeSubtitleFailureFallsBackAndStaysDisabled(t *testing.T, features []string) {
+	t.Helper()
 	file := v3HandlerFixtureFile(t)
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 3, ContainerTrackID: "4", Codec: "mov_text", Language: "eng"}}
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	start := v3HandlerStartRequest()
-	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3)
+	start.ClientFeatures = append(start.ClientFeatures, features...)
 	start.SubtitleTrackIndex = new(0)
 	start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", 0)
 	caps := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]

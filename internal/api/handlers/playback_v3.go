@@ -4539,7 +4539,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// an attempt. Keep a confirmed failure disabled even when a later client
 	// replan resends its full capability/feature advertisement.
 	if !playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3) || req.Failure.Classification == "subtitle_embedded_failed" {
-		start.ClientFeatures = slices.DeleteFunc(slices.Clone(start.ClientFeatures), func(feature string) bool { return feature == playback.FeatureEmbeddedSubtitlesV3 })
+		start.ClientFeatures = slices.DeleteFunc(slices.Clone(start.ClientFeatures), func(feature string) bool {
+			return strings.EqualFold(strings.TrimSpace(feature), playback.FeatureEmbeddedSubtitlesV3)
+		})
 	}
 	requestedFallbackID := record.EffectiveMediaFileID
 	effectiveFallbackID := record.RequestedMediaFileID
