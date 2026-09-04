@@ -886,6 +886,40 @@ Before 1.0, the project publishes the v2 OpenAPI document, the v1-to-v2 operatio
 migration guide, and the bridge/retirement dates. The alpha v1 contract does not receive a
 post-1.0 deprecation window, but its removal must not be a surprise.
 
+### Pilot slice
+
+Phase 3 ports five operations before any domain section, one per foundation class, so the
+foundation is proven on real v1 behavior rather than on probes. Each pilot calls the same
+service layer as its v1 handler; v1 stays byte-identical and fully served.
+
+| Operation | v2 | v1 | Proves |
+| --- | --- | --- | --- |
+| `getSetupStatus` | `GET /api/v2/system/setup` | `GET /api/v1/auth/setup` | `public` discovery |
+| `getCurrentUser` | `GET /api/v2/account/me` | `GET /api/v1/auth/me` | `authenticated`, no profile |
+| `listProgress` | `GET /api/v2/progress` | `GET /api/v1/progress/` | `profile_scoped` read with query parameters and cursor pagination |
+| `updateProfile` | `PATCH /api/v2/profiles/{id}` | `PUT /api/v1/profiles/{id}` | `profile_scoped` JSON mutation with a path parameter |
+| `listAdminUsers` | `GET /api/v2/admin/users` | `GET /api/v1/admin/users` | `acting_admin`, demo-guarded; nullable, instant, and enum fields |
+
+Two findings from the pilot are now settled for every later section:
+
+- **PATCH semantics.** A v1 full-replacement `PUT` becomes a `PATCH` whose members are all
+  optional: an omitted member is unchanged, and explicit `null` clears a member only where the
+  schema admits clearing (for `updateProfile`: avatar, PIN, content-rating ceiling, languages,
+  playback ceiling). `null` on any other member is a `422` `validation_failed` naming the member.
+  Because Huma treats `null` on an optional member as absent, the distinction is enforced from the
+  raw body. The pilot mutation is naturally idempotent and is not `If-Match` protected;
+  optimistic concurrency stays opt-in per operation.
+- **Cursor pagination replaces offset.** `listProgress` takes `limit` (default 50, maximum 200)
+  and an opaque `cursor` bound to the operation, account, profile, filters, and sort; `offset`
+  and the v1 `since` parameter are refused with the unknown-query-parameter `422`. The v1
+  `?since=` delta pull is a separate operation for a later section, not a mode of `listProgress`.
+  Bounded collections such as `listAdminUsers` return `{items}` with no page object.
+
+The pilot ledger rows record the remaining v1 divergences: enums are strict (no `4K`/`UHD`
+aliases), every string member of a profile is always emitted, ids are string `ID`s, and instants
+are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
+`<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;
