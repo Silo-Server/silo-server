@@ -497,9 +497,6 @@ func (s *Service) applyResult(
 	completedAt := time.Now().UTC()
 
 	status := "success"
-	if unmatched > 0 {
-		status = "warning"
-	}
 	// Report the full source size as the denominator so users see
 	// "Matched 10 of 200" rather than "Matched 10 of 10" when the limit
 	// truncated mid-source; the trailing clause exposes the actual scan depth.
