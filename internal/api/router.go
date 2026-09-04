@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/branding"
@@ -1869,6 +1870,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// probes (/ping, /healthcheck, /status, etc.) don't collide with the
 	// SPA fallback. Same pattern as the Jellyfin compat listener on 8096.
 
+	// The native v2 API. The subtree is handed to the sealed apiv2 listener
+	// with a single wildcard registration the route inventory records as a
+	// delegation; every operation behind it is described by
+	// contracts/api/v2/openapi.json, not by an inventory row. All v2
+	// operations register at build regardless of the wiring here: a gate the
+	// wiring lacks makes its operations fail closed, never disappear.
+	r.Handle("/api/v2/*", apiv2.NewHandler(v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)))
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)
 		r.Get("/ready", readyHandler.ServeHTTP)
@@ -3490,8 +3499,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 // two drift, and a drifted copy is exactly how a broken writer chain passes its
 // own tests (see the §4.4 conformance requirement in the stream-telemetry design).
 func useBaseMiddleware(r chi.Router, deps Dependencies) {
-	// Standard middleware.
-	r.Use(middleware.RequestID)
+	// Server-generated request ID; never adopts a client-supplied one.
+	r.Use(apimw.RequestID)
 
 	// Client IP resolution must run before request logging.
 	if deps.ClientIPResolver != nil {
@@ -3951,4 +3960,40 @@ func metadataAIConfigFromServer(cfg *config.Config) metadatatranslation.Config {
 		ChatModel:  cfg.AI.ChatModel,
 		OnView:     cfg.MetadataAI.OnView,
 	}
+}
+
+// v2Dependencies assembles the gates the v2 listener composes onto its
+// operations from the same middleware values the v1 groups use, so the two
+// surfaces cannot drift in authorization strength.
+func v2Dependencies(
+	deps Dependencies,
+	auth *apimw.AuthMiddleware,
+	viewer *apimw.ViewerAccessMiddleware,
+	actingAdmin func(http.Handler) http.Handler,
+	metadataCuration func(http.Handler) http.Handler,
+	markerEdit func(http.Handler) http.Handler,
+	settings catalog.SettingsStore,
+) apiv2.Dependencies {
+	out := apiv2.Dependencies{
+		Auth:            auth,
+		ViewerAccess:    viewer,
+		ActingAdmin:     actingAdmin,
+		PermissionGates: map[string]func(http.Handler) http.Handler{},
+	}
+	if metadataCuration != nil {
+		out.PermissionGates[policy.PermissionMetadataCuration] = metadataCuration
+	}
+	if markerEdit != nil {
+		out.PermissionGates[policy.PermissionMarkerEdit] = markerEdit
+	}
+	if settings != nil {
+		out.DemoSettings = settings
+	}
+	if deps.RateLimitMW != nil {
+		out.RateLimit = deps.RateLimitMW.Handler
+	}
+	if deps.Config != nil {
+		out.CursorSecret = []byte(deps.Config.Auth.JWTSecret)
+	}
+	return out
 }
