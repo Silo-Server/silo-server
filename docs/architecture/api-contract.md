@@ -298,6 +298,21 @@ The foundation is `internal/apiv2`. Four facts about it are not derivable from t
   registry declares. The wildcard covers `/api/v2/` and everything under it; the namespace root
   `/api/v2`, with no trailing slash, is outside the v2 surface and is answered by the legacy
   listener like any other unrouted path.
+- **The artifact.** `cmd/apiv2-openapi` renders `contracts/api/v2/openapi.json` from the
+  registries alone (`apiv2.GenerateOpenAPI`; no database, network, credentials or
+  environment), the binary embeds the committed bytes, `GET /api/v2/openapi.json`
+  (`getOpenAPIDocument`, an ordinary public operation) serves them unchanged, and
+  `/api/v2/system/info` reports their SHA-256. `make verify-apiv2-openapi` byte-compares a
+  fresh generation; `make verify-apiv2-contract` runs the spec lint and the pinned oasdiff
+  policy (`internal/contractspec`): pre-lock, a breaking change against the merge base needs
+  an exact entry — operation id, rule id, fingerprint — in
+  `contracts/api/v2/breaking-approvals.json`; once `contracts/api/v2/LOCKED` exists no entry
+  applies. `TestCommittedArtifactMatchesRouter` reconciles the assembled router with the
+  committed artifact plus the typed manual registry of raw handshakes (`apiv2.RawHandshake`,
+  empty today), in both directions. The root `/health`, `/ready` and unauthenticated
+  `/metrics` probes are operator-facing and deliberately absent from the artifact and from
+  generated native clients; deployments restrict their exposure through proxy or network
+  policy.
 - **The body read timeout.** `apiv2.BodyReadTimeout` is the server's 30 s `ReadTimeout`
   baseline, not Huma's 5 s default. Ratified on #135, 2026-09-02; the constant is the one
   place to change it.

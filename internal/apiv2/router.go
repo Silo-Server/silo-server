@@ -75,9 +75,6 @@ type Dependencies struct {
 	bodyReadTimeout time.Duration
 	// testRegister registers probe operations; tests only.
 	testRegister func(*Registry)
-	// testRawHandshakes are manual-registry entries a test adds alongside a
-	// raw route it registers itself; tests only.
-	testRawHandshakes []RawHandshake
 }
 
 // sealedHandler is what NewHandler hands out: the finished router behind an

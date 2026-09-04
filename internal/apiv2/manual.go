@@ -1,5 +1,12 @@
 package apiv2
 
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+)
+
 // RawHandshake is a v2 route the listener serves outside Huma: a protocol
 // upgrade or a raw client handshake whose exchange no request/response
 // schema describes. Every such route is listed here so the route/spec
@@ -22,9 +29,50 @@ type RawHandshake struct {
 // the operation's section.
 var rawHandshakes = []RawHandshake{}
 
-// RawHandshakes lists the manual registry, plus any test-only entries the
-// wiring carries.
-func RawHandshakes(deps Dependencies) []RawHandshake {
-	out := append([]RawHandshake(nil), rawHandshakes...)
-	return append(out, deps.testRawHandshakes...)
+// RawHandshakes lists the manual registry.
+func RawHandshakes() []RawHandshake {
+	return append([]RawHandshake(nil), rawHandshakes...)
+}
+
+// reconcileSpec compares the routes a router serves with the operations a
+// committed OpenAPI document describes plus the manual registry. It returns
+// the served routes no document or registry entry accounts for, and the
+// documented or registered routes the router does not serve. Both must be
+// empty: a structured route cannot bypass Huma, and the artifact cannot
+// describe a route the binary does not serve.
+func reconcileSpec(observed []string, doc []byte, handshakes []RawHandshake) (unaccounted, unserved []string, err error) {
+	var parsed struct {
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
+	}
+	if err := json.Unmarshal(doc, &parsed); err != nil {
+		return nil, nil, err
+	}
+	expected := map[string]string{}
+	for path, item := range parsed.Paths {
+		for method := range item {
+			expected[strings.ToUpper(method)+" "+path] = "openapi.json"
+		}
+	}
+	for _, h := range handshakes {
+		key := h.Method + " " + h.Path
+		if prev, dup := expected[key]; dup {
+			return nil, nil, fmt.Errorf("%s is both a %s entry and a manual-registry entry", key, prev)
+		}
+		expected[key] = "manual registry"
+	}
+	served := map[string]bool{}
+	for _, o := range observed {
+		served[o] = true
+		if _, ok := expected[o]; !ok {
+			unaccounted = append(unaccounted, o)
+		}
+	}
+	for key := range expected {
+		if !served[key] {
+			unserved = append(unserved, key+" ("+expected[key]+")")
+		}
+	}
+	sort.Strings(unaccounted)
+	sort.Strings(unserved)
+	return unaccounted, unserved, nil
 }

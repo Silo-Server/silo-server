@@ -157,6 +157,75 @@ func TestRuntimeReconcile(t *testing.T) {
 	}
 }
 
+// TestCommittedArtifactMatchesRouter is the route/spec reconciliation over
+// the production wiring: every route the real assembled router serves is an
+// operation in the COMMITTED contracts/api/v2/openapi.json or a manual
+// registry entry, and vice versa. A stale artifact fails here as well as in
+// make verify-apiv2-openapi.
+func TestCommittedArtifactMatchesRouter(t *testing.T) {
+	observed, err := routeinventory.Observed(newChiRouter(Dependencies{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, RawHandshakes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range unaccounted {
+		t.Errorf("served but in neither openapi.json nor the manual registry: %s", r)
+	}
+	for _, r := range unserved {
+		t.Errorf("documented but not served: %s", r)
+	}
+	generated, err := GenerateOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated, contracts.OpenAPI) {
+		t.Fatal("contracts/api/v2/openapi.json is stale; run make apiv2-openapi")
+	}
+	if len(RawHandshakes()) != 0 {
+		t.Fatalf("the manual registry is expected to be empty until a raw handshake is ratified: %+v", RawHandshakes())
+	}
+}
+
+// TestReconcileSpecSeeded proves the reconciliation fires in each direction
+// and that a manual-registry entry accounts for a raw route: the one
+// test-only entry the placeholder registry carries.
+func TestReconcileSpecSeeded(t *testing.T) {
+	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
+	observed := []string{"GET " + Prefix + "/openapi.json", "GET " + Prefix + "/system/info"}
+
+	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
+	if err != nil || len(unaccounted) != 0 || len(unserved) != 0 {
+		t.Fatalf("baseline: %v %v %v", unaccounted, unserved, err)
+	}
+	// A raw route the router serves but nothing describes.
+	unaccounted, _, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, nil)
+	if len(unaccounted) != 1 || unaccounted[0] != "GET "+ws.Path {
+		t.Fatalf("raw route not reported: %v", unaccounted)
+	}
+	// The same route with its manual-registry entry.
+	unaccounted, unserved, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, []RawHandshake{ws})
+	if len(unaccounted) != 0 || len(unserved) != 0 {
+		t.Fatalf("manual entry did not account for the raw route: %v %v", unaccounted, unserved)
+	}
+	// A manual entry for a route nobody serves is reported.
+	_, unserved, _ = reconcileSpec(observed, contracts.OpenAPI, []RawHandshake{ws})
+	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+ws.Path) {
+		t.Fatalf("unserved manual entry not reported: %v", unserved)
+	}
+	// A documented operation the router does not serve (stale artifact).
+	_, unserved, _ = reconcileSpec(observed[:1], contracts.OpenAPI, nil)
+	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+Prefix+"/system/info") {
+		t.Fatalf("stale artifact not reported: %v", unserved)
+	}
+	// A route cannot be both.
+	if _, _, err := reconcileSpec(observed, contracts.OpenAPI, []RawHandshake{{Method: http.MethodGet, Path: Prefix + "/system/info"}}); err == nil {
+		t.Fatal("an operation doubling as a manual entry was accepted")
+	}
+}
+
 // TestDeterministicRegistration: the route table does not depend on the
 // wiring; missing gates fail closed at request time.
 func TestDeterministicRegistration(t *testing.T) {
