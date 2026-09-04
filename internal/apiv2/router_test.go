@@ -518,8 +518,8 @@ func TestOpenAPIDocumentIsTheEmbeddedArtifact(t *testing.T) {
 }
 
 // TestGenerateOpenAPIIsDeterministic: two generations in one process and the
-// document's own hygiene rules (no servers, no examples, nothing
-// build-specific).
+// document's own hygiene rules (no servers, nothing build-specific; schema
+// examples are fictional fixture-shaped values and are allowed).
 func TestGenerateOpenAPIIsDeterministic(t *testing.T) {
 	a, err := GenerateOpenAPI()
 	if err != nil {
@@ -541,7 +541,7 @@ func TestGenerateOpenAPIIsDeterministic(t *testing.T) {
 			t.Errorf("document carries %q", forbidden)
 		}
 	}
-	for _, needle := range []string{"\"example\"", "\"examples\"", "/Users/", "/home/", "localhost"} {
+	for _, needle := range []string{"/Users/", "/home/", "localhost"} {
 		if bytes.Contains(a, []byte(needle)) {
 			t.Errorf("document contains %s", needle)
 		}
