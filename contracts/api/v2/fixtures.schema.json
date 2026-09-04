@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siloserver.org/contracts/api/v2/fixtures.schema.json",
+  "title": "Native API v2 contract fixture index",
+  "description": "Index of the committed request/response fixtures under contracts/api/v2/fixtures. Every entry is generated through the real v2 router by TestContractFixtures in internal/apiv2 (make apiv2-fixtures); the bodies are validated against the committed OpenAPI artifact by internal/contractspec. Fixtures are public: synthetic identities and reserved origins only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fixtures"],
+  "properties": {
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fixture" }
+    }
+  },
+  "$defs": {
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "operation_id", "scenario", "request", "expected_status", "response_headers", "response_media_type", "schema", "body_file"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Fixture name; body_file is <name>.json."
+        },
+        "operation_id": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][A-Za-z0-9]*$",
+          "description": "The contract operation the request targets, or null when the fixture shows an envelope produced without a contract operation: a router fallback, or a probe operation that exists only in the server's test build (request paths under /api/v2/probe/)."
+        },
+        "scenario": { "type": "string", "minLength": 1 },
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "path"],
+          "properties": {
+            "method": { "type": "string", "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] },
+            "path": { "type": "string", "pattern": "^/api/v2/" },
+            "headers": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "body": { "type": "string" }
+          }
+        },
+        "expected_status": { "type": "integer", "minimum": 200, "maximum": 599 },
+        "response_headers": {
+          "type": "object",
+          "description": "The response headers a client should assert on. X-Request-ID is present on every v2 response and omitted here; its value is the fixture's synthetic request id, which also names the problem instance.",
+          "additionalProperties": { "type": "string" }
+        },
+        "response_media_type": { "type": "string", "enum": ["application/json", "application/problem+json"] },
+        "schema": {
+          "type": "string",
+          "pattern": "^#/components/schemas/[A-Z][A-Za-z0-9]*$",
+          "description": "JSON pointer into contracts/api/v2/openapi.json naming the schema the body satisfies."
+        },
+        "body_file": { "type": "string", "pattern": "^[a-z][a-z0-9_]*\\.json$" }
+      }
+    }
+  }
+}

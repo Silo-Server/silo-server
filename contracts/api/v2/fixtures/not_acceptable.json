@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/not_acceptable",
+  "title": "Not acceptable",
+  "status": 406,
+  "detail": "No acceptable representation is available for this operation.",
+  "instance": "urn:silo:request:000000000000000000000004"
+}
+

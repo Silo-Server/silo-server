@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/payload_too_large",
+  "title": "Payload too large",
+  "status": 413,
+  "detail": "The request body exceeds the 256-byte limit.",
+  "instance": "urn:silo:request:000000000000000000000006"
+}
+

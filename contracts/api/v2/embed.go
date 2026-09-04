@@ -14,12 +14,23 @@ import (
 )
 
 // FS holds route-inventory.json, migration.json, migration.schema.json,
-// offline-routes.txt, and the breaking-change approvals with their schema.
+// offline-routes.txt, the breaking-change approvals with their schema, and
+// the contract fixtures (fixtures/*.json) with their index schema.
 // The post-lock marker LOCKED is deliberately not embedded: it is read from
 // the working tree by the diff command, never by the binary.
 //
-//go:embed route-inventory.json migration.json migration.schema.json offline-routes.txt breaking-approvals.json breaking-approvals.schema.json
+//go:embed route-inventory.json migration.json migration.schema.json offline-routes.txt breaking-approvals.json breaking-approvals.schema.json fixtures.schema.json fixtures/*.json
 var FS embed.FS
+
+// FixturesDir is the directory inside FS holding the contract fixtures and
+// their index.json; FixturesSchemaPath is the index's JSON Schema.
+// TestContractFixtures in internal/apiv2 generates them (make apiv2-fixtures)
+// and internal/contractspec validates every body against the OpenAPI schema
+// the index names.
+const (
+	FixturesDir        = "fixtures"
+	FixturesSchemaPath = "fixtures.schema.json"
+)
 
 // OfflineRoutesPath is the file inside FS that pins which API listener rows
 // the scenario executor's offline router registers. TestOfflineRouteSet in

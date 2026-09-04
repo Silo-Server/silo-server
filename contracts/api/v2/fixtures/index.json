@@ -1,0 +1,198 @@
+{
+  "fixtures": [
+    {
+      "name": "authentication_required",
+      "operation_id": null,
+      "scenario": "An authenticated operation called without a credential.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/probe/authenticated",
+        "body": "{\"name\":\"fixture\",\"cleared\":null}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "authentication_required.json"
+    },
+    {
+      "name": "get_system_info_ok",
+      "operation_id": "getSystemInfo",
+      "scenario": "Discovery before login: a public operation answered with the contract identity.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/system/info",
+        "headers": {
+          "X-Silo-Client": "Silo Fixture Client",
+          "X-Silo-Client-Version": "0.0.0"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SystemInfo",
+      "body_file": "get_system_info_ok.json"
+    },
+    {
+      "name": "not_acceptable",
+      "operation_id": "getSystemInfo",
+      "scenario": "An Accept header that admits no JSON representation.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/system/info",
+        "headers": {
+          "Accept": "text/html"
+        }
+      },
+      "expected_status": 406,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "not_acceptable.json"
+    },
+    {
+      "name": "not_found",
+      "operation_id": null,
+      "scenario": "A path under /api/v2/ with no operation registered at it.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/items/fixture-missing"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "not_found.json"
+    },
+    {
+      "name": "payload_too_large",
+      "operation_id": null,
+      "scenario": "A JSON body over the operation's declared limit (256 bytes on this probe), refused before decoding.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/probe/smallbody",
+        "body": "{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"cleared\":null}"
+      },
+      "expected_status": 413,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "payload_too_large.json"
+    },
+    {
+      "name": "profile_verification_required",
+      "operation_id": null,
+      "scenario": "A profile-scoped operation called for a PIN-locked profile without X-Profile-Token; clients start PIN entry on this type.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/probe/profile_scoped",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        },
+        "body": "{\"name\":\"fixture\",\"cleared\":null}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "profile_verification_required.json"
+    },
+    {
+      "name": "rate_limited",
+      "operation_id": null,
+      "scenario": "The authenticated-route limiter refused the request; Retry-After is the only rate-limit header on v2.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/probe/authenticated",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"name\":\"fixture\",\"cleared\":null}"
+      },
+      "expected_status": 429,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json",
+        "Retry-After": "30"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "rate_limited.json"
+    },
+    {
+      "name": "unknown_query_parameter",
+      "operation_id": "getSystemInfo",
+      "scenario": "A query parameter the operation does not declare is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/system/info?verbose=1"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "unknown_query_parameter.json"
+    },
+    {
+      "name": "unsupported_media_type",
+      "operation_id": null,
+      "scenario": "A request body in a media type other than application/json.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/probe/public",
+        "headers": {
+          "Content-Type": "text/plain"
+        },
+        "body": "name=fixture"
+      },
+      "expected_status": 415,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "unsupported_media_type.json"
+    },
+    {
+      "name": "validation_failed_body",
+      "operation_id": null,
+      "scenario": "A JSON body with a missing required member and an out-of-range member: one errors[] entry per failure, the rejected values never echoed.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/probe/public",
+        "body": "{\"count\":99,\"cleared\":null}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "validation_failed_body.json"
+    }
+  ]
+}

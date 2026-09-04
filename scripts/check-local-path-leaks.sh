@@ -67,14 +67,19 @@ check_pattern \
 # catalog note can); the whole tree, schema file included, is scanned for
 # absolute paths. The schema's $schema/$id URLs (json-schema.org,
 # siloserver.org) are the one allowed public origin, listed by name.
+# The v2 contract fixtures (contracts/api/v2/fixtures, generated through the
+# real router with synthetic identities) are public in the same way and are
+# scanned by every rule below alongside the catalogs.
 scenario_tree='contracts/api/v2/scenarios'
+fixture_tree='contracts/api/v2/fixtures'
 catalog_files=':(glob)contracts/api/v2/scenarios/*/*.json'
 generator_files=':(glob)contracts/api/v2/scenarios/tools/*.py'
+fixture_files=':(glob)contracts/api/v2/fixtures/*.json'
 
 check_pattern \
-	"absolute local filesystem path under contracts/api/v2/scenarios" \
+	"absolute local filesystem path under contracts/api/v2/scenarios or fixtures" \
 	'(/Users/[^[:space:]"]+|/home/[^[:space:]"]+|/Volumes/[^[:space:]"]+|/var/folders/[^[:space:]"]+|/private/tmp/[^[:space:]"]+|[A-Za-z]:\\Users\\[^[:space:]"]+)' \
-	"$scenario_tree"
+	"$scenario_tree" "$fixture_tree" contracts/api/v2/fixtures.schema.json
 
 # Public TLDs a schemeless dotted token is judged by: when its last label is
 # one of these (any number of labels, so quick104.dev and plex.tv count) it
@@ -211,7 +216,7 @@ check_hosts() {
 # The schema's own $schema/$id origins are the only public hosts allowed,
 # and only in that file; they are checked by exact value.
 check_schema_urls() {
-	local file='contracts/api/v2/scenarios/scenario-catalog.schema.json'
+	local file=$1
 	local urls
 	if [[ "$cached" -eq 1 ]]; then
 		urls=$(git grep --cached -h -o -I -E '[A-Za-z][A-Za-z0-9+.-]*://[^/?#"[:space:]]+' -- "$file" 2>/dev/null) || return 0
@@ -227,12 +232,13 @@ check_schema_urls() {
 		esac
 	done <<< "$urls"
 	if [[ -n "$bad" ]]; then
-		printf '%s\n' "local path leak check failed: non-allowlisted URL host in the scenario schema" >&2
+		printf '%s\n' "local path leak check failed: non-allowlisted URL host in a contract schema" >&2
 		printf '%s\n' "$bad" >&2
 		failed=1
 	fi
 }
-check_schema_urls
+check_schema_urls 'contracts/api/v2/scenarios/scenario-catalog.schema.json'
+check_schema_urls 'contracts/api/v2/fixtures.schema.json'
 
 # Any scheme (http, https, ws, wss, rtsp, ...) followed by an authority, or a
 # protocol-relative //authority; the host must be reserved whatever its TLD.
@@ -243,14 +249,42 @@ check_hosts \
 	"$authority" \
 	"$catalog_files" "$generator_files"
 
+# Fixture bodies are server responses, and every v2 problem carries its type
+# URI under the ratified problem-type origin (apiv2.ProblemTypeOrigin). That
+# one origin, https only, exact host, is allowed in fixture bodies by name;
+# any other non-reserved URL host is a leak.
+check_fixture_urls() {
+	local urls
+	if [[ "$cached" -eq 1 ]]; then
+		urls=$(git grep --cached -n -o -I -E "$authority" -- "$fixture_files" 2>/dev/null) || return 0
+	else
+		urls=$(git grep -n -o -I -E "$authority" -- "$fixture_files" 2>/dev/null) || return 0
+	fi
+	local line url bad=""
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		url=${line#*:*:}
+		case "$url" in
+			https://siloserver.org) ;;
+			*) reserved_host "$url" || bad+="${line}"$'\n' ;;
+		esac
+	done <<< "$urls"
+	if [[ -n "$bad" ]]; then
+		printf '%s\n' "local path leak check failed: non-reserved URL host in a v2 contract fixture" >&2
+		printf '%s\n' "$bad" >&2
+		failed=1
+	fi
+}
+check_fixture_urls
+
 # Mail-style @domain (fixture accounts, invitations); regex-escaped dots
 # between labels count as dots.
 maildomain='@([A-Za-z0-9-]+[\\]*\.)+[A-Za-z0-9-]+'
 check_hosts \
-	"non-reserved mail domain in a scenario catalog or generator" \
+	"non-reserved mail domain in a scenario catalog, generator or fixture" \
 	"$maildomain" \
 	"$maildomain" \
-	"$catalog_files" "$generator_files"
+	"$catalog_files" "$generator_files" "$fixture_files"
 
 # Schemeless dotted token: judged a hostname only when its last label is a
 # public TLD (any label count) and it does not read as a file name, not
@@ -260,32 +294,32 @@ check_hosts \
 # accepted between labels.
 fqdn='([A-Za-z0-9-]+[\\]*\.)+[A-Za-z]{2,63}'
 check_hosts --tld \
-	"non-reserved bare hostname in a scenario catalog or generator" \
+	"non-reserved bare hostname in a scenario catalog, generator or fixture" \
 	"(^|[^A-Za-z0-9._\$/@{\\\\-])${fqdn}([^A-Za-z0-9._-]|\$)" \
 	"(^|[^A-Za-z0-9._\$/@{\\\\-])${fqdn}([^A-Za-z0-9._-]|\$)" \
-	"$catalog_files" "$generator_files"
+	"$catalog_files" "$generator_files" "$fixture_files"
 
 # Non-loopback IPv4 literal (first octet 1-126 or 128-255), anchored on
 # non-digit context rather than \b so BSD and GNU regex agree; backslashes
 # before a dot allow regex-escaped literals inside "matches" predicates.
 check_pattern \
-	"non-loopback IPv4 literal in a scenario catalog or generator" \
+	"non-loopback IPv4 literal in a scenario catalog, generator or fixture" \
 	'(^|[^0-9.])([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-689]|1[3-9][0-9]|2[0-4][0-9]|25[0-5])([\\]*\.[0-9]{1,3}){3}([^0-9.]|$)' \
-	"$catalog_files" "$generator_files"
+	"$catalog_files" "$generator_files" "$fixture_files"
 
 # Bracketed IPv6 literal ([2001:db8::1], [fe80::1]:8080); only [::1] is
 # loopback and allowed.
 ipv6='\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\]'
 check_hosts \
-	"non-loopback IPv6 literal in a scenario catalog or generator" \
+	"non-loopback IPv6 literal in a scenario catalog, generator or fixture" \
 	"$ipv6" \
 	"$ipv6" \
-	"$catalog_files" "$generator_files"
+	"$catalog_files" "$generator_files" "$fixture_files"
 
 check_pattern \
-	"credential-looking literal in a scenario catalog or generator" \
+	"credential-looking literal in a scenario catalog, generator or fixture" \
 	'(sa_[0-9a-f]{64}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
-	"$catalog_files" "$generator_files"
+	"$catalog_files" "$generator_files" "$fixture_files"
 
 if [[ "$failed" -ne 0 ]]; then
 	printf '%s\n' "Remove local machine paths from committed content. Use repository-relative paths instead." >&2
