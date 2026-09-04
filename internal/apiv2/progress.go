@@ -52,10 +52,13 @@ type ProgressCollection struct {
 	Collection[ProgressEntry]
 }
 
+// opListProgress is the operation id; the cursor scope is bound to it.
+const opListProgress = "listProgress"
+
 func registerProgress(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodGet, Prefix+"/progress", "listProgress", "progress",
+		Operation: humaOp(http.MethodGet, Prefix+"/progress", opListProgress, "progress",
 			"List the acting profile's watch progress, newest change first."),
 		Class: ClassProfileScoped,
 	}, func(ctx context.Context, in *ProgressListInput) (*ProgressCollectionOutput, error) {
@@ -84,7 +87,7 @@ func (reg *Registry) listProgress(ctx context.Context, cursors *Cursors, in *Pro
 		libraryID = n
 	}
 	scope := CursorScope{
-		OperationID: "listProgress",
+		OperationID: opListProgress,
 		Security:    strconv.Itoa(claims.UserID) + "/" + profileID,
 		Filter:      in.Status + "|" + string(in.LibraryID),
 		Sort:        "-updated_at",
