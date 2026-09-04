@@ -14,11 +14,7 @@ SET sync_schedule = CASE sync_schedule
 WHERE sync_schedule IN ('30 4 * * *', '30 4 * * 0', '30 4 1 * *');
 
 -- +goose Down
-UPDATE user_personal_collections
-SET sync_schedule = CASE sync_schedule
-        WHEN '0 3 * * *' THEN '30 4 * * *'
-        WHEN '0 3 * * 0' THEN '30 4 * * 0'
-        WHEN '0 3 1 * *' THEN '30 4 1 * *'
-    END,
-    updated_at = NOW()
-WHERE sync_schedule IN ('0 3 * * *', '0 3 * * 0', '0 3 1 * *');
+-- No-op: the Up migration cannot distinguish its rewritten rows from rows
+-- created or edited with the same 03:00 schedules afterward. Rewriting every
+-- matching row on rollback would corrupt those newer user choices.
+SELECT 1;

@@ -62,8 +62,13 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const traktMutation = useImportUserTraktCollection();
   const mdblistMutation = useImportUserMDBListCollection();
   const { data: libraries = [] } = useUserLibraries();
-  const { data: collectionCapabilities, isPending: capabilitiesPending } =
-    useCollectionCapabilities();
+  const {
+    data: collectionCapabilities,
+    isError: capabilitiesError,
+    isFetching: capabilitiesFetching,
+    refetch: refetchCapabilities,
+  } = useCollectionCapabilities();
+  const capabilitiesUnavailable = collectionCapabilities === undefined;
   const allowCustomCron =
     collectionCapabilities?.user_collection_sync_schedule?.custom_cron === true;
 
@@ -93,7 +98,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const limitInvalid = limit.trim().length > 0 && parsedLimit === undefined;
   const isPending = tmdbMutation.isPending || traktMutation.isPending || mdblistMutation.isPending;
   const missingMDBListURL = template.source === "mdblist" && mdblistUrl.trim().length === 0;
-  const submitDisabled = capabilitiesPending || isPending || limitInvalid || missingMDBListURL;
+  const submitDisabled = capabilitiesUnavailable || isPending || limitInvalid || missingMDBListURL;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -304,9 +309,32 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           value={schedule}
           onChange={setSchedule}
           allowCustomCron={allowCustomCron}
+          disabled={capabilitiesUnavailable}
           inputId="user-template-schedule"
         />
       </div>
+
+      {capabilitiesUnavailable && capabilitiesError ? (
+        <div
+          role="alert"
+          className="border-border bg-muted/40 space-y-2 rounded-md border p-3 text-sm"
+        >
+          <p className="font-medium">Couldn&apos;t load sync schedule options</p>
+          <p className="text-muted-foreground text-xs">
+            Collection creation stays unavailable until Silo confirms which sync schedules this
+            account can use.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={capabilitiesFetching}
+            onClick={() => void refetchCapabilities()}
+          >
+            {capabilitiesFetching ? "Checking…" : "Retry schedule check"}
+          </Button>
+        </div>
+      ) : null}
 
       <CollectionDefaultSortField
         value={defaultSort}
