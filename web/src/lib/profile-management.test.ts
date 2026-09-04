@@ -5,6 +5,7 @@ import { avatarPresetRef } from "@/lib/profile-avatars";
 import {
   applyKidsPreset,
   buildProfileAccessSummary,
+  buildProfileUpdateFromDraft,
   clearKidsPreset,
   createProfileDraft,
 } from "./profile-management";
@@ -110,6 +111,46 @@ describe("profile-management", () => {
       maxPlaybackQuality: "any",
       libraryRestrictionsEnabled: false,
       allowedLibraryIDs: [],
+    });
+  });
+
+  it("builds a PATCH body that clears with null and omits an unchanged PIN", () => {
+    const draft = createProfileDraft(
+      makeProfile({
+        avatar: avatarPresetRef("fox"),
+        max_content_rating: "PG",
+        max_playback_quality: "1080p",
+        library_restrictions_enabled: true,
+        allowed_library_ids: [3, 1],
+      }),
+    );
+
+    const body = buildProfileUpdateFromDraft({
+      ...draft,
+      avatarPreset: "",
+      maxContentRating: "",
+      maxPlaybackQuality: "any",
+    });
+
+    expect(body).toEqual({
+      name: draft.name,
+      avatar: null,
+      is_child: false,
+      max_content_rating: null,
+      max_playback_quality: null,
+      library_restrictions_enabled: true,
+      allowed_library_ids: ["1", "3"],
+    });
+    expect("pin" in body).toBe(false);
+    expect(JSON.parse(JSON.stringify(body))).toMatchObject({ avatar: null });
+
+    expect(buildProfileUpdateFromDraft({ ...draft, clearPin: true }).pin).toBeNull();
+    expect(buildProfileUpdateFromDraft({ ...draft, pin: " 1234 " }).pin).toBe("1234");
+    expect(buildProfileUpdateFromDraft({ ...draft, avatarPreset: "fox" })).toMatchObject({
+      avatar: avatarPresetRef("fox"),
+      max_content_rating: "PG",
+      max_playback_quality: "1080p",
+      allowed_library_ids: ["1", "3"],
     });
   });
 });

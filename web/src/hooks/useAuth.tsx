@@ -18,11 +18,11 @@ import type {
   LoginResponse,
   Profile,
   SetupRequest,
-  SetupStatusResponse,
   SignupRequest,
   User,
   VerifyPinResponse,
 } from "@/api/types";
+import { v2, type V2Response } from "@/api/v2/request";
 import { queryClient } from "@/lib/query-client";
 import {
   clearStoredImpersonationAdminSession,
@@ -30,6 +30,30 @@ import {
   saveStoredImpersonationAdminSession,
   type StoredImpersonationAdminSession,
 } from "@/lib/impersonationSession";
+
+/**
+ * Projects the v2 account onto the session's `User` shape. Login, signup, and
+ * session restore still answer on v1 with numeric ids, so the one account
+ * state keeps that shape until those operations move; the v2 id is the same
+ * account id rendered as a string.
+ */
+function userFromAccount(account: V2Response<"GET /api/v2/account/me">): User {
+  return {
+    id: Number(account.id),
+    username: account.username,
+    email: account.email,
+    role: account.role,
+    permissions: account.permissions,
+    download_allowed: account.download_allowed,
+    impersonation: account.impersonation
+      ? {
+          active: account.impersonation.active,
+          impersonator_user_id: Number(account.impersonation.impersonator_user_id),
+          impersonator_username: account.impersonation.impersonator_username,
+        }
+      : null,
+  };
+}
 
 interface AuthState {
   user: User | null;
@@ -359,7 +383,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function initialize() {
       try {
         const [status, availableProviders] = await Promise.all([
-          api<SetupStatusResponse>("/auth/setup"),
+          v2("GET /api/v2/system/setup"),
           api<AuthProviderOption[]>("/auth/providers"),
         ]);
         if (cancelled) {
@@ -383,7 +407,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           refreshToken: storage.get(storage.KEYS.REFRESH_TOKEN),
           hasStoredImpersonationAdminSession: Boolean(loadStoredImpersonationAdminSession()),
           bootstrapAccessToken: () => bootstrapAccessToken(),
-          fetchCurrentUser: () => api<User>("/auth/me"),
+          fetchCurrentUser: () => v2("GET /api/v2/account/me").then(userFromAccount),
           applyCurrentUser: (currentUser) => {
             if (cancelled) {
               return;

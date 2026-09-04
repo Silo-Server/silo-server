@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import type { ProgressListResponse, ProgressEntry, ItemDetail } from "@/api/types";
+import type { ItemDetail } from "@/api/types";
+import { v2, type V2Response } from "@/api/v2/request";
 import { catalogKeys, progressKeys } from "./keys";
 import { fetchCatalogItemDetail } from "./catalogRead";
 
@@ -8,25 +9,27 @@ interface ContinueWatchingOptions {
   enabled?: boolean;
 }
 
+/** The first page of the profile's progress list as the v2 contract returns it. */
+export type ProgressList = V2Response<"GET /api/v2/progress">;
+export type ProgressListEntry = ProgressList["items"][number];
+
 export function useProgressList(libraryId?: number, options?: ContinueWatchingOptions) {
   return useQuery({
     queryKey: progressKeys.list("in_progress", libraryId),
-    queryFn: () => {
-      const searchParams = new URLSearchParams({
-        status: "in_progress",
-        limit: "20",
-      });
-      if (libraryId) {
-        searchParams.set("library_id", String(libraryId));
-      }
-      return api<ProgressListResponse>(`/progress?${searchParams.toString()}`);
-    },
+    queryFn: () =>
+      v2("GET /api/v2/progress", {
+        query: {
+          status: "in_progress",
+          limit: 20,
+          library_id: libraryId ? String(libraryId) : undefined,
+        },
+      }),
     enabled: options?.enabled ?? true,
   });
 }
 
 export interface ContinueWatchingItem {
-  progress: ProgressEntry;
+  progress: ProgressListEntry;
   detail: ItemDetail | undefined;
   isLoading: boolean;
 }
@@ -43,7 +46,7 @@ export function useContinueWatching(
     enabled,
   });
 
-  const entries = progressData?.progress ?? [];
+  const entries = progressData?.items ?? [];
 
   const detailQueries = useQueries({
     queries: entries.map((entry) => ({

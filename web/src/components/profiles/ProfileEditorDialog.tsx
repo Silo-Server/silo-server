@@ -40,6 +40,7 @@ import { PLAYBACK_QUALITY_OPTIONS, type PlaybackQualityPreset } from "@/lib/play
 import {
   applyKidsPreset,
   buildProfileRequestFromDraft,
+  buildProfileUpdateFromDraft,
   clearKidsPreset,
   CONTENT_RATING_OPTIONS,
   createProfileDraft,
@@ -256,7 +257,6 @@ function ProfileEditorForm({
       return;
     }
 
-    const body = buildProfileRequestFromDraft(draft);
     const pin = draft.pin.trim();
     const preserveExistingUpload =
       mode === "edit" &&
@@ -271,16 +271,16 @@ function ProfileEditorForm({
       !avatarFile &&
       draft.avatarPreset === "";
 
-    if (preserveExistingUpload || deleteExistingUpload) {
-      delete body.avatar;
-    }
-
     let savedProfile: Profile;
     try {
       if (mode === "edit" && profile) {
+        const body = buildProfileUpdateFromDraft(draft);
+        if (preserveExistingUpload || deleteExistingUpload) {
+          delete body.avatar;
+        }
         savedProfile = await updateMutation.mutateAsync({ id: profile.id, body });
       } else {
-        savedProfile = await createMutation.mutateAsync(body);
+        savedProfile = await createMutation.mutateAsync(buildProfileRequestFromDraft(draft));
       }
     } catch {
       return;

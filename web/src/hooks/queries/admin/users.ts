@@ -9,6 +9,7 @@ import type {
   LoginResponse,
   UpdateUserRequest,
 } from "@/api/types";
+import { v2, type V2Response } from "@/api/v2/request";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { adminKeys } from "../keys";
 import { useAdminUserProfiles } from "./history";
@@ -177,10 +178,55 @@ function invalidateAdminDeviceCaches(
   queryClient.invalidateQueries({ queryKey: adminKeys.devices() });
 }
 
+type AdminUserV2 = V2Response<"GET /api/v2/admin/users">["items"][number];
+
+/**
+ * Projects a v2 admin user onto the `AdminUser` shape the admin pages share
+ * with the detail, create, update, and delete operations, which still answer
+ * on v1 with numeric ids. The v2 ids are the same ids as strings; an absent
+ * last activity is null on v2 and omitted on v1.
+ */
+export function adminUserFromV2(user: AdminUserV2): AdminUser {
+  return {
+    id: Number(user.id),
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    permissions: user.permissions,
+    enabled: user.enabled,
+    library_ids: user.library_ids === null ? null : user.library_ids.map(Number),
+    access_group_id: user.access_group_id === null ? null : Number(user.access_group_id),
+    max_playback_quality: user.max_playback_quality,
+    max_streams: user.max_streams,
+    max_transcodes: user.max_transcodes,
+    transcode_allowed: user.transcode_allowed,
+    audio_transcode_allowed: user.audio_transcode_allowed,
+    max_profiles: user.max_profiles,
+    download_allowed: user.download_allowed,
+    download_transcode_allowed: user.download_transcode_allowed,
+    requests_allowed: user.requests_allowed,
+    effective_policy: {
+      library_ids: user.effective_policy.library_ids.map(Number),
+      max_playback_quality: user.effective_policy.max_playback_quality,
+      max_streams: user.effective_policy.max_streams,
+      max_transcodes: user.effective_policy.max_transcodes,
+      transcode_allowed: user.effective_policy.transcode_allowed,
+      audio_transcode_allowed: user.effective_policy.audio_transcode_allowed,
+      download_allowed: user.effective_policy.download_allowed,
+      download_transcode_allowed: user.effective_policy.download_transcode_allowed,
+      requests_allowed: user.effective_policy.requests_allowed,
+      permissions: user.effective_policy.permissions,
+    },
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+    ...(user.last_active_at === null ? {} : { last_active_at: user.last_active_at }),
+  };
+}
+
 export function useAdminUsers() {
   return useQuery({
     queryKey: adminKeys.users(),
-    queryFn: () => api<AdminUser[]>("/admin/users").then((d) => d ?? []),
+    queryFn: () => v2("GET /api/v2/admin/users").then((d) => d.items.map(adminUserFromV2)),
     staleTime: ADMIN_STALE_TIME,
   });
 }

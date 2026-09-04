@@ -2,7 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AuthProviderOption, Profile, SetupStatusResponse } from "@/api/types";
+import type { AuthProviderOption, Profile } from "@/api/types";
+import { v2Fixture } from "@/api/v2/testing";
 import { storage } from "@/utils/storage";
 import { AuthProvider, useAuth } from "./useAuth";
 
@@ -16,6 +17,7 @@ const setProfileIdMock = vi.hoisted(() => vi.fn());
 const setProfileTokenMock = vi.hoisted(() => vi.fn());
 const setRefreshTokenMock = vi.hoisted(() => vi.fn());
 const queryClientClearMock = vi.hoisted(() => vi.fn());
+const v2Mock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/client", async () => {
   const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
@@ -32,6 +34,11 @@ vi.mock("@/api/client", async () => {
     setProfileToken: setProfileTokenMock,
     setRefreshToken: setRefreshTokenMock,
   };
+});
+
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: v2Mock };
 });
 
 vi.mock("@/lib/query-client", () => ({
@@ -102,6 +109,12 @@ describe("AuthProvider", () => {
     bootstrapAccessTokenMock.mockResolvedValue(false);
     getAccessTokenMock.mockReturnValue(null);
     restoreUserSessionMock.mockResolvedValue(null);
+    v2Mock.mockImplementation((key: string) => {
+      if (key === "GET /api/v2/system/setup") {
+        return Promise.resolve(v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false }));
+      }
+      return Promise.reject(new Error(`unexpected v2 call: ${key}`));
+    });
   });
 
   it("preserves OAuth login providers returned by the auth providers endpoint", async () => {
@@ -116,17 +129,12 @@ describe("AuthProvider", () => {
       },
     ];
 
-    apiMock.mockImplementation(
-      (path: string): Promise<SetupStatusResponse | AuthProviderOption[]> => {
-        if (path === "/auth/setup") {
-          return Promise.resolve({ needs_setup: false });
-        }
-        if (path === "/auth/providers") {
-          return Promise.resolve(providers);
-        }
-        return Promise.reject(new Error(`unexpected API call: ${path}`));
-      },
-    );
+    apiMock.mockImplementation((path: string): Promise<AuthProviderOption[]> => {
+      if (path === "/auth/providers") {
+        return Promise.resolve(providers);
+      }
+      return Promise.reject(new Error(`unexpected API call: ${path}`));
+    });
 
     renderWithAuthProvider(<ProviderProbe />);
 
@@ -138,9 +146,6 @@ describe("AuthProvider", () => {
 
   it("clears cached profile-scoped data when the active profile changes", async () => {
     apiMock.mockImplementation((path: string) => {
-      if (path === "/auth/setup") {
-        return Promise.resolve({ needs_setup: false });
-      }
       if (path === "/auth/providers") {
         return Promise.resolve([]);
       }
@@ -165,9 +170,6 @@ describe("AuthProvider", () => {
 
   it("keeps cached data when updating the active profile without changing identity", async () => {
     apiMock.mockImplementation((path: string) => {
-      if (path === "/auth/setup") {
-        return Promise.resolve({ needs_setup: false });
-      }
       if (path === "/auth/providers") {
         return Promise.resolve([]);
       }
