@@ -206,7 +206,7 @@ function getDeviceHeaders(): Record<string, string> {
   };
 }
 
-async function attemptRefresh(): Promise<boolean> {
+export async function attemptRefresh(): Promise<boolean> {
   const rt = getRefreshToken();
   if (!rt) return false;
 
