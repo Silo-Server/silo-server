@@ -23,7 +23,7 @@ type Account struct {
 	Username        string         `json:"username" doc:"Login name" example:"alice"`
 	Email           string         `json:"email" doc:"Contact email; empty when none is set" example:"alice@example.test"`
 	Role            string         `json:"role" enum:"admin,user" doc:"Server-wide role" example:"user"`
-	Permissions     []string       `json:"permissions" doc:"Effective assignable permissions; empty for a disabled account"`
+	Permissions     []Permission   `json:"permissions" doc:"Effective assignable permissions; empty for a disabled account" example:"[\"marker_edit\"]"`
 	DownloadAllowed bool           `json:"download_allowed" doc:"Whether the effective policy permits downloads" example:"true"`
 	Impersonation   *Impersonation `json:"impersonation,omitempty" doc:"Present only while an administrator impersonates this account"`
 }
@@ -63,7 +63,7 @@ func accountFromView(v handlers.UserView) Account {
 		Username:        v.Username,
 		Email:           v.Email,
 		Role:            roleOf(v.Role),
-		Permissions:     NonNil(v.Permissions),
+		Permissions:     permissionsOf(v.Permissions),
 		DownloadAllowed: v.DownloadAllowed,
 	}
 	if v.Impersonation != nil {

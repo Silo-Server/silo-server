@@ -35,7 +35,7 @@ type Profile struct {
 	AutoPlayNextPreview        bool    `json:"auto_play_next_preview" example:"false"`
 	ShowForcedSubtitles        bool    `json:"show_forced_subtitles" example:"false"`
 	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled" example:"false"`
-	AllowedLibraryIDs          []ID    `json:"allowed_library_ids" doc:"Libraries the profile may see when restrictions are enabled"`
+	AllowedLibraryIDs          []ID    `json:"allowed_library_ids" doc:"Libraries the profile may see when restrictions are enabled" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         string  `json:"max_playback_quality" doc:"Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values" example:"1080p"`
 	CreatedAt                  Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt                  Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
@@ -60,13 +60,13 @@ type ProfileUpdate struct {
 	AutoPlayNextPreview        *bool         `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
 	ShowForcedSubtitles        *bool         `json:"show_forced_subtitles,omitempty" nullable:"false" example:"false"`
 	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
-	AllowedLibraryIDs          *[]ID         `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Replaces the allowlist; an empty array allows none"`
+	AllowedLibraryIDs          *[]ID         `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Replaces the allowlist; an empty array allows none" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         Patch[string] `json:"max_playback_quality,omitzero" enum:"1080p,2160p" doc:"Playback ceiling; null removes it" example:"1080p"`
 }
 
 // ProfileUpdateInput is the updateProfile request.
 type ProfileUpdateInput struct {
-	ID   ID `path:"id" doc:"The profile to update"`
+	ID   ID `path:"id" doc:"The profile to update" example:"1"`
 	Body ProfileUpdate
 	// RawBody is the document as sent: the framework treats null on an
 	// optional member as absence, and the contract does not (null clears,

@@ -32,7 +32,16 @@
           },
           "permissions": {
             "description": "Effective assignable permissions; empty for a disabled account",
+            "examples": [
+              [
+                "marker_edit"
+              ]
+            ],
             "items": {
+              "description": "Assignable permission name",
+              "examples": [
+                "marker_edit"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -160,8 +169,17 @@
           },
           "library_ids": {
             "description": "Explicit library allowlist; null inherits the group's, empty means none",
+            "examples": [
+              [
+                "1",
+                "2"
+              ]
+            ],
             "items": {
               "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
               "minLength": 1,
               "type": "string"
             },
@@ -212,7 +230,16 @@
           },
           "permissions": {
             "description": "Permissions assigned directly to the account",
+            "examples": [
+              [
+                "marker_edit"
+              ]
+            ],
             "items": {
+              "description": "Assignable permission name",
+              "examples": [
+                "marker_edit"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -332,8 +359,17 @@
           },
           "library_ids": {
             "description": "Libraries the account may see; empty means every library",
+            "examples": [
+              [
+                "1",
+                "2"
+              ]
+            ],
             "items": {
               "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
               "minLength": 1,
               "type": "string"
             },
@@ -364,7 +400,16 @@
           },
           "permissions": {
             "description": "Effective assignable permissions",
+            "examples": [
+              [
+                "marker_edit"
+              ]
+            ],
             "items": {
+              "description": "Assignable permission name",
+              "examples": [
+                "marker_edit"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -434,10 +479,16 @@
         "properties": {
           "has_more": {
             "description": "Whether a next page exists",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "next_cursor": {
             "description": "Opaque cursor for the next page; absent on the last page",
+            "examples": [
+              "eyJvZmZzZXQiOjUwfQ"
+            ],
             "type": "string"
           }
         },
@@ -451,6 +502,9 @@
         "properties": {
           "detail": {
             "description": "Safe occurrence-specific explanation; not for control flow",
+            "examples": [
+              "The request did not pass validation; see errors."
+            ],
             "type": "string"
           },
           "errors": {
@@ -462,20 +516,32 @@
           },
           "instance": {
             "description": "urn:silo:request:\u003crequest-id\u003e, matching the X-Request-ID response header",
+            "examples": [
+              "urn:silo:request:000000000000000000000003"
+            ],
             "format": "uri",
             "type": "string"
           },
           "status": {
             "description": "HTTP status code, equal to the response status",
+            "examples": [
+              422
+            ],
             "format": "int64",
             "type": "integer"
           },
           "title": {
             "description": "Short summary fixed for the problem type",
+            "examples": [
+              "Validation failed"
+            ],
             "type": "string"
           },
           "type": {
             "description": "Stable problem type URI; the final segment is the problem identifier",
+            "examples": [
+              "https://siloserver.org/docs/api/v2/problems/validation_failed"
+            ],
             "format": "uri",
             "type": "string"
           }
@@ -494,14 +560,23 @@
         "properties": {
           "code": {
             "description": "Stable machine-readable code for the failure",
+            "examples": [
+              "required"
+            ],
             "type": "string"
           },
           "detail": {
             "description": "Safe human-readable explanation; never the rejected value",
+            "examples": [
+              "expected required property name to be present"
+            ],
             "type": "string"
           },
           "location": {
             "description": "Where the error occurred: body.*, query.*, path.* or header.*",
+            "examples": [
+              "body.name"
+            ],
             "type": "string"
           }
         },
@@ -517,8 +592,17 @@
         "properties": {
           "allowed_library_ids": {
             "description": "Libraries the profile may see when restrictions are enabled",
+            "examples": [
+              [
+                "1",
+                "2"
+              ]
+            ],
             "items": {
               "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
               "minLength": 1,
               "type": "string"
             },
@@ -720,8 +804,17 @@
         "properties": {
           "allowed_library_ids": {
             "description": "Replaces the allowlist; an empty array allows none",
+            "examples": [
+              [
+                "1",
+                "2"
+              ]
+            ],
             "items": {
               "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
               "minLength": 1,
               "type": "string"
             },
@@ -971,11 +1064,17 @@
         "properties": {
           "api_major": {
             "description": "The native API major this server serves at this path",
+            "examples": [
+              2
+            ],
             "format": "int64",
             "type": "integer"
           },
           "contract_digest": {
             "description": "SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it.",
+            "examples": [
+              "3b8f0c2d9e1a4f6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
+            ],
             "type": "string"
           },
           "links": {
@@ -984,6 +1083,9 @@
           },
           "server_version": {
             "description": "Server build identity (short revision, +dirty when built from a modified tree, or \"unavailable\"). Diagnostic only: never feature-detect on it.",
+            "examples": [
+              "1.0.0-dev"
+            ],
             "type": "string"
           }
         },
@@ -1000,10 +1102,16 @@
         "properties": {
           "capabilities": {
             "description": "Path prefix of the per-domain capability documents",
+            "examples": [
+              "/api/v2/capabilities"
+            ],
             "type": "string"
           },
           "openapi": {
             "description": "Path of the committed OpenAPI artifact",
+            "examples": [
+              "/api/v2/openapi.json"
+            ],
             "type": "string"
           }
         },
@@ -1134,6 +1242,9 @@
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
+              "examples": [
+                "1"
+              ],
               "type": "string"
             }
           }
@@ -1334,6 +1445,9 @@
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
+              "examples": [
+                "1"
+              ],
               "type": "string"
             }
           },
@@ -1344,6 +1458,9 @@
             "required": true,
             "schema": {
               "description": "The profile to update",
+              "examples": [
+                "1"
+              ],
               "minLength": 1,
               "type": "string"
             }
@@ -1511,6 +1628,9 @@
             "name": "X-Profile-Id",
             "required": true,
             "schema": {
+              "examples": [
+                "1"
+              ],
               "type": "string"
             }
           },
@@ -1525,6 +1645,9 @@
                 "in_progress",
                 "completed"
               ],
+              "examples": [
+                "in_progress"
+              ],
               "type": "string"
             }
           },
@@ -1535,6 +1658,9 @@
             "name": "library_id",
             "schema": {
               "description": "Only entries whose item is in this library",
+              "examples": [
+                "1"
+              ],
               "minLength": 1,
               "type": "string"
             }
@@ -1547,6 +1673,9 @@
             "schema": {
               "default": 50,
               "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
               "format": "int64",
               "maximum": 200,
               "minimum": 1,
@@ -1560,6 +1689,9 @@
             "name": "cursor",
             "schema": {
               "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJvZmZzZXQiOjUwfQ"
+              ],
               "type": "string"
             }
           }

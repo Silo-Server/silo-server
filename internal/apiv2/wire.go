@@ -113,7 +113,25 @@ func IDFromInt(v int64) ID { return ID(fmt.Sprint(v)) }
 
 // Schema describes ID as an opaque string.
 func (ID) Schema(_ huma.Registry) *huma.Schema {
-	return &huma.Schema{Type: huma.TypeString, MinLength: ptr(1), Description: "Opaque identifier"}
+	return &huma.Schema{Type: huma.TypeString, MinLength: ptr(1), Description: "Opaque identifier", Examples: []any{"1"}}
+}
+
+// Permission is one assignable permission name. It is a plain string on the
+// wire; the named type only lets array items carry a schema example.
+type Permission string
+
+// Schema describes Permission as a plain string.
+func (Permission) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{Type: huma.TypeString, Description: "Assignable permission name", Examples: []any{"marker_edit"}}
+}
+
+// permissionsOf renders permission names; the result is never null.
+func permissionsOf(names []string) []Permission {
+	out := make([]Permission, 0, len(names))
+	for _, n := range names {
+		out = append(out, Permission(n))
+	}
+	return out
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -172,8 +190,8 @@ func (Patch[T]) Schema(r huma.Registry) *huma.Schema {
 
 // PageInfo is the cursor state a paginated collection returns.
 type PageInfo struct {
-	NextCursor string `json:"next_cursor,omitempty" doc:"Opaque cursor for the next page; absent on the last page"`
-	HasMore    bool   `json:"has_more" doc:"Whether a next page exists"`
+	NextCursor string `json:"next_cursor,omitempty" doc:"Opaque cursor for the next page; absent on the last page" example:"eyJvZmZzZXQiOjUwfQ"`
+	HasMore    bool   `json:"has_more" doc:"Whether a next page exists" example:"true"`
 }
 
 // Collection is the shared collection envelope. Items is never null: use
@@ -224,7 +242,7 @@ const (
 // LimitParam is the shared `limit` query parameter. Embed it in an input
 // struct; Huma enforces the bound with 422.
 type LimitParam struct {
-	Limit int `query:"limit" minimum:"1" maximum:"200" default:"50" doc:"Page size; default 50, maximum 200"`
+	Limit int `query:"limit" minimum:"1" maximum:"200" default:"50" doc:"Page size; default 50, maximum 200" example:"50"`
 }
 
 // SortField is one parsed sort term.

@@ -12,16 +12,16 @@ import (
 // EffectivePolicy is an account's resolved access policy: its own overrides
 // layered on its access group's values.
 type EffectivePolicy struct {
-	LibraryIDs               []ID     `json:"library_ids" doc:"Libraries the account may see; empty means every library"`
-	MaxPlaybackQuality       string   `json:"max_playback_quality" doc:"Playback ceiling; empty means none" example:"1080p"`
-	MaxStreams               int      `json:"max_streams" doc:"Concurrent stream limit; 0 means unlimited" example:"2"`
-	MaxTranscodes            int      `json:"max_transcodes" doc:"Concurrent transcode limit; 0 means unlimited" example:"0"`
-	TranscodeAllowed         bool     `json:"transcode_allowed" example:"true"`
-	AudioTranscodeAllowed    bool     `json:"audio_transcode_allowed" example:"false"`
-	DownloadAllowed          bool     `json:"download_allowed" example:"true"`
-	DownloadTranscodeAllowed bool     `json:"download_transcode_allowed" example:"false"`
-	RequestsAllowed          bool     `json:"requests_allowed" example:"false"`
-	Permissions              []string `json:"permissions" doc:"Effective assignable permissions"`
+	LibraryIDs               []ID         `json:"library_ids" doc:"Libraries the account may see; empty means every library" example:"[\"1\",\"2\"]"`
+	MaxPlaybackQuality       string       `json:"max_playback_quality" doc:"Playback ceiling; empty means none" example:"1080p"`
+	MaxStreams               int          `json:"max_streams" doc:"Concurrent stream limit; 0 means unlimited" example:"2"`
+	MaxTranscodes            int          `json:"max_transcodes" doc:"Concurrent transcode limit; 0 means unlimited" example:"0"`
+	TranscodeAllowed         bool         `json:"transcode_allowed" example:"true"`
+	AudioTranscodeAllowed    bool         `json:"audio_transcode_allowed" example:"false"`
+	DownloadAllowed          bool         `json:"download_allowed" example:"true"`
+	DownloadTranscodeAllowed bool         `json:"download_transcode_allowed" example:"false"`
+	RequestsAllowed          bool         `json:"requests_allowed" example:"false"`
+	Permissions              []Permission `json:"permissions" doc:"Effective assignable permissions" example:"[\"marker_edit\"]"`
 }
 
 // AdminUser is one login account with its own policy overrides (null =
@@ -31,9 +31,9 @@ type AdminUser struct {
 	Username                 string          `json:"username" example:"alice"`
 	Email                    string          `json:"email" doc:"Contact email; empty when none is set" example:"alice@example.test"`
 	Role                     string          `json:"role" enum:"admin,user" example:"user"`
-	Permissions              []string        `json:"permissions" doc:"Permissions assigned directly to the account"`
+	Permissions              []Permission    `json:"permissions" doc:"Permissions assigned directly to the account" example:"[\"marker_edit\"]"`
 	Enabled                  bool            `json:"enabled" example:"true"`
-	LibraryIDs               []ID            `json:"library_ids" nullable:"true" doc:"Explicit library allowlist; null inherits the group's, empty means none"`
+	LibraryIDs               []ID            `json:"library_ids" nullable:"true" doc:"Explicit library allowlist; null inherits the group's, empty means none" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality       *string         `json:"max_playback_quality" nullable:"true" doc:"Playback ceiling override; null inherits, empty string means no ceiling" example:"1080p"`
 	MaxStreams               *int            `json:"max_streams" nullable:"true" doc:"Stream limit override; null inherits, 0 means unlimited" example:"2"`
 	MaxTranscodes            *int            `json:"max_transcodes" nullable:"true" doc:"Transcode limit override; null inherits, 0 means unlimited" example:"0"`
@@ -93,7 +93,7 @@ func adminUserFromView(v handlers.AdminUserView) AdminUser {
 		Username:                 v.Username,
 		Email:                    v.Email,
 		Role:                     roleOf(v.Role),
-		Permissions:              NonNil(v.Permissions),
+		Permissions:              permissionsOf(v.Permissions),
 		Enabled:                  v.Enabled,
 		LibraryIDs:               idsOfInts(v.LibraryIDs),
 		MaxPlaybackQuality:       v.MaxPlaybackQuality,
@@ -115,7 +115,7 @@ func adminUserFromView(v handlers.AdminUserView) AdminUser {
 			DownloadAllowed:          v.EffectivePolicy.DownloadAllowed,
 			DownloadTranscodeAllowed: v.EffectivePolicy.DownloadTranscodeAllowed,
 			RequestsAllowed:          v.EffectivePolicy.RequestsAllowed,
-			Permissions:              NonNil(v.EffectivePolicy.Permissions),
+			Permissions:              permissionsOf(v.EffectivePolicy.Permissions),
 		},
 		CreatedAt: NewInstant(v.CreatedAt),
 		UpdatedAt: NewInstant(v.UpdatedAt),

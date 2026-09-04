@@ -18,16 +18,16 @@ import (
 // last-resort compatibility messages — and are never a substitute for the
 // capability documents linked from `links.capabilities`.
 type SystemInfo struct {
-	ServerVersion  string          `json:"server_version" doc:"Server build identity (short revision, +dirty when built from a modified tree, or \"unavailable\"). Diagnostic only: never feature-detect on it."`
-	APIMajor       int             `json:"api_major" doc:"The native API major this server serves at this path"`
-	ContractDigest string          `json:"contract_digest" doc:"SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it."`
+	ServerVersion  string          `json:"server_version" doc:"Server build identity (short revision, +dirty when built from a modified tree, or \"unavailable\"). Diagnostic only: never feature-detect on it." example:"1.0.0-dev"`
+	APIMajor       int             `json:"api_major" doc:"The native API major this server serves at this path" example:"2"`
+	ContractDigest string          `json:"contract_digest" doc:"SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it." example:"3b8f0c2d9e1a4f6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"`
 	Links          SystemInfoLinks `json:"links" doc:"Stable links to the contract and to capability documents"`
 }
 
 // SystemInfoLinks are the discovery links.
 type SystemInfoLinks struct {
-	OpenAPI      string `json:"openapi" doc:"Path of the committed OpenAPI artifact"`
-	Capabilities string `json:"capabilities" doc:"Path prefix of the per-domain capability documents"`
+	OpenAPI      string `json:"openapi" doc:"Path of the committed OpenAPI artifact" example:"/api/v2/openapi.json"`
+	Capabilities string `json:"capabilities" doc:"Path prefix of the per-domain capability documents" example:"/api/v2/capabilities"`
 }
 
 // SystemInfoOutput is the getSystemInfo response.

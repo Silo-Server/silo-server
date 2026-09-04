@@ -78,7 +78,7 @@ func profileHeaderParam(class Class) *huma.Param {
 	p := &huma.Param{
 		Name:   profileHeader,
 		In:     "header",
-		Schema: &huma.Schema{Type: "string"},
+		Schema: &huma.Schema{Type: "string", Examples: []any{"1"}},
 	}
 	switch class {
 	case ClassProfileScoped:

@@ -140,7 +140,12 @@ export interface components {
       id: string;
       /** @description Present only while an administrator impersonates this account */
       impersonation?: components["schemas"]["Impersonation"];
-      /** @description Effective assignable permissions; empty for a disabled account */
+      /**
+       * @description Effective assignable permissions; empty for a disabled account
+       * @example [
+       *       "marker_edit"
+       *     ]
+       */
       permissions: string[];
       /**
        * @description Server-wide role
@@ -201,7 +206,13 @@ export interface components {
        * @example 2026-01-02T03:04:05.678Z
        */
       last_active_at: string | null;
-      /** @description Explicit library allowlist; null inherits the group's, empty means none */
+      /**
+       * @description Explicit library allowlist; null inherits the group's, empty means none
+       * @example [
+       *       "1",
+       *       "2"
+       *     ]
+       */
       library_ids: string[] | null;
       /**
        * @description Playback ceiling override; null inherits, empty string means no ceiling
@@ -226,7 +237,12 @@ export interface components {
        * @example 0
        */
       max_transcodes: number | null;
-      /** @description Permissions assigned directly to the account */
+      /**
+       * @description Permissions assigned directly to the account
+       * @example [
+       *       "marker_edit"
+       *     ]
+       */
       permissions: string[];
       /**
        * @description Override; null inherits
@@ -265,7 +281,13 @@ export interface components {
       download_allowed: boolean;
       /** @example false */
       download_transcode_allowed: boolean;
-      /** @description Libraries the account may see; empty means every library */
+      /**
+       * @description Libraries the account may see; empty means every library
+       * @example [
+       *       "1",
+       *       "2"
+       *     ]
+       */
       library_ids: string[];
       /**
        * @description Playback ceiling; empty means none
@@ -284,7 +306,12 @@ export interface components {
        * @example 0
        */
       max_transcodes: number;
-      /** @description Effective assignable permissions */
+      /**
+       * @description Effective assignable permissions
+       * @example [
+       *       "marker_edit"
+       *     ]
+       */
       permissions: string[];
       /** @example false */
       requests_allowed: boolean;
@@ -309,44 +336,74 @@ export interface components {
       impersonator_username: string;
     };
     PageInfo: {
-      /** @description Whether a next page exists */
+      /**
+       * @description Whether a next page exists
+       * @example true
+       */
       has_more: boolean;
-      /** @description Opaque cursor for the next page; absent on the last page */
+      /**
+       * @description Opaque cursor for the next page; absent on the last page
+       * @example eyJvZmZzZXQiOjUwfQ
+       */
       next_cursor?: string;
     };
     Problem: {
-      /** @description Safe occurrence-specific explanation; not for control flow */
+      /**
+       * @description Safe occurrence-specific explanation; not for control flow
+       * @example The request did not pass validation; see errors.
+       */
       detail: string;
       /** @description Field-level validation details */
       errors?: components["schemas"]["ProblemError"][];
       /**
        * Format: uri
        * @description urn:silo:request:<request-id>, matching the X-Request-ID response header
+       * @example urn:silo:request:000000000000000000000003
        */
       instance: string;
       /**
        * Format: int64
        * @description HTTP status code, equal to the response status
+       * @example 422
        */
       status: number;
-      /** @description Short summary fixed for the problem type */
+      /**
+       * @description Short summary fixed for the problem type
+       * @example Validation failed
+       */
       title: string;
       /**
        * Format: uri
        * @description Stable problem type URI; the final segment is the problem identifier
+       * @example https://siloserver.org/docs/api/v2/problems/validation_failed
        */
       type: string;
     };
     ProblemError: {
-      /** @description Stable machine-readable code for the failure */
+      /**
+       * @description Stable machine-readable code for the failure
+       * @example required
+       */
       code: string;
-      /** @description Safe human-readable explanation; never the rejected value */
+      /**
+       * @description Safe human-readable explanation; never the rejected value
+       * @example expected required property name to be present
+       */
       detail: string;
-      /** @description Where the error occurred: body.*, query.*, path.* or header.* */
+      /**
+       * @description Where the error occurred: body.*, query.*, path.* or header.*
+       * @example body.name
+       */
       location: string;
     };
     Profile: {
-      /** @description Libraries the profile may see when restrictions are enabled */
+      /**
+       * @description Libraries the profile may see when restrictions are enabled
+       * @example [
+       *       "1",
+       *       "2"
+       *     ]
+       */
       allowed_library_ids: string[];
       /** @example false */
       auto_play_next_preview: boolean;
@@ -440,7 +497,13 @@ export interface components {
       updated_at: string;
     };
     ProfileUpdate: {
-      /** @description Replaces the allowlist; an empty array allows none */
+      /**
+       * @description Replaces the allowlist; an empty array allows none
+       * @example [
+       *       "1",
+       *       "2"
+       *     ]
+       */
       allowed_library_ids?: string[];
       /** @example false */
       auto_play_next_preview?: boolean;
@@ -555,19 +618,32 @@ export interface components {
       /**
        * Format: int64
        * @description The native API major this server serves at this path
+       * @example 2
        */
       api_major: number;
-      /** @description SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it. */
+      /**
+       * @description SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it.
+       * @example 3b8f0c2d9e1a4f6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b
+       */
       contract_digest: string;
       /** @description Stable links to the contract and to capability documents */
       links: components["schemas"]["SystemInfoLinks"];
-      /** @description Server build identity (short revision, +dirty when built from a modified tree, or "unavailable"). Diagnostic only: never feature-detect on it. */
+      /**
+       * @description Server build identity (short revision, +dirty when built from a modified tree, or "unavailable"). Diagnostic only: never feature-detect on it.
+       * @example 1.0.0-dev
+       */
       server_version: string;
     };
     SystemInfoLinks: {
-      /** @description Path prefix of the per-domain capability documents */
+      /**
+       * @description Path prefix of the per-domain capability documents
+       * @example /api/v2/capabilities
+       */
       capabilities: string;
-      /** @description Path of the committed OpenAPI artifact */
+      /**
+       * @description Path of the committed OpenAPI artifact
+       * @example /api/v2/openapi.json
+       */
       openapi: string;
     };
   };

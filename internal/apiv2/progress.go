@@ -29,10 +29,10 @@ type ProgressEntry struct {
 
 // ProgressListInput is the listProgress query.
 type ProgressListInput struct {
-	Status    string `query:"status" enum:"in_progress,completed" doc:"Only entries in this state; absent lists every entry"`
-	LibraryID ID     `query:"library_id" doc:"Only entries whose item is in this library"`
+	Status    string `query:"status" enum:"in_progress,completed" doc:"Only entries in this state; absent lists every entry" example:"in_progress"`
+	LibraryID ID     `query:"library_id" doc:"Only entries whose item is in this library" example:"1"`
 	LimitParam
-	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
+	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvZmZzZXQiOjUwfQ"`
 }
 
 // ProgressCollectionOutput is the listProgress response.
