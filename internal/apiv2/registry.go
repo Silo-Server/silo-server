@@ -47,10 +47,11 @@ var classes = map[Class]bool{
 // Metadata keys the registry stores on the Huma operation so the gate can
 // read the declaration at request time.
 const (
-	metaClass          = "silo.class"
-	metaPermission     = "silo.permission"
-	metaDemoRestricted = "silo.demo_restricted"
-	metaMaxBodyBytes   = "silo.max_body_bytes"
+	metaClass           = "silo.class"
+	metaPermission      = "silo.permission"
+	metaDemoRestricted  = "silo.demo_restricted"
+	metaProfileOptional = "silo.profile_optional"
+	metaMaxBodyBytes    = "silo.max_body_bytes"
 )
 
 // knownPermissions is the policy permission set an operation may name. It is
@@ -74,6 +75,12 @@ type Operation struct {
 	// DemoRestricted marks a mutation that demo mode refuses to non-admins.
 	// It is meaningless on ClassPublic, where no gate runs.
 	DemoRestricted bool
+	// ProfileOptional, on a ClassProfileScoped operation, accepts an absent
+	// X-Profile-Id: viewer access still resolves and judges a present header,
+	// but the profile-required gate is not run, as on the v1 routes whose
+	// group runs viewer access without RequireProfile (profiles, devices).
+	// The handler then decides what an account-scoped caller may do.
+	ProfileOptional bool
 	// MaxBodyBytes lowers this operation's structured-body cap; 0 takes
 	// MaxJSONBodyBytes. Set it here rather than on the embedded Huma
 	// operation: Register applies the framework's off-by-one convention and
@@ -135,6 +142,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaClass] = op.Class
 	op.Metadata[metaPermission] = op.Permission
 	op.Metadata[metaDemoRestricted] = op.DemoRestricted
+	op.Metadata[metaProfileOptional] = op.ProfileOptional
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {
@@ -185,6 +193,9 @@ func checkOperation(op Operation) error {
 	}
 	if op.DemoRestricted && op.Class == ClassPublic {
 		return fmt.Errorf("demo restriction is inert on class %s: no gate runs in front of a public operation", ClassPublic)
+	}
+	if op.ProfileOptional && op.Class != ClassProfileScoped {
+		return fmt.Errorf("profile optional is only meaningful on class %s", ClassProfileScoped)
 	}
 	if op.MaxBodyBytes < 0 {
 		return fmt.Errorf("max body bytes %d must not be negative", op.MaxBodyBytes)

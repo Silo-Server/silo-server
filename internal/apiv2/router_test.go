@@ -194,7 +194,9 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 // test-only entry the placeholder registry carries.
 func TestReconcileSpecSeeded(t *testing.T) {
 	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
-	observed := []string{"GET " + Prefix + "/openapi.json", "GET " + Prefix + "/system/info"}
+	observed := []string{
+		"GET " + Prefix + "/openapi.json", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
+	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
 	if err != nil || len(unaccounted) != 0 || len(unserved) != 0 {
@@ -216,7 +218,13 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		t.Fatalf("unserved manual entry not reported: %v", unserved)
 	}
 	// A documented operation the router does not serve (stale artifact).
-	_, unserved, _ = reconcileSpec(observed[:1], contracts.OpenAPI, nil)
+	var withoutInfo []string
+	for _, route := range observed {
+		if route != "GET "+Prefix+"/system/info" {
+			withoutInfo = append(withoutInfo, route)
+		}
+	}
+	_, unserved, _ = reconcileSpec(withoutInfo, contracts.OpenAPI, nil)
 	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+Prefix+"/system/info") {
 		t.Fatalf("stale artifact not reported: %v", unserved)
 	}

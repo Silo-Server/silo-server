@@ -66,7 +66,7 @@ func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSy
 // planUpdateProfileSettingsSync plans the canonical writes for PUT
 // /profiles/{id}. A nil field was not part of the request and must not touch
 // the canonical row; the shipped clients send single-field deltas.
-func planUpdateProfileSettingsSync(req updateProfileRequest) ([]profileSettingSync, error) {
+func planUpdateProfileSettingsSync(req ProfileUpdateRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		req.Language, req.SubtitleLanguage, req.PreferredMetadataLanguage,
 		req.SubtitleMode, req.ShowForcedSubtitles,

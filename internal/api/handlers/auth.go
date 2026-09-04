@@ -61,10 +61,10 @@ type loginRequest struct {
 
 // loginResponse represents the JSON body of a successful login response.
 type loginResponse struct {
-	AccessToken  string       `json:"access_token"`
-	RefreshToken string       `json:"refresh_token"`
-	ExpiresIn    int          `json:"expires_in"`
-	User         userResponse `json:"user"`
+	AccessToken  string   `json:"access_token"`
+	RefreshToken string   `json:"refresh_token"`
+	ExpiresIn    int      `json:"expires_in"`
+	User         UserView `json:"user"`
 }
 
 // setupRequest represents the JSON body of a POST /auth/setup request.
@@ -112,21 +112,21 @@ type pluginLaunchResponse struct {
 	ExpiresIn int `json:"expires_in"`
 }
 
-type impersonationResponse struct {
+type ImpersonationView struct {
 	Active               bool   `json:"active"`
 	ImpersonatorUserID   int    `json:"impersonator_user_id"`
 	ImpersonatorUsername string `json:"impersonator_username"`
 }
 
-// userResponse represents a user in JSON responses.
-type userResponse struct {
-	ID              int                    `json:"id"`
-	Username        string                 `json:"username"`
-	Email           string                 `json:"email"`
-	Role            string                 `json:"role"`
-	Permissions     []string               `json:"permissions"`
-	DownloadAllowed bool                   `json:"download_allowed"`
-	Impersonation   *impersonationResponse `json:"impersonation,omitempty"`
+// UserView represents a user in JSON responses.
+type UserView struct {
+	ID              int                `json:"id"`
+	Username        string             `json:"username"`
+	Email           string             `json:"email"`
+	Role            string             `json:"role"`
+	Permissions     []string           `json:"permissions"`
+	DownloadAllowed bool               `json:"download_allowed"`
+	Impersonation   *ImpersonationView `json:"impersonation,omitempty"`
 }
 
 // sessionResponse represents a session in JSON responses.
@@ -381,19 +381,35 @@ func (h *AuthHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.service.GetCurrentUser(r.Context(), claims)
+	resp, err := h.CurrentUser(r.Context(), claims)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+		writeAPIError(w, err)
 		return
 	}
 
-	impersonator, err := h.loadImpersonator(r.Context(), claims)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// NeedsSetup reports whether the first administrator still has to be created.
+// v1 GET /auth/setup and v2 getSetupStatus both answer from it.
+func (h *AuthHandler) NeedsSetup(ctx context.Context) (bool, error) {
+	return h.service.NeedsSetup(ctx)
+}
+
+// CurrentUser builds the account view of the authenticated caller. v1 GET
+// /auth/me and v2 getCurrentUser both call it; a failure is an *APIError.
+func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (UserView, error) {
+	user, err := h.service.GetCurrentUser(ctx, claims)
+	if err != nil {
+		return UserView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+
+	impersonator, err := h.loadImpersonator(ctx, claims)
 	if err != nil && !auth.IsNotFound(err) {
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
-		return
+		return UserView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 
-	writeJSON(w, http.StatusOK, buildUserResponse(user, effectiveDownloadAllowed(r.Context(), user, h.accessGroups), claims.ImpersonatorUserID, impersonator))
+	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
 }
 
 // HandleListSessions handles GET /auth/sessions. Requires authentication.
@@ -549,8 +565,8 @@ func effectiveDownloadAllowed(ctx context.Context, user *models.User, groups acc
 	return effective.DownloadAllowed
 }
 
-func buildUserResponse(user *models.User, downloadAllowed bool, impersonatorUserID *int, impersonator *models.User) userResponse {
-	resp := userResponse{
+func buildUserResponse(user *models.User, downloadAllowed bool, impersonatorUserID *int, impersonator *models.User) UserView {
+	resp := UserView{
 		ID:              user.ID,
 		Username:        user.Username,
 		Email:           user.Email,
@@ -559,7 +575,7 @@ func buildUserResponse(user *models.User, downloadAllowed bool, impersonatorUser
 		DownloadAllowed: downloadAllowed,
 	}
 	if impersonatorUserID != nil {
-		resp.Impersonation = &impersonationResponse{
+		resp.Impersonation = &ImpersonationView{
 			Active:             true,
 			ImpersonatorUserID: *impersonatorUserID,
 		}
@@ -615,6 +631,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // writeError writes a JSON error response with the given status code,
 // error code, and message.
+// writeAPIError renders an *APIError in the v1 {error, message} shape; any
+// other error is the generic internal error.
+func writeAPIError(w http.ResponseWriter, err error) {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+}
+
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, errorResponse{
 		Error:   code,

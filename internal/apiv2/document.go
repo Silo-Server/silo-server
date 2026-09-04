@@ -60,7 +60,11 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	}
 	op.Security = []map[string][]string{{securitySchemeBearer: {}}}
 	if resolvesProfile(op.Class) {
-		op.Parameters = append(op.Parameters, profileHeaderParam(op.Class))
+		class := op.Class
+		if op.ProfileOptional {
+			class = ClassAuthenticated // documented as optional
+		}
+		op.Parameters = append(op.Parameters, profileHeaderParam(class))
 	}
 }
 
@@ -160,6 +164,7 @@ func declaresBody(t reflect.Type) bool {
 // generator both call it, so the served router and the committed artifact
 // describe the same operations.
 func registerAll(reg *Registry) {
+	// Alphabetical by domain file; registration order is deterministic.
 	registerSystem(reg)
 	registerOpenAPIDocument(reg)
 }

@@ -51,12 +51,39 @@ var contractDigest = func() string {
 // ContractDigest is the SHA-256 (hex) of the embedded OpenAPI artifact.
 func ContractDigest() string { return contractDigest }
 
+// SetupStatus reports whether the server still needs its first administrator.
+type SetupStatus struct {
+	NeedsSetup bool `json:"needs_setup" doc:"True until the first administrator account exists"`
+}
+
+// SetupStatusOutput is the getSetupStatus response.
+type SetupStatusOutput struct {
+	Body SetupStatus
+}
+
 func registerSystem(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/system/info", "getSystemInfo", "system",
 			"Get server and contract identity for discovery before login."),
 		Class: ClassPublic,
 	}, getSystemInfo)
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/system/setup", "getSetupStatus", "system",
+			"Report whether the server still needs its first administrator."),
+		Class: ClassPublic,
+	}, reg.getSetupStatus)
+}
+
+// getSetupStatus answers from the same account count v1 GET /auth/setup uses.
+func (reg *Registry) getSetupStatus(ctx context.Context, _ *struct{}) (*SetupStatusOutput, error) {
+	if reg.deps.Accounts == nil {
+		return nil, unavailable("account")
+	}
+	needsSetup, err := reg.deps.Accounts.NeedsSetup(ctx)
+	if err != nil {
+		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	}
+	return &SetupStatusOutput{Body: SetupStatus{NeedsSetup: needsSetup}}, nil
 }
 
 func getSystemInfo(_ context.Context, _ *struct{}) (*SystemInfoOutput, error) {

@@ -231,11 +231,36 @@ type mediaType struct {
 
 type schema struct {
 	Ref                  string             `json:"$ref"`
-	Type                 string             `json:"type"`
+	Type                 schemaType         `json:"type"`
 	Properties           map[string]*schema `json:"properties"`
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
 	Extensions           map[string]any     `json:"-"`
+}
+
+// schemaType is the JSON Schema `type` member: a single name, or in OpenAPI
+// 3.1 a list such as ["string", "null"] for a nullable member. The lint
+// reasons about the non-null name.
+type schemaType string
+
+func (t *schemaType) UnmarshalJSON(b []byte) error {
+	var single string
+	if err := json.Unmarshal(b, &single); err == nil {
+		*t = schemaType(single)
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(b, &list); err != nil {
+		return err
+	}
+	for _, name := range list {
+		if name != "null" {
+			*t = schemaType(name)
+			return nil
+		}
+	}
+	*t = ""
+	return nil
 }
 
 func (s *schema) UnmarshalJSON(b []byte) error {

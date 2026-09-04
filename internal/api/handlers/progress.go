@@ -144,42 +144,17 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 	var nextCursor string
 	if since != "" {
 		entries, nextCursor, err = store.ListProgressSince(r.Context(), profileID, since)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
+			return
+		}
+		entries, err = h.filterProgress(r.Context(), entries, libraryID)
 	} else {
-		entries, err = store.ListProgress(r.Context(), profileID, status, limit, offset)
+		entries, err = h.listProgressFrom(r.Context(), store, profileID, ProgressQuery{Status: status, LibraryID: libraryID, Limit: limit, Offset: offset})
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
+		writeAPIError(w, err)
 		return
-	}
-
-	// Drop entries the viewer can't access before they reach the client.
-	// Without this, a library-restricted profile receives progress rows for
-	// items outside its scope (e.g. an XXX title) and the client then fans out
-	// per-item detail fetches that 404 — a dead Continue Watching tile. Only
-	// runs for restricted profiles; unrestricted viewers are unaffected.
-	if scope, ok := access.GetScope(r.Context()); ok &&
-		(scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.MaxContentRating != "") {
-		if h.LibraryLookup == nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
-			return
-		}
-		entries, err = filterProgressEntriesByAccess(r.Context(), entries, scope, h.LibraryLookup)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
-			return
-		}
-	}
-
-	if libraryID > 0 {
-		if h.LibraryLookup == nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply library filter")
-			return
-		}
-		entries, err = filterProgressEntriesByLibrary(r.Context(), entries, libraryID, h.LibraryLookup)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply library filter")
-			return
-		}
 	}
 
 	resp := progressListResponse{
@@ -197,6 +172,65 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ProgressQuery is the status listing's filter and window.
+type ProgressQuery struct {
+	Status    string
+	LibraryID int
+	Limit     int
+	Offset    int
+}
+
+// ListProgress is the status/pagination listing v1 GET /progress (without
+// ?since=) and v2 listProgress both serve: the store window, then the viewer
+// access and library filters. A failure is an *APIError.
+func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileID string, q ProgressQuery) ([]userstore.WatchProgress, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	return h.listProgressFrom(ctx, store, profileID, q)
+}
+
+func (h *ProgressHandler) listProgressFrom(ctx context.Context, store userstore.UserStore, profileID string, q ProgressQuery) ([]userstore.WatchProgress, error) {
+	entries, err := store.ListProgress(ctx, profileID, q.Status, q.Limit, q.Offset)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
+	}
+	return h.filterProgress(ctx, entries, q.LibraryID)
+}
+
+// filterProgress drops the rows the viewer may not see, then the rows outside
+// the requested library.
+func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int) ([]userstore.WatchProgress, error) {
+	var err error
+	// Drop entries the viewer can't access before they reach the client.
+	// Without this, a library-restricted profile receives progress rows for
+	// items outside its scope (e.g. an XXX title) and the client then fans out
+	// per-item detail fetches that 404 — a dead Continue Watching tile. Only
+	// runs for restricted profiles; unrestricted viewers are unaffected.
+	if scope, ok := access.GetScope(ctx); ok &&
+		(scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.MaxContentRating != "") {
+		if h.LibraryLookup == nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+		}
+		entries, err = filterProgressEntriesByAccess(ctx, entries, scope, h.LibraryLookup)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+		}
+	}
+
+	if libraryID > 0 {
+		if h.LibraryLookup == nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply library filter")
+		}
+		entries, err = filterProgressEntriesByLibrary(ctx, entries, libraryID, h.LibraryLookup)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply library filter")
+		}
+	}
+	return entries, nil
 }
 
 func parseLibraryIDParam(r *http.Request) (int, error) {

@@ -3,6 +3,7 @@ package apiv2
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,7 +16,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // Prefix is the path every v2 operation lives under. Operations register with
@@ -69,6 +73,21 @@ type Dependencies struct {
 	// CursorSecret keys pagination cursors. It must be shared by every replica
 	// (the JWT secret is); empty means a per-process random key.
 	CursorSecret []byte
+
+	// The services the pilot operations call. Each is the same value the
+	// corresponding v1 handler calls, so the two surfaces read and write one
+	// store. A nil service makes its operations answer 503
+	// dependency_unavailable rather than disappear.
+
+	// Accounts answers setup status and the current account
+	// (*handlers.AuthHandler).
+	Accounts AccountService
+	// Progress lists watch progress (*handlers.ProgressHandler).
+	Progress ProgressService
+	// Profiles applies profile updates (*handlers.ProfileHandler).
+	Profiles ProfileService
+	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
+	AdminUsers AdminUserService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -300,4 +319,51 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 		p = p.WithHeader("Allow", allow)
 	}
 	writeProblem(w, r, p)
+}
+
+// The pilot services are narrow slices of the v1 handlers: each method is
+// the business logic the v1 handler runs after parsing its request, so v2
+// cannot drift from v1 in what it reads or writes. A *handlers.APIError is
+// mapped onto the problem type of its status; any other error is 500.
+
+// AccountService is the slice of *handlers.AuthHandler the account and setup
+// operations use.
+type AccountService interface {
+	NeedsSetup(ctx context.Context) (bool, error)
+	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
+}
+
+// ProgressService is the slice of *handlers.ProgressHandler listProgress uses.
+type ProgressService interface {
+	ListProgress(ctx context.Context, userID int, profileID string, q handlers.ProgressQuery) ([]userstore.WatchProgress, error)
+}
+
+// ProfileService is the slice of *handlers.ProfileHandler updateProfile uses.
+type ProfileService interface {
+	UpdateProfile(ctx context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error)
+}
+
+// AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.
+type AdminUserService interface {
+	ListAdminUsers(ctx context.Context) ([]handlers.AdminUserView, error)
+}
+
+// unavailable is the fail-closed answer of an operation whose service is not
+// wired, matching the gate rule for a missing gate.
+func unavailable(what string) *Problem {
+	return NewProblem(TypeDependencyUnavailable, "The "+what+" service is not available on this server.").WithRetryAfter(30)
+}
+
+// serviceProblem renders a service failure. A *handlers.APIError keeps the
+// v1 decision (status and message); anything else is an internal error with
+// no detail leaked.
+func serviceProblem(err error) *Problem {
+	var apiErr *handlers.APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.Status >= 500 {
+			return NewProblem(TypeInternalError, "An unexpected error occurred.")
+		}
+		return NewProblem(TypeForStatus(apiErr.Status), apiErr.Message)
+	}
+	return NewProblem(TypeInternalError, "An unexpected error occurred.")
 }

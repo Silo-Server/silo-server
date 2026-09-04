@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,6 +114,9 @@ func (ID) Schema(_ huma.Registry) *huma.Schema {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// intOfID recovers an internal integer key from an opaque ID.
+func intOfID(id ID) (int, error) { return strconv.Atoi(string(id)) }
 
 // Patch is the presence-aware PATCH transport for one field: omitted
 // (unchanged), explicit null (clear, only where the schema is nullable), or
@@ -253,4 +257,17 @@ func ParseSort(raw string, allowed []string) ([]SortField, *Problem) {
 		out = append(out, SortField{Field: field, Desc: desc})
 	}
 	return out, nil
+}
+
+// idsOfInts renders integer keys as IDs, keeping nil (inherit) distinct from
+// empty (none).
+func idsOfInts(ints []int) []ID {
+	if ints == nil {
+		return nil
+	}
+	out := make([]ID, 0, len(ints))
+	for _, v := range ints {
+		out = append(out, IDFromInt(int64(v)))
+	}
+	return out
 }
