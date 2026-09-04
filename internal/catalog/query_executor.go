@@ -69,6 +69,10 @@ func (e *QueryExecutor) PreviewPage(
 		return nil, 0, false, err
 	}
 
+	return e.executePreviewPagePlan(ctx, build, includeTotal)
+}
+
+func (e *QueryExecutor) executePreviewPagePlan(ctx context.Context, build previewPagePlan, includeTotal bool) ([]*models.MediaItem, int, bool, error) {
 	pagedSQL, pagedArgs := build.pagedSQL(false)
 	rows, err := e.Pool.Query(ctx, pagedSQL, pagedArgs...)
 	if err != nil {

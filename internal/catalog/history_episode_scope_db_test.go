@@ -170,6 +170,9 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 		total      int
 	}{
 		{name: "oldest filtered beyond event cap", req: CatalogRequest{SearchQuery: "HES", Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{olderMovieID, seriesID}, total: 2},
+		{name: "title sorting after history join", req: CatalogRequest{NamePrefix: "hes", Query: QueryDefinition{Sort: QuerySort{Field: "title", Order: "asc"}}}, want: []string{olderMovieID, seriesID}, total: 2},
+		{name: "search normalized tokens", req: CatalogRequest{SearchQuery: "HES Earlier", Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{olderMovieID}, total: 1},
+		{name: "name prefix before page cap", req: CatalogRequest{NamePrefix: "hes e", Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "desc"}, Limit: new(1)}}, want: []string{olderMovieID}, total: 1},
 		{name: "newest filtered deduplicates series", req: CatalogRequest{SearchQuery: "HES", Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "desc"}}}, want: []string{seriesID, olderMovieID}, total: 2},
 		{name: "episode content allowlist", allowedIDs: []string{ep1}, req: CatalogRequest{Query: QueryDefinition{MediaScope: "episode", Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{ep1}, total: 1},
 		{name: "oldest episodes beyond event cap", req: CatalogRequest{Query: QueryDefinition{MediaScope: "episode", Sort: QuerySort{Field: "date_viewed", Order: "asc"}}}, want: []string{ep1, ep2}, total: 2},
@@ -196,6 +199,51 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 			}
 			if result.HasMore {
 				t.Fatal("complete or exhausted query-limited page must not advertise more results")
+			}
+		})
+	}
+
+	for _, prefix := range []string{"", "hes"} {
+		t.Run("snapshot paging prefix="+prefix, func(t *testing.T) {
+			req := CatalogRequest{Source: CatalogSourceHistory, Limit: 1, NamePrefix: prefix, Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "desc"}, Limit: new(2)}}
+			first, err := resolver.Resolve(t.Context(), req, access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first.SnapshotAt.IsZero() {
+				t.Fatal("first history page must return a watch-event snapshot")
+			}
+			if len(first.Items) != 1 || first.Total != 2 || !first.HasMore {
+				t.Fatalf("unexpected first page: %+v", first)
+			}
+			req.SnapshotAt = &first.SnapshotAt
+			req.Limit = 60
+			frozen, err := resolver.Resolve(t.Context(), req, access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(frozen.Items) != 2 {
+				t.Fatalf("expected two frozen items, got %d", len(frozen.Items))
+			}
+			if err := store.AddHistory(t.Context(), userstore.WatchHistoryEntry{ProfileID: profileID, MediaItemID: frozen.Items[1].ContentID, WatchedAt: first.SnapshotAt.Add(time.Minute).Format(time.RFC3339), Completed: true}); err != nil {
+				t.Fatal(err)
+			}
+			req.Offset = 1
+			req.Limit = 1
+			second, err := resolver.Resolve(t.Context(), req, access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(second.Items) != 1 || second.Items[0].ContentID != frozen.Items[1].ContentID || second.Total != 2 || second.HasMore || !second.SnapshotAt.Equal(first.SnapshotAt) {
+				t.Fatalf("rewatch changed frozen page: %+v", second)
+			}
+			req.SkipTotal = true
+			withoutTotal, err := resolver.Resolve(t.Context(), req, access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(withoutTotal.Items) != 1 || withoutTotal.HasMore || withoutTotal.TotalExact || withoutTotal.Total != 0 {
+				t.Fatalf("query cap lost without total: %+v", withoutTotal)
 			}
 		})
 	}

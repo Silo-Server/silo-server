@@ -752,13 +752,8 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 }
 
 func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
-	// History dates belong to watch events, including episodes displayed as a
-	// series. Preserve that order rather than sorting series by direct watches.
-	if req.Source == CatalogSourceHistory && req.Query.Sort.Field == historyDateViewedSort {
-		req.UseSourceOrder = true
-	}
-	if historySourceCanUseOptimizedPageQuery(req) {
-		return r.resolveHistorySourcePage(ctx, req, access)
+	if req.Source == CatalogSourceHistory {
+		return r.resolveHistoryQueryPage(ctx, req, access)
 	}
 
 	if req.Source == CatalogSourceFavorites || req.Source == CatalogSourceWatchlist {

@@ -1,27 +1,12 @@
 package catalog
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestHistorySourceCanUseOptimizedPageQuery(t *testing.T) {
-	req := CatalogRequest{
-		Source:         CatalogSourceHistory,
-		UseSourceOrder: true,
-		Query:          QueryDefinition{},
-	}
-
-	if !historySourceCanUseOptimizedPageQuery(req) {
-		t.Fatal("expected bare history source-order request to use optimized page query")
-	}
-
-	req.SearchQuery = "house"
-	if historySourceCanUseOptimizedPageQuery(req) {
-		t.Fatal("expected search history request to fall back to generic resolver path")
-	}
-}
 
 func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing.T) {
 	snapshot := time.Date(2026, time.April, 6, 12, 0, 0, 0, time.UTC)
@@ -64,40 +49,54 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 	}
 }
 
-func TestHistoryDateViewedUsesWatchEventOrder(t *testing.T) {
-	for _, order := range []string{"asc", "desc"} {
-		t.Run(order, func(t *testing.T) {
-			req := CatalogRequest{Source: CatalogSourceHistory, Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: order}}}
-			if !historySourceCanUseOptimizedPageQuery(req) {
-				t.Fatal("explicit date_viewed must retain episode-to-series watch-event ordering")
-			}
-			if historyDateViewedAscending(req) != (order == "asc") {
-				t.Fatal("incorrect watch-event sort direction")
-			}
-			req.SearchQuery = "series"
-			if historySourceCanUseOptimizedPageQuery(req) {
-				t.Fatal("filtered history must apply its overlay before pagination")
-			}
-			req.Source = CatalogSourceFavorites
-			if historyDateViewedAscending(req) {
-				t.Fatal("history ordering must not override other sources")
-			}
-		})
-	}
-}
-
-func TestHistoryQueryLimitUsesFilteredPath(t *testing.T) {
-	for _, field := range []string{"", "date_viewed"} {
-		req := CatalogRequest{Source: CatalogSourceHistory, UseSourceOrder: field == "", Query: QueryDefinition{Sort: QuerySort{Field: field}, Limit: new(10)}}
-		if historySourceCanUseOptimizedPageQuery(req) {
-			t.Fatalf("query limit must apply before pagination for sort %q", field)
-		}
-	}
-}
-
 func TestHistoryEpisodeIDsPreserveParentAccessChecks(t *testing.T) {
 	query, _ := buildHistoryDisplayBaseQuery(AccessFilter{UserID: 7, ProfileID: "profile-1"}, nil, true)
 	if !strings.Contains(query, "SELECT h.media_item_id AS display_id") || !strings.Contains(query, "JOIN media_items mi ON mi.content_id = COALESCE(") {
 		t.Fatal("episode IDs must retain access checks on the parent media item")
+	}
+}
+
+func TestHistoryPreviewPagesAreBoundedAndBindEveryArgument(t *testing.T) {
+	r := &CatalogResolver{itemRepo: NewItemRepository(nil)}
+	for _, scope := range []string{"", "episode"} {
+		for _, sort := range []string{"date_viewed", "progress", "title"} {
+			t.Run(scope+"/"+sort, func(t *testing.T) {
+				req := CatalogRequest{Source: CatalogSourceHistory, Limit: 2, Offset: 1, SnapshotAt: new(time.Now().UTC()), SearchQuery: "HES story", NamePrefix: "he", Query: QueryDefinition{MediaScope: scope, Sort: QuerySort{Field: sort, Order: "asc"}, Limit: new(3)}}
+				plan, err := r.buildHistoryPreviewPagePlan(req, AccessFilter{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{11}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				pageSQL, pageArgs := plan.pagedSQL(false)
+				countSQL, countArgs := plan.countSQL()
+				for _, query := range []struct {
+					sql  string
+					args []any
+				}{{pageSQL, pageArgs}, {countSQL, countArgs}} {
+					if !strings.Contains(query.sql, "JOIN history_display") || !strings.Contains(query.sql, "LIMIT $") {
+						t.Fatalf("history must filter and bound rows in SQL: %s", query.sql)
+					}
+					seen := make(map[int]bool)
+					for _, match := range regexp.MustCompile(`\$(\d+)`).FindAllStringSubmatch(query.sql, -1) {
+						n, _ := strconv.Atoi(match[1])
+						if n < 1 || n > len(query.args) {
+							t.Fatalf("unbound $%d of %d", n, len(query.args))
+						}
+						seen[n] = true
+					}
+					if len(seen) != len(query.args) {
+						t.Fatalf("SQL uses %d of %d arguments", len(seen), len(query.args))
+					}
+				}
+				if !strings.Contains(pageSQL, "OFFSET $") || plan.limit != 2 || plan.maxResults != 3 {
+					t.Fatal("query cap and page bounds must survive history composition")
+				}
+				if sort == "date_viewed" && !strings.Contains(pageSQL, "ORDER BY history_source.watched_at ASC, mi.content_id ASC") {
+					t.Fatal("date viewed must use grouped watch-event order")
+				}
+				if strings.Contains(pageSQL, "mi.created_at <=") {
+					t.Fatal("history snapshot must fence watch events, not imported item creation")
+				}
+			})
+		}
 	}
 }
