@@ -1020,8 +1020,8 @@ func TestRetrySafetyPlacement(t *testing.T) {
 	// The /api/v1/admin group is split: its api-keys and devices paths are
 	// classified, the rest is still exempt.
 	admin := Entry{Tier: 1, Disposition: DispositionPorted}
-	admin.Method = "POST"
-	admin.RouteGroup = "/api/v1/admin"
+	admin.Method = http.MethodPost
+	admin.RouteGroup = adminRouteGroup
 	admin.Path = "/api/v1/admin/api-keys"
 	if retrySafetyExempt(admin) {
 		t.Error("/api/v1/admin/api-keys must not be exempt")
@@ -1034,7 +1034,7 @@ func TestRetrySafetyPlacement(t *testing.T) {
 	// not cover: the real ledger cannot carry such a row while the list is
 	// non-empty, so the rule is exercised directly.
 	unlisted := Entry{Tier: 1, Disposition: DispositionPorted}
-	unlisted.Method = "POST"
+	unlisted.Method = http.MethodPost
 	unlisted.RouteGroup = "/api/v1/not-a-real-group"
 	if got := retrySafetyRules(unlisted.key(), unlisted); len(got) != 1 || !strings.Contains(got[0], "no retry_safety") {
 		t.Errorf("unlisted mutation row without retry_safety: got %v", got)
@@ -1083,7 +1083,7 @@ func TestRetrySafetyPlacement(t *testing.T) {
 	// Go-side rules, reached directly because the schema refuses the same
 	// documents first.
 	mutation := Entry{Tier: 1, Disposition: DispositionPorted}
-	mutation.Method = "DELETE"
+	mutation.Method = http.MethodDelete
 	mutation.RouteGroup = "/api/v1/not-a-real-group"
 	for name, e := range map[string]func(Entry) Entry{
 		"unknown value":         func(e Entry) Entry { e.RetrySafety = "retry_later"; return e },

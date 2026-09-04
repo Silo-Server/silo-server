@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"reflect"
 	"sort"
 	"strings"
@@ -62,6 +63,10 @@ const (
 	// retrySafetyNoteMaxLen mirrors the schema's maxLength so the Go rule and
 	// the schema refuse the same note.
 	retrySafetyNoteMaxLen = 300
+
+	// adminRouteGroup is the one route group the temporary retry_safety
+	// allow-list splits by path (see retrySafetyExempt).
+	adminRouteGroup = "/api/v1/admin"
 
 	// removedTier is the only tier a removed row may hold: there is no v2
 	// behavior to baseline, so it never sits in tier 1.
@@ -216,7 +221,7 @@ var retrySafetyValues = map[string]bool{
 var retrySafetyUnclassifiedGroups = map[string]bool{
 	"/":                                 true,
 	"/api/v1":                           true,
-	"/api/v1/admin":                     true,
+	adminRouteGroup:                     true,
 	"/api/v1/admin/diagnostics/reports": true,
 	"/api/v1/admin/jobs":                true,
 	"/api/v1/admin/libraries/{libraryID}/collection-groups": true,
@@ -261,7 +266,7 @@ func retrySafetyExempt(e Entry) bool {
 	if !retrySafetyUnclassifiedGroups[e.RouteGroup] {
 		return false
 	}
-	if e.RouteGroup == "/api/v1/admin" {
+	if e.RouteGroup == adminRouteGroup {
 		return !strings.Contains(e.Path, "/api-keys") && !strings.Contains(e.Path, "/devices")
 	}
 	return true
@@ -597,7 +602,17 @@ func eligibleForConcurrency(e Entry) bool {
 // may be registered Guarded, so only their rows may be marked if_match.
 func isGuardableMethod(method string) bool {
 	switch method {
-	case "PUT", "PATCH", "DELETE":
+	case http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// isMutatingMethod is the retry_safety placement rule: every tier-1 ported
+// row with one of these methods carries a classification.
+func isMutatingMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		return true
 	}
 	return false
