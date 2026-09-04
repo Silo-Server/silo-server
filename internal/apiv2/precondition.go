@@ -3,6 +3,8 @@ package apiv2
 import (
 	"errors"
 	"hash/fnv"
+	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -273,4 +275,22 @@ func StaleVersionProblem(current EntityTag) *Problem {
 		p = p.WithHeader(etagField, current.String())
 	}
 	return p
+}
+
+// NotModified turns a conditional read's output into the 304 answer: Status
+// becomes 304, the ETag header field the current tag, and the body stays
+// zero; Huma writes no body on 304 and the listener drops Content-Type. The
+// output shape (a direct int Status and a string `header:"ETag"`) is what
+// Register requires of a Conditional operation, so a type that reaches here
+// has both.
+func NotModified[O any](out *O, current EntityTag) *O {
+	v := reflect.ValueOf(out).Elem()
+	v.FieldByName("Status").SetInt(http.StatusNotModified)
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		if strings.EqualFold(t.Field(i).Tag.Get("header"), etagField) {
+			v.Field(i).SetString(current.String())
+		}
+	}
+	return out
 }

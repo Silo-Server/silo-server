@@ -1,10 +1,13 @@
 package apiv2
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -79,7 +82,7 @@ func TestImpliedStatusesTable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ImpliedStatuses(tc.class, tc.demo, tc.serviceBacked, tc.body, tc.path)
+			got := ImpliedStatuses(tc.class, tc.demo, tc.serviceBacked, tc.body, tc.path, false, false)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("ImpliedStatuses = %v, want %v", got, tc.want)
 			}
@@ -215,5 +218,279 @@ func TestGeneratedDocumentRequestMediaTypes(t *testing.T) {
 	}
 	if bodies == 0 {
 		t.Fatal("no operation with a request body; the media-type rule is untested")
+	}
+}
+
+func TestImpliedStatusesForConcurrency(t *testing.T) {
+	has := func(s []int, v int) bool {
+		for _, x := range s {
+			if x == v {
+				return true
+			}
+		}
+		return false
+	}
+	plain := ImpliedStatuses(ClassPublic, false, false, false, true, false, false)
+	if has(plain, http.StatusPreconditionFailed) || has(plain, http.StatusPreconditionRequired) || has(plain, http.StatusNotModified) {
+		t.Fatalf("plain operation implies concurrency statuses: %v", plain)
+	}
+	guarded := ImpliedStatuses(ClassPublic, false, false, true, true, true, false)
+	if !has(guarded, http.StatusPreconditionFailed) || !has(guarded, http.StatusPreconditionRequired) || has(guarded, http.StatusNotModified) {
+		t.Fatalf("guarded = %v", guarded)
+	}
+	conditional := ImpliedStatuses(ClassPublic, false, false, false, true, false, true)
+	if !has(conditional, http.StatusNotModified) || has(conditional, http.StatusPreconditionFailed) {
+		t.Fatalf("conditional = %v", conditional)
+	}
+}
+
+// conditionalDocOutput is the minimal output shape a Conditional read needs.
+type conditionalDocOutput struct {
+	Status int
+	ETag   string `header:"ETag"`
+	Body   probeEcho
+}
+
+type guardedDocOutput struct {
+	ETag string `header:"ETag"`
+	Body probeEcho
+}
+
+func registerConcurrencyDocProbes(reg *Registry) {
+	current := RenderETag(1, "doc")
+	Register(reg, Operation{
+		Operation:   humaOp(http.MethodGet, Prefix+"/docprobe/{id}", "getDocProbe", "probe", "conditional"),
+		Class:       ClassPublic,
+		Conditional: true,
+	}, func(_ context.Context, in *struct {
+		ID          string `path:"id"`
+		IfNoneMatch string `header:"If-None-Match"`
+	}) (*conditionalDocOutput, error) {
+		out := &conditionalDocOutput{ETag: current.String(), Body: probeEcho{Name: in.ID, Tags: []string{}, Labels: map[string]int{}}}
+		if matched, p := EvaluateIfNoneMatch(in.IfNoneMatch, current); p != nil {
+			return nil, p
+		} else if matched {
+			return NotModified(out, current), nil
+		}
+		return out, nil
+	})
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodPut, Prefix+"/docprobe/{id}", "putDocProbe", "probe", "guarded"),
+		Class:     ClassPublic,
+		Guarded:   true,
+	}, func(_ context.Context, in *struct {
+		ID      string `path:"id"`
+		IfMatch string `header:"If-Match"`
+		Body    probeBody
+	}) (*guardedDocOutput, error) {
+		if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+			return nil, p
+		}
+		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
+	})
+}
+
+// TestConcurrencyDeclarationsAreDocumented checks the document a guarded and a
+// conditional registration produce: the extension, the required If-Match
+// parameter, the ETag header on every 2xx, the 304 response, and the
+// implied problem statuses.
+func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
+	api := huma.NewAPI(humaConfig(), noopAdapter{})
+	reg := &Registry{api: api}
+	registerConcurrencyDocProbes(reg)
+	raw, err := api.OpenAPI().MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Extensions map[string]any
+			Parameters []struct {
+				Name     string `json:"name"`
+				In       string `json:"in"`
+				Required bool   `json:"required"`
+			} `json:"parameters"`
+			Responses map[string]struct {
+				Headers map[string]any `json:"headers"`
+				Content map[string]any `json:"content"`
+			} `json:"responses"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var generic map[string]any
+	_ = json.Unmarshal(raw, &generic)
+	ext := func(method, name string) any {
+		return generic["paths"].(map[string]any)[Prefix+"/docprobe/{id}"].(map[string]any)[method].(map[string]any)[name]
+	}
+	put := doc.Paths[Prefix+"/docprobe/{id}"]["put"]
+	if ext("put", extGuarded) != true || ext("put", extConditional) != nil {
+		t.Fatalf("put extensions: guarded=%v conditional=%v", ext("put", extGuarded), ext("put", extConditional))
+	}
+	ifMatch := false
+	for _, p := range put.Parameters {
+		if p.Name == "If-Match" && p.In == "header" {
+			ifMatch = p.Required
+		}
+	}
+	if !ifMatch {
+		t.Fatalf("If-Match is not a required header parameter: %+v", put.Parameters)
+	}
+	for _, status := range []string{"412", "428"} {
+		if _, ok := put.Responses[status]; !ok {
+			t.Fatalf("put lacks %s: %v", status, put.Responses)
+		}
+	}
+	if put.Responses["200"].Headers["ETag"] == nil {
+		t.Fatalf("put 200 lacks the ETag header: %+v", put.Responses["200"])
+	}
+	get := doc.Paths[Prefix+"/docprobe/{id}"]["get"]
+	if ext("get", extConditional) != true || ext("get", extGuarded) != nil {
+		t.Fatalf("get extensions: guarded=%v conditional=%v", ext("get", extGuarded), ext("get", extConditional))
+	}
+	if get.Responses["200"].Headers["ETag"] == nil || get.Responses["304"].Headers["ETag"] == nil || len(get.Responses["304"].Content) != 0 {
+		t.Fatalf("get responses: %+v", get.Responses)
+	}
+	if _, ok := get.Responses["412"]; ok {
+		t.Fatal("a conditional read must not document 412")
+	}
+	if findings := lintExtensions(raw); len(findings) != 0 {
+		t.Fatal(findings)
+	}
+}
+
+// lintExtensions is a stand-in for internal/contractspec, which cannot be
+// imported here: it checks the concurrency extensions round-trip as booleans.
+func lintExtensions(raw []byte) []string {
+	var d struct {
+		Paths map[string]map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return []string{err.Error()}
+	}
+	var out []string
+	for path, methods := range d.Paths {
+		for method, op := range methods {
+			for _, name := range []string{extGuarded, extConditional} {
+				if v, ok := op[name]; ok && v != true {
+					out = append(out, path+" "+method+" "+name+" is not true")
+				}
+			}
+		}
+	}
+	return out
+}
+
+// TestNotModifiedHasNoBody proves through the real router that a conditional
+// read answering 304 sends the ETag, no body and no Content-Type, and that
+// the same read without a matching If-None-Match is a normal 200.
+func TestNotModifiedHasNoBody(t *testing.T) {
+	h := NewHandler(Dependencies{testRegister: registerConcurrencyDocProbes})
+	current := RenderETag(1, "doc")
+	rec := do(t, h, http.MethodGet, Prefix+"/docprobe/a", "", map[string]string{"If-None-Match": current.String()})
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("304 carries a body: %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("ETag"); got != current.String() {
+		t.Fatalf("ETag = %q, want %q", got, current.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "" {
+		t.Fatalf("304 carries Content-Type %q", ct)
+	}
+	if requestIDHeader(rec) == "" {
+		t.Fatal("304 lacks X-Request-ID")
+	}
+	rec = do(t, h, http.MethodGet, Prefix+"/docprobe/a", "", map[string]string{"If-None-Match": RenderETag(2, "doc").String()})
+	if rec.Code != http.StatusOK || rec.Body.Len() == 0 || rec.Header().Get("ETag") != current.String() {
+		t.Fatalf("non-matching read: %d %q etag %q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
+	}
+}
+
+// TestRegisterRefusesBadConcurrencyDeclarations: the shape rules are build
+// failures, not request failures.
+func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
+	type okIn struct {
+		IfMatch     string `header:"If-Match"`
+		IfNoneMatch string `header:"If-None-Match"`
+	}
+	type noHeaders struct{}
+	type okOut struct {
+		Status int
+		ETag   string `header:"ETag"`
+	}
+	type noETag struct{ Status int }
+	type noStatus struct {
+		ETag string `header:"ETag"`
+	}
+	type intETag struct {
+		Status int
+		ETag   int `header:"ETag"`
+	}
+	guarded := func(method string) Operation {
+		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, Guarded: true}
+	}
+	conditional := func(method string) Operation {
+		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, Conditional: true}
+	}
+	cases := map[string]struct {
+		op   Operation
+		reg  func(*Registry, Operation)
+		want string
+	}{
+		"guarded GET": {guarded(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}, "guarded is for PUT"},
+		"guarded POST": {guarded(http.MethodPost), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}, "guarded is for PUT"},
+		"conditional PUT": {conditional(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}, "conditional is for GET"},
+		"guarded without If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *noHeaders) (*okOut, error) { return nil, nil })
+		}, "If-Match"},
+		"guarded without ETag": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noETag, error) { return nil, nil })
+		}, "ETag"},
+		"guarded with a non-string ETag": {guarded(http.MethodPatch), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*intETag, error) { return nil, nil })
+		}, "ETag"},
+		"conditional without If-None-Match": {conditional(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *noHeaders) (*okOut, error) { return nil, nil })
+		}, "If-None-Match"},
+		"conditional without ETag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noETag, error) { return nil, nil })
+		}, "ETag"},
+		"conditional without Status": {conditional(http.MethodHead), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noStatus, error) { return nil, nil })
+		}, "Status"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("expected a panic")
+				}
+				if !strings.Contains(fmt.Sprint(r), c.want) {
+					t.Fatalf("panic %v does not mention %q", r, c.want)
+				}
+			}()
+			newChiRouter(Dependencies{testRegister: func(reg *Registry) { c.reg(reg, c.op) }})
+		})
+	}
+	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+			Register(reg, guarded(method), func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}})
+	}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+			Register(reg, conditional(method), func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}})
 	}
 }

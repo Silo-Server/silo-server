@@ -52,6 +52,12 @@ const (
 	metaDemoRestricted  = "silo.demo_restricted"
 	metaProfileOptional = "silo.profile_optional"
 	metaMaxBodyBytes    = "silo.max_body_bytes"
+	metaClass           = "silo.class"
+	metaPermission      = "silo.permission"
+	metaDemoRestricted  = "silo.demo_restricted"
+	metaMaxBodyBytes    = "silo.max_body_bytes"
+	metaGuarded         = "silo.guarded"
+	metaConditional     = "silo.conditional"
 )
 
 // knownPermissions is the policy permission set an operation may name. It is
@@ -93,6 +99,18 @@ type Operation struct {
 	// The document and discovery operations answer from the build alone
 	// and leave it unset.
 	ServiceBacked bool
+	// Guarded marks a PUT, PATCH or DELETE protected by optimistic
+	// concurrency (docs/architecture/api-contract.md, "Optimistic
+	// concurrency"): the input binds `header:"If-Match"` as a string, the
+	// output carries `header:"ETag"`, and the handler evaluates the
+	// precondition with EvaluateIfMatch after loading the resource. The
+	// document gains 412 and 428, a required If-Match parameter, and the
+	// ETag header on every success response.
+	Guarded bool
+	// Conditional marks a GET or HEAD that honours If-None-Match: the input
+	// binds `header:"If-None-Match"`, the output carries `header:"ETag"` and
+	// an int Status so the handler can answer 304 through NotModified.
+	Conditional bool
 }
 
 // Registry is the deterministic registration surface. Domain files call
@@ -112,6 +130,8 @@ type Declared struct {
 	Path        string
 	OperationID string
 	Class       Class
+	Guarded     bool
+	Conditional bool
 }
 
 // Declared lists every registered operation, sorted by method then path.
@@ -143,6 +163,9 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	if err := checkEnums(reflect.TypeOf(out)); err != nil {
 		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
 	}
+	if err := checkConcurrencyShape(op, reflect.TypeOf(in), reflect.TypeOf(out)); err != nil {
+		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	}
 	if op.Metadata == nil {
 		op.Metadata = map[string]any{}
 	}
@@ -150,6 +173,8 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaPermission] = op.Permission
 	op.Metadata[metaDemoRestricted] = op.DemoRestricted
 	op.Metadata[metaProfileOptional] = op.ProfileOptional
+	op.Metadata[metaGuarded] = op.Guarded
+	op.Metadata[metaConditional] = op.Conditional
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {
@@ -167,9 +192,11 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 		}
 	}
 	reg.mu.Lock()
-	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class})
+	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
+		Guarded: op.Guarded, Conditional: op.Conditional})
 	reg.mu.Unlock()
 	huma.Register(reg.api, op.Operation, handler)
+	documentConcurrencyResponses(reg.api.OpenAPI(), op)
 }
 
 func checkOperation(op Operation) error {
@@ -210,7 +237,59 @@ func checkOperation(op Operation) error {
 	if op.Operation.MaxBodyBytes != 0 {
 		return fmt.Errorf("set apiv2.Operation.MaxBodyBytes, not the embedded Huma field: Register owns the limit translation")
 	}
+	if op.Guarded && op.Method != http.MethodPut && op.Method != http.MethodPatch && op.Method != http.MethodDelete {
+		return fmt.Errorf("guarded is for PUT, PATCH and DELETE; %s has no If-Match precondition to guard", op.Method)
+	}
+	if op.Conditional && op.Method != http.MethodGet && op.Method != http.MethodHead {
+		return fmt.Errorf("conditional is for GET and HEAD; %s has no If-None-Match read to answer 304", op.Method)
+	}
 	return nil
+}
+
+// checkConcurrencyShape requires the transport fields a guarded or
+// conditional declaration relies on: the precondition header as a string on
+// the input, ETag as a string on the output, and for a conditional read an
+// int Status so the handler can answer 304.
+func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
+	if op.Guarded {
+		if !declaresHeaderString(in, ifMatchField) {
+			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"`", ifMatchField)
+		}
+		if !declaresHeaderString(out, etagField) {
+			return fmt.Errorf("guarded: output must declare a string field with `header:\"%s\"`", etagField)
+		}
+	}
+	if op.Conditional {
+		if !declaresHeaderString(in, ifNoneMatchField) {
+			return fmt.Errorf("conditional: input must declare a string field with `header:\"%s\"`", ifNoneMatchField)
+		}
+		if !declaresHeaderString(out, etagField) {
+			return fmt.Errorf("conditional: output must declare a string field with `header:\"%s\"`", etagField)
+		}
+		if f, ok := out.FieldByName("Status"); !ok || f.Type.Kind() != reflect.Int || len(f.Index) != 1 {
+			return fmt.Errorf("conditional: output must declare a direct int Status field so the handler can answer 304")
+		}
+	}
+	return nil
+}
+
+// declaresHeaderString reports whether struct type t (or an embedded struct)
+// has a string field bound to the named header, compared case-insensitively
+// as HTTP header names are.
+func declaresHeaderString(t reflect.Type, name string) bool {
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous && f.Type.Kind() == reflect.Struct && declaresHeaderString(f.Type, name) {
+			return true
+		}
+		if strings.EqualFold(f.Tag.Get("header"), name) && f.Type.Kind() == reflect.String {
+			return true
+		}
+	}
+	return false
 }
 
 // declaresPathParam reports whether a route path declares {name} as one whole

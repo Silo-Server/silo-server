@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -20,6 +21,11 @@ const (
 	extPermission     = "x-silo-permission"
 	extDemoRestricted = "x-silo-demo-restricted"
 	extServiceBacked  = "x-silo-service-backed"
+	// extGuarded and extConditional record the optimistic-concurrency
+	// declarations so a reader of the document can enumerate the operations
+	// that require If-Match or honour If-None-Match.
+	extGuarded     = "x-silo-guarded"
+	extConditional = "x-silo-conditional"
 	// extExtensionBag marks the one legitimate use of additionalProperties:
 	// a named bag whose keys are not fixed by this contract. The spec lint
 	// refuses any other additionalProperties.
@@ -62,9 +68,21 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.ServiceBacked {
 		op.Extensions[extServiceBacked] = true
 	}
+	if op.Guarded {
+		op.Extensions[extGuarded] = true
+		op.Parameters = append(op.Parameters, ifMatchParam())
+	}
+	if op.Conditional {
+		op.Extensions[extConditional] = true
+	}
 	hasBody := declaresBody(input)
 	hasPath := strings.Contains(op.Path, "{")
-	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath) {
+	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath, op.Guarded, op.Conditional) {
+		if status < http.StatusBadRequest {
+			// 304 is a success shape, documented with its headers by
+			// documentConcurrencyResponses, not a problem.
+			continue
+		}
 		op.Errors = appendUnique(op.Errors, status)
 	}
 	if op.Class == ClassPublic {
@@ -117,6 +135,73 @@ func profileHeaderParam(class Class) *huma.Param {
 	return p
 }
 
+// ifMatchParam documents the precondition a guarded operation requires. The
+// handler binds the same header through its input struct; declaring the
+// parameter here, before Huma sees the input, is what marks it required in
+// the document without Huma refusing the request itself (a missing field is
+// the 428 problem, not a 422).
+func ifMatchParam() *huma.Param {
+	return &huma.Param{
+		Name:        ifMatchField,
+		In:          "header",
+		Required:    true,
+		Description: "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+		Schema:      &huma.Schema{Type: "string"},
+	}
+}
+
+// documentConcurrencyResponses runs after Huma has derived the success
+// responses: it documents the ETag header on every 2xx response of a guarded
+// or conditional operation and adds the 304 response of a conditional read.
+func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
+	if !op.Guarded && !op.Conditional {
+		return
+	}
+	item := oapi.Paths[op.Path]
+	if item == nil {
+		return
+	}
+	var registered *huma.Operation
+	switch op.Method {
+	case http.MethodGet:
+		registered = item.Get
+	case http.MethodHead:
+		registered = item.Head
+	case http.MethodPut:
+		registered = item.Put
+	case http.MethodPatch:
+		registered = item.Patch
+	case http.MethodDelete:
+		registered = item.Delete
+	}
+	if registered == nil {
+		return
+	}
+	etag := func() *huma.Header {
+		return &huma.Header{
+			Description: "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+			Schema:      &huma.Schema{Type: "string"},
+		}
+	}
+	if op.Conditional {
+		registered.Responses[strconv.Itoa(http.StatusNotModified)] = &huma.Response{
+			Description: "The representation named by If-None-Match is current; no body.",
+			Headers:     map[string]*huma.Header{etagField: etag()},
+		}
+	}
+	for status, resp := range registered.Responses {
+		if code, err := strconv.Atoi(status); err != nil || code < 200 || code >= 300 {
+			continue
+		}
+		if resp.Headers == nil {
+			resp.Headers = map[string]*huma.Header{}
+		}
+		if resp.Headers[etagField] == nil {
+			resp.Headers[etagField] = etag()
+		}
+	}
+}
+
 // resolvesProfile reports whether the class runs viewer access and so needs
 // the profile header.
 func resolvesProfile(class Class) bool {
@@ -131,13 +216,20 @@ func resolvesProfile(class Class) bool {
 // X-Profile-Id before the handler runs); a service-backed handler adds 503
 // (its service is not wired); every gated class adds 401, 429 and 503 (a
 // gate the wiring lacks fails closed); a class that resolves a profile or a
-// demo-restricted mutation adds 403. Statuses an operation produces on its
-// own (409 for a name conflict, say) are declared on that operation's
-// Errors, not here.
-func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPath bool) []int {
+// demo-restricted mutation adds 403; a guarded mutation adds 412 and 428; a
+// conditional read adds 304. Statuses an operation produces on its own (409
+// for a name conflict, say) are declared on that operation's Errors, not here.
+func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPath, guarded, conditional bool) []int {
 	set := map[int]bool{
 		http.StatusBadRequest: true, http.StatusNotAcceptable: true,
 		http.StatusUnprocessableEntity: true, http.StatusInternalServerError: true,
+	}
+	if guarded {
+		set[http.StatusPreconditionFailed] = true
+		set[http.StatusPreconditionRequired] = true
+	}
+	if conditional {
+		set[http.StatusNotModified] = true
 	}
 	if hasBody {
 		set[http.StatusRequestTimeout] = true

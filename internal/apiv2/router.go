@@ -329,6 +329,12 @@ func (b *bufferedWriter) flush() {
 		// The client is gone; a success body has nobody to read it.
 		return
 	}
+	if b.status == http.StatusNotModified || b.status == http.StatusNoContent {
+		// No body travels with these statuses, so no representation header
+		// describes one; Huma negotiates Content-Type before it knows.
+		b.w.Header().Del("Content-Type")
+		b.body.Reset()
+	}
 	b.w.WriteHeader(b.status)
 	_, _ = b.w.Write(b.body.Bytes())
 }
