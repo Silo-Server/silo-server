@@ -993,3 +993,95 @@ func concurrencyMismatches(entries []Entry, declared []apiv2registry.Declared, e
 	}
 	return problems
 }
+
+// TestRetrySafetyPlacement pins where the curated retry_safety field may
+// appear: required on a tier-1 ported row with a mutating method (outside
+// the temporary unclassified allow-list), forbidden on every other row, one
+// of the seven contract values, and accompanied by a note for
+// idempotency_key and non_retryable.
+func TestRetrySafetyPlacement(t *testing.T) {
+	ledger, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ledger.Entries {
+		if e.RetrySafety == "" {
+			continue
+		}
+		if !retrySafetyValues[e.RetrySafety] || !requiresRetrySafety(e) {
+			t.Errorf("%s: retry_safety %q on tier %d %s %s", e.key(), e.RetrySafety, e.Tier, e.Disposition, e.Method)
+		}
+	}
+	// The required direction, against a row in a group the allow-list does
+	// not cover: the real ledger cannot carry such a row while the list is
+	// non-empty, so the rule is exercised directly.
+	unlisted := Entry{Tier: 1, Disposition: DispositionPorted}
+	unlisted.Method = "POST"
+	unlisted.RouteGroup = "/api/v1/not-a-real-group"
+	if got := retrySafetyRules(unlisted.key(), unlisted); len(got) != 1 || !strings.Contains(got[0], "no retry_safety") {
+		t.Errorf("unlisted mutation row without retry_safety: got %v", got)
+	}
+	unlisted.RetrySafety = RetrySafetyNaturalIdempotent
+	if got := retrySafetyRules(unlisted.key(), unlisted); len(got) != 0 {
+		t.Errorf("classified row: got %v", got)
+	}
+
+	isGET1 := func(e map[string]any) bool {
+		return e["method"] == "GET" && e["tier"] == float64(1) && e["disposition"] == "ported"
+	}
+	isMutation1 := func(e map[string]any) bool {
+		m, _ := e["method"].(string)
+		return isMutatingMethod(m) && e["tier"] == float64(1) && e["disposition"] == "ported"
+	}
+	isTier2 := func(e map[string]any) bool { return e["tier"] == float64(2) }
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		entryWhere(t, doc, isGET1)["retry_safety"] = RetrySafetyNaturalIdempotent
+	}), "retry_safety")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		entryWhere(t, doc, isTier2)["retry_safety"] = RetrySafetyNaturalIdempotent
+	}), "retry_safety")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		entryWhere(t, doc, isMutation1)["retry_safety"] = "retry_later"
+	}), "retry_safety")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isMutation1)
+		e["retry_safety"] = RetrySafetyIdempotencyKey
+		delete(e, "retry_safety_note")
+	}), "retry_safety_note")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isMutation1)
+		e["retry_safety"] = RetrySafetyNonRetryable
+		delete(e, "retry_safety_note")
+	}), "retry_safety_note")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isMutation1)
+		e["retry_safety"] = RetrySafetyNaturalIdempotent
+		e["retry_safety_note"] = strings.Repeat("x", retrySafetyNoteMaxLen+1)
+	}), "retry_safety_note")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isGET1)
+		e["retry_safety_note"] = "a note without a value"
+	}), "retry_safety")
+	// Go-side rules, reached directly because the schema refuses the same
+	// documents first.
+	mutation := Entry{Tier: 1, Disposition: DispositionPorted}
+	mutation.Method = "DELETE"
+	mutation.RouteGroup = "/api/v1/not-a-real-group"
+	for name, e := range map[string]func(Entry) Entry{
+		"unknown value":         func(e Entry) Entry { e.RetrySafety = "retry_later"; return e },
+		"key without note":      func(e Entry) Entry { e.RetrySafety = RetrySafetyIdempotencyKey; return e },
+		"non-retryable no note": func(e Entry) Entry { e.RetrySafety = RetrySafetyNonRetryable; return e },
+		"note without value":    func(e Entry) Entry { e.Tier = 2; e.RetrySafetyNote = "x"; return e },
+		"read row":              func(e Entry) Entry { e.Method = "GET"; e.RetrySafety = RetrySafetyNaturalIdempotent; return e },
+		"tier-2 row":            func(e Entry) Entry { e.Tier = 2; e.RetrySafety = RetrySafetyNaturalIdempotent; return e },
+		"long note": func(e Entry) Entry {
+			e.RetrySafety = RetrySafetyNaturalIdempotent
+			e.RetrySafetyNote = strings.Repeat("x", retrySafetyNoteMaxLen+1)
+			return e
+		},
+	} {
+		if got := retrySafetyRules(mutation.key(), e(mutation)); len(got) == 0 {
+			t.Errorf("%s: no finding", name)
+		}
+	}
+}

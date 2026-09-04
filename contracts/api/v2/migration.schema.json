@@ -277,9 +277,40 @@
         "concurrency": {
           "enum": ["if_match"],
           "description": "Optional, curated. if_match marks a resource with demonstrated lost-update risk whose v2 operation is registered Guarded (docs/architecture/api-contract.md, \"Optimistic concurrency\"): PUT/PATCH/DELETE require If-Match, a missing field is 428, a stale tag is 412. Allowed only on tier-1 ported rows whose method is PUT, PATCH or DELETE (the methods a Guarded v2 operation may use); internal/contractledger enforces that and reconciles the set against the v2 registry in both directions."
+        },
+        "retry_safety": {
+          "enum": ["natural_idempotent", "unique_constraint", "domain_identity", "coalescing", "durable_dispatch", "idempotency_key", "non_retryable"],
+          "description": "Curated. The mutation retry-safety strategy (docs/architecture/api-contract.md, \"Mutation retry safety\"), one value per contract bullet: natural_idempotent (PUT/DELETE converging on one state), unique_constraint (natural key or client-supplied id enforced by a DB uniqueness constraint), domain_identity (durable domain operation id: playback attempt, upload, job, webhook delivery), coalescing (returns the already-active job), durable_dispatch (state-gated or outbox dispatch for external side effects), idempotency_key (generic key; only with a note naming the residual group), non_retryable (documented; clients never auto-retry after an uncertain response). Required on every tier-1 ported row with a mutating method (POST, PUT, PATCH, DELETE) and forbidden elsewhere; internal/contractledger enforces both and reconciles the set against the v2 registry's x-silo-retry-safety."
+        },
+        "retry_safety_note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Curated, optional. Why the retry_safety value is right when it is not obvious from the method and resource. Required for idempotency_key (name the residual group) and non_retryable (say what a client must do instead)."
         }
       },
       "allOf": [
+        {
+          "$comment": "retry_safety is a mutation-only classification of a ported tier-1 row. The required direction (every such row carries one) is enforced by internal/contractledger, which owns the temporary unclassified allow-list.",
+          "if": {
+            "not": {
+              "properties": {
+                "tier": { "const": 1 },
+                "disposition": { "const": "ported" },
+                "method": { "enum": ["POST", "PUT", "PATCH", "DELETE"] }
+              }
+            }
+          },
+          "then": { "properties": { "retry_safety": false, "retry_safety_note": false } }
+        },
+        {
+          "if": { "required": ["retry_safety_note"] },
+          "then": { "required": ["retry_safety"] }
+        },
+        {
+          "if": { "properties": { "retry_safety": { "enum": ["idempotency_key", "non_retryable"] } }, "required": ["retry_safety"] },
+          "then": { "required": ["retry_safety_note"] }
+        },
         {
           "if": { "properties": { "consumers": { "contains": { "const": "unused" } } } },
           "then": { "properties": { "consumers": { "maxItems": 1 }, "consumer_call_sites": { "maxItems": 0 } } }

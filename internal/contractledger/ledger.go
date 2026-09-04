@@ -46,6 +46,23 @@ const (
 	// appear only on a tier-1 ported row with a mutating method.
 	ConcurrencyIfMatch = "if_match"
 
+	// RetrySafety values (migration.schema.json entry.retry_safety), one per
+	// bullet of the contract's "Mutation retry safety" section. The value is
+	// required on every tier-1 ported row with a mutating method and
+	// forbidden on every other row; internal/apiv2 declares the same set as
+	// apiv2.RetrySafety and the reconcile test compares them.
+	RetrySafetyNaturalIdempotent = "natural_idempotent"
+	RetrySafetyUniqueConstraint  = "unique_constraint"
+	RetrySafetyDomainIdentity    = "domain_identity"
+	RetrySafetyCoalescing        = "coalescing"
+	RetrySafetyDurableDispatch   = "durable_dispatch"
+	RetrySafetyIdempotencyKey    = "idempotency_key"
+	RetrySafetyNonRetryable      = "non_retryable"
+
+	// retrySafetyNoteMaxLen mirrors the schema's maxLength so the Go rule and
+	// the schema refuse the same note.
+	retrySafetyNoteMaxLen = 300
+
 	// removedTier is the only tier a removed row may hold: there is no v2
 	// behavior to baseline, so it never sits in tier 1.
 	removedTier = 2
@@ -172,6 +189,89 @@ type Entry struct {
 	// Concurrency is the optional curated optimistic-concurrency marking:
 	// ConcurrencyIfMatch on a row whose v2 operation is registered Guarded.
 	Concurrency string `json:"concurrency,omitempty"`
+	// RetrySafety is the curated mutation retry-safety strategy (one of the
+	// RetrySafety* constants); RetrySafetyNote explains a non-obvious choice
+	// and is required for idempotency_key and non_retryable.
+	RetrySafety     string `json:"retry_safety,omitempty"`
+	RetrySafetyNote string `json:"retry_safety_note,omitempty"`
+}
+
+// retrySafetyValues is the closed set a row may carry.
+var retrySafetyValues = map[string]bool{
+	RetrySafetyNaturalIdempotent: true,
+	RetrySafetyUniqueConstraint:  true,
+	RetrySafetyDomainIdentity:    true,
+	RetrySafetyCoalescing:        true,
+	RetrySafetyDurableDispatch:   true,
+	RetrySafetyIdempotencyKey:    true,
+	RetrySafetyNonRetryable:      true,
+}
+
+// retrySafetyUnclassifiedGroups is TEMPORARY: the route groups whose tier-1
+// ported mutation rows may still lack retry_safety while the classification
+// pass (branch api-v2/wave1-idempotency and its follow-up) works through the
+// ledger group by group. A group leaves this list in the same commit that
+// classifies its rows. TODO(api-v2/wave1-idempotency): empty this list and
+// delete it together with retrySafetyExempt.
+var retrySafetyUnclassifiedGroups = map[string]bool{
+	"/":                                 true,
+	"/api/v1":                           true,
+	"/api/v1/admin":                     true,
+	"/api/v1/admin/diagnostics/reports": true,
+	"/api/v1/admin/invitations":         true,
+	"/api/v1/admin/invite-codes":        true,
+	"/api/v1/admin/jobs":                true,
+	"/api/v1/admin/libraries/{libraryID}/collection-groups": true,
+	"/api/v1/admin/nodes":             true,
+	"/api/v1/admin/policy":            true,
+	"/api/v1/admin/rate-limits":       true,
+	"/api/v1/admin/system":            true,
+	"/api/v1/admin/tasks":             true,
+	"/api/v1/api-keys":                true,
+	"/api/v1/audio-prefs":             true,
+	"/api/v1/auth":                    true,
+	"/api/v1/auth/oauth/{install_id}": true,
+	"/api/v1/collections":             true,
+	"/api/v1/devices":                 true,
+	"/api/v1/downloads":               true,
+	"/api/v1/ebooks":                  true,
+	"/api/v1/favorites":               true,
+	"/api/v1/history":                 true,
+	"/api/v1/home/dismissals":         true,
+	"/api/v1/invitations/{token}":     true,
+	"/api/v1/libraries":               true,
+	"/api/v1/library-playback-prefs":  true,
+	"/api/v1/markers":                 true,
+	"/api/v1/notifications":           true,
+	"/api/v1/notifications/web-push":  true,
+	"/api/v1/notifications/webhooks":  true,
+	"/api/v1/onboarding":              true,
+	"/api/v1/playback":                true,
+	"/api/v1/profile/sections":        true,
+	"/api/v1/profiles":                true,
+	"/api/v1/ratings":                 true,
+	"/api/v1/recommendations":         true,
+	"/api/v1/requests":                true,
+	"/api/v1/settings":                true,
+	"/api/v1/subtitle-prefs":          true,
+	"/api/v1/subtitles":               true,
+	"/api/v1/sync":                    true,
+	"/api/v1/watch-providers":         true,
+	"/api/v1/watch-together":          true,
+	"/api/v1/watched":                 true,
+	"/api/v1/watchlist":               true,
+}
+
+// retrySafetyExempt reports whether an unclassified row is tolerated by the
+// temporary allow-list.
+func retrySafetyExempt(e Entry) bool {
+	return retrySafetyUnclassifiedGroups[e.RouteGroup]
+}
+
+// requiresRetrySafety reports whether a row must carry retry_safety: a
+// tier-1 ported row with a mutating method.
+func requiresRetrySafety(e Entry) bool {
+	return e.Tier == 1 && e.Disposition == DispositionPorted && isMutatingMethod(e.Method)
 }
 
 // V2Target is the v2 operation an entry maps to. All three are nil until the
@@ -455,6 +555,32 @@ func reviewRules(k Key, e Entry, r inventoryRoute) []string {
 		case !isGuardableMethod(e.Method):
 			out = append(out, fmt.Sprintf("concurrency %s is only for a method a Guarded v2 operation may use (PUT, PATCH, DELETE), not %s: %s", e.Concurrency, e.Method, k))
 		}
+	}
+	out = append(out, retrySafetyRules(k, e)...)
+	return out
+}
+
+// retrySafetyRules enforces the classification's placement: required on a
+// tier-1 ported mutation row (outside the temporary allow-list), forbidden
+// elsewhere, a known value, and a note where the value needs one.
+func retrySafetyRules(k Key, e Entry) []string {
+	var out []string
+	switch {
+	case e.RetrySafety == "" && requiresRetrySafety(e) && !retrySafetyExempt(e):
+		out = append(out, fmt.Sprintf("tier-1 ported mutation row has no retry_safety: %s", k))
+	case e.RetrySafety == "":
+		if e.RetrySafetyNote != "" {
+			out = append(out, fmt.Sprintf("retry_safety_note without retry_safety: %s", k))
+		}
+	case !retrySafetyValues[e.RetrySafety]:
+		out = append(out, fmt.Sprintf("unknown retry_safety %q: %s", e.RetrySafety, k))
+	case !requiresRetrySafety(e):
+		out = append(out, fmt.Sprintf("retry_safety %s is only for tier-1 ported rows with a mutating method; row is tier %d %s %s: %s", e.RetrySafety, e.Tier, e.Disposition, e.Method, k))
+	case (e.RetrySafety == RetrySafetyIdempotencyKey || e.RetrySafety == RetrySafetyNonRetryable) && e.RetrySafetyNote == "":
+		out = append(out, fmt.Sprintf("retry_safety %s requires a retry_safety_note: %s", e.RetrySafety, k))
+	}
+	if len(e.RetrySafetyNote) > retrySafetyNoteMaxLen {
+		out = append(out, fmt.Sprintf("retry_safety_note longer than %d characters: %s", retrySafetyNoteMaxLen, k))
 	}
 	return out
 }
