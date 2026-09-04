@@ -62,8 +62,16 @@ export default defineConfig(({ mode }) => {
     apiProxyTarget,
   );
 
+  const webVersion = (
+    JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "utf8")) as { version: string }
+  ).version;
+
   return {
     plugins: [react(), tailwindcss(), precompressStaticAssets()],
+    define: {
+      // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
+      __SILO_WEB_VERSION__: JSON.stringify(webVersion),
+    },
     worker: {
       format: "es",
     },
