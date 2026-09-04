@@ -29,7 +29,7 @@ describe("useContinueWatching", () => {
     });
     mocks.useQuery.mockReturnValue({
       data: {
-        progress: [{ media_item_id: "movie-123" }],
+        items: [{ media_item_id: "movie-123" }],
       },
       isLoading: false,
     });
