@@ -1977,6 +1977,9 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Post("/oauth/complete", oauthHandler.HandleComplete)
 					r.Route("/oauth/{install_id}", func(r chi.Router) {
 						r.Post("/init", oauthHandler.HandleInit)
+						// /start is what the SPA uses; /init's cross-origin
+						// redirect is blocked by the frontend's form-action CSP.
+						r.Post("/start", oauthHandler.HandleStart)
 						r.Get("/callback", oauthHandler.HandleCallback)
 					})
 				}
