@@ -67,7 +67,7 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 	}
 	switch class {
 	case ClassProfileScoped:
-		chain = append(chain, apimw.RequireProfile, deps.ViewerAccess.RequireViewerAccess)
+		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, apimw.RequireProfile)
 	case ClassActingAdmin:
 		if deps.ActingAdmin == nil {
 			return nil, "acting admin"
