@@ -83,6 +83,7 @@ type GlobalSessionView struct {
 	RequestCount                int64
 	Routes                      []RouteActivityView
 	RoutesOverflowed            bool
+	ObservationsOverflowed      bool
 	ViewerIPs                   []string
 	ViewerIPsOverflowed         bool
 	DeviceIDs                   []string
@@ -211,7 +212,8 @@ type sessionContribution struct {
 }
 
 func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMonitoringView {
-	view := GlobalMonitoringView{BuiltAt: at, Complete: true, Truncated: set.Truncated}
+	view := GlobalMonitoringView{BuiltAt: at, Complete: true, Truncated: set.SessionsTruncated,
+		TransfersTruncated: set.TransfersTruncated}
 	snapshots := make(map[string]Snapshot, len(set.Snapshots))
 	for _, snapshot := range set.Snapshots {
 		snapshots[snapshot.PublisherID] = snapshot
@@ -326,8 +328,16 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 	if len(view.MissingPublishers) > 0 {
 		addReason(&view, "missing_publisher")
 	}
-	if set.Truncated {
+	if set.SessionsTruncated {
 		addReason(&view, "truncated")
+	}
+	// The reader's aggregate transfer budget is deliberately NOT a completeness
+	// reason. Exhausting it says nothing about whether a session is missing, and
+	// a transfer key is minted partly from client-supplied input, so treating it
+	// as one would let a single authenticated client fill the budget and switch
+	// no-delivery and unclaimed-idle classification off for every reader.
+	if set.TransfersTruncated {
+		addAdvisory(&view, "publisher_transfer_capacity")
 	}
 	for _, status := range view.Publishers {
 		if (status.State == PublisherFresh || status.State == PublisherDegraded) && status.Truncated {
@@ -452,9 +462,11 @@ func mergeContributions(view *GlobalMonitoringView, contributions []publisherCon
 		return refLess(view.Transfers[i].Publisher, view.Transfers[j].Publisher)
 	})
 	if params.MaxMergedTransfers > 0 && len(view.Transfers) > params.MaxMergedTransfers {
+		// Same rule as the store's aggregate transfer cap: a short transfer list is
+		// an advisory, never a claim that sessions are missing. See PublisherSet.
 		view.Transfers = view.Transfers[:params.MaxMergedTransfers]
-		view.Truncated = true
-		addReason(view, "truncated")
+		view.TransfersTruncated = true
+		addAdvisory(view, "publisher_transfer_capacity")
 	}
 }
 
@@ -579,7 +591,8 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 			result.LastObservationEnd = session.LastObservationEnd
 		}
 		result.RoutesOverflowed = result.RoutesOverflowed || session.RoutesOverflowed
-		result.BytesDegraded = result.BytesDegraded || session.RoutesOverflowed
+		result.ObservationsOverflowed = result.ObservationsOverflowed || session.ObservationsOverflowed
+		result.BytesDegraded = result.BytesDegraded || session.RoutesOverflowed || session.ObservationsOverflowed
 		for _, route := range session.Routes {
 			key := route.Method + "\x00" + route.Pattern + "\x00" + string(route.Role)
 			merged, seen := routes[key]

@@ -54,27 +54,31 @@ type wireIdentityConflict struct {
 }
 
 type wireSession struct {
-	V                           int                                `json:"v"`
-	Subject                     wireSubject                        `json:"sub"`
-	ProfileID                   string                             `json:"pid"`
-	SessionID                   string                             `json:"sid"`
-	MediaFileID                 int                                `json:"mfid"`
-	PlayMethod                  string                             `json:"pm"`
-	MediaFileIDs                []int                              `json:"mfids"`
-	MediaFileIDsOverflowed      bool                               `json:"mfido"`
-	PlayMethods                 []string                           `json:"pms"`
-	PlayMethodsOverflowed       bool                               `json:"pmo"`
-	StartedAt                   int64                              `json:"st"`
-	StartedAtSource             StartedAtSource                    `json:"sts"`
-	StartedAtDegraded           bool                               `json:"std"`
-	BytesAccepted               int64                              `json:"ba"`
-	LastByteAccepted            int64                              `json:"lb"`
-	LastObservationEnd          int64                              `json:"le"`
-	OpenObservations            int                                `json:"oo"`
-	RealtimeConnectionAlive     bool                               `json:"rt"`
-	RequestCount                int64                              `json:"rc"`
-	Routes                      []wireRouteActivity                `json:"routes"`
-	RoutesOverflowed            bool                               `json:"ro"`
+	V                       int                 `json:"v"`
+	Subject                 wireSubject         `json:"sub"`
+	ProfileID               string              `json:"pid"`
+	SessionID               string              `json:"sid"`
+	MediaFileID             int                 `json:"mfid"`
+	PlayMethod              string              `json:"pm"`
+	MediaFileIDs            []int               `json:"mfids"`
+	MediaFileIDsOverflowed  bool                `json:"mfido"`
+	PlayMethods             []string            `json:"pms"`
+	PlayMethodsOverflowed   bool                `json:"pmo"`
+	StartedAt               int64               `json:"st"`
+	StartedAtSource         StartedAtSource     `json:"sts"`
+	StartedAtDegraded       bool                `json:"std"`
+	BytesAccepted           int64               `json:"ba"`
+	LastByteAccepted        int64               `json:"lb"`
+	LastObservationEnd      int64               `json:"le"`
+	OpenObservations        int                 `json:"oo"`
+	RealtimeConnectionAlive bool                `json:"rt"`
+	RequestCount            int64               `json:"rc"`
+	Routes                  []wireRouteActivity `json:"routes"`
+	RoutesOverflowed        bool                `json:"ro"`
+	// ObservationsOverflowed is additive at codec v1: omitempty keeps a record
+	// written by an older publisher byte-identical, so the field costs nothing
+	// until a session actually overflows.
+	ObservationsOverflowed      bool                               `json:"obso,omitempty"`
 	ViewerIPs                   []string                           `json:"ips"`
 	ViewerIPsOverflowed         bool                               `json:"ipso"`
 	DeviceIDs                   []string                           `json:"dids"`
@@ -194,7 +198,8 @@ func encodeSession(value SessionView) ([]byte, error) {
 		StartedAt: timeToUnixNano(value.StartedAt), StartedAtSource: value.StartedAtSource, StartedAtDegraded: value.StartedAtDegraded,
 		BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
 		OpenObservations: value.OpenObservations, RealtimeConnectionAlive: value.RealtimeConnectionAlive, RequestCount: value.RequestCount,
-		RoutesOverflowed: value.RoutesOverflowed, ViewerIPs: value.ViewerIPs, ViewerIPsOverflowed: value.ViewerIPsOverflowed,
+		RoutesOverflowed: value.RoutesOverflowed, ObservationsOverflowed: value.ObservationsOverflowed,
+		ViewerIPs: value.ViewerIPs, ViewerIPsOverflowed: value.ViewerIPsOverflowed,
 		DeviceIDs: value.DeviceIDs, DeviceIDsOverflowed: value.DeviceIDsOverflowed, UserAgents: value.UserAgents, UserAgentsOverflowed: value.UserAgentsOverflowed,
 		TokenIssuedAtsOverflowed: value.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources:     value.TokenIssuedAtSources, Outcomes: value.Outcomes, HasIdentityConflict: value.HasIdentityConflict,
@@ -233,7 +238,8 @@ func decodeSession(data []byte) (SessionView, error) {
 		PlayMethods: w.PlayMethods, PlayMethodsOverflowed: w.PlayMethodsOverflowed, StartedAt: timeFromUnixNano(w.StartedAt), StartedAtSource: w.StartedAtSource,
 		StartedAtDegraded: w.StartedAtDegraded, BytesAccepted: w.BytesAccepted, LastByteAccepted: timeFromUnixNano(w.LastByteAccepted), LastObservationEnd: timeFromUnixNano(w.LastObservationEnd),
 		OpenObservations: w.OpenObservations, RealtimeConnectionAlive: w.RealtimeConnectionAlive, RequestCount: w.RequestCount, RoutesOverflowed: w.RoutesOverflowed,
-		ViewerIPs: w.ViewerIPs, ViewerIPsOverflowed: w.ViewerIPsOverflowed, DeviceIDs: w.DeviceIDs, DeviceIDsOverflowed: w.DeviceIDsOverflowed,
+		ObservationsOverflowed: w.ObservationsOverflowed,
+		ViewerIPs:              w.ViewerIPs, ViewerIPsOverflowed: w.ViewerIPsOverflowed, DeviceIDs: w.DeviceIDs, DeviceIDsOverflowed: w.DeviceIDsOverflowed,
 		UserAgents: w.UserAgents, UserAgentsOverflowed: w.UserAgentsOverflowed, TokenIssuedAtsOverflowed: w.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources: w.TokenIssuedAtSources, Outcomes: w.Outcomes, HasIdentityConflict: w.HasIdentityConflict,
 		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed,

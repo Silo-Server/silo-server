@@ -293,7 +293,7 @@ func TestRedisStoreIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if set.Truncated || hasPublisherReason(set.Errors, "", "publisher_cap") {
+		if set.SessionsTruncated || hasPublisherReason(set.Errors, "", "publisher_cap") {
 			t.Fatalf("stale roster entries triggered cap: %+v", set)
 		}
 		if err := client.ZAdd(ctx, store.rosterKey(),
@@ -306,7 +306,7 @@ func TestRedisStoreIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !set.Truncated || !hasPublisherReason(set.Errors, "", "publisher_cap") {
+		if !set.SessionsTruncated || !hasPublisherReason(set.Errors, "", "publisher_cap") {
 			t.Fatalf("live roster cap not reported: %+v", set)
 		}
 	})

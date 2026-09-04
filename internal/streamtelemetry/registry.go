@@ -100,16 +100,21 @@ type Registry struct {
 	// cannot suppress a genuine capacity-exhausted warning for the following
 	// minute. The transfer path was given its own stamp for exactly this reason.
 	lastTombstoneWarnUnixNano atomic.Int64
-	lastPublishWarnUnixNano   atomic.Int64
-	sequence                  atomic.Uint64
-	reportingPublisherID      atomic.Value
-	startOnce                 sync.Once
-	stopOnce                  sync.Once
-	stop                      chan struct{}
-	done                      chan struct{}
-	started                   atomic.Bool
-	leaveMu                   sync.Mutex
-	left                      bool
+	// lastSessionObservationWarnUnixNano is the per-session observation cap's own
+	// stamp, for the same reason the tombstone path has one: a client hammering
+	// one session id must not silence a minute of genuine global capacity
+	// warnings.
+	lastSessionObservationWarnUnixNano atomic.Int64
+	lastPublishWarnUnixNano            atomic.Int64
+	sequence                           atomic.Uint64
+	reportingPublisherID               atomic.Value
+	startOnce                          sync.Once
+	stopOnce                           sync.Once
+	stop                               chan struct{}
+	done                               chan struct{}
+	started                            atomic.Bool
+	leaveMu                            sync.Mutex
+	left                               bool
 }
 
 func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry {
@@ -308,10 +313,11 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 	}
 	s.mu.Lock()
 	if len(s.observations) >= r.cfg.MaxObservationsPerSession {
+		s.observationsOverflowed = true
 		s.mu.Unlock()
 		shard.Unlock()
 		obs.countingOnly = true
-		r.drop("per-session observation capacity exhausted")
+		r.dropSessionObservation("per-session observation capacity exhausted")
 		return
 	}
 	s.recordConflicts(attachment, observedAt, r.cfg.MaxIdentityConflictsPerSession)
@@ -405,6 +411,28 @@ func (r *Registry) drop(reason string) {
 	r.lastDropUnixNano.Store(now().UnixNano())
 	r.droppedObservations.Add(1)
 	r.warnRateLimited(reason, &r.lastWarnUnixNano)
+}
+
+// dropSessionObservation records an observation one SESSION's table refused. It
+// deliberately does not stamp lastDropUnixNano.
+//
+// Snapshot.Truncated is a claim that sessions are MISSING, and a per-session cap
+// cannot hide a session: the session is in the view either way, it is only its
+// byte total that is short. Letting the cap raise that flag handed any client
+// holding one valid stream token a fleet-wide off switch — roughly
+// MaxObservationsPerSession concurrent range requests carrying the same session
+// id, repeated inside each Freshness window, made the merged view incomplete,
+// and an incomplete view suppresses no_delivery and unclaimed_idle on every row
+// for every reader.
+//
+// The under-count is expressed where it is true instead: SessionView
+// ObservationsOverflowed, which merges into BytesDegraded so the row renders as
+// a floor rather than a measurement. The global MaxObservations and MaxSessions
+// caps keep using drop, because exhausting either genuinely can leave a whole
+// session unrepresented.
+func (r *Registry) dropSessionObservation(reason string) {
+	r.droppedObservations.Add(1)
+	r.warnRateLimited(reason, &r.lastSessionObservationWarnUnixNano)
 }
 
 // dropTransfer records blindness in the TRANSFER table only. It deliberately

@@ -234,7 +234,7 @@ func TestBuildGlobalViewRelayDoesNotSupplyViewerIPs(t *testing.T) {
 	}
 
 	// With no edge present at all the relay still supplies none: an empty set is
-	// the honest answer, not a licence to fall back on whatever the hop could see.
+	// the honest answer, not a license to fall back on whatever the hop could see.
 	relayOnly := BuildGlobalView(globalSet(at, relay), at, globalTestParams()).Sessions[0]
 	if len(relayOnly.ViewerIPs) != 0 || relayOnly.ViewerIPsOverflowed {
 		t.Fatalf("relay-only viewer IPs = %v (overflowed=%t), want none", relayOnly.ViewerIPs, relayOnly.ViewerIPsOverflowed)
@@ -362,7 +362,7 @@ func TestBuildGlobalViewCompleteness(t *testing.T) {
 		{name: "never published", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at}}}, reason: "missing_publisher"},
 		{name: "departed", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at.Add(-params.MembershipTTL - time.Second)}}}, complete: true},
 		{name: "publisher truncated", set: globalSet(at, func() Snapshot { value := fresh; value.Truncated = true; return value }()), reason: "publisher_truncated"},
-		{name: "reader truncated", set: PublisherSet{Members: globalSet(at, fresh).Members, Snapshots: []Snapshot{fresh}, Truncated: true}, reason: "truncated"},
+		{name: "reader truncated", set: PublisherSet{Members: globalSet(at, fresh).Members, Snapshots: []Snapshot{fresh}, SessionsTruncated: true}, reason: "truncated"},
 		{name: "decode errors", set: PublisherSet{Members: globalSet(at, fresh).Members, Snapshots: []Snapshot{fresh}, Errors: []PublisherError{{PublisherID: "p", DecodeErrors: 1, Reason: "decode"}}}, reason: "decode_errors"},
 	}
 	for _, test := range tests {
@@ -669,5 +669,69 @@ func TestBuildGlobalViewTwoReportersDisagreeingOnStartIsDegraded(t *testing.T) {
 	}
 	if !session.StartedAtDegraded {
 		t.Fatal("two reporters disagreeing about the start was not marked degraded")
+	}
+}
+
+// The READER-side aggregate transfer budget carries exactly the signal a
+// publisher's own full transfer table carries, so it has to land in the same
+// place. It did not: the store raised one shared Truncated for both shortfalls,
+// so a fleet holding more transfers between them than MaxMergedTransfers made
+// the merged view incomplete — and an incomplete view clears no_delivery and
+// unclaimed_idle on every row for every reader. A transfer identity is minted
+// partly from client-supplied input, which makes that budget reachable by one
+// authenticated client. Session truncation, which really can hide a session,
+// must keep making the view incomplete.
+func TestBuildGlobalViewAggregateTransferTruncationIsAdvisoryOnly(t *testing.T) {
+	at := time.Now()
+	healthy := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage()}
+
+	transfers := globalSet(at, healthy)
+	transfers.TransfersTruncated = true
+	view := BuildGlobalView(transfers, at, globalTestParams())
+	if !view.Complete {
+		t.Fatalf("aggregate transfer truncation made the view incomplete: %v", view.IncompleteReasons)
+	}
+	if slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("incomplete reasons = %v", view.IncompleteReasons)
+	}
+	if !slices.Contains(view.Advisories, "publisher_transfer_capacity") {
+		t.Fatalf("advisories = %v, want publisher_transfer_capacity", view.Advisories)
+	}
+
+	sessions := globalSet(at, healthy)
+	sessions.SessionsTruncated = true
+	view = BuildGlobalView(sessions, at, globalTestParams())
+	if view.Complete || !slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("session truncation did not degrade the view: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
+	}
+}
+
+// The merge's own MaxMergedTransfers cap is the same class of shortfall as the
+// store's, and answers to the same rule. MaxMergedSessions is not: a session
+// dropped from the merge is a session no reader can see.
+func TestMergeTransferCapIsAdvisoryButSessionCapIsNot(t *testing.T) {
+	at := time.Now()
+	one := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage(),
+		Sessions:  []SessionView{{SessionID: "s1"}, {SessionID: "s2"}},
+		Transfers: []TransferView{{ID: "t1"}, {ID: "t2"}}}
+
+	params := globalTestParams()
+	params.MaxMergedTransfers = 1
+	view := BuildGlobalView(globalSet(at, one), at, params)
+	if !view.Complete || slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("merged transfer cap made the view incomplete: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
+	}
+	if !view.TransfersTruncated || !slices.Contains(view.Advisories, "publisher_transfer_capacity") {
+		t.Fatalf("merged transfer cap advisory = %v truncated=%v", view.Advisories, view.TransfersTruncated)
+	}
+
+	params = globalTestParams()
+	params.MaxMergedSessions = 1
+	view = BuildGlobalView(globalSet(at, one), at, params)
+	if view.Complete || !slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("merged session cap did not degrade the view: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
 	}
 }

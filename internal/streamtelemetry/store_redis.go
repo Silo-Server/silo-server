@@ -229,7 +229,9 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 		return set, err
 	}
 	if len(members) > s.cfg.MaxPublishers {
-		set.Truncated = true
+		// A publisher over the roster cap is not read at all, so every session it
+		// alone carries is absent from the merge. That is session blindness.
+		set.SessionsTruncated = true
 		set.Errors = append(set.Errors, PublisherError{Reason: "publisher_cap"})
 		members = members[:s.cfg.MaxPublishers]
 	}
@@ -291,10 +293,10 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 			continue
 		}
 		if len(snapshot.Sessions) == remainingSessions && countFields(fields, "s:") > remainingSessions {
-			set.Truncated = true
+			set.SessionsTruncated = true
 		}
 		if len(snapshot.Transfers) == remainingTransfers && countFields(fields, "t:") > remainingTransfers {
-			set.Truncated = true
+			set.TransfersTruncated = true
 		}
 		remainingSessions -= len(snapshot.Sessions)
 		remainingTransfers -= len(snapshot.Transfers)

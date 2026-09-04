@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1308,5 +1309,77 @@ func TestPerSubjectBudgetIsClampedToAShareOfTheTable(t *testing.T) {
 				t.Fatalf("NewRegistry resolved per-subject budget = %d, want %d", got, test.want)
 			}
 		})
+	}
+}
+
+// One client must not be able to switch ghost detection off for everybody by
+// hammering a single session id. Exceeding MaxObservationsPerSession under-counts
+// that ONE session's bytes; it cannot hide a session, so it must not raise
+// Snapshot.Truncated — which becomes publisher_truncated, which makes the view
+// incomplete, which clears no_delivery and unclaimed_idle on every row for every
+// reader. The overflow still has to be recorded and operator-visible.
+func TestPerSessionObservationCapDegradesOnlyThatSession(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0)
+	originalNow := now
+	now = func() time.Time { return at }
+	defer func() { now = originalNow }()
+
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	cfg.MaxObservationsPerSession = 2
+	store := NewLocalStore()
+	registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
+
+	// Held open, so the observation table stays full rather than draining between
+	// requests — the shape a client produces with concurrent range GETs.
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	handler := registry.Observe(testRoute(ClassPlayback))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Attach(r.Context(), testAttachment("session-1"))
+		_, _ = w.Write([]byte("chunk"))
+		<-release
+	}))
+	for range cfg.MaxObservationsPerSession + 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/media/x", nil))
+		}()
+	}
+	// Wait for the table to be full before releasing, otherwise the cap may never
+	// be reached and the test would pass without exercising anything.
+	for {
+		snapshot := registry.SnapshotAt(at)
+		if len(snapshot.Sessions) == 1 && snapshot.Sessions[0].ObservationsOverflowed {
+			break
+		}
+		runtime.Gosched()
+	}
+	close(release)
+	wg.Wait()
+
+	snapshot := registry.Sweep()
+	if snapshot.Truncated {
+		t.Fatal("per-session observation overflow set Snapshot.Truncated")
+	}
+	if len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].ObservationsOverflowed {
+		t.Fatalf("sessions = %+v", snapshot.Sessions)
+	}
+	if snapshot.DroppedObservations == 0 {
+		t.Fatal("overflow was not counted")
+	}
+	if err := store.Publish(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	view, err := registry.GlobalView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Complete || len(view.IncompleteReasons) != 0 {
+		t.Fatalf("per-session overflow made the view incomplete: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
+	}
+	if len(view.Sessions) != 1 || !view.Sessions[0].ObservationsOverflowed || !view.Sessions[0].BytesDegraded {
+		t.Fatalf("merged session = %+v", view.Sessions)
 	}
 }

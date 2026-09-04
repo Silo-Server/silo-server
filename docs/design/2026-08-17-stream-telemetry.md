@@ -248,9 +248,24 @@ monotonic dropped counters grow, and the registry emits at most one warning per 
 Bounded sets drop the newest value and expose their own overflow flag. Saturation
 serving through is a P0 decision — a fail-closed download policy belongs to P1.
 
-Transfer-table saturation is deliberately kept OUT of `Truncated`. It sets
-`TransfersTruncated` and grows `DroppedTransferObservations`, which surface as the
-`publisher_transfer_capacity` advisory rather than as an incomplete reason.
+Only a GLOBAL cap sets `Truncated`, because only a global cap can leave a whole
+session unrepresented. A PER-SESSION cap cannot: the session is in the snapshot
+either way and it is the byte total that is short, so
+`MaxObservationsPerSession` sets that session's `ObservationsOverflowed` — which
+merges into `BytesDegraded`, rendering the row as a floor — and never
+`Truncated`. The distinction is load-bearing rather than tidy: the per-session
+cap is reachable by any client holding one stream token, with roughly
+`MaxObservationsPerSession` concurrent range requests carrying the same session
+id, so routing it into `Truncated` was a fleet-wide off switch for ghost
+detection in exactly the way transfer saturation was.
+
+Transfer-table saturation is deliberately kept OUT of `Truncated`, at every layer
+that can observe it: the publisher's own table, the reader's aggregate
+`MaxMergedTransfers` budget, and the roster reader's per-set accounting
+(`PublisherSet.TransfersTruncated`, kept separate from `SessionsTruncated` for
+exactly this reason). All of them set `TransfersTruncated` and grow
+`DroppedTransferObservations`, which surface as the `publisher_transfer_capacity`
+advisory rather than as an incomplete reason.
 `Truncated` is a claim about the SESSION picture, and it makes the merged view
 incomplete, which makes the live-sessions handler stop classifying `no_delivery`
 and `unclaimed_idle` for every reader on every row. Transfers feed no live-session
@@ -354,9 +369,10 @@ excluded, named in `MissingPublishers`, and does block it. `Complete` is true on
 all six hold:
 
 1. no publisher is missing or stale;
-2. no merged snapshot reports session or observation truncation (transfer-table
-   exhaustion is an advisory, not a completeness claim — see Bounds);
-3. the reader hit no publisher/session/transfer cap;
+2. no merged snapshot reports session or global-observation truncation
+   (transfer-table exhaustion and per-session observation overflow are both
+   advisory/per-row degradations, not completeness claims — see Bounds);
+3. the reader hit no publisher or session cap (its transfer cap is an advisory);
 4. no publisher has decode errors, a count mismatch, or an oversized hash;
 5. every contributing publisher declares its coverage;
 6. every contributing measuring publisher observes all canonical families.
@@ -717,6 +733,13 @@ field only one side can express would manufacture mismatches and bury the real o
   a node that served no viewer.
 - **Every list is capped at 50 with an explicit dropped count.** Silent truncation
   would read as "covered everything".
+- **A retired-measurement tombstone nobody reports is an ended session, and is left
+  out of the projection.** It has already left `playback_sessions_sync` but stays in
+  the telemetry view for `Retention` plus `TombstoneRetention`, so counting it would
+  put every stream that ended in the last half hour into `telemetry_only` — and
+  `agrees` requires that list to be empty. A tombstone a session manager still
+  reports is a live session whose measurement was merely pruned, and stays as
+  measured evidence.
 - **The view's completeness travels with the diff.** A degraded view is missing
   sessions by construction, so a report built on one is evidence of blindness, not
   disagreement. A source that cannot be read reports itself unavailable *with a reason*

@@ -40,7 +40,17 @@ type PublisherSet struct {
 	Members   []Member
 	Snapshots []Snapshot
 	Errors    []PublisherError
-	Truncated bool
+	// SessionsTruncated and TransfersTruncated are separate because only one of
+	// them is a completeness claim. A reader that could not take every session —
+	// or every publisher — is blind to sessions, which BuildGlobalView must turn
+	// into an incomplete view. A reader that could not take every transfer is not:
+	// transfers feed no LiveByteFacts, and a transfer identity is minted partly
+	// from client-supplied input, so one client could otherwise fill the aggregate
+	// transfer budget and switch ghost detection off for the whole fleet. That is
+	// the same reasoning Registry.dropTransfer applies on the publisher side; the
+	// reader side has to apply it too or the fix is only half done.
+	SessionsTruncated  bool
+	TransfersTruncated bool
 }
 
 type GlobalSnapshotStore interface {

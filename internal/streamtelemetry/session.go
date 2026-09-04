@@ -66,16 +66,21 @@ type logicalSession struct {
 	identityOverflowed  bool
 	routes              map[string]*routeActivity
 	routesOverflowed    bool
-	observations        map[string]*Observation
-	viewerIPs           boundedSet[string]
-	deviceIDs           boundedSet[string]
-	clientVariants      boundedSet[ClientVariant]
-	userAgents          boundedSet[string]
-	mediaFileIDs        boundedSet[int]
-	playMethods         boundedSet[string]
-	tokenIssuedAts      boundedSet[int64]
-	tokenIssuedSources  map[TokenIssuedAtSource]int64
-	outcomes            map[httpstream.StreamOutcome]int64
+	// observationsOverflowed marks this session's byte total as a floor: its
+	// observation table was full and later requests were counted without being
+	// attributed. It lives here, per session, because that is the whole extent of
+	// the damage — see Registry.dropSessionObservation.
+	observationsOverflowed bool
+	observations           map[string]*Observation
+	viewerIPs              boundedSet[string]
+	deviceIDs              boundedSet[string]
+	clientVariants         boundedSet[ClientVariant]
+	userAgents             boundedSet[string]
+	mediaFileIDs           boundedSet[int]
+	playMethods            boundedSet[string]
+	tokenIssuedAts         boundedSet[int64]
+	tokenIssuedSources     map[TokenIssuedAtSource]int64
+	outcomes               map[httpstream.StreamOutcome]int64
 }
 
 type transfer struct {

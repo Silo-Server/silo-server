@@ -21,26 +21,30 @@ type RouteActivityView struct {
 }
 
 type SessionView struct {
-	Subject                     Subject
-	ProfileID                   string
-	SessionID                   string
-	MediaFileID                 int
-	PlayMethod                  string
-	MediaFileIDs                []int
-	MediaFileIDsOverflowed      bool
-	PlayMethods                 []string
-	PlayMethodsOverflowed       bool
-	StartedAt                   time.Time
-	StartedAtSource             StartedAtSource
-	StartedAtDegraded           bool
-	BytesAccepted               int64 // pre-compression at the enrollment point; see package documentation.
-	LastByteAccepted            time.Time
-	LastObservationEnd          time.Time
-	OpenObservations            int
-	RealtimeConnectionAlive     bool
-	RequestCount                int64
-	Routes                      []RouteActivityView
-	RoutesOverflowed            bool
+	Subject                 Subject
+	ProfileID               string
+	SessionID               string
+	MediaFileID             int
+	PlayMethod              string
+	MediaFileIDs            []int
+	MediaFileIDsOverflowed  bool
+	PlayMethods             []string
+	PlayMethodsOverflowed   bool
+	StartedAt               time.Time
+	StartedAtSource         StartedAtSource
+	StartedAtDegraded       bool
+	BytesAccepted           int64 // pre-compression at the enrollment point; see package documentation.
+	LastByteAccepted        time.Time
+	LastObservationEnd      time.Time
+	OpenObservations        int
+	RealtimeConnectionAlive bool
+	RequestCount            int64
+	Routes                  []RouteActivityView
+	RoutesOverflowed        bool
+	// ObservationsOverflowed marks a byte total short because this session's own
+	// observation table was full. Per-session degradation, never a completeness
+	// claim: see Registry.dropSessionObservation.
+	ObservationsOverflowed      bool
 	ViewerIPs                   []string
 	ViewerIPsOverflowed         bool
 	DeviceIDs                   []string
@@ -92,7 +96,8 @@ func tombstoneViewOf(s *logicalSession) (SessionView, bool) {
 		StartedAt: s.startedAt, StartedAtSource: s.startedAtSource, StartedAtDegraded: s.startedDegraded,
 		BytesAccepted: s.lastSweptBytes, LastByteAccepted: s.lastByteAccepted,
 		LastObservationEnd: s.lastObservationEnd, RequestCount: s.requestCount,
-		RoutesOverflowed: s.routesOverflowed, MeasurementPruned: true,
+		RoutesOverflowed: s.routesOverflowed, ObservationsOverflowed: s.observationsOverflowed,
+		MeasurementPruned: true,
 	}
 	for _, route := range s.routes {
 		if route.LastSweptBytes == 0 {
@@ -206,7 +211,8 @@ func sessionViewOf(s *logicalSession) SessionView {
 		BytesAccepted: s.lastSweptBytes, LastByteAccepted: s.lastByteAccepted,
 		LastObservationEnd: s.lastObservationEnd, OpenObservations: s.openObservations,
 		RealtimeConnectionAlive: s.realtimeAlive, RequestCount: s.requestCount,
-		RoutesOverflowed: s.routesOverflowed, ViewerIPsOverflowed: s.viewerIPs.overflowed,
+		RoutesOverflowed: s.routesOverflowed, ObservationsOverflowed: s.observationsOverflowed,
+		ViewerIPsOverflowed: s.viewerIPs.overflowed,
 		DeviceIDsOverflowed: s.deviceIDs.overflowed, ClientVariantsOverflowed: s.clientVariants.overflowed,
 		UserAgentsOverflowed: s.userAgents.overflowed, TokenIssuedAtsOverflowed: s.tokenIssuedAts.overflowed,
 		TokenIssuedAtSources: cloneTokenSources(s.tokenIssuedSources),
