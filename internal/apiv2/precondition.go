@@ -104,9 +104,10 @@ func isETagChar(b byte) bool {
 // with optional whitespace, empty elements tolerated. It returns star=true
 // for the bare wildcard; "*" among other elements is malformed. A field
 // whose elements are all empty yields an empty list and no error. Multiple
-// header lines must already be joined with commas; net/http keeps them as
-// separate values, so a caller that reads Header.Get sees the first line
-// only, which is why v2 inputs bind the field as one string.
+// header lines must already be joined with commas: net/http keeps them as
+// separate values and Huma binds the input from Header.Get (first line
+// only), so the v2 router's joinPreconditionFields middleware folds repeated
+// If-Match / If-None-Match lines into one value before the input is bound.
 func ParseETagList(field string) (tags []EntityTag, star bool, err error) {
 	if strings.Trim(field, " \t") == "*" {
 		return nil, true, nil

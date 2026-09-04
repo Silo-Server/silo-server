@@ -351,12 +351,18 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   same context value `apimw.RequestID` already stored, so the request log, activity log, and the
   Problem Details `instance` name the same request.
 - **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
-  DELETE only) or `Conditional` (GET, HEAD only); `Register` panics when a guarded input does
-  not bind a string `header:"If-Match"` or its output a string `header:"ETag"`, and when a
-  conditional input does not bind `header:"If-None-Match"` with a string `ETag` and an int
-  `Status` on the output. A guarded operation documents `412` and `428`, a required `If-Match`
+  DELETE only), `Conditional` (GET, HEAD only) or `CreateOnly` (PUT only, exclusive with
+  `Guarded`); `Register` panics when a guarded input does not bind a string
+  `header:"If-Match"` or its output a string `header:"ETag"`, when a conditional input does
+  not bind `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output,
+  and when a create-only input does not bind `header:"If-None-Match"` with a string `ETag`
+  on the output. A guarded operation documents `412` and `428`, a required `If-Match`
   parameter, and the `ETag` header on every `2xx`; a conditional read documents `304` with
-  `ETag`; both carry `x-silo-guarded` / `x-silo-conditional` so a reader can enumerate them.
+  `ETag`; a create-only PUT documents `412`, an optional `If-None-Match` parameter and
+  `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
+  `x-silo-create-only` so a reader can enumerate them. The router joins repeated `If-Match`
+  and `If-None-Match` lines into one comma-separated list before the input is bound (RFC
+  9110 5.3), so a tag on a second line is evaluated.
   `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(version, scope)` (strong,
   quoted, opaque; the scope keeps redacted representations from sharing a validator),
   `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),

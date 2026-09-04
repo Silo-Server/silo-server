@@ -210,6 +210,20 @@ func (s *guardedProbeStore) Update(id string, expected int64, name string) (guar
 	return row, nil
 }
 
+// Create stores a new row at a client-selected id; a row already there is
+// left alone and reported as ErrStaleVersion, the same sentinel a
+// create-only insert races into when another writer lands first.
+func (s *guardedProbeStore) Create(id string, name string) (guardedProbeRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.rows[id]; ok {
+		return guardedProbeRow{}, ErrStaleVersion
+	}
+	row := guardedProbeRow{Name: name, Version: 1}
+	s.rows[id] = row
+	return row, nil
+}
+
 func (s *guardedProbeStore) Delete(id string, expected int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -230,6 +244,14 @@ type guardedProbeWriteInput struct {
 	ID      string `path:"id" doc:"Probe resource id"`
 	IfMatch string `header:"If-Match" doc:"The resource's current ETag"`
 	Body    struct {
+		Name string `json:"name" minLength:"1"`
+	}
+}
+
+type createOnlyProbeInput struct {
+	ID          string `path:"id" doc:"Client-selected probe resource id"`
+	IfNoneMatch string `header:"If-None-Match" doc:"\"*\" to refuse overwriting an existing resource"`
+	Body        struct {
 		Name string `json:"name" minLength:"1"`
 	}
 }
@@ -330,6 +352,43 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			}
 			// The deleted representation has no ETag: 204 with no validator.
 			return &guardedProbeDeleteOutput{}, nil
+		})
+		// The create-only probe: PUT at a client-selected id. Without
+		// If-None-Match it creates or replaces; with "*" it refuses to
+		// overwrite. It shares the store so a created row is then readable
+		// and guardable through the other probes.
+		Register(reg, Operation{
+			Operation:  humaOp(http.MethodPut, Prefix+"/probe/created/{id}", "putCreatedProbe", "probe", "create-only put"),
+			Class:      ClassPublic,
+			CreateOnly: true,
+		}, func(_ context.Context, in *createOnlyProbeInput) (*guardedProbeWriteOutput, error) {
+			var existing *EntityTag
+			row, ok := store.Get(in.ID)
+			if ok {
+				tag := RenderETag(row.Version, guardedProbeScope)
+				existing = &tag
+			}
+			if p := EvaluateCreateOnly(in.IfNoneMatch, existing); p != nil {
+				return nil, p
+			}
+			var (
+				updated guardedProbeRow
+				err     error
+			)
+			if ok {
+				updated, err = store.Update(in.ID, row.Version, in.Body.Name)
+			} else {
+				updated, err = store.Create(in.ID, in.Body.Name)
+			}
+			if err != nil {
+				// Lost the race with a concurrent writer at the same id.
+				latest, _ := store.Get(in.ID)
+				return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+			}
+			return &guardedProbeWriteOutput{
+				ETag: RenderETag(updated.Version, guardedProbeScope).String(),
+				Body: guardedProbeBody{ID: in.ID, Name: updated.Name, Version: updated.Version},
+			}, nil
 		})
 	}
 }

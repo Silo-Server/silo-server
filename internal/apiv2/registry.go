@@ -52,12 +52,9 @@ const (
 	metaDemoRestricted  = "silo.demo_restricted"
 	metaProfileOptional = "silo.profile_optional"
 	metaMaxBodyBytes    = "silo.max_body_bytes"
-	metaClass           = "silo.class"
-	metaPermission      = "silo.permission"
-	metaDemoRestricted  = "silo.demo_restricted"
-	metaMaxBodyBytes    = "silo.max_body_bytes"
 	metaGuarded         = "silo.guarded"
 	metaConditional     = "silo.conditional"
+	metaCreateOnly      = "silo.create_only"
 )
 
 // knownPermissions is the policy permission set an operation may name. It is
@@ -111,6 +108,15 @@ type Operation struct {
 	// binds `header:"If-None-Match"`, the output carries `header:"ETag"` and
 	// an int Status so the handler can answer 304 through NotModified.
 	Conditional bool
+	// CreateOnly marks a PUT with a client-selected resource ID that honors
+	// `If-None-Match: *` as a create-only request: the input binds
+	// `header:"If-None-Match"` as a string, the output carries
+	// `header:"ETag"`, and the handler evaluates EvaluateCreateOnly against
+	// the stored representation (nil when none). The document gains 412, an
+	// optional If-None-Match parameter, and the ETag header on every success
+	// response. Exclusive with Guarded: a guarded PUT already requires
+	// If-Match and has no create path.
+	CreateOnly bool
 }
 
 // Registry is the deterministic registration surface. Domain files call
@@ -132,6 +138,7 @@ type Declared struct {
 	Class       Class
 	Guarded     bool
 	Conditional bool
+	CreateOnly  bool
 }
 
 // Declared lists every registered operation, sorted by method then path.
@@ -175,6 +182,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaProfileOptional] = op.ProfileOptional
 	op.Metadata[metaGuarded] = op.Guarded
 	op.Metadata[metaConditional] = op.Conditional
+	op.Metadata[metaCreateOnly] = op.CreateOnly
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {
@@ -193,7 +201,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	}
 	reg.mu.Lock()
 	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
-		Guarded: op.Guarded, Conditional: op.Conditional})
+		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly})
 	reg.mu.Unlock()
 	huma.Register(reg.api, op.Operation, handler)
 	documentConcurrencyResponses(reg.api.OpenAPI(), op)
@@ -243,14 +251,28 @@ func checkOperation(op Operation) error {
 	if op.Conditional && op.Method != http.MethodGet && op.Method != http.MethodHead {
 		return fmt.Errorf("conditional is for GET and HEAD; %s has no If-None-Match read to answer 304", op.Method)
 	}
+	if op.CreateOnly && op.Method != http.MethodPut {
+		return fmt.Errorf("create-only is for PUT with a client-selected id; %s has no If-None-Match: * create to refuse", op.Method)
+	}
+	if op.CreateOnly && op.Guarded {
+		return fmt.Errorf("create-only and guarded are exclusive: a guarded PUT requires If-Match and has no create path")
+	}
 	return nil
 }
 
-// checkConcurrencyShape requires the transport fields a guarded or
-// conditional declaration relies on: the precondition header as a string on
-// the input, ETag as a string on the output, and for a conditional read an
-// int Status so the handler can answer 304.
+// checkConcurrencyShape requires the transport fields a guarded,
+// conditional or create-only declaration relies on: the precondition header
+// as a string on the input, ETag as a string on the output, and for a
+// conditional read an int Status so the handler can answer 304.
 func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
+	if op.CreateOnly {
+		if !declaresHeaderString(in, ifNoneMatchField) {
+			return fmt.Errorf("create-only: input must declare a string field with `header:\"%s\"`", ifNoneMatchField)
+		}
+		if !declaresHeaderString(out, etagField) {
+			return fmt.Errorf("create-only: output must declare a string field with `header:\"%s\"`", etagField)
+		}
+	}
 	if op.Guarded {
 		if !declaresHeaderString(in, ifMatchField) {
 			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"`", ifMatchField)

@@ -82,7 +82,7 @@ func TestImpliedStatusesTable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ImpliedStatuses(tc.class, tc.demo, tc.serviceBacked, tc.body, tc.path, false, false)
+			got := ImpliedStatuses(tc.class, tc.demo, tc.serviceBacked, tc.body, tc.path, false, false, false)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("ImpliedStatuses = %v, want %v", got, tc.want)
 			}
@@ -230,17 +230,21 @@ func TestImpliedStatusesForConcurrency(t *testing.T) {
 		}
 		return false
 	}
-	plain := ImpliedStatuses(ClassPublic, false, false, false, true, false, false)
+	plain := ImpliedStatuses(ClassPublic, false, false, false, true, false, false, false)
 	if has(plain, http.StatusPreconditionFailed) || has(plain, http.StatusPreconditionRequired) || has(plain, http.StatusNotModified) {
 		t.Fatalf("plain operation implies concurrency statuses: %v", plain)
 	}
-	guarded := ImpliedStatuses(ClassPublic, false, false, true, true, true, false)
+	guarded := ImpliedStatuses(ClassPublic, false, false, true, true, true, false, false)
 	if !has(guarded, http.StatusPreconditionFailed) || !has(guarded, http.StatusPreconditionRequired) || has(guarded, http.StatusNotModified) {
 		t.Fatalf("guarded = %v", guarded)
 	}
-	conditional := ImpliedStatuses(ClassPublic, false, false, false, true, false, true)
+	conditional := ImpliedStatuses(ClassPublic, false, false, false, true, false, true, false)
 	if !has(conditional, http.StatusNotModified) || has(conditional, http.StatusPreconditionFailed) {
 		t.Fatalf("conditional = %v", conditional)
+	}
+	createOnly := ImpliedStatuses(ClassPublic, false, false, true, true, false, false, true)
+	if !has(createOnly, http.StatusPreconditionFailed) || has(createOnly, http.StatusPreconditionRequired) || has(createOnly, http.StatusNotModified) {
+		t.Fatalf("createOnly = %v", createOnly)
 	}
 }
 
@@ -284,6 +288,20 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		Body    probeBody
 	}) (*guardedDocOutput, error) {
 		if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+			return nil, p
+		}
+		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
+	})
+	Register(reg, Operation{
+		Operation:  humaOp(http.MethodPut, Prefix+"/docprobe/created/{id}", "putCreatedDocProbe", "probe", "create-only"),
+		Class:      ClassPublic,
+		CreateOnly: true,
+	}, func(_ context.Context, in *struct {
+		ID          string `path:"id"`
+		IfNoneMatch string `header:"If-None-Match"`
+		Body        probeBody
+	}) (*guardedDocOutput, error) {
+		if p := EvaluateCreateOnly(in.IfNoneMatch, &current); p != nil {
 			return nil, p
 		}
 		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
@@ -355,6 +373,31 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	if _, ok := get.Responses["412"]; ok {
 		t.Fatal("a conditional read must not document 412")
 	}
+	created := doc.Paths[Prefix+"/docprobe/created/{id}"]["put"]
+	if generic["paths"].(map[string]any)[Prefix+"/docprobe/created/{id}"].(map[string]any)["put"].(map[string]any)[extCreateOnly] != true {
+		t.Fatal("create-only put lacks x-silo-create-only")
+	}
+	ifNoneMatch := false
+	for _, p := range created.Parameters {
+		if p.Name == "If-None-Match" && p.In == "header" {
+			ifNoneMatch = true
+			if p.Required {
+				t.Fatal("If-None-Match on a create-only put must be optional")
+			}
+		}
+	}
+	if !ifNoneMatch {
+		t.Fatalf("If-None-Match is not documented on the create-only put: %+v", created.Parameters)
+	}
+	if _, ok := created.Responses["412"]; !ok {
+		t.Fatalf("create-only put lacks 412: %v", created.Responses)
+	}
+	if _, ok := created.Responses["428"]; ok {
+		t.Fatal("a create-only put must not document 428; If-None-Match is optional")
+	}
+	if created.Responses["200"].Headers["ETag"] == nil {
+		t.Fatalf("create-only put 200 lacks the ETag header: %+v", created.Responses["200"])
+	}
 	if findings := lintExtensions(raw); len(findings) != 0 {
 		t.Fatal(findings)
 	}
@@ -372,7 +415,7 @@ func lintExtensions(raw []byte) []string {
 	var out []string
 	for path, methods := range d.Paths {
 		for method, op := range methods {
-			for _, name := range []string{extGuarded, extConditional} {
+			for _, name := range []string{extGuarded, extConditional, extCreateOnly} {
 				if v, ok := op[name]; ok && v != true {
 					out = append(out, path+" "+method+" "+name+" is not true")
 				}
@@ -436,6 +479,9 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 	conditional := func(method string) Operation {
 		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, Conditional: true}
 	}
+	createOnly := func(method string) Operation {
+		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, CreateOnly: true}
+	}
 	cases := map[string]struct {
 		op   Operation
 		reg  func(*Registry, Operation)
@@ -450,6 +496,18 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"conditional PUT": {conditional(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}, "conditional is for GET"},
+		"create-only POST": {createOnly(http.MethodPost), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}, "create-only is for PUT"},
+		"create-only and guarded": {func() Operation { op := createOnly(http.MethodPut); op.Guarded = true; return op }(), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}, "exclusive"},
+		"create-only without If-None-Match": {createOnly(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *noHeaders) (*okOut, error) { return nil, nil })
+		}, "If-None-Match"},
+		"create-only without ETag": {createOnly(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noETag, error) { return nil, nil })
+		}, "ETag"},
 		"guarded without If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *noHeaders) (*okOut, error) { return nil, nil })
 		}, "If-Match"},

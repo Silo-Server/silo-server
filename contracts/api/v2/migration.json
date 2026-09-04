@@ -1647,7 +1647,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; apiKeyRepo != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; apiKeyRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -1707,7 +1708,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; apiKeyRepo != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; apiKeyRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -4984,7 +4986,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: resets the layout to defaults; the outcome does not depend on the version being replaced."
     },
     {
       "listener": "api",
@@ -5106,7 +5108,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -5352,7 +5355,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; diagnosticsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; diagnosticsHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: reports are append-only artifacts with no editable representation."
     },
     {
       "listener": "api",
@@ -6929,7 +6932,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; invitationService != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; invitationService != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: revokes a short-lived invitation; an accepted invitation is a domain 409, not a stale confirmation."
     },
     {
       "listener": "api",
@@ -7175,7 +7178,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; inviteCodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; inviteCodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: revokes a short-lived code; a redeemed code is a domain 409, not a stale confirmation."
     },
     {
       "listener": "api",
@@ -7235,7 +7238,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; inviteCodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; inviteCodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: short-lived code with single-field edits; last writer wins."
     },
     {
       "listener": "api",
@@ -10033,7 +10036,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -10104,7 +10108,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -13474,7 +13479,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; settingsRepo != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; settingsRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -17699,7 +17705,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.TaskManager != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.TaskManager != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -18050,7 +18057,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -18684,7 +18692,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: apiKeyRepo != nil && authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: apiKeyRepo != nil && authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: self-service key revocation by the owner; the admin delete of the same key is the marked row."
     },
     {
       "listener": "api",
@@ -29395,7 +29403,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "concurrency": "if_match"
     },
     {
       "listener": "api",
@@ -29517,7 +29526,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: clears a single-value developer override."
     },
     {
       "listener": "api",
@@ -29578,7 +29587,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: single-value developer override; last writer wins."
     },
     {
       "listener": "api",

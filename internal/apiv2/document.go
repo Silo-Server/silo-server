@@ -21,11 +21,13 @@ const (
 	extPermission     = "x-silo-permission"
 	extDemoRestricted = "x-silo-demo-restricted"
 	extServiceBacked  = "x-silo-service-backed"
-	// extGuarded and extConditional record the optimistic-concurrency
-	// declarations so a reader of the document can enumerate the operations
-	// that require If-Match or honor If-None-Match.
+	// extGuarded, extConditional and extCreateOnly record the
+	// optimistic-concurrency declarations so a reader of the document can
+	// enumerate the operations that require If-Match, honor If-None-Match on
+	// a read, or honor If-None-Match: * on a create.
 	extGuarded     = "x-silo-guarded"
 	extConditional = "x-silo-conditional"
+	extCreateOnly  = "x-silo-create-only"
 	// extExtensionBag marks the one legitimate use of additionalProperties:
 	// a named bag whose keys are not fixed by this contract. The spec lint
 	// refuses any other additionalProperties.
@@ -75,9 +77,13 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.Conditional {
 		op.Extensions[extConditional] = true
 	}
+	if op.CreateOnly {
+		op.Extensions[extCreateOnly] = true
+		op.Parameters = append(op.Parameters, ifNoneMatchCreateParam())
+	}
 	hasBody := declaresBody(input)
 	hasPath := strings.Contains(op.Path, "{")
-	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath, op.Guarded, op.Conditional) {
+	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath, op.Guarded, op.Conditional, op.CreateOnly) {
 		if status < http.StatusBadRequest {
 			// 304 is a success shape, documented with its headers by
 			// documentConcurrencyResponses, not a problem.
@@ -150,11 +156,24 @@ func ifMatchParam() *huma.Param {
 	}
 }
 
+// ifNoneMatchCreateParam documents the optional create-only precondition:
+// "*" refuses to overwrite an existing resource at the client-selected id.
+func ifNoneMatchCreateParam() *huma.Param {
+	return &huma.Param{
+		Name:        ifNoneMatchField,
+		In:          "header",
+		Required:    false,
+		Description: "\"*\" makes the request create-only: a resource already stored at this id is 412 precondition_failed with its current ETag. Absent, the request replaces or creates.",
+		Schema:      &huma.Schema{Type: "string"},
+	}
+}
+
 // documentConcurrencyResponses runs after Huma has derived the success
-// responses: it documents the ETag header on every 2xx response of a guarded
-// or conditional operation and adds the 304 response of a conditional read.
+// responses: it documents the ETag header on every 2xx response of a guarded,
+// conditional or create-only operation and adds the 304 response of a
+// conditional read.
 func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
-	if !op.Guarded && !op.Conditional {
+	if !op.Guarded && !op.Conditional && !op.CreateOnly {
 		return
 	}
 	item := oapi.Paths[op.Path]
@@ -217,9 +236,10 @@ func resolvesProfile(class Class) bool {
 // (its service is not wired); every gated class adds 401, 429 and 503 (a
 // gate the wiring lacks fails closed); a class that resolves a profile or a
 // demo-restricted mutation adds 403; a guarded mutation adds 412 and 428; a
-// conditional read adds 304. Statuses an operation produces on its own (409
-// for a name conflict, say) are declared on that operation's Errors, not here.
-func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPath, guarded, conditional bool) []int {
+// conditional read adds 304; a create-only PUT adds 412. Statuses an
+// operation produces on its own (409 for a name conflict, say) are declared
+// on that operation's Errors, not here.
+func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPath, guarded, conditional, createOnly bool) []int {
 	set := map[int]bool{
 		http.StatusBadRequest: true, http.StatusNotAcceptable: true,
 		http.StatusUnprocessableEntity: true, http.StatusInternalServerError: true,
@@ -230,6 +250,9 @@ func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPat
 	}
 	if conditional {
 		set[http.StatusNotModified] = true
+	}
+	if createOnly {
+		set[http.StatusPreconditionFailed] = true
 	}
 	if hasBody {
 		set[http.StatusRequestTimeout] = true

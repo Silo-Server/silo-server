@@ -296,6 +296,28 @@
       "body_file": "precondition_failed.json"
     },
     {
+      "name": "precondition_failed_create_only",
+      "operation_id": null,
+      "scenario": "A create-only PUT (If-None-Match: *) at an id that already holds a resource: nothing changes and ETag carries the existing validator.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/probe/created/a",
+        "headers": {
+          "If-None-Match": "*"
+        },
+        "body": "{\"name\":\"fixture\"}"
+      },
+      "expected_status": 412,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json",
+        "ETag": "\"23305467.1x02i55143o12\""
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "precondition_failed_create_only.json"
+    },
+    {
       "name": "precondition_required",
       "operation_id": null,
       "scenario": "A guarded mutation without If-Match: the server refuses before touching the resource and names the field to send.",

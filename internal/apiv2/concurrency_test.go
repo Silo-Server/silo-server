@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -229,5 +230,73 @@ func TestStaleVersionSentinelFromStore(t *testing.T) {
 	}
 	if _, err := store.Update("missing", 1, "x"); err != ErrStaleVersion { //nolint:errorlint // sentinel identity is the contract
 		t.Fatalf("Update missing: %v", err)
+	}
+}
+
+// Repeated header lines are one list (RFC 9110 5.3): the router joins them
+// before Huma binds the input, so a tag on the second line still matches.
+func TestGuardedProbeRepeatedHeaderLinesAreOneList(t *testing.T) {
+	h, store := guardedHandler(t)
+	current := RenderETag(1, guardedProbeScope)
+	stale := RenderETag(0, guardedProbeScope)
+
+	r := httptest.NewRequest(http.MethodPut, "/api/v2/probe/guarded/a", strings.NewReader(`{"name":"beta"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Add("If-Match", stale.String())
+	r.Header.Add("If-Match", current.String())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("two If-Match lines: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if row, _ := store.Get("a"); row.Name != "beta" || row.Version != 2 {
+		t.Fatalf("resource not updated: %+v", row)
+	}
+
+	r = httptest.NewRequest(http.MethodGet, "/api/v2/probe/guarded/a", nil)
+	r.Header.Add("If-None-Match", stale.String())
+	r.Header.Add("If-None-Match", RenderETag(2, guardedProbeScope).String())
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("two If-None-Match lines: status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The create-only probe: If-None-Match: * creates a new resource, refuses an
+// existing one with 412 and its ETag, and an absent field replaces.
+func TestCreateOnlyProbe(t *testing.T) {
+	h, store := guardedHandler(t)
+	rec := do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"fresh"}`, map[string]string{"If-None-Match": "*"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("ETag"), RenderETag(1, guardedProbeScope).String(); got != want {
+		t.Fatalf("create ETag = %q, want %q", got, want)
+	}
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"again"}`, map[string]string{"If-None-Match": "*"})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got, want := rec.Header().Get("ETag"), RenderETag(1, guardedProbeScope).String(); got != want {
+		t.Fatalf("412 ETag = %q, want %q", got, want)
+	}
+	if row, _ := store.Get("new"); row.Name != "fresh" || row.Version != 1 {
+		t.Fatalf("resource changed on refused create: %+v", row)
+	}
+	// A weak match against the existing tag also refuses.
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"again"}`, map[string]string{"If-None-Match": "W/" + RenderETag(1, guardedProbeScope).String()})
+	requireProblem(t, rec, TypePreconditionFailed)
+	// No field: an ordinary replace.
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"replaced"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("replace: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if row, _ := store.Get("new"); row.Name != "replaced" || row.Version != 2 {
+		t.Fatalf("resource not replaced: %+v", row)
+	}
+	// Malformed: 400 without echo.
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"x"}`, map[string]string{"If-None-Match": "not-a-tag"})
+	p := requireProblem(t, rec, TypeMalformedRequest)
+	if strings.Contains(p.Detail, "not-a-tag") {
+		t.Fatalf("malformed value echoed: %q", p.Detail)
 	}
 }

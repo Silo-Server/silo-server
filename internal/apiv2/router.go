@@ -127,6 +127,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(requestID)
 	r.Use(observe)
 	r.Use(dropDelegationPattern)
+	r.Use(joinPreconditionFields)
 	r.Use(bufferResponse)
 	r.NotFound(notFound)
 
@@ -222,6 +223,22 @@ func requestID(next http.Handler) http.Handler {
 		// Set through the map to keep the contract's spelling (X-Request-ID);
 		// Header.Set would canonicalize it.
 		w.Header()[RequestIDHeader] = []string{id}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// joinPreconditionFields folds repeated If-Match and If-None-Match header
+// lines into one comma-separated value (RFC 9110 5.3: a recipient may combine
+// list-based fields in order). Huma binds a header input from Header.Get,
+// which returns the first line only, so without this a second line would be
+// silently dropped and the precondition evaluated against half the list.
+func joinPreconditionFields(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, field := range []string{ifMatchField, ifNoneMatchField} {
+			if vs := r.Header.Values(field); len(vs) > 1 {
+				r.Header.Set(field, strings.Join(vs, ", "))
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }
