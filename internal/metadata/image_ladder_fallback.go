@@ -109,9 +109,10 @@ func (p imageAvailabilityPolicy) withBatchFailureCircuit() imageAvailabilityPoli
 // from artworkkey.VariantWidths. Revisit both this set and that assumption
 // whenever LadderVersion is bumped.
 var ladderTypesWithAddedRung = map[string]bool{
-	ImageCacheImagePoster: true,
-	ImageCacheImageStill:  true,
-	ImageCacheImageLogo:   true,
+	ImageCacheImagePoster:   true,
+	ImageCacheImageStill:    true,
+	ImageCacheImageLogo:     true,
+	ImageCacheImageBackdrop: true,
 }
 
 // needsExistenceCheck reports whether a cached artwork key names a rung that

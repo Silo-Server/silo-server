@@ -159,6 +159,17 @@ func TestLadderFallbackWalksLogoLadder(t *testing.T) {
 	}
 }
 
+func TestLadderFallbackWalksBackdropLadder(t *testing.T) {
+	const requested = "tmdb/movies/550/backdrop/w1920.rev.webp"
+	const present = "tmdb/movies/550/backdrop/w1280.rev.webp"
+	store := newFakeS3ImageStore(present)
+	resolver := newResolverWithStore(t, store)
+
+	if got := resolvedKey(t, resolver, requested); got != present {
+		t.Fatalf("resolved key = %q, want %q", got, present)
+	}
+}
+
 // A storage HEAD is not proof that a separately authenticated public URL is
 // fetchable. The ladder must check the same delivery path the client will use.
 func TestLadderFallbackUsesClientDeliveryAvailability(t *testing.T) {
@@ -181,6 +192,11 @@ func TestLadderFallbackUsesClientDeliveryAvailability(t *testing.T) {
 			name:      "logo",
 			requested: "tmdb/series/1396/logo/w1280.rev.webp",
 			present:   "tmdb/series/1396/logo/w500.rev.webp",
+		},
+		{
+			name:      "backdrop",
+			requested: "tmdb/movies/550/backdrop/w1920.rev.webp",
+			present:   "tmdb/movies/550/backdrop/w1280.rev.webp",
 		},
 	}
 
@@ -318,7 +334,7 @@ func TestLadderFallbackSkipsEstablishedRungs(t *testing.T) {
 	for _, key := range []string{
 		"tmdb/movies/550/poster/w500.abc123.webp",
 		"tmdb/movies/550/poster/w300.abc123.webp",
-		"tmdb/movies/550/backdrop/w1920.abc123.webp",
+		"tmdb/movies/550/backdrop/w1280.abc123.webp",
 		"tmdb/movies/550/poster/original.abc123.webp",
 		"tmdb/series/1396/logo/w500.rev.webp",
 	} {
