@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -100,6 +101,50 @@ func TestWatchedActivityCTEIncludesEbookReaderProgress(t *testing.T) {
 		if !strings.Contains(query, term) {
 			t.Fatalf("watched activity CTE missing %q: %s", term, query)
 		}
+	}
+}
+
+func TestRecentCompletedItemIDsQueryCanonicalizesBeforeLimit(t *testing.T) {
+	query := strings.Join(strings.Fields(recentCompletedItemIDsQuery), " ")
+
+	assertQueryTermsInOrder(t, query,
+		"SELECT item_id",
+		"FROM watched_activity",
+		"WHERE user_id = $1 AND profile_id = $2 AND completed = true",
+		"GROUP BY item_id",
+		"ORDER BY MAX(updated_at) DESC, item_id ASC",
+		"LIMIT $3",
+	)
+	if strings.Contains(query, "SELECT leaf_item_id") {
+		t.Fatalf("automatic anchors must not use episode leaf IDs: %s", query)
+	}
+}
+
+func TestResolveCanonicalItemIDsDefaultsToInputAndRollsEpisodesUp(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := context.Background()
+	prefix := "t612-anchor-"
+	seriesID := prefix + "series"
+	episodeID := prefix + "episode"
+	movieID := prefix + "movie"
+
+	cleanupRecoMediaItems(t, pool, prefix)
+	seedRecoMediaItem(t, pool, seriesID, "series", "matched")
+	seedRecoMediaItem(t, pool, movieID, "movie", "matched")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+		VALUES ($1, $2, 1, 1, 'Episode 1')
+	`, episodeID, seriesID); err != nil {
+		t.Fatalf("seed episode: %v", err)
+	}
+
+	got, err := NewRepo(pool).ResolveCanonicalItemIDs(ctx, []string{episodeID, movieID, "unknown-id"})
+	if err != nil {
+		t.Fatalf("ResolveCanonicalItemIDs: %v", err)
+	}
+	want := map[string]string{episodeID: seriesID, movieID: movieID, "unknown-id": "unknown-id"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolved IDs = %#v, want %#v", got, want)
 	}
 }
 
