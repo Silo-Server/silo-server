@@ -3,11 +3,13 @@ package playback
 import "strings"
 
 const (
-	QuirkFireTVAFTKRTHigh10V3       = "android.fire_tv.aftkrt.h264_high10_l52_v1"
-	QuirkFireTVAFTKRTEAC3HLSV3      = "android.fire_tv.aftkrt.eac3_7_1_hls_audio_adapt_v1"
-	QuirkFireTVDV8HDR10PlusV3       = "android.fire_tv.dv8_hdr10plus_sei_v1"
-	QuirkFirefoxMatroskaAACTimingV3 = "web.firefox.matroska_aac_timestamps_v1"
-	legacyAndroidMedia3HLSBuildV3   = "15"
+	QuirkFireTVAFTKRTHigh10V3              = "android.fire_tv.aftkrt.h264_high10_l52_v1"
+	QuirkFireTVAFTKRTEAC3HLSV3             = "android.fire_tv.aftkrt.eac3_7_1_hls_audio_adapt_v1"
+	QuirkFireTVDV8HDR10PlusV3              = "android.fire_tv.dv8_hdr10plus_sei_v1"
+	QuirkFirefoxMatroskaAACTimingV3        = "web.firefox.matroska_aac_timestamps_v1"
+	QuirkWindowsWebAudioNormalizeV3        = "web.windows.audio_normalization_v1"
+	QuirkAndroidFirefoxWebAudioNormalizeV3 = "web.android.firefox.audio_normalization_v1"
+	legacyAndroidMedia3HLSBuildV3          = "15"
 )
 
 func high10DecodeOverrideV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
@@ -92,6 +94,67 @@ func firefoxMatroskaAACTimingQuirkV3(source SourceDescriptorV3, request StartReq
 		Reason:           "Firefox requires Matroska AAC timestamps to be normalized before MP4 or HLS packaging.",
 	}
 	return &quirk, true
+}
+
+// windowsWebAudioNormalizationQuirkV3 keeps video on a source-preserving route
+// while giving Windows browsers one stable audio contract. Every non-AAC
+// source codec is decoded server-side and re-encoded with the timestamp-
+// normalizing AAC recipe. Windows Firefox also normalizes AAC because its
+// audio path is the strictest target; other browsers keep native AAC.
+func windowsWebAudioNormalizationQuirkV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
+	codec := normalizeCodecV3(source.AudioCodec)
+	if !isWindowsWebV3(request) || codec == "" || (codec == audioCodecAACV3 && !isFirefoxWebV3(request)) {
+		return nil, false
+	}
+	quirk := AppliedQuirkV3{
+		ID:               QuirkWindowsWebAudioNormalizeV3,
+		RegistryRevision: DeviceQuirkRegistryRevisionV3,
+		Action:           "audio_only_transcode",
+		Reason:           "Windows web playback normalizes source audio to timestamp-corrected AAC while preserving copied video; Firefox also normalizes native AAC.",
+	}
+	return &quirk, true
+}
+
+// androidFirefoxWebAudioNormalizationQuirkV3 gives Firefox on Android the
+// timestamp-normalized AAC recipe for non-AAC source audio. The observed
+// mobile route crackles while directly decoding E-AC-3, but native AAC remains
+// unchanged unless the more specific Matroska AAC timing quirk applies.
+func androidFirefoxWebAudioNormalizationQuirkV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
+	codec := normalizeCodecV3(source.AudioCodec)
+	if !isAndroidFirefoxWebV3(request) || codec == "" || codec == audioCodecAACV3 {
+		return nil, false
+	}
+	quirk := AppliedQuirkV3{
+		ID:               QuirkAndroidFirefoxWebAudioNormalizeV3,
+		RegistryRevision: DeviceQuirkRegistryRevisionV3,
+		Action:           "audio_only_transcode",
+		Reason:           "Firefox on Android normalizes non-AAC source audio to timestamp-corrected AAC stereo while preserving copied video.",
+	}
+	return &quirk, true
+}
+
+func webAudioNormalizationQuirkV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
+	if quirk, ok := windowsWebAudioNormalizationQuirkV3(source, request); ok {
+		return quirk, true
+	}
+	return androidFirefoxWebAudioNormalizationQuirkV3(source, request)
+}
+
+func isWindowsWebV3(request StartRequestV3) bool {
+	device := request.ClientPlaybackContext.Device
+	if !strings.EqualFold(device.Platform, "web") {
+		return false
+	}
+	userAgent := strings.ToLower(strings.TrimSpace(device.PlatformDetails["user_agent"]))
+	return strings.Contains(userAgent, "windows nt")
+}
+
+func isAndroidFirefoxWebV3(request StartRequestV3) bool {
+	if !isFirefoxWebV3(request) {
+		return false
+	}
+	userAgent := strings.ToLower(strings.TrimSpace(request.ClientPlaybackContext.Device.PlatformDetails["user_agent"]))
+	return strings.Contains(userAgent, "android")
 }
 
 func isFirefoxWebV3(request StartRequestV3) bool {

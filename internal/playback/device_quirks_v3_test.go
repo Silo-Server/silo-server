@@ -162,6 +162,84 @@ func TestFirefoxMatroskaAACTimingQuirkIsExact(t *testing.T) {
 	}
 }
 
+func TestWindowsWebAudioNormalizationQuirkIsExact(t *testing.T) {
+	request := validStartRequestV3()
+	request.ClientPlaybackContext.Device = DeviceContextV3{
+		Platform: "web",
+		PlatformDetails: map[string]string{
+			"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
+		},
+	}
+	quirk, ok := windowsWebAudioNormalizationQuirkV3(SourceDescriptorV3{AudioCodec: "eac3"}, request)
+	if !ok || quirk == nil || quirk.ID != QuirkWindowsWebAudioNormalizeV3 || quirk.Action != "audio_only_transcode" {
+		t.Fatalf("Windows web audio normalization quirk = %#v, ok=%v", quirk, ok)
+	}
+	request.ClientPlaybackContext.Device.PlatformDetails["user_agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0"
+	quirk, ok = windowsWebAudioNormalizationQuirkV3(SourceDescriptorV3{AudioCodec: "aac"}, request)
+	if !ok || quirk == nil || quirk.ID != QuirkWindowsWebAudioNormalizeV3 {
+		t.Fatalf("Windows Firefox AAC quirk = %#v, ok=%v", quirk, ok)
+	}
+	request.ClientPlaybackContext.Device.PlatformDetails["user_agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/151.0.0.0"
+
+	for _, test := range []struct {
+		name      string
+		platform  string
+		userAgent string
+		codec     string
+	}{
+		{name: "Windows AAC", platform: "web", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/151.0.0.0", codec: "aac"},
+		{name: "Windows no codec", platform: "web", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/151.0.0.0"},
+		{name: "macOS Edge", platform: "web", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Edg/151.0.0.0", codec: "eac3"},
+		{name: "Android app", platform: "android", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", codec: "eac3"},
+		{name: "missing UA", platform: "web", codec: "eac3"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := request
+			candidate.ClientPlaybackContext.Device.Platform = test.platform
+			candidate.ClientPlaybackContext.Device.PlatformDetails = map[string]string{"user_agent": test.userAgent}
+			if got, eligible := windowsWebAudioNormalizationQuirkV3(SourceDescriptorV3{AudioCodec: test.codec}, candidate); eligible || got != nil {
+				t.Fatalf("unexpected quirk = %#v, eligible=%v", got, eligible)
+			}
+		})
+	}
+}
+
+func TestAndroidFirefoxWebAudioNormalizationQuirkIsExact(t *testing.T) {
+	request := validStartRequestV3()
+	request.ClientPlaybackContext.Device = DeviceContextV3{
+		Platform: "web",
+		PlatformDetails: map[string]string{
+			"user_agent": "Mozilla/5.0 (Android 16; Mobile; rv:154.0) Gecko/154.0 Firefox/154.0",
+		},
+	}
+	quirk, ok := androidFirefoxWebAudioNormalizationQuirkV3(SourceDescriptorV3{AudioCodec: "eac3"}, request)
+	if !ok || quirk == nil || quirk.ID != QuirkAndroidFirefoxWebAudioNormalizeV3 || quirk.Action != "audio_only_transcode" {
+		t.Fatalf("Android Firefox web audio normalization quirk = %#v, ok=%v", quirk, ok)
+	}
+
+	for _, test := range []struct {
+		name      string
+		platform  string
+		userAgent string
+		codec     string
+	}{
+		{name: "native AAC", platform: "web", userAgent: "Mozilla/5.0 (Android 16; Mobile; rv:154.0) Gecko/154.0 Firefox/154.0", codec: "aac"},
+		{name: "Android Chrome", platform: "web", userAgent: "Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 Chrome/151.0.0.0 Mobile Safari/537.36", codec: "eac3"},
+		{name: "desktop Firefox", platform: "web", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0", codec: "eac3"},
+		{name: "native Android app", platform: "android", userAgent: "Mozilla/5.0 (Android 16; Mobile; rv:154.0) Gecko/154.0 Firefox/154.0", codec: "eac3"},
+		{name: "missing codec", platform: "web", userAgent: "Mozilla/5.0 (Android 16; Mobile; rv:154.0) Gecko/154.0 Firefox/154.0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := request
+			candidate.ClientPlaybackContext.Device.Platform = test.platform
+			candidate.ClientPlaybackContext.Device.PlatformDetails = map[string]string{"user_agent": test.userAgent}
+			if got, eligible := androidFirefoxWebAudioNormalizationQuirkV3(SourceDescriptorV3{AudioCodec: test.codec}, candidate); eligible || got != nil {
+				t.Fatalf("unexpected quirk = %#v, eligible=%v", got, eligible)
+			}
+		})
+	}
+}
+
 func TestPlanAttemptKeyV3DeviceQuirkIsStable(t *testing.T) {
 	width, height, bitrate := 3840, 2160, 60_000
 	plan := PlanV3{
