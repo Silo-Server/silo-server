@@ -62,7 +62,7 @@ func TestUpdateProfileOmittedVersusNull(t *testing.T) {
 		t.Fatal(rec.Body.String())
 	}
 	req := profiles.last.Request
-	for name, v := range map[string]*string{"avatar": req.Avatar, "pin": req.PIN, "max_content_rating": req.MaxContentRating, "max_playback_quality": req.MaxPlaybackQuality} {
+	for name, v := range map[string]*string{"avatar": req.Avatar, "pin": req.PIN, "max_content_rating": req.MaxContentRating, fieldMaxPlaybackQuality: req.MaxPlaybackQuality} {
 		if v == nil || *v != "" {
 			t.Errorf("%s: want clearing form, got %v", name, v)
 		}
@@ -107,12 +107,12 @@ func TestUpdateProfileDecisions(t *testing.T) {
 		err  error
 		want ProblemType
 	}{
-		{&handlers.APIError{Status: 404, Code: "not_found", Message: "Profile not found"}, TypeNotFound},
+		{&handlers.APIError{Status: 404, Code: TypeNotFound.ID, Message: "Profile not found"}, TypeNotFound},
 		{&handlers.APIError{Status: 409, Code: "name_conflict", Message: "A profile with this name already exists"}, TypeConflict},
 		{&handlers.APIError{Status: 403, Code: "forbidden", Message: "You can only update the active profile's playback preferences"}, TypePermissionDenied},
 		{&handlers.APIError{Status: 403, Code: "profile_management", Message: "Profile management requires verifying the primary profile PIN"}, TypeProfileVerificationRequired},
-		{&handlers.APIError{Status: 400, Code: "bad_request", Message: "Invalid max_playback_quality", Field: "max_playback_quality"}, TypeValidationFailed},
-		{&handlers.APIError{Status: 500, Code: "internal_error", Message: "Failed to store profile preferences"}, TypeInternalError},
+		{&handlers.APIError{Status: 400, Code: "bad_request", Message: "Invalid max_playback_quality", Field: fieldMaxPlaybackQuality}, TypeValidationFailed},
+		{&handlers.APIError{Status: 500, Code: TypeInternalError.ID, Message: "Failed to store profile preferences"}, TypeInternalError},
 		{errStore, TypeInternalError},
 	} {
 		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))

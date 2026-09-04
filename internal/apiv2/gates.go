@@ -222,6 +222,9 @@ func unauthorizedProblem(reason string) *Problem {
 	}
 }
 
+// locationProfileHeader is the errors[].location of the profile header.
+const locationProfileHeader = "header.x-profile-id"
+
 // badRequestProblem translates a v1 400 by the reason the gate declared. It
 // never invents an error the gate did not raise: an unnamed reason is reported
 // as a bare malformed request at the v1 status, with no field-level entry.
@@ -229,7 +232,7 @@ func badRequestProblem(reason string) *Problem {
 	switch reason {
 	case apimw.ReasonProfileHeaderRequired:
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: "header.x-profile-id", Code: codeRequired, Detail: "The X-Profile-Id header is required."})
+			WithErrors(ProblemError{Location: locationProfileHeader, Code: codeRequired, Detail: "The X-Profile-Id header is required."})
 	case apimw.ReasonItemIDRequired:
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: "path.id", Code: codeRequired, Detail: "The item id path parameter is required."})

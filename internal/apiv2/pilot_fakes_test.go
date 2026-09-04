@@ -27,7 +27,7 @@ func (f fakeAccounts) CurrentUser(_ context.Context, claims *auth.Claims) (handl
 	}
 	view, ok := f.users[claims.UserID]
 	if !ok {
-		return handlers.UserView{}, &handlers.APIError{Status: 500, Code: "internal_error", Message: "An unexpected error occurred"}
+		return handlers.UserView{}, &handlers.APIError{Status: 500, Code: TypeInternalError.ID, Message: "An unexpected error occurred"}
 	}
 	return view, nil
 }

@@ -117,7 +117,7 @@ func TestListProgressDenied(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress", "", nil), TypeAuthenticationRequired)
 	// Profile scoped: the header is required, and a locked profile must be verified.
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress", "", bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "header.x-profile-id" {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationProfileHeader {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)

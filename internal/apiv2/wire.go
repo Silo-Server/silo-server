@@ -67,6 +67,9 @@ func (Instant) Schema(_ huma.Registry) *huma.Schema {
 // full syntax check is the date-time format.
 const nonZeroInstantPattern = `^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-`
 
+// jsonNull is the JSON null literal.
+var jsonNull = []byte("null")
+
 // NullableInstant is the explicit-null form: a JSON null is a documented
 // "known to have no value", distinct from omission.
 type NullableInstant struct {
@@ -76,7 +79,7 @@ type NullableInstant struct {
 
 // UnmarshalJSON accepts null or an instant.
 func (n *NullableInstant) UnmarshalJSON(b []byte) error {
-	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+	if bytes.Equal(bytes.TrimSpace(b), jsonNull) {
 		*n = NullableInstant{}
 		return nil
 	}
@@ -91,7 +94,7 @@ func (n *NullableInstant) UnmarshalJSON(b []byte) error {
 // MarshalJSON renders null or the instant.
 func (n NullableInstant) MarshalJSON() ([]byte, error) {
 	if !n.Valid {
-		return []byte("null"), nil
+		return jsonNull, nil
 	}
 	return n.Time.MarshalJSON()
 }
@@ -133,7 +136,7 @@ type Patch[T any] struct {
 // UnmarshalJSON is only called when the field is present.
 func (p *Patch[T]) UnmarshalJSON(b []byte) error {
 	p.Present = true
-	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+	if bytes.Equal(bytes.TrimSpace(b), jsonNull) {
 		p.Null = true
 		var zero T
 		p.Value = zero
@@ -147,7 +150,7 @@ func (p *Patch[T]) UnmarshalJSON(b []byte) error {
 // null, which callers avoid by using omitzero.
 func (p Patch[T]) MarshalJSON() ([]byte, error) {
 	if !p.Present || p.Null {
-		return []byte("null"), nil
+		return jsonNull, nil
 	}
 	return json.Marshal(p.Value)
 }
@@ -160,7 +163,7 @@ func (Patch[T]) Schema(r huma.Registry) *huma.Schema {
 	var v T
 	s := r.Schema(reflect.TypeOf(v), true, "")
 	if s.Ref != "" {
-		return &huma.Schema{OneOf: []*huma.Schema{s, {Type: "null"}}}
+		return &huma.Schema{OneOf: []*huma.Schema{s, {Type: string(jsonNull)}}}
 	}
 	out := *s
 	out.Nullable = true

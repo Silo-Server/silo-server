@@ -75,23 +75,26 @@ type ProfileUpdateInput struct {
 	RawBody []byte
 }
 
+// fieldMaxPlaybackQuality is the member the v1 handler rejects by name.
+const fieldMaxPlaybackQuality = "max_playback_quality"
+
 // profileUpdateNullable names the members whose null is a clearing value;
 // null on any other member is a type failure.
 var profileUpdateNullable = map[string]bool{
 	"avatar": true, "pin": true, "max_content_rating": true, "language": true,
-	"preferred_metadata_language": true, "subtitle_language": true, "max_playback_quality": true,
+	"preferred_metadata_language": true, "subtitle_language": true, fieldMaxPlaybackQuality: true,
 }
 
 // rejectNonNullableNulls is the contract's omitted-versus-null rule for the
 // members that do not admit clearing.
 func rejectNonNullableNulls(raw []byte, nullable map[string]bool) *Problem {
+	// The framework already judged the syntax and shape; a document that
+	// does not decode here has no members to judge.
 	var members map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &members); err != nil {
-		return nil // the framework already judged the syntax and shape
-	}
+	_ = json.Unmarshal(raw, &members)
 	var errs []ProblemError
 	for name, v := range members {
-		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) && !nullable[name] {
+		if bytes.Equal(bytes.TrimSpace(v), jsonNull) && !nullable[name] {
 			errs = append(errs, ProblemError{Location: locationBody + "." + name, Code: codeInvalidType, Detail: "null is not a value for this member; omit it to leave it unchanged"})
 		}
 	}

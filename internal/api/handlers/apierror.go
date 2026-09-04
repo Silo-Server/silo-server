@@ -27,5 +27,5 @@ func apiError(status int, code, message string) *APIError {
 }
 
 func fieldError(field, message string) *APIError {
-	return &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: message, Field: field}
+	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, Field: field}
 }
