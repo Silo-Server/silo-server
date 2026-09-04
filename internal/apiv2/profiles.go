@@ -24,11 +24,11 @@ type Profile struct {
 	IsChild                    bool    `json:"is_child"`
 	IsPrimary                  bool    `json:"is_primary" doc:"The household parent (not the server admin role)"`
 	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none"`
-	QualityPreference          string  `json:"quality_preference" enum:"auto,original" doc:"Empty when unset"`
+	QualityPreference          string  `json:"quality_preference" doc:"Canonical values: auto, original; empty when unset. Older profiles may carry other stored values"`
 	Language                   string  `json:"language" doc:"Preferred audio language (ISO 639-1); empty inherits"`
 	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" doc:"Metadata language (ISO 639-1); empty inherits the library's"`
 	SubtitleLanguage           string  `json:"subtitle_language" doc:"Preferred subtitle language (ISO 639-1); empty inherits"`
-	SubtitleMode               string  `json:"subtitle_mode" enum:"auto,always,off" doc:"Empty when unset"`
+	SubtitleMode               string  `json:"subtitle_mode" doc:"Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values"`
 	AutoSkipIntro              bool    `json:"auto_skip_intro"`
 	AutoSkipCredits            bool    `json:"auto_skip_credits"`
 	AutoSkipRecap              bool    `json:"auto_skip_recap"`
@@ -36,7 +36,7 @@ type Profile struct {
 	ShowForcedSubtitles        bool    `json:"show_forced_subtitles"`
 	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled"`
 	AllowedLibraryIDs          []ID    `json:"allowed_library_ids" doc:"Libraries the profile may see when restrictions are enabled"`
-	MaxPlaybackQuality         string  `json:"max_playback_quality" enum:"1080p,2160p" doc:"Playback ceiling; empty means none"`
+	MaxPlaybackQuality         string  `json:"max_playback_quality" doc:"Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values"`
 	CreatedAt                  Instant `json:"created_at"`
 	UpdatedAt                  Instant `json:"updated_at"`
 }

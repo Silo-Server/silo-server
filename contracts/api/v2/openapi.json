@@ -484,11 +484,7 @@
             "type": "string"
           },
           "max_playback_quality": {
-            "description": "Playback ceiling; empty means none",
-            "enum": [
-              "1080p",
-              "2160p"
-            ],
+            "description": "Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values",
             "type": "string"
           },
           "name": {
@@ -499,11 +495,7 @@
             "type": "string"
           },
           "quality_preference": {
-            "description": "Empty when unset",
-            "enum": [
-              "auto",
-              "original"
-            ],
+            "description": "Canonical values: auto, original; empty when unset. Older profiles may carry other stored values",
             "type": "string"
           },
           "show_forced_subtitles": {
@@ -514,12 +506,7 @@
             "type": "string"
           },
           "subtitle_mode": {
-            "description": "Empty when unset",
-            "enum": [
-              "auto",
-              "always",
-              "off"
-            ],
+            "description": "Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values",
             "type": "string"
           },
           "updated_at": {

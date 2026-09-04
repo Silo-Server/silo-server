@@ -915,8 +915,9 @@ Two findings from the pilot are now settled for every later section:
   `?since=` delta pull is a separate operation for a later section, not a mode of `listProgress`.
   Bounded collections such as `listAdminUsers` return `{items}` with no page object.
 
-The pilot ledger rows record the remaining v1 divergences: enums are strict (no `4K`/`UHD`
-aliases), every string member of a profile is always emitted, ids are string `ID`s, and instants
+The pilot ledger rows record the remaining v1 divergences: request enums are strict (no `4K`/`UHD`
+aliases) while the profile read model documents canonical values without constraining legacy
+stored ones, every string member of a profile is always emitted, ids are string `ID`s, and instants
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 

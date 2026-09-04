@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -135,4 +136,22 @@ func TestUpdateProfileDenied(t *testing.T) {
 	demo := pilotDeps(nil, nil)
 	demo.DemoSettings = fakeSettings{demo: true}
 	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, bearer(memberToken)), TypePermissionDenied)
+}
+
+// A legacy stored quality_preference (the pre-validation schema default) is
+// served unchanged: the read model documents canonical values but does not
+// constrain what older profiles carry.
+func TestUpdateProfileServesLegacyStoredEnum(t *testing.T) {
+	view := fixtureProfileView()
+	view.QualityPreference = "1080p"
+	profiles := &fakeProfiles{view: view}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+
+	rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, bearer(memberToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"quality_preference":"1080p"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
 }

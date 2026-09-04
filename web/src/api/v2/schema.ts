@@ -304,27 +304,18 @@ export interface components {
       library_restrictions_enabled: boolean;
       /** @description Content-rating ceiling; empty means none */
       max_content_rating: string;
-      /**
-       * @description Playback ceiling; empty means none
-       * @enum {string}
-       */
-      max_playback_quality: "1080p" | "2160p";
+      /** @description Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values */
+      max_playback_quality: string;
       name: string;
       /** @description Metadata language (ISO 639-1); empty inherits the library's */
       preferred_metadata_language: string;
-      /**
-       * @description Empty when unset
-       * @enum {string}
-       */
-      quality_preference: "auto" | "original";
+      /** @description Canonical values: auto, original; empty when unset. Older profiles may carry other stored values */
+      quality_preference: string;
       show_forced_subtitles: boolean;
       /** @description Preferred subtitle language (ISO 639-1); empty inherits */
       subtitle_language: string;
-      /**
-       * @description Empty when unset
-       * @enum {string}
-       */
-      subtitle_mode: "auto" | "always" | "off";
+      /** @description Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values */
+      subtitle_mode: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision

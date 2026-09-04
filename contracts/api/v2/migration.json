@@ -35891,7 +35891,7 @@
         "path": "/api/v2/profiles/{id}",
         "operation_id": "updateProfile"
       },
-      "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Enums strict (no 4K/UHD aliases); every string member always emitted."
+      "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Enums strict (no 4K/UHD aliases); every string member always emitted; read model does not constrain legacy stored enum values."
     },
     {
       "listener": "api",
