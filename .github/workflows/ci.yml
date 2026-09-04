@@ -30,6 +30,20 @@ jobs:
   go:
     name: Go
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: silo_test
+          POSTGRES_PASSWORD: silo_test
+          POSTGRES_DB: silo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U silo_test -d silo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -45,7 +59,7 @@ jobs:
       - name: Install libvips
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvips-dev
+          sudo apt-get install -y --no-install-recommends libvips-dev postgresql-client
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -113,6 +127,20 @@ jobs:
       # defaults. Without this job those tests exist but never run.
       - name: Test
         run: make test-go
+
+      - name: Test static playback reservations and recovery across API instances
+        env:
+          PGPASSWORD: silo_test
+          SILO_TEST_DATABASE_URL: postgres://silo_test:silo_test@localhost:5432/silo_test?sslmode=disable
+        run: |
+          sed '/^-- +goose Down/,$d' migrations/sql/20260618053223_add_jellycompat_playback_sessions.sql | psql -h localhost -U silo_test -d silo_test -v ON_ERROR_STOP=1
+          psql -h localhost -U silo_test -d silo_test -v ON_ERROR_STOP=1 -c 'CREATE TABLE playback_sessions_sync (session_id text PRIMARY KEY, media_file_id integer)'
+          go test -race ./internal/jellycompat -run 'TestDurableCompatPlaybackStoreStaticReservation|TestDurableStaticAttachment|TestDurableLegacyStaticDuplicates|TestLegacyStaticDuplicates|TestDevicePlaybackAlias|TestHandlePlaybackReport_DeviceAlias|TestCreateStaticPlaySessionConcurrent|TestStaticPlayback|TestPlaybackSessionStoreStaticReservation|TestHandleVideoStream.*Static' -count=1 -v
+
+      - name: Benchmark static reservation reuse
+        env:
+          SILO_TEST_DATABASE_URL: postgres://silo_test:silo_test@localhost:5432/silo_test?sslmode=disable
+        run: go test ./internal/jellycompat -run '^$' -bench 'Benchmark(StaticPlayback|DurableStatic)ReservationReuse$' -benchmem -benchtime=250ms -count=5
 
   web:
     name: Web

@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,6 +75,111 @@ func postProgressReport(handler *PlaybackHandler, body string) *httptest.Respons
 	rec := httptest.NewRecorder()
 	handler.HandleSessionPlayingProgress(rec, req)
 	return rec
+}
+
+func TestHandlePlaybackReport_DeviceAliasIgnoresUnresolvedLegacyRecords(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		t.Run(map[bool]string{false: "progress", true: "stop"}[stop], func(t *testing.T) {
+			handler, mgr, routeID, sourceID := newReportLivenessHandler("current-native", true)
+			if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+				s.ClientPlaySessionID, s.ClientDeviceID, s.StaticPlaybackKey = "client-play", "current-device", "reservation"
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			first, second := legacyStaticPair("token-1", time.Now())
+			for _, old := range []PlaybackSession{first, second} {
+				old.ClientDeviceID, old.RouteItemID = "", routeID
+				old.MediaSources = []PlaybackMediaSource{{ID: sourceID, FileID: 42}, {ID: "another-edition", FileID: 43}}
+				handler.playbackStore.Put(old)
+			}
+			reportSourceID := sourceID
+			if !stop {
+				reportSourceID = routeID // Jellyfin's item-as-source convention.
+			}
+			req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(`{"PlaySessionId":"client-play","ItemId":"`+routeID+`","MediaSourceId":"`+reportSourceID+`","PositionTicks":600000000}`))
+			req.Header.Set("X-Emby-Authorization", `MediaBrowser DeviceId="current-device"`)
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+			rec := httptest.NewRecorder()
+			handler.handlePlaybackReport(rec, req, stop)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			if stop {
+				if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "current-native" {
+					t.Fatal("stop did not resolve the exact device playback")
+				}
+			} else if len(mgr.progressUpdates) != 1 || mgr.progressUpdates[0].sessionID != "current-native" {
+				t.Fatal("unresolved historical aliases blocked current progress")
+			}
+			for _, old := range []PlaybackSession{first, second} {
+				if _, ok := handler.playbackStore.Get(old.ID); !ok {
+					t.Fatal("unproven historical record was modified")
+				}
+			}
+		})
+	}
+}
+
+func TestHandlePlaybackReport_DeviceAliasRejectsUnscopedLegacySession(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		for _, storedDevice := range []string{"", "other-device"} {
+			for _, playID := range []string{"client-play", "unknown-play", "play-1"} {
+				t.Run(fmt.Sprintf("stop_%t/device_%s/play_%s", stop, storedDevice, playID), func(t *testing.T) {
+					handler, mgr, routeID, sourceID := newReportLivenessHandler("legacy-native", true)
+					if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+						s.ClientPlaySessionID, s.ClientDeviceID = "client-play", storedDevice
+						return nil
+					}); err != nil {
+						t.Fatal(err)
+					}
+					req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(`{"PlaySessionId":"`+playID+`","ItemId":"`+routeID+`","MediaSourceId":"`+sourceID+`","PositionTicks":600000000}`))
+					req.Header.Set("X-Emby-Authorization", `MediaBrowser DeviceId="current-device"`)
+					req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+					rec := httptest.NewRecorder()
+					handler.handlePlaybackReport(rec, req, stop)
+					if rec.Code != http.StatusNoContent {
+						t.Fatalf("status = %d", rec.Code)
+					}
+					// An exact caller-owned server ID remains sufficient for a
+					// legacy record; an alias/route must match the explicit device.
+					allow := playID == "play-1" && storedDevice == ""
+					if !allow && (len(mgr.progressUpdates) != 0 || len(mgr.stopCalls) != 0) {
+						t.Fatal("explicit-device report mutated an unscoped or other-device session")
+					}
+					if allow && ((stop && len(mgr.stopCalls) != 1) || (!stop && len(mgr.progressUpdates) != 1)) {
+						t.Fatal("exact caller-owned legacy session ID stopped working")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHandlePlaybackReport_ReviveSelectedEdition(t *testing.T) {
+	for _, selected := range []int{43, 99} {
+		handler, mgr, routeID, _ := newReportLivenessHandler("expired-native", false)
+		if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+			second := s.MediaSources[0]
+			second.ID, second.FileID, second.Version.FileID = "second-edition", 43, 43
+			s.MediaSources = append(s.MediaSources, second)
+			s.SelectedMediaFileID = selected
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		rec := postProgressReport(handler, `{"PlaySessionId":"play-1","ItemId":"`+routeID+`","MediaSourceId":"`+routeID+`","PositionTicks":600000000}`)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("status = %d", rec.Code)
+		}
+		if selected == 43 {
+			if got := mgr.sessions["upstream-started"]; got == nil || got.MediaFileID != 43 {
+				t.Fatal("recovery substituted the first edition")
+			}
+		} else if mgr.startCalls != 0 {
+			t.Fatal("missing selected edition was replaced by another file")
+		}
+	}
 }
 
 // TestHandlePlaybackReport_ClientPlaySessionIDFallsBackToItemRoute proves a

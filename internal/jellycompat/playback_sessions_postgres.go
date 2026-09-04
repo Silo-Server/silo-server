@@ -3,6 +3,8 @@ package jellycompat
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -283,6 +285,81 @@ func negotiatedPlaybackScope(compatToken, clientDeviceID, routeItemID string) st
 	)
 }
 
+// GetOrCreateStatic serializes the initial lookup and insert across API nodes.
+// The existing token index bounds the lookup to this caller's playback rows.
+func (d *DurableCompatPlaybackStore) GetOrCreateStatic(ctx context.Context, session PlaybackSession) (*PlaybackSession, error) {
+	if d.pool == nil {
+		return d.mem.GetOrCreateStatic(ctx, session)
+	}
+	if session.CompatToken == "" || session.StaticPlaybackKey == "" {
+		return nil, ErrSessionNotFound
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Domain-separate static reservations from PlaybackInfo negotiation locks.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::bigint)`, staticPlaybackReservationLockKey(session.CompatToken, session.StaticPlaybackKey)); err != nil {
+		return nil, err
+	}
+	var data []byte
+	err = tx.QueryRow(ctx, `
+		SELECT data FROM jellycompat_playback_sessions
+		WHERE compat_token = $1 AND data->>'StaticPlaybackKey' = $2
+			AND expires_at > $3
+			AND COALESCE((data->>'Terminal')::boolean, false) = false
+		ORDER BY created_at, id LIMIT 1 FOR UPDATE
+	`, session.CompatToken, session.StaticPlaybackKey, d.now()).Scan(&data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		session = d.mem.normalizeSession(session)
+		data, err = marshalPlaybackSession(session)
+		if err == nil {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO jellycompat_playback_sessions (id, compat_token, user_id, data, expires_at)
+				VALUES ($1, $2, $3, $4, $5)
+			`, session.ID, session.CompatToken, session.UserID, data, session.ExpiresAt)
+		}
+	} else if err == nil {
+		err = json.Unmarshal(data, &session)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	// Reload through the normal generation-aware cache path. Applying the
+	// transaction's snapshot directly could overwrite a concurrent upstream
+	// attachment, progress update, or terminal marker after the commit.
+	d.invalidateValidation(session.ID, session.CompatToken)
+	stored, ok := d.Get(session.ID)
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+	return stored, nil
+}
+
+// staticPlaybackReservationLockKey retains the deployed reservation lock's
+// framing and domain without changing PlaybackInfo negotiation locking. The
+// static marker separates these reservations from ordinary negotiated scopes.
+// A truncated-hash collision can only serialize unrelated callers: the row
+// lookup still checks the full token and reservation key.
+func staticPlaybackReservationLockKey(token, key string) int64 {
+	const domain = "silo:jellycompat:negotiated-session:v1"
+	const marker = "static-playback-reservation"
+	framed := make([]byte, 0, len(domain)+3*8+len(token)+len(marker)+len(key))
+	framed = append(framed, domain...)
+	for _, value := range [...]string{token, marker, key} {
+		framed = binary.BigEndian.AppendUint64(framed, uint64(len(value)))
+		framed = append(framed, value...)
+	}
+	digest := sha256.Sum256(framed)
+	return int64(binary.BigEndian.Uint64(digest[:8]))
+}
+
 // Get periodically revalidates the durable row before returning an active
 // session. Query failures preserve a still-valid cache entry: a temporary DB
 // outage must not interrupt an already-playing stream.
@@ -493,6 +570,9 @@ func (d *DurableCompatPlaybackStore) stageTerminalDB(
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
 		return nil, err
+	}
+	if session.SupersededBy != "" {
+		return nil, ErrSessionNotFound
 	}
 	if !session.TerminalAuthoritative || authoritative {
 		eventCopy := event
@@ -779,11 +859,19 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 		// reflects any concurrent writer's fields that fn merged on top of.
 		d.mem.Put(*committed)
 		d.markIDValidated(committed.ID)
-		if len(pending) > 0 {
+		// On a rejected CAS this is the authoritative pre-transaction row,
+		// not a commit of the pending mutations. Keep those mutations for retry.
+		if err == nil && len(pending) > 0 {
 			d.consumePendingUpdates(id, pending[len(pending)-1].sequence)
 		}
 	}
 	if err != nil {
+		if errors.Is(err, errUpstreamReplaced) {
+			// A rejected compare-and-set is not a retryable persistence failure.
+			// The authoritative winner above replaces the speculative cache write;
+			// queuing the losing closure could later attach an obsolete session.
+			return err
+		}
 		d.appendPendingUpdate(id, d.mem.compatTokenForID(id), fn)
 		// The in-memory mutation stands (live state is correct), but the durable
 		// row was NOT updated: surface the failure so durability-sensitive callers
@@ -841,6 +929,15 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 		return nil, err
 	}
 	if err := fn(&session); err != nil {
+		if errors.Is(err, errUpstreamReplaced) {
+			// Pending closures may have mutated the decoded copy before the CAS
+			// rejected it. Reload the original locked row for the caller's cache.
+			var authoritative PlaybackSession
+			if decodeErr := json.Unmarshal(raw, &authoritative); decodeErr != nil {
+				return nil, decodeErr
+			}
+			return &authoritative, err
+		}
 		// The mutation itself rejected the authoritative row; the cache mutation
 		// (already applied) stands. This is a fn/data condition, not an
 		// infrastructure failure, so it is not surfaced as a durability error.
@@ -910,15 +1007,8 @@ func (d *DurableCompatPlaybackStore) FindFinalizableByRoute(
 // rows from Postgres into the cache (same bounded fallback as FindByRoute; the
 // alias uniqueness check runs against the repopulated cache).
 func (d *DurableCompatPlaybackStore) FindByClientPlaySessionID(compatToken, clientPlaySessionID string) (*PlaybackSession, bool) {
-	if compatToken == "" {
-		return d.mem.FindByClientPlaySessionID(compatToken, clientPlaySessionID)
-	}
-	cached, cachedOK := d.mem.FindByClientPlaySessionID(compatToken, clientPlaySessionID)
-	if cachedOK && !d.shouldRevalidateToken(compatToken) {
-		return cached, true
-	}
-	_ = d.loadByCompatToken(compatToken)
-	return d.mem.FindByClientPlaySessionID(compatToken, clientPlaySessionID)
+	session, err := d.ResolveClientPlaySessionID(compatToken, clientPlaySessionID)
+	return session, err == nil
 }
 
 // FindFinalizableByClientPlaySessionID is the terminal-aware alias lookup used
@@ -926,20 +1016,21 @@ func (d *DurableCompatPlaybackStore) FindByClientPlaySessionID(compatToken, clie
 func (d *DurableCompatPlaybackStore) FindFinalizableByClientPlaySessionID(
 	compatToken, clientPlaySessionID, routeItemID, mediaSourceID string,
 ) (*PlaybackSession, bool) {
-	if compatToken == "" {
+	if compatToken == "" || d.pool == nil {
 		return d.mem.FindFinalizableByClientPlaySessionID(
 			compatToken, clientPlaySessionID, routeItemID, mediaSourceID,
 		)
 	}
-	cached, cachedOK := d.mem.FindFinalizableByClientPlaySessionID(
-		compatToken, clientPlaySessionID, routeItemID, mediaSourceID,
+	_, _ = d.ResolveClientPlaySessionID(compatToken, clientPlaySessionID)
+	cached, cachedOK := d.mem.findByClientPlaySessionID(
+		compatToken, clientPlaySessionID, routeItemID, mediaSourceID, true,
 	)
 	if cachedOK && !d.shouldRevalidateToken(compatToken) {
 		return cached, true
 	}
 	_ = d.loadByCompatToken(compatToken)
-	return d.mem.FindFinalizableByClientPlaySessionID(
-		compatToken, clientPlaySessionID, routeItemID, mediaSourceID,
+	return d.mem.findByClientPlaySessionID(
+		compatToken, clientPlaySessionID, routeItemID, mediaSourceID, true,
 	)
 }
 
