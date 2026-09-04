@@ -154,12 +154,37 @@ function queryKeyStartsWith(queryKey: readonly unknown[], prefix: readonly unkno
   );
 }
 
+export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefined {
+  if (!Array.isArray(queryKey) || queryKey.length < 2) return undefined;
+  if (
+    queryKey[0] === "items" &&
+    (queryKey[1] === "detail" || queryKey[1] === "watchDetail" || queryKey[1] === "markers") &&
+    typeof queryKey[2] === "string"
+  ) {
+    return queryKey[2];
+  }
+  if (queryKey[0] === "catalog" && queryKey[1] === "items" && typeof queryKey[2] === "string") {
+    return queryKey[2];
+  }
+  if (queryKey[0] === "ratings" && typeof queryKey[1] === "string") {
+    return queryKey[1];
+  }
+  return undefined;
+}
+
 function shouldInvalidateMediaSurfaceQuery(
   queryKey: readonly unknown[],
   options: InvalidateMediaSurfaceOptions,
 ) {
   if (options.skipItemDetail && options.itemId && isItemDetailQueryKey(queryKey, options.itemId)) {
     return false;
+  }
+
+  if (options.itemId) {
+    const targetItemId = getQueryKeyItemId(queryKey);
+    if (targetItemId && targetItemId !== options.itemId) {
+      return false;
+    }
   }
 
   if (queryKeyStartsWith(queryKey, catalogKeys.all)) {
