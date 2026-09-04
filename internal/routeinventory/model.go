@@ -29,6 +29,7 @@ const SchemaVersion = 1
 // version-neutral paths are retired individually.
 const (
 	NamespaceAPIV1        = "api_v1"
+	NamespaceAPIV2        = "api_v2"
 	NamespaceUnversioned  = "legacy_unversioned"
 	NamespaceOperational  = "operational" // root /metrics style probes
 	unknownClassification = "unknown"

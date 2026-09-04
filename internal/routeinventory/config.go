@@ -16,6 +16,9 @@ const ArtifactPath = "contracts/api/v2/route-inventory.json"
 const (
 	apiRouterFunc            = "NewRouter"
 	apiRouterCtor            = "newChiRouter"
+	apiV2HandlerFunc         = "NewHandler"
+	apiV2RouterCtor          = "newChiRouter"
+	humaChiAdapterNew        = "github.com/danielgtaylor/huma/v2/adapters/humachi.New"
 	nodeHandlerRecv          = "Server"
 	nodeHandlerFunc          = "Handler"
 	nodeHandlerCtor          = "router"
@@ -27,6 +30,7 @@ const (
 	absListenerFile          = "cmd/silo/abs_listener.go"
 	cmdSiloDir               = "cmd/silo"
 	internalAPIDir           = "internal/api"
+	internalAPIV2Dir         = "internal/apiv2"
 	internalProxyDir         = "internal/proxy"
 	internalTranscodeNodeDir = "internal/transcodenode"
 )
@@ -64,6 +68,17 @@ func DefaultConfig(root string) Config {
 				Constructor: apiRouterCtor,
 			},
 			{
+				ID: ListenerAPIV2,
+				Description: "Native /api/v2 listener: the Huma API the API listener delegates the /api/v2/ subtree to. " +
+					"Its operations are described by contracts/api/v2/openapi.json, not by inventory rows.",
+				Dir:         internalAPIV2Dir,
+				Func:        apiV2HandlerFunc,
+				Constructor: apiV2RouterCtor,
+				// The delegation row: the API listener's r.Handle("/api/v2/*", apiv2.NewHandler(...)).
+				DelegatedBy:    internalAPIDir,
+				RouterConsumer: humaChiAdapterNew,
+			},
+			{
 				ID:          ListenerProxy,
 				Description: "Proxy node listener: media relay, node control, and its own health/metrics probes.",
 				Dir:         internalProxyDir,
@@ -83,6 +98,7 @@ func DefaultConfig(root string) Config {
 		AuditDirs: []string{
 			internalAPIDir,
 			"internal/api/handlers",
+			internalAPIV2Dir,
 			internalProxyDir,
 			internalTranscodeNodeDir,
 			cmdSiloDir,

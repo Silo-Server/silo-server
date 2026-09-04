@@ -441,7 +441,7 @@ var traitOnlyRules = []authRule{
 // infrastructureMiddleware is the base stack every request passes through. It
 // is listed so a genuinely new middleware stands out as unclassified.
 var infrastructureMiddleware = []string{
-	"middleware.RequestID", "middleware.Recoverer", "apimw.RequestLogger", "apimw.Metrics",
+	"apimw.RequestID", "middleware.RequestID", "middleware.Recoverer", "apimw.RequestLogger", "apimw.Metrics",
 	"httpstream.CompressExcept", "clientip.Middleware", "activitylog.NewMiddleware",
 }
 

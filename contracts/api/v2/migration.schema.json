@@ -35,8 +35,8 @@
     }
   },
   "$defs": {
-    "listener": { "enum": ["root", "api", "proxy", "transcode_node"] },
-    "namespace": { "enum": ["api_v1", "legacy_unversioned", "operational"] },
+    "listener": { "enum": ["root", "api", "api_v2", "proxy", "transcode_node"] },
+    "namespace": { "enum": ["api_v1", "api_v2", "legacy_unversioned", "operational"] },
     "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"] },
     "path": { "type": "string", "pattern": "^/" },
     "handlerKind": { "enum": ["method", "func", "expression", "literal", "delegation"] },
