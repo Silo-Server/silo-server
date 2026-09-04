@@ -237,7 +237,7 @@ func (r *CatalogResolver) Resolve(ctx context.Context, req CatalogRequest, acces
 		}
 		return r.resolveUserCollectionSource(ctx, req, access)
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		return r.resolvePersonalSource(ctx, req, access)
@@ -1037,7 +1037,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 			return nil, err
 		}
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
@@ -1141,7 +1141,7 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 			return nil, err
 		}
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
@@ -1434,13 +1434,13 @@ func validateCatalogQueryRequest(req CatalogRequest, allowPersonalizedSorts bool
 	)
 }
 
-func validateCatalogPersonalRequest(req CatalogRequest) error {
+func validateCatalogPersonalRequest(req CatalogRequest, allowPersonalizedSorts bool) error {
 	switch req.Source {
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
 	default:
 		return fmt.Errorf("%w: source %q is not supported", ErrInvalidCatalogRequest, req.Source)
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, catalogPersonalSortFields(), false)
+	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, QuerySortFieldSet(allowPersonalizedSorts), false)
 }
 
 func validateCatalogPersonRequest(req CatalogRequest) error {
@@ -1620,10 +1620,6 @@ var catalogPersonalRuleFields = map[string]bool{
 }
 
 func catalogQuerySortFields() map[string]bool {
-	return QuerySortFieldSet(false)
-}
-
-func catalogPersonalSortFields() map[string]bool {
 	return QuerySortFieldSet(false)
 }
 
