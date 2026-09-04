@@ -2147,14 +2147,14 @@ func NewRouter(deps Dependencies) chi.Router {
 				}
 				return authMiddleware.RequireAuth(chain)
 			}
-			displayMiddlewares := []func(http.Handler) http.Handler{
-				authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth),
-			}
+			// Limiter first, as in the authenticated group, so rejected
+			// profile or PIN resolutions still consume budget. The route
+			// only left that group to accept the display token type.
+			var displayMiddlewares []func(http.Handler) http.Handler
 			if deps.RateLimitMW != nil {
-				// Same limiter the authenticated group applies; the route
-				// only left that group to accept the display token type.
 				displayMiddlewares = append(displayMiddlewares, deps.RateLimitMW.Handler)
 			}
+			displayMiddlewares = append(displayMiddlewares, authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth))
 			r.With(displayMiddlewares...).Get(
 				"/notifications/push/apple/display/{delivery_id}",
 				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,

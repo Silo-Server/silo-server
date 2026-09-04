@@ -22,7 +22,7 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(fallback func(http.Handler
 	return func(next http.Handler) http.Handler {
 		standard := fallback(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Header only. extractBearerToken also honours ?token= for media
+			// Header only. extractBearerToken also accepts ?token= for media
 			// elements, but a credential that lives as long as a refresh
 			// token must not end up in proxy and access logs via the URL.
 			token, ok := headerBearerToken(r)
