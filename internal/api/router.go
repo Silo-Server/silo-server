@@ -2140,15 +2140,19 @@ func NewRouter(deps Dependencies) chi.Router {
 		// display token is not an access token; RequireApplePushDisplayAuth
 		// still validates the session and binds the profile from the claims.
 		if authMiddleware != nil && deps.Notifications != nil {
-			// Same order as the authenticated group: auth, then the limiter
-			// (it needs claims for per-API-key budgets), then viewer access
-			// so rejected profile or PIN resolutions still consume budget.
-			// The route only left that group to accept the display token.
+			// The route only left the authenticated group to accept the
+			// display token. Both credential paths share the same
+			// post-auth chain: the limiter (per-API-key budgets need
+			// claims), then viewer access so a deleted or foreign profile
+			// is rejected and rejected resolutions still consume budget.
+			// The limiter also runs once before auth: a display token lives
+			// as long as a refresh token, so its session lookup must not be
+			// reachable outside the global and per-IP budgets.
 			var limiter func(http.Handler) http.Handler
 			if deps.RateLimitMW != nil {
 				limiter = deps.RateLimitMW.Handler
 			}
-			standardDisplayAuth := func(next http.Handler) http.Handler {
+			postAuth := func(next http.Handler) http.Handler {
 				chain := apimw.RequireProfile(next)
 				if viewerAccessMiddleware != nil {
 					chain = viewerAccessMiddleware.RequireViewerAccess(chain)
@@ -2156,9 +2160,18 @@ func NewRouter(deps Dependencies) chi.Router {
 				if limiter != nil {
 					chain = limiter(chain)
 				}
-				return authMiddleware.RequireAuth(chain)
+				return chain
 			}
-			r.With(authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, limiter)).Get(
+			standardDisplayAuth := func(next http.Handler) http.Handler {
+				return authMiddleware.RequireAuth(postAuth(next))
+			}
+			displayMiddlewares := []func(http.Handler) http.Handler{}
+			if limiter != nil {
+				displayMiddlewares = append(displayMiddlewares, limiter)
+			}
+			displayMiddlewares = append(displayMiddlewares,
+				authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, postAuth))
+			r.With(displayMiddlewares...).Get(
 				"/notifications/push/apple/display/{delivery_id}",
 				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,
 			)

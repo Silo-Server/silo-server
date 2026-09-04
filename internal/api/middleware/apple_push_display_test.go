@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
@@ -37,8 +38,17 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	fallback := func(next http.Handler) http.Handler { return am.RequireAuth(afterAuth(RequireProfile(next))) }
-	inner := am.RequireApplePushDisplayAuth(fallback, afterAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Viewer access on both paths: the display token skips the PIN proof but
+	// the profile must still resolve as owned by the user.
+	viewer := NewViewerAccessMiddleware(&fakeViewerResolver{
+		profiles: map[string]int{"profile-1": 42, "profile-2": 42, "profile-pin": 42},
+		pinned:   map[string]bool{"profile-pin": true},
+	})
+	postAuth := func(next http.Handler) http.Handler {
+		return afterAuth(viewer.RequireViewerAccess(RequireProfile(next)))
+	}
+	fallback := func(next http.Handler) http.Handler { return am.RequireAuth(postAuth(next)) }
+	inner := am.RequireApplePushDisplayAuth(fallback, postAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotProfile = GetProfileID(r.Context())
 		gotClaims = GetClaims(r.Context())
 		w.WriteHeader(http.StatusNoContent)
@@ -55,6 +65,14 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	revoked, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-dead", "profile-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletedProfile, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-live", "profile-gone", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinnedProfile, _, err := jwt.GenerateApplePushDisplayToken(42, "user", "sess-live", "profile-pin", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +94,9 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 	}{
 		{"display token binds profile from claims", display, "profile-other", http.StatusNoContent, "profile-1"},
 		{"display token with revoked session", revoked, "", http.StatusUnauthorized, ""},
+		{"display token for a deleted profile", deletedProfile, "", http.StatusNotFound, ""},
+		{"display token skips the PIN proof", pinnedProfile, "", http.StatusNoContent, "profile-pin"},
+		{"access token for a PIN profile still needs proof", access, "profile-pin", http.StatusForbidden, ""},
 		{"access token still works through fallback chain", access, "profile-2", http.StatusNoContent, "profile-2"},
 		{"access token without profile header hits fallback 400", access, "", http.StatusBadRequest, ""},
 		{"refresh token rejected", refresh, "", http.StatusUnauthorized, ""},
@@ -119,4 +140,25 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakeViewerResolver approximates access.Resolver: unknown profiles are not
+// found, PIN-protected profiles need SkipPINVerification or a profile token.
+type fakeViewerResolver struct {
+	profiles map[string]int
+	pinned   map[string]bool
+}
+
+func (f *fakeViewerResolver) Resolve(_ context.Context, in access.ResolveInput) (access.Scope, error) {
+	if in.ProfileID == "" {
+		return access.Scope{UserID: in.UserID}, nil
+	}
+	owner, ok := f.profiles[in.ProfileID]
+	if !ok || owner != in.UserID {
+		return access.Scope{}, access.ErrProfileNotFound
+	}
+	if f.pinned[in.ProfileID] && !in.SkipPINVerification && in.ProfileToken == "" {
+		return access.Scope{}, access.ErrProfileUnverified
+	}
+	return access.Scope{UserID: in.UserID, ProfileID: in.ProfileID}, nil
 }

@@ -12,16 +12,16 @@ import (
 // endpoint. It accepts the long-lived, profile-scoped display token minted at
 // Apple push registration; any other bearer credential is handed to
 // `fallback`, which should be the ordinary access-token chain (RequireAuth,
-// rate limiting, viewer access, RequireProfile) so normal sessions keep
-// working unchanged. `afterAuth` runs on the display-token path once claims
-// are set, so the same rate limiter can sit after authentication on both
-// paths (it needs claims to apply per-key budgets). Pass nil to skip it.
+// viewer access, RequireProfile) so normal sessions keep working unchanged.
 //
-// The display token path deliberately bypasses viewer-access PIN checks: the
-// token was issued to an already-verified profile session, carries that
-// profile in its claims, and only unlocks compact notification text. The
-// profile in the claims is authoritative; the X-Profile-Id header is ignored
-// so a token cannot be replayed against another profile's inbox.
+// On the display-token path the middleware validates the token and its
+// login session, sets the claims, and rewrites X-Profile-Id to the profile
+// in the claims before running `afterAuth`. That should be the same viewer
+// access + RequireProfile chain as the fallback: viewer access re-checks the
+// profile still exists and belongs to the user (a deleted profile's token
+// must stop working) while skipping the PIN proof, which the token already
+// represents. The header rewrite means a token cannot be replayed against
+// another profile's inbox.
 func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 	fallback func(http.Handler) http.Handler,
 	afterAuth func(http.Handler) http.Handler,
@@ -67,7 +67,10 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 			}
 			ctx := SetClaims(r.Context(), claims)
 			ctx = SetProfileID(ctx, claims.ProfileID)
-			display.ServeHTTP(w, r.WithContext(ctx))
+			r = r.WithContext(ctx)
+			r.Header.Set("X-Profile-Id", claims.ProfileID)
+			r.Header.Del("X-Profile-Token")
+			display.ServeHTTP(w, r)
 		})
 	}
 }

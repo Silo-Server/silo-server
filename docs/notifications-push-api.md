@@ -92,7 +92,7 @@ Authentication rules for this route only:
 
 | Credential | Behavior |
 |---|---|
-| Display token in `Authorization` header | Accepted. The profile comes from the token's claims; `X-Profile-Id` and `X-Profile-Token` are ignored. PIN verification is skipped because the token was issued to an already verified profile session. The login session must still be valid. |
+| Display token in `Authorization` header | Accepted. The profile comes from the token's claims; `X-Profile-Id` and `X-Profile-Token` are ignored. PIN verification is skipped because the token was issued to an already verified profile session. The login session must still be valid, and the profile must still exist and belong to the user (a deleted profile's token returns `404`). |
 | Display token in `?token=` query | Rejected with `401`. Long-lived credentials must not appear in URLs. |
 | Access token | Accepted through the normal chain: `X-Profile-Id` is required and PIN-protected profiles need `X-Profile-Token`, as before. |
 | Refresh token or API key | `401` / normal API key handling; neither is a display credential. |
