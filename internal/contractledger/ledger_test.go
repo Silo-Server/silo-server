@@ -1012,6 +1012,24 @@ func TestRetrySafetyPlacement(t *testing.T) {
 			t.Errorf("%s: retry_safety %q on tier %d %s %s", e.key(), e.RetrySafety, e.Tier, e.Disposition, e.Method)
 		}
 	}
+	for _, g := range []string{"/api/v1/auth", "/api/v1/auth/oauth/{install_id}", "/api/v1/profiles", "/api/v1/api-keys", "/api/v1/devices", "/api/v1/invitations/{token}", "/api/v1/admin/invitations", "/api/v1/admin/invite-codes", "/api/v1/admin/system"} {
+		if retrySafetyUnclassifiedGroups[g] {
+			t.Errorf("wave-1 group %s is still on the temporary unclassified allow-list", g)
+		}
+	}
+	// The /api/v1/admin group is split: its api-keys and devices paths are
+	// classified, the rest is still exempt.
+	admin := Entry{Tier: 1, Disposition: DispositionPorted}
+	admin.Method = "POST"
+	admin.RouteGroup = "/api/v1/admin"
+	admin.Path = "/api/v1/admin/api-keys"
+	if retrySafetyExempt(admin) {
+		t.Error("/api/v1/admin/api-keys must not be exempt")
+	}
+	admin.Path = "/api/v1/admin/users"
+	if !retrySafetyExempt(admin) {
+		t.Error("/api/v1/admin/users is still exempt until its group is classified")
+	}
 	// The required direction, against a row in a group the allow-list does
 	// not cover: the real ledger cannot carry such a row while the list is
 	// non-empty, so the rule is exercised directly.
