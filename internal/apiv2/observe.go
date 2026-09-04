@@ -90,8 +90,10 @@ var (
 	}, []string{labelMethod})
 )
 
-// RecordV1Tombstone counts one request answered by the v1 tombstone.
-func RecordV1Tombstone(method string) { v1TombstoneRequests.WithLabelValues(method).Inc() }
+// RecordV1Tombstone counts one request answered by the v1 tombstone. The
+// method label is bounded the same way as the v2 request vectors, so an
+// unauthenticated caller cannot mint a series per invented method token.
+func RecordV1Tombstone(method string) { v1TombstoneRequests.WithLabelValues(methodLabel(method)).Inc() }
 
 // observation is the per-request record the middleware chain fills in as the
 // request moves through the router, and the observe middleware reports once

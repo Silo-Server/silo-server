@@ -121,6 +121,11 @@ func TestValidationFailureCounter(t *testing.T) {
 		t.Fatalf("tombstone counter = %v before any tombstone", v)
 	}
 	RecordV1Tombstone(http.MethodGet)
+	otherBefore := counterValue(t, v1TombstoneRequests, prometheus.Labels{"method": labelOther})
+	RecordV1Tombstone("BREW")
+	if v := counterValue(t, v1TombstoneRequests, prometheus.Labels{"method": labelOther}); v != otherBefore+1 {
+		t.Fatalf("tombstone other-method series: %v -> %v", otherBefore, v)
+	}
 	if v := counterValue(t, v1TombstoneRequests, prometheus.Labels{"method": "GET"}); v != 1 {
 		t.Fatalf("tombstone counter = %v", v)
 	}
