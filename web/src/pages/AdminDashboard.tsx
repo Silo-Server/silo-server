@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
 import { DashboardGrid } from "@/components/admin/dashboard/DashboardGrid";
 import { useDashboardLayout } from "@/components/admin/dashboard/useDashboardLayout";
-import { fetchAdminStats, useAdminSessions, useAdminStats } from "@/hooks/queries/admin/stats";
+import { fetchAdminStats, useAdminLiveSessions, useAdminStats } from "@/hooks/queries/admin/stats";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
@@ -37,7 +37,10 @@ const RELATIVE_UPDATED_LABEL_TICK_MS = 30_000;
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
   const statsQuery = useAdminStats();
-  const sessionsQuery = useAdminSessions();
+  // Freshness bookkeeping for the Refresh control and the "updated" label. It
+  // subscribes to the same query the widgets read, so the page is not holding a
+  // second session list open purely to time-stamp the first.
+  const sessionsQuery = useAdminLiveSessions(false);
   const librariesQuery = useAdminLibraries();
   const usersQuery = useAdminUsers();
   const { data: adminInstallations } = useAdminPluginInstallations();

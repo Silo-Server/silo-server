@@ -2,11 +2,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AdminSession } from "@/api/types";
+import type { AdminLiveSessionsResponse, AdminSession } from "@/api/types";
 import type { DashboardLayout } from "./useDashboardLayout";
 
 const mocks = vi.hoisted(() => ({
-  useAdminSessions: vi.fn(),
+  useAdminLiveSessions: vi.fn(),
   useAdminStats: vi.fn(),
 }));
 
@@ -16,13 +16,31 @@ vi.mock("@/hooks/queries/admin/stats", async () => {
   );
   return {
     ...actual,
-    useAdminSessions: mocks.useAdminSessions,
+    useAdminLiveSessions: mocks.useAdminLiveSessions,
     useAdminStats: mocks.useAdminStats,
   };
 });
 
 import { DashboardGrid, WIDGET_ADD_DRAG_TYPE } from "./DashboardGrid";
 import { getDashboardWidget } from "./registry";
+
+// The widget reads GET /admin/sessions/live, whose envelope carries the view's
+// own health beside the rows. A complete, fresh view with nothing held back is
+// the shape these layout tests care about.
+function live(sessions: AdminSession[]): AdminLiveSessionsResponse {
+  return {
+    telemetry_enabled: true,
+    view_available: true,
+    view_complete: true,
+    view_stale: false,
+    view_age_ms: 0,
+    no_delivery_count: 0,
+    no_delivery_shown: false,
+    unclaimed_idle_count: 0,
+    unclaimed_idle_shown: false,
+    sessions,
+  };
+}
 
 function session(overrides: Partial<AdminSession> = {}): AdminSession {
   return {
@@ -81,11 +99,11 @@ function rowsOf(container: HTMLElement): string | undefined {
 
 describe("DashboardGrid collapse", () => {
   beforeEach(() => {
-    mocks.useAdminSessions.mockReset();
+    mocks.useAdminLiveSessions.mockReset();
   });
 
   it("gives back rows when a collapsible widget reports it is empty", async () => {
-    mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
+    mocks.useAdminLiveSessions.mockReturnValue({ data: live([]), isLoading: false, error: null });
 
     const { container } = renderGrid();
 
@@ -97,12 +115,12 @@ describe("DashboardGrid collapse", () => {
   });
 
   it("keeps its full height while loading and after a failure", () => {
-    mocks.useAdminSessions.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    mocks.useAdminLiveSessions.mockReturnValue({ data: undefined, isLoading: true, error: null });
     const loading = renderGrid();
     expect(rowsOf(loading.container)).toBe("3");
     loading.unmount();
 
-    mocks.useAdminSessions.mockReturnValue({
+    mocks.useAdminLiveSessions.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error("boom"),
@@ -113,7 +131,7 @@ describe("DashboardGrid collapse", () => {
   });
 
   it("stays full size in customize mode so drag and resize targets hold still", async () => {
-    mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
+    mocks.useAdminLiveSessions.mockReturnValue({ data: live([]), isLoading: false, error: null });
 
     const { container } = renderGrid(true);
 
@@ -125,13 +143,13 @@ describe("DashboardGrid collapse", () => {
   });
 
   it("grows back to its placed height once a stream appears", async () => {
-    mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
+    mocks.useAdminLiveSessions.mockReturnValue({ data: live([]), isLoading: false, error: null });
 
     const { container, rerender } = renderGrid();
     expect(rowsOf(container)).toBe("1");
 
-    mocks.useAdminSessions.mockReturnValue({
-      data: [session()],
+    mocks.useAdminLiveSessions.mockReturnValue({
+      data: live([session()]),
       isLoading: false,
       error: null,
     });
@@ -193,9 +211,9 @@ describe("DashboardGrid add-widget drag", () => {
   const libraries = getDashboardWidget("libraries");
 
   beforeEach(() => {
-    mocks.useAdminSessions.mockReset();
+    mocks.useAdminLiveSessions.mockReset();
     mocks.useAdminStats.mockReset();
-    mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
+    mocks.useAdminLiveSessions.mockReturnValue({ data: live([]), isLoading: false, error: null });
     // Loading keeps the stat tile on its skeleton, off the stats data shape.
     mocks.useAdminStats.mockReturnValue({ data: undefined, isLoading: true, error: null });
   });
@@ -306,9 +324,9 @@ describe("DashboardGrid add-widget drag", () => {
 
 describe("DashboardGrid drag auto-scroll", () => {
   beforeEach(() => {
-    mocks.useAdminSessions.mockReset();
+    mocks.useAdminLiveSessions.mockReset();
     mocks.useAdminStats.mockReset();
-    mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
+    mocks.useAdminLiveSessions.mockReturnValue({ data: live([]), isLoading: false, error: null });
     mocks.useAdminStats.mockReturnValue({ data: undefined, isLoading: true, error: null });
   });
 

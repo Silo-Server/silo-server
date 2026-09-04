@@ -28,7 +28,9 @@ const mockUseBuildInfo = vi.fn<() => MockBuildInfoResult>(() => ({
   isPending: false,
   isError: false,
 }));
-const mockUseAdminLiveSessions = vi.fn(() => ({ data: { sessions: [] } }));
+const mockUseAdminLiveSessions = vi.fn((_includeHidden: boolean) => ({
+  data: { sessions: [] },
+}));
 const mockUseAdminPluginInstallations = vi.fn(() => ({ data: [] }));
 const mockUsePolicyCapability = vi.fn(() => ({
   data: {
@@ -95,7 +97,7 @@ describe("AdminSidebar", () => {
     expect(markup).not.toContain("/admin/settings?tab=");
   });
 
-  it("counts sessions from the live endpoint including idle rows", () => {
+  it("counts sessions from the live endpoint, excluding idle rows", () => {
     renderSidebar();
 
     // include_idle stays OFF here: it reveals unclaimed_idle rows too, which are ENDED

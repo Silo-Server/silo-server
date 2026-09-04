@@ -58,15 +58,18 @@ const envelope: AdminLiveSessionsResponse = {
   view_age_ms: 0,
   no_delivery_count: 0,
   no_delivery_shown: true,
+  unclaimed_idle_count: 0,
+  unclaimed_idle_shown: true,
   sessions: [session],
 };
 
 describe("AdminActivity", () => {
   it("renders sessions from the live endpoint including idle rows", () => {
     mocks.useAdminLiveSessions.mockReturnValue({
-      // no_delivery_shown false is what the server actually answers this page,
-      // which asks for the live-only list.
-      data: { ...envelope, no_delivery_shown: false },
+      // Both *_shown flags false is what the server actually answers this page,
+      // which asks for the live-only list. They always move together: one
+      // include_idle switch governs both withheld classes.
+      data: { ...envelope, no_delivery_shown: false, unclaimed_idle_shown: false },
       isLoading: false,
       refetch: vi.fn(),
     });
@@ -97,6 +100,7 @@ describe("AdminActivity", () => {
         no_delivery_count: 2,
         unclaimed_idle_count: 1,
         no_delivery_shown: false,
+        unclaimed_idle_shown: false,
       },
       isLoading: false,
       refetch,

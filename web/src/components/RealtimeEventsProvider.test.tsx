@@ -96,10 +96,19 @@ function emitSessionsReplaced(socket: FakeWebSocket) {
 }
 
 function liveInvalidationCalls(spy: ReturnType<typeof vi.spyOn>) {
-  return spy.mock.calls.filter(
-    ([filters]) =>
-      JSON.stringify(filters?.queryKey) === JSON.stringify(adminKeys.liveSessionsRoot()),
-  );
+  return (spy.mock.calls as unknown[][]).filter((call) => {
+    const filters = call[0] as { queryKey?: unknown } | undefined;
+    return JSON.stringify(filters?.queryKey) === JSON.stringify(adminKeys.liveSessionsRoot());
+  });
+}
+
+// The provider opens exactly one socket per render, so an absent instance means
+// the test set itself up wrong — worth failing loudly rather than passing
+// `undefined` down and reading the assertion failure two steps later.
+function socketAt(index: number): FakeWebSocket {
+  const socket = FakeWebSocket.instances[index];
+  if (!socket) throw new Error(`no FakeWebSocket at index ${index}`);
+  return socket;
 }
 
 describe("buildEventsUrl", () => {
@@ -369,7 +378,7 @@ describe("RealtimeEventsProvider", () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
     renderProvider(queryClient);
-    const socket = FakeWebSocket.instances[0];
+    const socket = socketAt(0);
 
     act(() => {
       for (let index = 0; index < 20; index += 1) emitSessionsReplaced(socket);
@@ -388,7 +397,7 @@ describe("RealtimeEventsProvider", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
     renderProvider(queryClient);
 
-    act(() => emitSessionsReplaced(FakeWebSocket.instances[0]));
+    act(() => emitSessionsReplaced(socketAt(0)));
 
     expect(liveInvalidationCalls(invalidate)).toHaveLength(1);
   });
@@ -403,7 +412,7 @@ describe("RealtimeEventsProvider", () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
     renderProvider(queryClient);
-    const socket = FakeWebSocket.instances[0];
+    const socket = socketAt(0);
 
     // Four ticks, one minute of a single session playing.
     act(() => {
@@ -421,7 +430,7 @@ describe("RealtimeEventsProvider", () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
     renderProvider(queryClient);
-    const socket = FakeWebSocket.instances[0];
+    const socket = socketAt(0);
 
     act(() => emitSessionsReplaced(socket));
     act(() => vi.advanceTimersByTime(30_000));
@@ -434,7 +443,7 @@ describe("RealtimeEventsProvider", () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
     renderProvider(queryClient);
-    const socket = FakeWebSocket.instances[0];
+    const socket = socketAt(0);
 
     act(() => {
       emitSessionsReplaced(socket);
@@ -462,8 +471,8 @@ describe("RealtimeEventsProvider", () => {
     renderProvider(secondClient);
 
     act(() => {
-      emitSessionsReplaced(FakeWebSocket.instances[0]);
-      emitSessionsReplaced(FakeWebSocket.instances[1]);
+      emitSessionsReplaced(socketAt(0));
+      emitSessionsReplaced(socketAt(1));
     });
 
     expect(liveInvalidationCalls(firstInvalidate)).toHaveLength(1);
@@ -474,7 +483,7 @@ describe("RealtimeEventsProvider", () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
     const view = renderProvider(queryClient);
-    const socket = FakeWebSocket.instances[0];
+    const socket = socketAt(0);
 
     act(() => {
       emitSessionsReplaced(socket);

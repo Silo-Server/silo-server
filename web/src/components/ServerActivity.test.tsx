@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TaskInfo } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
-  useAdminLiveSessions: vi.fn(() => ({ data: { sessions: [] } })),
+  useAdminLiveSessions: vi.fn((_includeHidden: boolean) => ({ data: { sessions: [] } })),
   tasks: [
     {
       key: "cache_metadata_images",

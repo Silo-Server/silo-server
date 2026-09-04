@@ -25,6 +25,8 @@ function responseWith(overrides: Partial<AdminLiveSessionsResponse>): AdminLiveS
     view_age_ms: 0,
     no_delivery_count: 0,
     no_delivery_shown: false,
+    unclaimed_idle_count: 0,
+    unclaimed_idle_shown: false,
     sessions: [],
     ...overrides,
   };
@@ -130,10 +132,13 @@ describe("describeSessionDelivery", () => {
     ["an unparseable start", "not-a-date"],
     ["a future start", "2026-08-27T12:00:05Z"],
   ])("ignores %s when the server has classified the row", (_label, startedAt) => {
+    // Cast on purpose: `started_at` is a required string on the wire, and two of
+    // these cases are rows a correct server would never send. Constructing them
+    // anyway is the point — the helper must not fall over on either.
     const session = {
       ...sessionWith({ evidence: "measured", viewer_bytes: 8192, unclaimed_idle: true }),
       started_at: startedAt,
-    };
+    } as AdminSession;
 
     expect(describeSessionDelivery(session, { viewBlind: false })?.unclaimed).toBe(true);
   });
