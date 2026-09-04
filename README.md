@@ -112,7 +112,7 @@ defines each tag and the SemVer contract.
 
 - [Documentation index](docs/wiki/index.md) — user and operator guides
 - [Development guide](DEVELOPMENT.md) — source setup, builds, tests, migrations
-- [Settings API](docs/settings-api.md) and [Downloads API](docs/downloads-api.md) — client contracts
+- [Settings API](docs/settings-api.md), [Downloads API](docs/downloads-api.md), and [Apple Push Display Token](docs/notifications-push-api.md) — client contracts
 
 ## Community and contributions
 

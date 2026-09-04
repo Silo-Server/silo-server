@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,13 +61,18 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 		{"access token without profile header hits fallback 400", access, "", http.StatusBadRequest, ""},
 		{"refresh token rejected", refresh, "", http.StatusUnauthorized, ""},
 		{"missing token", "", "", http.StatusUnauthorized, ""},
+		{"display token in query string is rejected", "?" + display, "", http.StatusUnauthorized, ""},
 		{"garbage token", "not-a-jwt", "", http.StatusUnauthorized, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotProfile, gotClaims = "", nil
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications/push/apple/display/d1", nil)
-			if tt.token != "" {
+			target := "/api/v1/notifications/push/apple/display/d1"
+			if strings.HasPrefix(tt.token, "?") {
+				target += "?token=" + strings.TrimPrefix(tt.token, "?")
+			}
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			if tt.token != "" && !strings.HasPrefix(tt.token, "?") {
 				req.Header.Set("Authorization", "Bearer "+tt.token)
 			}
 			if tt.profileHdr != "" {

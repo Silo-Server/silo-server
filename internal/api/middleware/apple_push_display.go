@@ -22,7 +22,10 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(fallback func(http.Handler
 	return func(next http.Handler) http.Handler {
 		standard := fallback(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token, ok := extractBearerToken(r)
+			// Header only. extractBearerToken also honours ?token= for media
+			// elements, but a credential that lives as long as a refresh
+			// token must not end up in proxy and access logs via the URL.
+			token, ok := headerBearerToken(r)
 			if !ok || strings.HasPrefix(token, "sa_") {
 				standard.ServeHTTP(w, r)
 				return
@@ -48,4 +51,15 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(fallback func(http.Handler
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// headerBearerToken reads only the Authorization header, ignoring the
+// ?token= query fallback that extractBearerToken allows.
+func headerBearerToken(r *http.Request) (string, bool) {
+	parts := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return "", false
+	}
+	token := strings.TrimSpace(parts[1])
+	return token, token != ""
 }
