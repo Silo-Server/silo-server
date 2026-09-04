@@ -37,6 +37,8 @@ type UserCollectionImportHandler struct {
 	presignTTL    time.Duration
 }
 
+const userCollectionSyncStatusFailed = "failed"
+
 func NewUserCollectionImportHandler(
 	provider userstore.UserStoreProvider,
 	sync *usercollections.Service,
@@ -125,7 +127,7 @@ func (h *UserCollectionImportHandler) HandleImportMDBList(w http.ResponseWriter,
 		Limit:      req.Limit,
 		LibraryIDs: req.LibraryIDs,
 	}
-	h.createImportedCollection(w, r, "mdblist", cfg, req.userImportSharedFields)
+	h.createImportedCollection(w, r, mdblistSourceKey, cfg, req.userImportSharedFields)
 }
 
 func (h *UserCollectionImportHandler) HandleImportTMDB(w http.ResponseWriter, r *http.Request) {
@@ -259,14 +261,15 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		// Persist failure state inline so the UI shows the error and the user
 		// can retry; the row is intentionally kept around for that retry path.
 		_ = store.UpdateCollectionSyncState(r.Context(), userstore.UpdateCollectionSyncStateInput{
-			ID:         collection.ID,
-			Status:     "failed",
-			Message:    syncErr.Error(),
-			LastSyncAt: time.Now().UTC(),
-			NextSyncAt: usercollections.InitialNextSyncAt(schedule),
+			ID:                   collection.ID,
+			Status:               userCollectionSyncStatusFailed,
+			Message:              syncErr.Error(),
+			LastSyncAt:           time.Now().UTC(),
+			ExpectedSyncSchedule: schedule,
+			NextSyncAt:           usercollections.InitialNextSyncAt(schedule),
 		})
 		updated = collection
-		updated.LastSyncStatus = "failed"
+		updated.LastSyncStatus = userCollectionSyncStatusFailed
 		updated.LastSyncMessage = syncErr.Error()
 	}
 

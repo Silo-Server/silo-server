@@ -20,6 +20,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+const mdblistSourceKey = "mdblist"
+
 // CollectionHandler handles personal collection CRUD endpoints.
 type CollectionHandler struct {
 	storeProvider      userstore.UserStoreProvider
@@ -485,7 +487,7 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 				}
 			}
 			if req.SourceURL != nil {
-				if existing.CollectionType != "mdblist" {
+				if existing.CollectionType != mdblistSourceKey {
 					writeError(w, http.StatusBadRequest, "bad_request", "source_url can only be edited for MDBList collections")
 					return
 				}

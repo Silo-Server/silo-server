@@ -52,4 +52,6 @@ the advertised presets match the server-collection schedule presets. Regular
 accounts receive the bounded `daily`, `weekly`, and `monthly` values. An empty
 value disables automatic sync. Those bounded values map to the matching server
 presets: daily at 03:00, weekly on Sunday at 03:00, and monthly on the first at
-03:00.
+03:00. If an admin account is changed to a regular account, an admin-only
+personal-collection schedule is changed to the bounded daily schedule before
+another scheduled provider request is made.

@@ -8,23 +8,32 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
+const (
+	syncScheduleHourly        = "0 * * * *"
+	syncScheduleEverySixHours = "0 */6 * * *"
+	syncScheduleDaily         = "0 3 * * *"
+	syncScheduleMonday        = "0 3 * * 1"
+	syncScheduleSunday        = "0 3 * * 0"
+	syncScheduleMonthly       = "0 3 1 * *"
+)
+
 // AllowedSyncSchedules maps the bounded cadence labels available to regular
 // accounts to the equivalent server-collection presets.
 var AllowedSyncSchedules = map[string]string{
-	"daily":   "0 3 * * *",
-	"weekly":  "0 3 * * 0",
-	"monthly": "0 3 1 * *",
+	"daily":   syncScheduleDaily,
+	"weekly":  syncScheduleSunday,
+	"monthly": syncScheduleMonthly,
 }
 
 // AdminSyncSchedulePresets mirrors the preset cron values offered for admin
 // library collections. Admins may also submit any other valid five-field cron.
 var AdminSyncSchedulePresets = []string{
-	"0 * * * *",
-	"0 */6 * * *",
-	"0 3 * * *",
-	"0 3 * * 1",
-	"0 3 * * 0",
-	"0 3 1 * *",
+	syncScheduleHourly,
+	syncScheduleEverySixHours,
+	syncScheduleDaily,
+	syncScheduleMonday,
+	syncScheduleSunday,
+	syncScheduleMonthly,
 }
 
 // ResolveSyncSchedule validates a personal-collection schedule for the
@@ -45,6 +54,15 @@ func ResolveSyncSchedule(value string, allowAdminCron bool) (*string, error) {
 		return nil, err
 	}
 	return &value, nil
+}
+
+func isBoundedSyncSchedule(schedule string) bool {
+	for _, allowed := range AllowedSyncSchedules {
+		if schedule == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func InitialNextSyncAt(schedule *string) *time.Time {

@@ -25,3 +25,28 @@ func TestNextSyncAfterFailureParksInvalidSchedule(t *testing.T) {
 		t.Fatalf("next = %v, want %v", got, want)
 	}
 }
+
+func TestBoundedSyncSchedulePolicy(t *testing.T) {
+	t.Parallel()
+
+	for label, schedule := range AllowedSyncSchedules {
+		if !isBoundedSyncSchedule(schedule) {
+			t.Errorf("%s schedule %q was not accepted", label, schedule)
+		}
+	}
+	for _, schedule := range []string{"0 * * * *", "0 */6 * * *", "0 3 * * 1", "15 2 * * *"} {
+		if isBoundedSyncSchedule(schedule) {
+			t.Errorf("admin-only schedule %q was accepted as bounded", schedule)
+		}
+	}
+
+	if !requiresScheduleDowngrade("0 * * * *", false) {
+		t.Fatal("regular account retained an hourly schedule")
+	}
+	if requiresScheduleDowngrade("0 * * * *", true) {
+		t.Fatal("admin account lost an hourly schedule")
+	}
+	if requiresScheduleDowngrade(AllowedSyncSchedules["daily"], false) {
+		t.Fatal("regular account lost its bounded daily schedule")
+	}
+}

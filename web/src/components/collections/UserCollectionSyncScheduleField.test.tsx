@@ -51,4 +51,25 @@ describe("UserCollectionSyncScheduleField", () => {
     expect(userCollectionScheduleRequestValue("weekly", true)).toBe("0 3 * * 0");
     expect(userCollectionScheduleRequestValue("monthly", true)).toBe("0 3 1 * *");
   });
+
+  it("returns to the externally restored preset after editing custom cron", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <UserCollectionSyncScheduleField value="0 */6 * * *" onChange={onChange} allowCustomCron />,
+    );
+
+    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("option", { name: "Custom cron expression" }));
+    rerender(
+      <UserCollectionSyncScheduleField value="0 3 * * *" onChange={onChange} allowCustomCron />,
+    );
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+
+    rerender(
+      <UserCollectionSyncScheduleField value="0 */6 * * *" onChange={onChange} allowCustomCron />,
+    );
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveTextContent("Every 6 hours");
+  });
 });
