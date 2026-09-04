@@ -910,36 +910,47 @@ describe("VideoPlayer translation handoff", () => {
     expect(controls.current?.subtitleTracks).toEqual([downloadedTrack]);
   });
 
-  it("falls back to webkitEnterFullscreen when requestFullscreen fails on iPhone Safari", async () => {
-    const webkitEnterFullscreen = vi.fn();
-    const webkitExitFullscreen = vi.fn();
+  it.each(["missing", "rejecting"])(
+    "falls back to webkitEnterFullscreen when requestFullscreen is %s",
+    async (mode) => {
+      const webkitEnterFullscreen = vi.fn();
+      const webkitExitFullscreen = vi.fn();
 
-    const { container } = renderPlayer();
+      const { container } = renderPlayer();
 
-    const video = container.querySelector("video") as HTMLVideoElement & {
-      webkitSupportsFullscreen?: boolean;
-      webkitDisplayingFullscreen?: boolean;
-      webkitEnterFullscreen?: () => void;
-      webkitExitFullscreen?: () => void;
-    };
-    video.webkitSupportsFullscreen = true;
-    video.webkitEnterFullscreen = webkitEnterFullscreen;
-    video.webkitExitFullscreen = webkitExitFullscreen;
+      const video = container.querySelector("video") as HTMLVideoElement & {
+        webkitSupportsFullscreen?: boolean;
+        webkitDisplayingFullscreen?: boolean;
+        webkitEnterFullscreen?: () => void;
+        webkitExitFullscreen?: () => void;
+      };
+      video.webkitSupportsFullscreen = true;
+      video.webkitEnterFullscreen = webkitEnterFullscreen;
+      video.webkitExitFullscreen = webkitExitFullscreen;
 
-    // Simulate container requestFullscreen rejecting (as WebKit on iPhone does)
-    const playerContainer = container.querySelector(
-      '[data-testid="player-container"]',
-    ) as HTMLElement;
-    if (playerContainer) {
-      playerContainer.requestFullscreen = vi.fn().mockRejectedValue(new Error("Not supported"));
-    }
+      // Simulate container requestFullscreen rejecting (as WebKit on iPhone does)
+      const playerContainer = container.querySelector(".player-container") as HTMLElement;
+      expect(playerContainer).not.toBeNull();
+      const requestFullscreen = vi.fn().mockRejectedValue(new Error("Not supported"));
+      Object.defineProperty(playerContainer, "requestFullscreen", {
+        value: mode === "rejecting" ? requestFullscreen : undefined,
+        configurable: true,
+      });
 
-    act(() => {
-      controls.current?.onFullscreenToggle?.();
-    });
+      act(() => {
+        controls.current?.onFullscreenToggle?.();
+      });
 
-    await waitFor(() => expect(webkitEnterFullscreen).toHaveBeenCalledOnce());
-  });
+      await waitFor(() => expect(webkitEnterFullscreen).toHaveBeenCalledOnce());
+      expect(requestFullscreen).toHaveBeenCalledTimes(mode === "rejecting" ? 1 : 0);
+
+      video.webkitDisplayingFullscreen = true;
+      act(() => {
+        controls.current?.onFullscreenToggle?.();
+      });
+      expect(webkitExitFullscreen).toHaveBeenCalledOnce();
+    },
+  );
 
   it("tracks WebKit fullscreen events on the video element", async () => {
     const { container } = renderPlayer();
