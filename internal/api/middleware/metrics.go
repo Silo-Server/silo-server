@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,6 +39,11 @@ var (
 // Metrics is an HTTP middleware that records request count and duration.
 func Metrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, APIv2Prefix) {
+			// The v2 listener records itself with operation-ID labels.
+			next.ServeHTTP(w, r)
+			return
+		}
 		start := time.Now()
 
 		// Wrap response writer to capture status code.

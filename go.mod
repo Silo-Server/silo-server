@@ -72,6 +72,7 @@ require (
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.2.1 // indirect
 	github.com/lestrrat-go/dsig-secp256k1 v1.0.0 // indirect

@@ -362,6 +362,7 @@ func problemTransformer(ctx huma.Context, _ string, v any) (any, error) {
 	if p.Instance == "" {
 		p.Instance = requestInstance(requestIDFrom(ctx.Context()))
 	}
+	noteProblem(ctx.Context(), p)
 	return p, nil
 }
 
@@ -371,6 +372,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	if p.Instance == "" {
 		p.Instance = requestInstance(requestIDFrom(r.Context()))
 	}
+	noteProblem(r.Context(), p)
 	h := w.Header()
 	for name, values := range p.GetHeaders() {
 		for _, v := range values {

@@ -102,12 +102,13 @@ func NewHandler(deps Dependencies) http.Handler {
 func newChiRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 	r.Use(requestID)
+	r.Use(observe)
 	r.Use(dropDelegationPattern)
 	r.Use(bufferResponse)
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
-	api.UseMiddleware(defaultHeaders, classGate(deps), normalizeAccept, mediaTypeGuard, queryGuard)
+	api.UseMiddleware(observeOperation, defaultHeaders, classGate(deps), observeIdentity, normalizeAccept, mediaTypeGuard, queryGuard)
 
 	reg := &Registry{api: api, deps: deps}
 	registerAll(reg)

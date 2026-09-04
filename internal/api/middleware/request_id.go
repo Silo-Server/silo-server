@@ -11,6 +11,13 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
+// APIv2Prefix is the path prefix of the v2 listener's subtree. The v1
+// request logger and metrics middleware stop at it: the v2 listener records
+// its own requests with operation-ID labels (internal/apiv2, observe.go), and
+// a second record keyed by raw path would defeat that. internal/apiv2 pins
+// this value against its own DelegationPattern.
+const APIv2Prefix = "/api/v2/"
+
 // RequestID assigns every request a server-generated ID and stores it under
 // chi's RequestIDKey, so chimw.GetReqID keeps working for the request logger,
 // activity log, playback telemetry and policy decisions.
