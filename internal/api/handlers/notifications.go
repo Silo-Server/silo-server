@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/go-chi/chi/v5"
@@ -23,6 +25,26 @@ const (
 type NotificationsHandler struct {
 	system *notifications.System
 	hub    *evt.Hub
+	// displayTokens mints the long-lived display token returned from Apple
+	// push registration. Nil when JWT auth is not configured; registration
+	// then omits the token and the extension falls back to the access token.
+	displayTokens ApplePushDisplayTokenIssuer
+}
+
+// ApplePushDisplayTokenIssuer mints the profile-scoped token the iOS
+// Notification Service extension presents to the display endpoint.
+type ApplePushDisplayTokenIssuer interface {
+	GenerateApplePushDisplayToken(userID int, role, sessionID, profileID string) (string, time.Time, error)
+}
+
+// SetApplePushDisplayTokenIssuer wires the token issuer used by
+// HandleRegisterApplePushDevice. A nil *auth.JWTService is treated as unset.
+func (h *NotificationsHandler) SetApplePushDisplayTokenIssuer(issuer ApplePushDisplayTokenIssuer) {
+	if jwt, ok := issuer.(*auth.JWTService); ok && jwt == nil {
+		h.displayTokens = nil
+		return
+	}
+	h.displayTokens = issuer
 }
 
 // NewNotificationsHandler creates a NotificationsHandler.

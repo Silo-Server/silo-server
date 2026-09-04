@@ -2134,6 +2134,25 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Apple notification display metadata: authenticated by either the
+		// normal access token or the long-lived display token minted at Apple
+		// push registration. Sits outside the RequireAuth group because the
+		// display token is not an access token; RequireApplePushDisplayAuth
+		// still validates the session and binds the profile from the claims.
+		if authMiddleware != nil && deps.Notifications != nil {
+			standardDisplayAuth := func(next http.Handler) http.Handler {
+				chain := apimw.RequireProfile(next)
+				if viewerAccessMiddleware != nil {
+					chain = viewerAccessMiddleware.RequireViewerAccess(chain)
+				}
+				return authMiddleware.RequireAuth(chain)
+			}
+			r.With(authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth)).Get(
+				"/notifications/push/apple/display/{delivery_id}",
+				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,
+			)
+		}
+
 		// All remaining routes require auth.
 		if authMiddleware != nil {
 			r.Group(func(r chi.Router) {
@@ -2178,6 +2197,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.Notifications.SetImageResolver(detailSvc)
 					}
 					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
+					notificationsHandler.SetApplePushDisplayTokenIssuer(jwtService)
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
 					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
 					// Discord DM channel: the linked identity and mode hang off
@@ -2198,7 +2218,6 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/capability", notificationsHandler.HandleCapability)
 						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
-						r.Get("/push/apple/display/{delivery_id}", notificationsHandler.HandleApplePushDisplay)
 						// Platform-generic registration used by the Android
 						// client; Apple keeps its dedicated route above.
 						r.Post("/push/devices", notificationsHandler.HandleRegisterPushDevice)
