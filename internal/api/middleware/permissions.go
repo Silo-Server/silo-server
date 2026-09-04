@@ -56,7 +56,7 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
 		if claims == nil {
-			writeUnauthorized(w, "Authentication required")
+			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
 			return
 		}
 		if claims.Role == "admin" {
@@ -81,7 +81,7 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 
 		contentID := chi.URLParam(r, "id")
 		if contentID == "" {
-			writePermissionError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
+			writePermissionErrorReason(w, http.StatusBadRequest, "bad_request", itemIDRequiredMsg, ReasonItemIDRequired)
 			return
 		}
 
@@ -135,7 +135,7 @@ func (m *PermissionMiddleware) RequireMarkerEdit(next http.Handler) http.Handler
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
 		if claims == nil {
-			writeUnauthorized(w, "Authentication required")
+			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
 			return
 		}
 		if claims.Role == "admin" {
@@ -224,4 +224,12 @@ func writePermissionError(w http.ResponseWriter, status int, code, message strin
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorResponse{Error: code, Message: message})
+}
+
+// writePermissionErrorReason is writePermissionError plus the machine-readable
+// reason that tells this denial apart from another with the same code. The
+// response body is identical either way.
+func writePermissionErrorReason(w http.ResponseWriter, status int, code, message, reason string) {
+	recordDenialReason(w, reason)
+	writePermissionError(w, status, code, message)
 }
