@@ -351,3 +351,50 @@ func TestLiveSessionsFromGlobalView(t *testing.T) {
 		t.Fatalf("measuring publishers were classified as reported-only: %+v", sessions)
 	}
 }
+
+// An ended session leaves playback_sessions_sync as soon as playback stops but
+// stays in the telemetry projection as a tombstone for Retention plus
+// TombstoneRetention. Projecting those tombstones put every stream that ended in
+// the last half hour into telemetry_only, and Agrees requires that list to be
+// empty — so on any server with more than a couple of streams an hour the parity
+// endpoint could never agree, which is the one verdict it exists to deliver.
+//
+// A tombstone a session manager still reports is a different thing: a live
+// session whose measurement was merely pruned. It stays, as measured evidence.
+func TestLiveSessionsFromGlobalViewDropsUnreportedTombstones(t *testing.T) {
+	startedAt := time.Unix(1_700_000_000, 0)
+	view := GlobalMonitoringView{Sessions: []GlobalSessionView{
+		{SessionID: "ended", StartedAt: startedAt, MeasurementPruned: true,
+			Routes: []RouteActivityView{{Method: "GET", Pattern: "/stream"}}, ViewerBytesAccepted: 4096,
+			Publishers: []PublisherRef{{PublisherID: "measuring"}}},
+		{SessionID: "pruned-but-reported", StartedAt: startedAt, MeasurementPruned: true, Reported: true,
+			Routes: []RouteActivityView{{Method: "GET", Pattern: "/stream"}}, ViewerBytesAccepted: 4096,
+			Publishers: []PublisherRef{{PublisherID: "measuring"}}},
+		{SessionID: "live", StartedAt: startedAt, Reported: true, ViewerBytesAccepted: 1,
+			Publishers: []PublisherRef{{PublisherID: "measuring"}}},
+	}}
+
+	sessions := LiveSessionsFromGlobalView(view)
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, session.SessionID)
+		if session.ReportedOnly {
+			t.Fatalf("%s lost its measured evidence", session.SessionID)
+		}
+	}
+	if len(ids) != 2 || ids[0] != "live" || ids[1] != "pruned-but-reported" {
+		t.Fatalf("projection = %v", ids)
+	}
+
+	// The legacy projection has already forgotten the ended session, and the
+	// report has to be able to call that agreement.
+	legacy := []LiveSession{
+		liveSession("live", func(s *LiveSession) { s.ProfileID = ""; s.MediaFileID = 0; s.PlayMethod = ""; s.Node = "" }),
+		liveSession("pruned-but-reported", func(s *LiveSession) { s.ProfileID = ""; s.MediaFileID = 0; s.PlayMethod = ""; s.Node = "" }),
+	}
+	report := CompareLiveSessions("legacy", TelemetrySide{Sessions: sessions, ViewComplete: true}, legacySide(legacy...), 0)
+	if !report.Agrees {
+		t.Fatalf("ended session blocked agreement: telemetry_only=%v withheld=%v",
+			report.TelemetryOnly, report.AgreesWithheld)
+	}
+}

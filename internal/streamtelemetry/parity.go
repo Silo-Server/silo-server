@@ -70,6 +70,21 @@ type LiveSession struct {
 func LiveSessionsFromGlobalView(view GlobalMonitoringView) []LiveSession {
 	sessions := make([]LiveSession, 0, len(view.Sessions))
 	for _, session := range view.Sessions {
+		// A retired-measurement tombstone nobody reports is an ENDED session, not a
+		// live one the legacy side has lost. It leaves playback_sessions_sync as
+		// soon as playback stops but stays in the telemetry projection for
+		// Retention plus TombstoneRetention, so counting it here put every stream
+		// that ended in the last half hour into telemetry_only — and Agrees
+		// requires that list to be empty. On any server with more than a couple of
+		// streams an hour the report could never agree, which is the one thing the
+		// endpoint exists to be able to say.
+		//
+		// Reported is what keeps this narrow: a tombstone a session manager still
+		// claims is a live session whose measurement was merely pruned, and it
+		// stays in the projection as measured evidence.
+		if session.MeasurementPruned && !session.Reported {
+			continue
+		}
 		live := LiveSession{
 			SessionID: session.SessionID, Subject: session.Subject, ProfileID: session.ProfileID,
 			MediaFileID: session.MediaFileID, StartedAt: session.StartedAt,
