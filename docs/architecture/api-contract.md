@@ -357,8 +357,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   9110 13.2.2 evaluates after the first; an input that did not bind it would let the field
   be dropped and a forbidden write applied) or its output a string `header:"ETag"` (a
   guarded DELETE answers a bodyless `204` and nothing else: its output declares no `ETag`
-  of any type, no body, and no `Status`, and its `DefaultStatus` is unset or `204`), when a
-  conditional input does not bind
+  of any type, no body, and no `Status`, its `DefaultStatus` is unset or `204`, and its
+  `Responses` declares no other `2xx`), when a conditional input does not bind
   `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
   create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
   output. Header fields and the conditional `Status` count only as direct exported struct

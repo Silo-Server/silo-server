@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -305,6 +306,14 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 				// the output has no Status field; anything but 204 would be
 				// a representation-bearing success without a validator.
 				return fmt.Errorf("guarded delete: DefaultStatus must be unset or 204, not %d", op.DefaultStatus)
+			}
+			for status := range op.Responses {
+				// A hand-declared 2xx other than 204 survives into the
+				// document, where the concurrency decoration would add an
+				// ETag the bodyless handler can never send.
+				if code, err := strconv.Atoi(status); err == nil && code >= 200 && code < 300 && code != http.StatusNoContent {
+					return fmt.Errorf("guarded delete: Responses declares %s, but the only success is 204", status)
+				}
 			}
 		} else if !declaresHeaderString(out, etagField) {
 			return fmt.Errorf("guarded: output must declare a string field with `header:\"%s\"`", etagField)

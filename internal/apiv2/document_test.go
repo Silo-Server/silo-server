@@ -626,6 +626,13 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"guarded DELETE with DefaultStatus 200": {func() Operation { op := guarded(http.MethodDelete); op.DefaultStatus = http.StatusOK; return op }(), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
 		}, "DefaultStatus"},
+		"guarded DELETE with a declared 202": {func() Operation {
+			op := guarded(http.MethodDelete)
+			op.Responses = map[string]*huma.Response{"202": {Description: "accepted"}}
+			return op
+		}(), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
+		}, "Responses declares 202"},
 		"conditional with lower-case etag tag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*struct {
 				Status int
