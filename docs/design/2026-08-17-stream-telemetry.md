@@ -38,7 +38,8 @@ kinds of process publish into Redis; a pure function merges them; an admin endpo
 serves the result and diffs it against the two projections admins read today.
 
 **What P0 deliberately does not do.** It makes no decisions. No request is denied,
-delayed or cut, and no existing admin read has been repointed onto it. Judgement —
+delayed or cut. `GET /admin/sessions` is untouched; the admin web UI reads the additive
+`GET /admin/sessions/live` instead, which walks the merged view. Judgement —
 which rate is a rip, which session to cut, who to suspend — is deferred on purpose:
 a threshold set before the traffic has been measured is a guess, and this is the thing
 that does the measuring. Monitoring becomes first-class here; enforcement is built on
@@ -279,12 +280,16 @@ For the same reason a principal gets its own transfer budget,
 `MaxTransfersPerSubject`. Past it, that principal's further transfer identities
 fold into ONE catch-all row rather than being dropped: the bytes are real and
 belong to it, and dropping is exactly what let one client's device-id churn starve
-everybody else's attribution. A fold row carries only the subject, the byte
-totals, the request count and the outcomes — every other identity field is zeroed,
-because the first arrival's file, route, address and device asserted over many
-pours is a plausible wrong answer, which is worse for an operator than an absent
-one. A subject therefore holds at most `MaxTransfersPerSubject + 1` records, the
-fold row not counting against its own allowance.
+everybody else's attribution. A fold row carries only the subject, the route
+role and class, the byte totals, the request count and the outcomes — every other
+identity field is zeroed, because the first arrival's file, pattern, address and
+device asserted over many pours is a plausible wrong answer, which is worse for an
+operator than an absent one. Role and class are kept because they are part of the
+fold key, one row per `(subject, role, class)`, and because they are the two
+fields a byte-summing consumer keys on: dropping them silently removed every
+folded byte from the egress series. A subject therefore holds at most
+`MaxTransfersPerSubject` ordinary records plus one fold row per `(role, class)`
+pair it has overflowed on, the fold rows not counting against its allowance.
 
 An un-upgraded publisher still sets `Truncated` on transfer exhaustion and still
 makes the view incomplete. The new fields are `omitempty`, so it stays decodable;
@@ -336,8 +341,8 @@ Postgres nor Redis, and it is the property to copy for P1's evaluator.
 | Field | Merge rule |
 |---|---|
 | Session id | Canonical join key. Remote transport ids correlate to it explicitly; they are never treated as sessions. |
-| Subject, profile id, media file id | **Only viewer-egress publishers contribute.** Populated disagreements retain all attributed values, flag a conflict, and leave the scalar zero. |
-| `StartedAt` | Highest source rank (`claim`, `session`, `issued_at`, `first_seen`), then earliest value at that rank. **Degradation is viewer-edge-owned** — a relay's publisher-local first-seen stamp must not degrade an authoritative viewer-edge session. |
+| Subject, profile id, media file id | **Viewer-egress publishers contribute; with no viewer edge present, the reporting publisher may supply them** so a byte-less session appears as itself. A relay never may. Populated disagreements retain all attributed values, flag a conflict, and leave the scalar zero. |
+| `StartedAt` | Highest source rank (`claim`, `session`, `issued_at`, `first_seen`), then earliest value at that rank. Viewer-egress and reporting publishers contribute; the reporting arm is what lets the session manager's rank-3 `session` source win for a session that is streaming. **Degradation is viewer-edge-owned** — a relay's publisher-local first-seen stamp must not degrade an authoritative viewer-edge session. |
 | Viewer bytes | Sum **only** viewer-egress routes. Never `SessionView.BytesAccepted`, which includes every role. |
 | Relay bytes | Summed separately, for correlation only. |
 | Open observations, requests | Saturating sum. |
@@ -490,7 +495,10 @@ Classes are `playback`, `manifest`, `transfer` and `probe`. Cap relevance is per
 not per family: streams, segments and manifests are cap-relevant; downloads, ebook reads,
 ABS files and the Jellyfin bandwidth probe are observed but cap-exempt. `probe` is the
 bandwidth probe alone: recorded exactly like a transfer, but its bytes are filler against
-no media file, so a consumer totalling delivered bytes must exclude it.
+no media file, so a consumer totalling delivered bytes must exclude it. The class travels
+on the transfer record (`TransferView.Class`, wire field `c`) for exactly that reason;
+`dashmetrics` excludes probe transfers from both egress series, and treats a record with
+no class — one from an un-upgraded publisher — as an ordinary transfer.
 
 **Manifest routes are enrolled and load-bearing.** A killed session that reaches an
 unenrolled manifest route can reconstruct or start ffmpeg before the next segment is
@@ -878,7 +886,7 @@ every session vanish atomically while the node keeps serving.
 
 | Key | Type | Contents |
 |---|---|---|
-| `{prefix}:snap:{publisherID}` | hash | `meta`, `s:{sessionID}` and `t:{transferID}` fields |
+| `{prefix}:snap:{publisherID}` | hash | `meta`, `s:{sessionID}` and `t:{transferID}` fields; the transfer id is a 128-bit SHA-256 digest of the identity tuple, never the tuple itself, because field names surface in `SCAN`, `MONITOR`, slowlog and RDB dumps |
 | `{prefix}:roster` | sorted set | publisher id scored by heartbeat Unix nanoseconds |
 
 Every publish is one `MULTI`/`EXEC`: optionally delete the hash for a full resync,
@@ -911,7 +919,9 @@ evolving session shape is not worth its maintenance cost at these sizes:
 **Read bounds.** Decode rejects negative counters and byte totals and caps every map
 and slice before the data reaches the merge. A read selects live roster entries bounded
 by the publisher cap, pipelines `HLEN` per publisher and skips any hash larger than
-`MaxSessions + MaxTransfers + 16`, then fetches eligible hashes with pipelined
+`MaxSessions + tombstone budget + MaxTransfers + 16` (the tombstone budget is
+`MaxSessions/shards + 1` per shard, because a pruned session gives its reservation back
+and lives on as an ordinary `s:` field), then fetches eligible hashes with pipelined
 `HGETALL` — which keeps each per-publisher snapshot atomic, unlike paged `HSCAN`.
 Fields are sorted before reader caps are applied. Missing metadata, publisher-id
 mismatch, oversized hashes, count mismatch and field decode errors are all attributed
@@ -1000,16 +1010,17 @@ evidence that a session is absent.
 | `SILO_STREAM_TELEMETRY_FAMILIES` | all five (`native,proxy,transcode_node,jellycompat,abs`) | core | Which route families are wrapped. Narrows or kills observation; naming it takes families away rather than staging them in, and makes the merged view incomplete until all five are restored. |
 | `SILO_STREAM_TELEMETRY_SWEEP_INTERVAL` | `1s` | core | Collector period. |
 | `SILO_STREAM_TELEMETRY_RETENTION` | `5m` | core | How long a session survives its last observation. |
+| `SILO_STREAM_TELEMETRY_TOMBSTONE_RETENTION` | `30m` | core | How long a pruned session's byte memory is still published after retirement. Repaired to `2×RETENTION` when left unset and below it. |
 | `SILO_STREAM_TELEMETRY_MAX_SESSIONS` | `10000` | core | Local session cap. |
 | `SILO_STREAM_TELEMETRY_MAX_TRANSFERS` | `10000` | core | Local transfer cap. |
-| `SILO_STREAM_TELEMETRY_MAX_TRANSFERS_PER_SUBJECT` | `128` | core | Distinct transfer identities one principal may hold before the rest fold into a single catch-all row. Clamped to an eighth of `MAX_TRANSFERS`, floor 1, so a lowered table cannot let one principal own all of it. |
+| `SILO_STREAM_TELEMETRY_MAX_TRANSFERS_PER_SUBJECT` | `128` | core | Distinct transfer identities one principal may hold before the rest fold into a catch-all row per `(role, class)`. Clamped to an eighth of `MAX_TRANSFERS`, floor 1. Fold rows still take an ordinary `MAX_TRANSFERS` reservation, so the global cap holds; the isolation the clamp buys is only meaningful once `MAX_TRANSFERS` is large enough for other principals to fit beside a full allowance. |
 | `SILO_STREAM_TELEMETRY_MAX_OBSERVATIONS` | `50000` | core | Local in-flight observation cap. |
 | `SILO_STREAM_TELEMETRY_DISTRIBUTED` | auto (on when Redis is configured) | distributed | Publish and read snapshots through Redis. Setting it pins the mode either way and stops the derivation; a rejected distributed configuration also pins it off. |
 | `SILO_STREAM_TELEMETRY_FRESHNESS` | `5s` | distributed | Maximum usable snapshot age; at least three sweep intervals. |
 | `SILO_STREAM_TELEMETRY_MEMBERSHIP_TTL` | `60s` | distributed | Heartbeat age after which a publisher has departed; must exceed freshness. |
 | `SILO_STREAM_TELEMETRY_KEY_PREFIX` | `silo:stelem` | distributed | Non-empty, whitespace-free Redis namespace. |
 | `SILO_STREAM_TELEMETRY_FULL_RESYNC_EVERY` | `60` | distributed | Successful publishes between full hash replacements. |
-| `SILO_STREAM_TELEMETRY_MAX_PUBLISHERS` | `256` | distributed | Roster entries considered by a read. |
+| `SILO_STREAM_TELEMETRY_MAX_PUBLISHERS` | `512` | distributed | Roster entries considered by a read. Each API process contributes two (measuring and reporting). |
 | `SILO_STREAM_TELEMETRY_MAX_MERGED_SESSIONS` | `50000` | distributed | Reader-side session cap across publishers. |
 | `SILO_STREAM_TELEMETRY_MAX_MERGED_TRANSFERS` | `50000` | distributed | Reader-side transfer cap across publishers. |
 | `SILO_STREAM_TELEMETRY_VIEW_TTL` | `5s` | distributed | How stale a served merged view may be before a read rebuilds it. |

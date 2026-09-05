@@ -95,8 +95,9 @@ type playbackSessionRow struct {
 	RoutingEgressNodeName    string `json:"routing_egress_node_name,omitempty"`
 	CompatOrigin             bool   `json:"-"`
 	// Telemetry carries measured delivery for this session. It is populated only
-	// by the live-sessions endpoint, and its absence there is meaningful: it means
-	// stream telemetry has no record of bytes reaching a viewer.
+	// by the live-sessions endpoint, where every row of the merged view carries
+	// one; it is absent only on that endpoint's legacy fallback paths (telemetry
+	// disabled, or no view built yet).
 	Telemetry *sessionTelemetry `json:"telemetry,omitempty"`
 }
 
@@ -132,10 +133,11 @@ type playbackSessionsCapabilitiesResponse struct {
 	// assignment fields when the active session has resolved them.
 	NodeRouting bool `json:"node_routing"`
 	// StreamTelemetryLiveSessions reports that GET /admin/sessions/live exists:
-	// the telemetry-backed live list, which merges the legacy projection with the
-	// measured byte flow and decorates each row with a telemetry block. A client
-	// must feature-detect it rather than assume it, and must read the envelope's
-	// source field rather than treating the list as authoritative.
+	// the merged telemetry view walked as the spine, with each row decorated by
+	// the display fields Postgres owns and a telemetry block. A client must
+	// feature-detect it rather than assume it, and must read the envelope's
+	// telemetry_enabled, view_available, view_complete and view_stale fields
+	// rather than treating the list as authoritative.
 	StreamTelemetryLiveSessions bool `json:"stream_telemetry_live_sessions"`
 }
 

@@ -2579,8 +2579,9 @@ export interface AdminSession {
   routing_egress_node_name?: string;
   /**
    * Measured delivery for this session, from stream telemetry. Only ever
-   * populated by GET /admin/sessions/live; its absence there is meaningful and
-   * means telemetry has no record of bytes reaching a viewer.
+   * populated by GET /admin/sessions/live, where every row of the merged view
+   * carries one. It is absent only on the legacy fallback paths, when
+   * `telemetry_enabled` or `view_available` is false on the envelope.
    */
   telemetry?: AdminSessionTelemetry;
 }
@@ -2630,7 +2631,9 @@ export interface AdminSessionTelemetry {
    * rendered as zero, which would read as a stalled stream.
    */
   delivery_rate_kbps?: number;
+  /** When the last byte was accepted on any route, viewer or relay. */
   last_byte_at?: string;
+  /** Requests currently open across every route, viewer or relay. */
   open_observations: number;
   request_count?: number;
   /**
@@ -2638,6 +2641,7 @@ export interface AdminSessionTelemetry {
    * automatically abuse (carrier NAT and network handoff both produce it).
    */
   viewer_ips?: string[];
+  /** The playback control socket is open, as the session manager reports it. */
   realtime_alive?: boolean;
   /** Publishers disagreed about who is watching. An abuse signal, not noise. */
   identity_conflict?: boolean;
@@ -2667,9 +2671,17 @@ export interface AdminLiveSessionsResponse {
   view_available: boolean;
   view_complete: boolean;
   view_stale: boolean;
+  /** Age of the served view build, in milliseconds. */
   view_age_ms: number;
   /** Why the view is incomplete, when it is. */
   incomplete_reasons?: string[];
+  /**
+   * Degradations that are NOT completeness claims and never suppress
+   * classification. Currently only `publisher_transfer_capacity`.
+   */
+  view_advisories?: string[];
+  /** Download and probe observations that lost per-transfer attribution. */
+  dropped_transfer_observations?: number;
   /** How many rows are reported-as-playing with no measured bytes. */
   no_delivery_count: number;
   no_delivery_shown: boolean;

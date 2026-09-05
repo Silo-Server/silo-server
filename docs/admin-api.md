@@ -695,9 +695,9 @@ paths themselves appear only here, behind admin auth.
 Returns the merged stream-telemetry view beside the two legacy live-session
 projections an admin reads today, plus the diff between them.
 
-It is a diagnostic: it compares and does not cut over. No existing admin read has
-been repointed onto telemetry, and nothing here blocks, throttles or ends a
-session. Design: [`docs/design/2026-08-17-stream-telemetry.md`](design/2026-08-17-stream-telemetry.md).
+It is a diagnostic: it compares and does not cut over. `GET /admin/sessions` is
+untouched (the admin web UI reads the additive `/admin/sessions/live`), and
+nothing here blocks, throttles or ends a session. Design: [`docs/design/2026-08-17-stream-telemetry.md`](design/2026-08-17-stream-telemetry.md).
 
 The view is served from a bounded-staleness cache with single-flight refresh, so
 several admins polling this route pay at most one rebuild per TTL.
@@ -1324,13 +1324,17 @@ should not be dropped.
   so the list is the legacy projection and no row carries a `telemetry` block.
 - `view_available` false means the view has not been built yet. An empty list
   with this false means "not known yet", never "nothing is streaming".
+- `view_age_ms` is the age of the served view build. The view is served from a
+  bounded-staleness cache, so it is normally under the view TTL.
 - `view_complete` false means publishers are missing, so sessions they serve may
   be absent or under-counted; `incomplete_reasons` says which. **While the view is
-  incomplete nothing is classified `no_delivery` or `unclaimed_idle` and nothing
-  is hidden** — the publisher holding a session's bytes may be exactly the one
-  that is missing, so the classification stops being evidence of anything. The
-  same rule applies while `view_stale` is true: an old complete view is still
-  blindness about what is happening now.
+  incomplete nothing is classified `no_delivery` and nothing live is hidden** —
+  the publisher holding a session's bytes may be exactly the one that is
+  missing, so the classification stops being evidence of anything. The same
+  rule applies while `view_stale` is true: an old complete view is still
+  blindness about what is happening now. The one row that stays hidden is a
+  retired measurement nobody reports (`measurement_pruned` and `unclaimed_idle`
+  both set); see the per-row block below.
   During a mixed-version rolling deploy, an older contributing binary produces
   `unknown_publisher_coverage`. `partial_family_observation` means a measuring
   publisher started with a narrowed `SILO_STREAM_TELEMETRY_FAMILIES`; that is an
@@ -1417,6 +1421,22 @@ The rest:
   surfaced rather than resolved: that disagreement is an abuse signal.
 - `publishers` names everyone who contributed; `viewer_edge_publishers` is
   strictly who served bytes, which is what answers "from which node?".
+- `last_byte_at` is when the last byte was accepted on any route, viewer or
+  relay; `open_observations` is how many requests are open across every route
+  and is always present; `request_count` is the total seen. These three are
+  role-agnostic, so they can answer "is anything moving?" but never "is the
+  viewer being served?" — the classifications above use the viewer-scoped
+  equivalents, which are not exposed.
+- `realtime_alive` is the playback control-socket state as the session manager
+  reports it. It is carried for diagnosis and is not an input to classification.
+
+Under a stale or incomplete view (`view_stale`, `!view_complete`) both flags
+are cleared, with one exception: an `unclaimed_idle` row whose measurement is
+`measurement_pruned` stays classified and stays hidden. That row is memory of a
+session no publisher is measuring any more, and a missing or stale publisher
+cannot make it live again; un-hiding it put every session that ended in the
+last `TombstoneRetention` back on the default list as an identity-only row for
+as long as the view stayed blind.
 
 ## The reporting publisher
 
