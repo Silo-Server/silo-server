@@ -198,7 +198,9 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json",
 		"GET " + Prefix + "/profile/sections", "PUT " + Prefix + "/profile/sections", "DELETE " + Prefix + "/profile/sections",
 		"GET " + Prefix + "/profile/sections/flags", "GET " + Prefix + "/profile/sections/settings",
-		"GET " + Prefix + "/profiles", "POST " + Prefix + "/profiles", "PATCH " + Prefix + "/profiles/{id}",
+		"GET " + Prefix + "/profiles", "POST " + Prefix + "/profiles", "PATCH " + Prefix + "/profiles/{id}", "DELETE " + Prefix + "/profiles/{id}",
+		"GET " + Prefix + "/profiles/household/sessions", "POST " + Prefix + "/profiles/{id}/verify-pin",
+		"PUT " + Prefix + "/profiles/{id}/avatar", "DELETE " + Prefix + "/profiles/{id}/avatar",
 		"GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
 	}
 

@@ -182,6 +182,14 @@ func requestIDFrom(ctx context.Context) string {
 // (status, message and huma.ErrorDetail list) onto the Silo envelope with a
 // catalog type, stable codes and no echoed values.
 func fromHumaError(requestID string, status int, msg string, errs []error, bodyLimit int64) *Problem {
+	if formParseFailure(status, errs) {
+		// The form decoder refused the body (no boundary, truncated
+		// framing): a malformed request, as an unparseable JSON document is,
+		// with a fixed detail rather than the parser's text.
+		p := NewProblem(TypeMalformedRequest, humaDetail(TypeMalformedRequest, msg, bodyLimit))
+		p.Instance = requestInstance(requestID)
+		return p.WithErrors(ProblemError{Location: locationBody, Code: codeMalformedForm, Detail: "The request body is not a valid multipart form."})
+	}
 	t := humaStatusType(status, msg)
 	p := NewProblem(t, humaDetail(t, msg, bodyLimit))
 	p.Instance = requestInstance(requestID)
@@ -214,6 +222,17 @@ func fromHumaError(requestID string, status int, msg string, errs []error, bodyL
 		})
 	}
 	return p
+}
+
+// formParseFailure reports whether the failure is the multipart parser
+// refusing the form as a whole (Huma reports it as one 422 detail at "body"
+// prefixed "cannot read multipart form").
+func formParseFailure(status int, errs []error) bool {
+	if status != http.StatusUnprocessableEntity || len(errs) != 1 {
+		return false
+	}
+	var detail *huma.ErrorDetail
+	return errors.As(errs[0], &detail) && detail.Location == locationBody && strings.HasPrefix(detail.Message, "cannot read multipart form")
 }
 
 // bodyParseFailure reports whether a detail is the decoder refusing the body
@@ -280,6 +299,7 @@ const (
 	codeUnknownField     = "unknown_field"
 	codeUnknownParameter = "unknown_parameter"
 	codeMalformedJSON    = "malformed_json"
+	codeMalformedForm    = "malformed_form"
 
 	locationBody = "body"
 )
@@ -316,6 +336,11 @@ func validationLocation(d *huma.ErrorDetail) string {
 		if name != "" && !strings.ContainsAny(name, " .[") {
 			return d.Location + "." + name
 		}
+	}
+	// A multipart part the form decoder refused is reported at the bare part
+	// name; the contract's grammar puts it under the body.
+	if d.Location != "" && d.Location != locationBody && !strings.ContainsAny(d.Location, ".[") {
+		return locationBody + "." + d.Location
 	}
 	return d.Location
 }

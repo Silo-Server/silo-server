@@ -139,11 +139,17 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"createProfile":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true, http.StatusOK: false},
 		"replaceProfileSectionOverrides": {http.StatusNoContent: true, http.StatusForbidden: true},
 		"resetProfileSectionOverrides":   {http.StatusNoContent: true},
+		"deleteProfile":                  {http.StatusNoContent: true, http.StatusConflict: true, http.StatusNotFound: true},
+		"deleteProfileAvatar":            {http.StatusNoContent: true, http.StatusNotFound: true},
+		"uploadProfileAvatar":            {http.StatusOK: true, http.StatusRequestEntityTooLarge: true, http.StatusUnsupportedMediaType: true},
+		"verifyProfilePIN":               {http.StatusOK: true, http.StatusNotFound: true},
+		"listHouseholdSessions":          {http.StatusOK: true, http.StatusForbidden: true},
 	}
 	profileToken := map[string]bool{
 		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
 		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
 		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
+		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
 	}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
@@ -215,7 +221,7 @@ func TestGeneratedDocumentRequestMediaTypes(t *testing.T) {
 				t.Errorf("%s %s documents a body with no media type", method, path)
 			}
 			for mediaType := range content {
-				if !structuredMediaTypeOK(mediaType) {
+				if !requestMediaTypeOK(mediaType) {
 					t.Errorf("%s %s documents request media type %q that the listener rejects with 415", method, path, mediaType)
 				}
 			}
