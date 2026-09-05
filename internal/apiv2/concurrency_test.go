@@ -266,6 +266,35 @@ func TestGuardedProbeIfNoneMatchAfterIfMatch(t *testing.T) {
 	requireProblem(t, rec, TypeMalformedRequest)
 }
 
+// TestGuardedProbeWildcardRetryRechecksIfNoneMatchAndDomain: under
+// If-Match: * a lost race is retried, but the retry judges If-None-Match
+// and the domain rule again against the latest row, so a writer that
+// installs the tag If-None-Match names, or the reserved state, turns the
+// retry into 412 or 409 instead of an overwrite.
+func TestGuardedProbeWildcardRetryRechecksIfNoneMatchAndDomain(t *testing.T) {
+	// If-None-Match names version 2; the racer moves the row to version 2.
+	store := newGuardedProbeStore()
+	h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() { store.Upsert("a", "racer") })
+	rec := do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"beta"}`, map[string]string{"If-Match": "*", "If-None-Match": RenderETag(2, guardedProbeScope).String()})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got := rec.Header().Get("ETag"); got != RenderETag(2, guardedProbeScope).String() {
+		t.Fatalf("412 ETag = %q", got)
+	}
+	if row, _ := store.Get("a"); row.Name != "racer" || row.Version != 2 {
+		t.Fatalf("row overwritten despite If-None-Match: %+v", row)
+	}
+	// The racer turns the row into the reserved state.
+	store = newGuardedProbeStore()
+	h = NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() { store.Upsert("a", guardedProbeReservedName) })
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"beta"}`, map[string]string{"If-Match": "*"})
+	requireProblem(t, rec, TypeConflict)
+	if row, _ := store.Get("a"); row.Name != guardedProbeReservedName {
+		t.Fatalf("reserved row overwritten: %+v", row)
+	}
+}
+
 // TestGuardedProbeWildcardSurvivesLostRace: "*" is a deliberate overwrite,
 // so a writer that lands between the load and the compare-and-update does
 // not turn it into a 412 while the resource still exists.

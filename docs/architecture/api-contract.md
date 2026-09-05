@@ -362,9 +362,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   fields: Huma binds and writes no header from an embedded struct or an unexported field,
   so one declared either way is refused rather than silently unsent. A guarded handler
   treats `If-Match: *` as a deliberate overwrite through the compare-and-update as well:
-  a race lost to a writer who left the resource in place is re-applied against the latest
-  version, however many writers land, a race lost to a delete is `412` with no `ETag`, and
-  only an exact tag turns a lost race into `412` with the current `ETag`. A create-only
+  a race lost to a writer who left the resource in place is retried against the latest
+  version, however many writers land, with `If-None-Match` and the domain rule judged again
+  against that latest row on every retry; a race lost to a delete is `412` with no `ETag`,
+  and only an exact tag turns a lost race into `412` with the current `ETag`. A create-only
   handler that loses its write evaluates `If-None-Match` again against the latest state and
   retries while the condition holds, so only a state that falsifies the condition is `412`. `TestGuardedOperationsAreMarkedIfMatch`
   reconciles both directions and refuses a guarded operation that maps to no legacy row

@@ -136,8 +136,10 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			if f.ExpectedStatus == 304 && f.ResponseHeaders["ETag"] == "" {
 				fail("%s: a 304 fixture must record ETag", where)
 			}
-			if f.ExpectedStatus == 204 && f.ResponseHeaders["ETag"] != "" {
-				fail("%s: a 204 fixture records an ETag, but a deleted representation has no validator", where)
+			if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && f.ResponseHeaders["ETag"] != "" {
+				// A guarded DELETE's 204 has no validator; a bodyless 204
+				// from a PUT or PATCH output that carries only ETag does.
+				fail("%s: a 204 DELETE fixture records an ETag, but a deleted representation has no validator", where)
 			}
 			if f.OperationID != nil {
 				if info, ok := ops[*f.OperationID]; !ok || !info.statuses[fmt.Sprint(f.ExpectedStatus)] {

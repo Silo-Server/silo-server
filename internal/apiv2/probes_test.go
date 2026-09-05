@@ -343,40 +343,42 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			Class:     ClassPublic,
 			Guarded:   true,
 		}, func(_ context.Context, in *guardedProbeWriteInput) (*guardedProbeWriteOutput, error) {
-			// Load first: a missing resource is 404 before any precondition.
-			row, ok := store.Get(in.ID)
-			if !ok {
-				return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
-			}
-			current := RenderETag(row.Version, guardedProbeScope)
-			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
-				return nil, p
-			}
-			// The precondition passed; domain state may still refuse.
-			if row.Name == guardedProbeReservedName {
-				return nil, NewProblem(TypeConflict, "A reserved probe resource cannot be replaced.")
-			}
-			updated, err := store.Update(in.ID, row.Version, in.Body.Name)
-			for err != nil {
-				// The compare-and-update lost a race with another writer.
-				latest, exists := store.Get(in.ID)
-				if !exists {
-					// The winner deleted the row: nothing current to
+			// Every attempt runs the whole sequence against the row it
+			// loaded: 404 before any precondition, then both preconditions
+			// in RFC order, then domain state, then the compare-and-update.
+			// A lost race under an exact If-Match is 412; under "*" the
+			// resource still existing keeps that precondition true, but the
+			// If-None-Match and the domain rule are judged again against
+			// the latest row before the write is retried.
+			for attempt := 0; ; attempt++ {
+				row, ok := store.Get(in.ID)
+				if !ok {
+					if attempt == 0 {
+						return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
+					}
+					// The race winner deleted the row: nothing current to
 					// advertise, so the 412 carries no ETag.
 					return nil, StaleVersionProblem(EntityTag{})
 				}
-				if !IsOverwrite(in.IfMatch) {
-					return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				current := RenderETag(row.Version, guardedProbeScope)
+				if attempt > 0 && !IsOverwrite(in.IfMatch) {
+					return nil, StaleVersionProblem(current)
 				}
-				// "*" asked for a deliberate overwrite and the resource still
-				// exists, so the precondition still holds: apply against the
-				// latest version.
-				updated, err = store.Update(in.ID, latest.Version, in.Body.Name)
+				if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
+					return nil, p
+				}
+				if row.Name == guardedProbeReservedName {
+					return nil, NewProblem(TypeConflict, "A reserved probe resource cannot be replaced.")
+				}
+				updated, err := store.Update(in.ID, row.Version, in.Body.Name)
+				if err != nil {
+					continue
+				}
+				return &guardedProbeWriteOutput{
+					ETag: RenderETag(updated.Version, guardedProbeScope).String(),
+					Body: guardedProbeBody{ID: in.ID, Name: updated.Name, Version: updated.Version},
+				}, nil
 			}
-			return &guardedProbeWriteOutput{
-				ETag: RenderETag(updated.Version, guardedProbeScope).String(),
-				Body: guardedProbeBody{ID: in.ID, Name: updated.Name, Version: updated.Version},
-			}, nil
 		})
 		Register(reg, Operation{
 			Operation: humaOp(http.MethodDelete, Prefix+"/probe/guarded/{id}", "deleteGuardedProbe", "probe", "guarded delete"),
