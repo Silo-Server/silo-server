@@ -10054,7 +10054,7 @@
       "section": "admin-nodes",
       "release_flow": "core_admin",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "durable_dispatch",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -10066,7 +10066,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "concurrency": "if_match"
+      "concurrency": "if_match",
+      "retry_safety_note": "DEFECT: node deletion commits before pool reload and replica notification; a crash leaves stale pools and a retry returns not_found without reloading. The nodes section must durably reconcile pool invalidation."
     },
     {
       "listener": "api",
@@ -17994,7 +17995,7 @@
       "section": "admin-users",
       "release_flow": "core_admin",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "durable_dispatch",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -18006,7 +18007,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "concurrency": "if_match"
+      "concurrency": "if_match",
+      "retry_safety_note": "DEFECT: account deletion commits before impersonation-session revocation; a crash leaves those sessions valid and a retry returns not_found without revoking them. The admin section must revoke atomically or durably resume cleanup."
     },
     {
       "listener": "api",
@@ -23958,7 +23960,7 @@
       "section": "personal-collections",
       "release_flow": "browse_search",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -23969,7 +23971,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; collectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: image removal, not the collection definition; the definition PUT/DELETE is guarded."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; collectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: image removal, not the collection definition; the definition PUT/DELETE is guarded.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry deletes the deterministic variants and clears the poster fields of an image uploaded after the first success. The collections section adds Guarded/If-Match on collection artwork before clients may retry."
     },
     {
       "listener": "api",
@@ -24171,7 +24174,7 @@
       "section": "personal-collections",
       "release_flow": "browse_search",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -24182,7 +24185,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; collectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: idempotent membership add/remove, which the contract keeps on domain semantics."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; collectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: idempotent membership add/remove, which the contract keeps on domain semantics.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry removes a membership the user re-added after the first success. The collections section adds a durable membership generation or ordering rule before clients may retry."
     },
     {
       "listener": "api",
@@ -24241,7 +24245,7 @@
       "section": "personal-collections",
       "release_flow": "browse_search",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -24252,7 +24256,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Conditionally registered: authMiddleware != nil; collectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: idempotent membership add/remove, which the contract keeps on domain semantics."
+      "notes": "Conditionally registered: authMiddleware != nil; collectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: idempotent membership add/remove, which the contract keeps on domain semantics.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry resurrects a membership the user removed after the first success. The collections section adds a durable membership generation or ordering rule before clients may retry."
     },
     {
       "listener": "api",
@@ -30503,7 +30508,7 @@
       "section": "catalog-libraries",
       "release_flow": "core_admin",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -30514,7 +30519,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: artwork upload/removal, not library configuration; the library PUT/DELETE is guarded."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: artwork upload/removal, not library configuration; the library PUT/DELETE is guarded.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry reloads the current path and deletes a poster uploaded after the first success. The libraries section adds Guarded/If-Match on library artwork (shared with the upload) before clients may retry."
     },
     {
       "listener": "api",
@@ -32020,7 +32026,7 @@
       "section": "notifications",
       "release_flow": "notifications",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -32031,7 +32037,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deps.Notifications != nil; discordNotificationsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deps.Notifications != nil; discordNotificationsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry clears a Discord identity linked after the first success (ClearIdentity is unconditional per user). The notifications section adds a link-generation precondition before clients may retry."
     },
     {
       "listener": "api",
@@ -32444,7 +32451,7 @@
       "section": "notifications",
       "release_flow": "notifications",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -32455,7 +32462,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry after a lost response clears an address the profile requested or verified in between (ClearCustomAddress is unconditional). The notifications section adds Guarded/If-Match on the address before clients may retry."
     },
     {
       "listener": "api",
@@ -32996,7 +33004,7 @@
       "section": "notifications",
       "release_flow": "notifications",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -33007,7 +33015,8 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry deletes a registration the app re-created for the same device (DeleteByProfileDevice ignores creation time). The notifications section adds a registration-generation precondition before clients may retry."
     },
     {
       "listener": "api",
@@ -36179,13 +36188,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profile/sections",
+        "operation_id": "listProfileSectionOverrides"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape (/profile/sections). Read is snake_case, matching the write (v1 answered PascalCase store fields; the Phase 1 catalogs flagged the GET/PUT casing mismatch). scope is an enum (home, library) and must agree with library_id (v1 stored any pair). Store timestamps are nullable instants. config and user_config keep v1's presence rule: omitted when the profile saved none, {} when it saved an explicitly empty one, so the read round-trips through the full-replacement PUT without dropping an empty config."
     },
     {
       "listener": "api",
@@ -36250,18 +36259,19 @@
       "section": "profiles",
       "release_flow": "profiles",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/profile/sections",
+        "operation_id": "replaceProfileSectionOverrides"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Full replacement of one page's override set stays PUT; scope and library_id move from the body to the query so GET, PUT and DELETE address the set the same way. Recipe gate failures (unknown_recipe, invalid_config) are 422 at body.overrides; custom_disabled stays 403. Demo-restricted in v2; v1's demo guard does not block it.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry replaces a layout the profile saved after the first success with the older override set. The profile-sections section adds Guarded/If-Match on the overrides before clients may retry."
     },
     {
       "listener": "api",
@@ -36317,13 +36327,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profile/sections/flags",
+        "operation_id": "getProfileSectionFlags"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil; sectionSettingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil; sectionSettingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape."
     },
     {
       "listener": "api",
@@ -36386,13 +36396,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/profile/sections",
+        "operation_id": "resetProfileSectionOverrides"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The /reset suffix is dropped: DELETE on the set addressed by scope and library_id. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",
@@ -36456,13 +36466,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profile/sections/settings",
+        "operation_id": "getProfileSectionSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag."
     },
     {
       "listener": "api",
@@ -36572,13 +36582,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profiles",
+        "operation_id": "listProfiles"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Collection envelope (items, no page: the household is bounded by the account's profile limit) plus avatar_upload_enabled; profile_scoped with the header optional, as v1."
     },
     {
       "listener": "api",
@@ -36657,19 +36667,19 @@
       "section": "profiles",
       "release_flow": "profiles",
       "tier": 1,
-      "retry_safety": "unique_constraint",
-      "retry_safety_note": "The v2 create takes a client-selected profile id so a retry resolves to the existing profile instead of creating a twin; the primary-per-user unique index bounds the special case.",
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "DEFECT: v1 and v2 mint a fresh profile id after application-only name and limit checks, so overlapping retries can create duplicates. The profiles section must add a durable creation identity and serialize the limit check before clients may retry.",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/profiles",
+        "operation_id": "createProfile"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. 201 with Location. Reuses the updateProfile member rules: name required, max_playback_quality strict enum, quality_preference and subtitle_mode free-form (#135), pin 1 to 72 bytes, allowlist validated against existing libraries (422, not a foreign-key 500); no member admits null. name_conflict and profile_limit_reached stay 409. Demo-restricted in v2 (403 permission_denied in demo mode); v1's demo guard does not block profile mutations, consistent with the pilot updateProfile. Location names /api/v2/profiles/{id}, which accepts PATCH and DELETE; read the created profile through listProfiles (no getProfile in this section)."
     },
     {
       "listener": "api",
@@ -36723,13 +36733,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profiles/household/sessions",
+        "operation_id": "listHouseholdSessions"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Plain items collection (v1 does not page); page is absent. Ids are strings, instants are UTC milliseconds, unknown members are null rather than omitted; the v1 compat-origin flag is not carried. v1 session_id is id."
     },
     {
       "listener": "api",
@@ -36787,18 +36797,19 @@
       "section": "profiles",
       "release_flow": "profiles",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/profiles/{id}",
+        "operation_id": "deleteProfile"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Same 204 and the same 409 primary_profile_protected as v1, rendered as the conflict problem. Demo-restricted in v2; v1's demo guard does not block it.",
+      "retry_safety_note": "DEFECT: v1 and v2 delete the profile before best-effort avatar and device cleanup; a retry stops at not_found, leaving orphaned data after a crash or cleanup error. The profiles section must persist or resume cleanup before clients may retry."
     },
     {
       "listener": "api",
@@ -36928,18 +36939,19 @@
       "section": "profiles",
       "release_flow": "profiles",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/profiles/{id}/avatar",
+        "operation_id": "deleteProfileAvatar"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Answers 204 rather than the updated profile; read the profile afterwards if it is needed. Demo-restricted in v2; v1's demo guard does not block it.",
+      "retry_safety_note": "Stale retry hazard: a delayed retry clears an avatar uploaded after the first success (the deterministic per-profile keys are deleted unconditionally). The profiles section adds Guarded/If-Match on the avatar before clients may retry."
     },
     {
       "listener": "api",
@@ -36995,13 +37007,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/profiles/{id}/avatar",
+        "operation_id": "uploadProfileAvatar"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Huma multipart operation (form part avatar, image/jpeg, image/png or image/webp). A JSON body is 415; a part outside the declared types or an undecodable image is 422 at body.avatar (v1: 400); an avatar over 10 MiB is 413 payload_too_large, as is a whole request over 11 MiB (the file limit plus a 1 MiB allowance for multipart framing, part headers and filename included); a missing upload store is 503 dependency_unavailable. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",
@@ -37077,13 +37089,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/profiles/{id}/verify-pin",
+        "operation_id": "verifyProfilePIN"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Same token semantics (X-Profile-Token bound to the login session and policy revision) and no-store. expires_at is a nullable instant, always present; a missing or empty pin is 422 (v1: 400)."
     },
     {
       "listener": "api",

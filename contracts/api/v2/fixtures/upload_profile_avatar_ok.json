@@ -1,0 +1,29 @@
+{
+  "id": "p-owner",
+  "name": "Laura",
+  "avatar": "upload:avatars/1/p-owner/original",
+  "avatar_url": "https://s3.example.test/avatars/1/p-owner/256.jpg",
+  "avatar_source": "upload",
+  "has_pin": false,
+  "is_child": false,
+  "is_primary": true,
+  "max_content_rating": "",
+  "quality_preference": "auto",
+  "language": "en",
+  "preferred_metadata_language": "",
+  "subtitle_language": "",
+  "subtitle_mode": "auto",
+  "auto_skip_intro": true,
+  "auto_skip_credits": false,
+  "auto_skip_recap": false,
+  "auto_play_next_preview": false,
+  "show_forced_subtitles": false,
+  "library_restrictions_enabled": false,
+  "allowed_library_ids": [
+    "3"
+  ],
+  "max_playback_quality": "1080p",
+  "created_at": "2026-01-02T03:04:05.000Z",
+  "updated_at": "2026-01-02T03:04:05.000Z"
+}
+

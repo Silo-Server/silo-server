@@ -432,11 +432,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (123
-  `natural_idempotent`, 27 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 8
-  `durable_dispatch`, 37 `non_retryable`, 0 `idempotency_key`, counted per distinct
-  operation) and no residual
-  group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  tier-1 ported mutation rows (219 distinct operations) are classified (111
+  `natural_idempotent`, 26 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 10
+  `durable_dispatch`, 48 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
   first call never touched (node force-reload, per node and fleet-wide), a token-issuing
@@ -459,12 +458,18 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   command that re-runs its side effect on every call (watch-together selection and
   suggestion promotion, which reset playback and clear member sessions each time;
   metadata-match-queue retry, which schedules another run once the first is leased; node
-  capability reprobe, which holds the GPU gate through a multi-minute cold build); each
-  note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
-  (email-address verification; favorites, watchlist, and rating add and remove, and the
-  taste seed, whose store converges but whose provider dispatch or recommendation refresh
-  fires unconditionally) name the outbox or change-gated claim the v2 port must add before
-  their retry is safe. Thirty-six rows carry a `DEFECT` note where v1 gates on
+  capability reprobe, which holds the GPU gate through a multi-minute cold build), or a
+  delete or replace that converges only while nothing intervenes: a delayed retry after a
+  lost response destroys a resource re-created after the first success (email-address
+  clear, push-device unregister, library and collection poster delete, profile avatar
+  delete, Discord unlink, collection item add and remove, profile section overrides
+  replace), so each stays `non_retryable` until its owning section guards the resource
+  with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
+  (email-address verification; favorites, watchlist, and rating add and remove; taste seed;
+  account and node deletion) name the durable dispatch or cleanup the v2 port must add before
+  their retry is safe. The existing v2 profile creation and deletion operations remain
+  `non_retryable` until their durable identity and cleanup defects are fixed. Forty rows
+  carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
   sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
@@ -481,7 +486,12 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
   field presence rather than on an effective change, the provider device-auth poll, whose
   completion check is a plain read ahead of the plugin call, admin user update, whose
-  password branch re-hashes and revokes every session on each attempt, library creation,
+  password branch re-hashes and revokes every session on each attempt, profile creation,
+  whose name and limit checks run in application code with no unique index on the
+  account-scoped name, account deletion, whose impersonation-session revocation follows
+  the commit, node deletion, whose pool invalidation follows the commit, and profile
+  deletion, whose object and device cleanup cannot resume after the row disappears,
+  library creation,
   whose seeding and initial scan run after the insert without a transaction, and the
   library provider chain, whose matcher wake fires unconditionally after the save); their
   v2 port must move the gate
@@ -814,7 +824,15 @@ Successful protected reads and mutations return the current ETag, except a prote
 whose bodyless `204` has no representation left to validate and carries none. First-party
 clients handle `412` by fetching the canonical representation and offering reload, comparison,
 or a deliberate overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
-Conditional reads may return `304`. V2 does not add a generic response-body revision; a body
+Conditional reads may return `304`. A response that carries an `ETag` is served identity-encoded
+whatever `Accept-Encoding` asked for: a strong validator names the representation data including
+its content coding (RFC 9110 8.8.1), so the listener's compression layer skips validator-bearing v2
+responses (`apiv2.IdentityEncoded`) rather than letting a gzip body and an identity body share one
+strong tag or rewriting the tag per coding. The tag a client received is therefore the tag it echoes
+in `If-Match` or `If-None-Match`, whichever coding it accepts; responses without a validator
+compress as usual. A request whose `Accept-Encoding` excludes identity (`identity;q=0`, or `*;q=0`
+without a positive `identity` entry, RFC 9110 12.5.3) is answered `406 not_acceptable` on a
+validator-bearing operation rather than with a coding the client refused. V2 does not add a generic response-body revision; a body
 revision exists only for a domain requirement such as capability invalidation or future offline
 synchronization. The implementation follows RFC 9110 parsing and precedence, including lists,
 optional whitespace, wildcard rules, and strong comparison, independent of Huma helper behavior.
@@ -1087,6 +1105,24 @@ inferred set; the profile read model documents canonical values without constrai
 stored ones, every string member of a profile is always emitted, ids are string `ID`s, and instants
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
+
+The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
+`updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
+`verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides
+`listProfileSectionOverrides`, `replaceProfileSectionOverrides`, `resetProfileSectionOverrides`,
+`getProfileSectionSettings`, `getProfileSectionFlags` under `/api/v2/profile/sections`. The
+deliberate v1 differences, recorded per row in the ledger: `createProfile` answers `201` with a
+`Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
+from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
+ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
+keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
+reports `expires_at` as a nullable instant; `uploadProfileAvatar` is the first Huma multipart
+operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
+types or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
+server without an upload store answers `503`; section overrides drop the `/reset` suffix
+(`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
+method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
+casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
 ## v1 lifecycle and release sequence
 

@@ -131,15 +131,29 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	doc := generatedDocument(t)
 	bodies := 0
 	expect := map[string]map[int]bool{
-		"getSetupStatus":     {http.StatusServiceUnavailable: true},
-		"getSystemInfo":      {http.StatusServiceUnavailable: false},
-		"getOpenAPIDocument": {http.StatusServiceUnavailable: false},
-		"getCurrentUser":     {http.StatusNotFound: false},
-		"listProgress":       {http.StatusNotFound: true},
-		"listAdminUsers":     {http.StatusNotFound: true},
-		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
+		"getSetupStatus":                 {http.StatusServiceUnavailable: true},
+		"getSystemInfo":                  {http.StatusServiceUnavailable: false},
+		"getOpenAPIDocument":             {http.StatusServiceUnavailable: false},
+		"getCurrentUser":                 {http.StatusNotFound: false},
+		"listProgress":                   {http.StatusNotFound: true},
+		"listAdminUsers":                 {http.StatusNotFound: true},
+		"updateProfile":                  {http.StatusNotFound: true, http.StatusConflict: true},
+		"listProfiles":                   {http.StatusNotFound: true, http.StatusConflict: false},
+		"createProfile":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true, http.StatusOK: false},
+		"replaceProfileSectionOverrides": {http.StatusNoContent: true, http.StatusForbidden: true},
+		"resetProfileSectionOverrides":   {http.StatusNoContent: true},
+		"deleteProfile":                  {http.StatusNoContent: true, http.StatusConflict: true, http.StatusNotFound: true},
+		"deleteProfileAvatar":            {http.StatusNoContent: true, http.StatusNotFound: true},
+		"uploadProfileAvatar":            {http.StatusOK: true, http.StatusRequestEntityTooLarge: true, http.StatusUnsupportedMediaType: true},
+		"verifyProfilePIN":               {http.StatusOK: true, http.StatusNotFound: true},
+		"listHouseholdSessions":          {http.StatusOK: true, http.StatusForbidden: true},
 	}
-	profileToken := map[string]bool{"listProgress": true, "listAdminUsers": true, "updateProfile": true}
+	profileToken := map[string]bool{
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
+		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
+		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
+		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
+	}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
 		for method, raw := range item.(map[string]any) {
@@ -210,7 +224,7 @@ func TestGeneratedDocumentRequestMediaTypes(t *testing.T) {
 				t.Errorf("%s %s documents a body with no media type", method, path)
 			}
 			for mediaType := range content {
-				if !structuredMediaTypeOK(mediaType) {
+				if !requestMediaTypeOK(mediaType) {
 					t.Errorf("%s %s documents request media type %q that the listener rejects with 415", method, path, mediaType)
 				}
 			}
@@ -332,6 +346,35 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
 	})
 	Register(reg, Operation{
+		Operation: func() huma.Operation {
+			o := humaOp(http.MethodPatch, Prefix+"/docprobe/{id}", "patchDocProbe", "probe", "guarded bodyless")
+			// A hand-declared 204 that names a representation: the runtime
+			// never sends a 204 body, so the document must not promise one.
+			o.Responses = map[string]*huma.Response{"204": {
+				Description: "updated",
+				Content:     map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: huma.TypeObject}}},
+			}}
+			return o
+		}(),
+		Class:       ClassPublic,
+		Guarded:     true,
+		RetrySafety: RetrySafetyNaturalIdempotent,
+	}, func(_ context.Context, in *struct {
+		ID          string `path:"id"`
+		IfMatch     string `header:"If-Match"`
+		IfNoneMatch string `header:"If-None-Match"`
+		Body        probeBody
+	}) (*struct {
+		ETag string `header:"ETag"`
+	}, error) {
+		if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
+			return nil, p
+		}
+		return &struct {
+			ETag string `header:"ETag"`
+		}{ETag: current.String()}, nil
+	})
+	Register(reg, Operation{
 		Operation:   humaOp(http.MethodDelete, Prefix+"/docprobe/{id}", "deleteDocProbe", "probe", "guarded delete"),
 		Class:       ClassPublic,
 		Guarded:     true,
@@ -421,6 +464,14 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	}
 	if put.Responses["200"].Headers["ETag"] == nil {
 		t.Fatalf("put 200 lacks the ETag header: %+v", put.Responses["200"])
+	}
+	patch := doc.Paths[Prefix+"/docprobe/{id}"]["patch"]
+	if r, ok := patch.Responses["204"]; !ok {
+		t.Fatalf("patch lacks its declared 204: %v", patch.Responses)
+	} else if len(r.Content) != 0 {
+		t.Fatalf("patch 204 documents content the runtime never sends: %v", r.Content)
+	} else if r.Headers["ETag"] == nil {
+		t.Fatalf("patch 204 lacks the ETag header: %+v", r)
 	}
 	ifNoneMatchOnPut := false
 	for _, p := range put.Parameters {

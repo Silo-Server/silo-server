@@ -58,6 +58,14 @@ const (
 	metaCreateOnly      = "silo.create_only"
 	metaRetrySafety     = "silo.retry_safety"
 	metaDeprecation     = "silo.deprecation"
+	// metaIdentityOnly marks an operation whose output declares an ETag: its
+	// responses are served identity-encoded (IdentityEncoded), so a request
+	// that forbids identity is refused up front (encodingGuard).
+	metaIdentityOnly = "silo.identity_only"
+	// metaFormSchema names the multipart form type of an operation whose
+	// RawBody is a huma.MultipartFormFiles[T]; the document hook registers
+	// the form under that name so the request schema is not anonymous.
+	metaFormSchema = "silo.form_schema"
 )
 
 // RetrySafety is the mutation retry-safety strategy an operation declares
@@ -249,12 +257,16 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	if op.Deprecation != nil {
 		op.Metadata[metaDeprecation] = op.Deprecation
 	}
+	op.Metadata[metaIdentityOnly] = declaresHeader(reflect.TypeOf(out), etagField)
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {
 		limit = MaxJSONBodyBytes
 	}
 	op.Metadata[metaMaxBodyBytes] = limit
+	if name := multipartFormName(reflect.TypeOf(in)); name != "" {
+		op.Metadata[metaFormSchema] = name
+	}
 	// Huma reads through a LimitReader and reports "too large" when the count
 	// reaches the limit, so a body of exactly N bytes needs N+1. Every limit
 	// goes through this translation, the default and an override alike.
@@ -271,6 +283,23 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	reg.mu.Unlock()
 	huma.Register(reg.api, op.Operation, handler)
 	documentConcurrencyResponses(reg.api.OpenAPI(), op)
+}
+
+// multipartFormName returns the form type name of an input whose RawBody is
+// a huma.MultipartFormFiles[T], else "".
+func multipartFormName(t reflect.Type) string {
+	if t == nil || t.Kind() != reflect.Struct {
+		return ""
+	}
+	f, ok := t.FieldByName("RawBody")
+	if !ok || !strings.HasPrefix(f.Type.Name(), "MultipartFormFiles[") {
+		return ""
+	}
+	data, ok := f.Type.FieldByName("data")
+	if !ok {
+		return ""
+	}
+	return data.Type.Elem().Name()
 }
 
 func checkOperation(op Operation) error {
