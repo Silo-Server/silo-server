@@ -7,6 +7,7 @@
 export const v2Operations = {
   "DELETE /api/v2/auth/sessions/{id}": "deleteSession",
   "GET /api/v2/account/me": "getCurrentUser",
+  "GET /api/v2/account/password/capability": "getAccountPasswordCapability",
   "GET /api/v2/admin/users": "listAdminUsers",
   "GET /api/v2/auth/device": "getDeviceLogin",
   "GET /api/v2/auth/device/capability": "getDeviceLoginCapability",
@@ -23,6 +24,7 @@ export const v2Operations = {
   "GET /api/v2/system/setup": "getSetupStatus",
   "GET /api/v2/user/libraries": "listUserLibraries",
   "PATCH /api/v2/profiles/{id}": "updateProfile",
+  "POST /api/v2/account/password": "changePassword",
   "POST /api/v2/auth/device/approve": "approveDeviceLogin",
   "POST /api/v2/auth/device/approve-handoff": "approveDeviceHandoff",
   "POST /api/v2/auth/device/deny": "denyDeviceLogin",

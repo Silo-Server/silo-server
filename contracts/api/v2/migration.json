@@ -18907,13 +18907,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/account/password/capability",
+        "operation_id": "getAccountPasswordCapability"
       },
-      "notes": "Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Ported as getAccountPasswordCapability (profile scoped with an optional X-Profile-Id, as v1's optional viewer-access group). Capability document in the system/info shape: revision and state head with v1's change_password as allowed, then requires_current_password, minimum_password_length and maximum_password_bytes; v1's schema_version is dropped in favour of revision, and a server without a password service is state not_configured with a 200. Cache-Control: no-cache. Conditionally registered on v1 (authHandler != nil; authMiddleware != nil); v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -18971,13 +18971,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/account/password",
+        "operation_id": "changePassword"
       },
-      "notes": "Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Ported as changePassword (profile scoped with an optional X-Profile-Id, as v1's optional viewer-access group): same {current_password, new_password} body and 204 on success. A missing or blank member is 422 validation_failed at the member (v1: 400 bad_request); the wrong current password and a rejected new password are 422 validation_failed at body.current_password / body.new_password (v1: 400 invalid_current_password, weak_password, password_too_long); a non-primary profile, API key or impersonated session is 403 permission_denied (v1: password_change_forbidden); an account without local sign-in is 409 conflict (v1: password_login_disabled); a missing password service is 503 dependency_unavailable (v1: password_change_unavailable). v1's per-endpoint password_change rate-limit bucket has no v2 equivalent on an authenticated operation (RateLimitBucket is public-only); v2 relies on the class gate's generic limiter. Conditionally registered on v1 (authHandler != nil; authMiddleware != nil); v2 registers the operation unconditionally."
     },
     {
       "listener": "api",

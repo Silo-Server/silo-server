@@ -122,6 +122,112 @@
       "body_file": "authentication_required.json"
     },
     {
+      "name": "change_password_authentication_required",
+      "operation_id": "changePassword",
+      "scenario": "A password change without a credential.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/account/password",
+        "body": "{\"current_password\":\"pw\",\"new_password\":\"margin fossil quench hollow\"}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "change_password_authentication_required.json"
+    },
+    {
+      "name": "change_password_current_password_incorrect",
+      "operation_id": "changePassword",
+      "scenario": "A wrong current password is a validation failure at body.current_password (v1: 400 invalid_current_password); the rejected value is never echoed.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/account/password",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"current_password\":\"not-the-password\",\"new_password\":\"margin fossil quench hollow\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "change_password_current_password_incorrect.json"
+    },
+    {
+      "name": "change_password_new_password_missing",
+      "operation_id": "changePassword",
+      "scenario": "A body without new_password is refused by the schema at the member before any authority is judged.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/account/password",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"current_password\":\"pw\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "change_password_new_password_missing.json"
+    },
+    {
+      "name": "change_password_permission_denied",
+      "operation_id": "changePassword",
+      "scenario": "A secondary profile may not replace the shared account password (v1: 403 password_change_forbidden).",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/account/password",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"current_password\":\"pw\",\"new_password\":\"margin fossil quench hollow\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "change_password_permission_denied.json"
+    },
+    {
+      "name": "change_password_profile_verification_required",
+      "operation_id": "changePassword",
+      "scenario": "A declared PIN-locked profile without X-Profile-Token is judged by viewer access even though the header is optional.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/account/password",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary-locked"
+        },
+        "body": "{\"current_password\":\"pw\",\"new_password\":\"margin fossil quench hollow\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "change_password_profile_verification_required.json"
+    },
+    {
       "name": "complete_oauth_login_code_required",
       "operation_id": "completeOAuthLogin",
       "scenario": "A completion without its code is a validation failure naming the member.",
@@ -272,6 +378,64 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "end_impersonation_not_impersonating.json"
+    },
+    {
+      "name": "get_account_password_capability_authentication_required",
+      "operation_id": "getAccountPasswordCapability",
+      "scenario": "The password capability without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/account/password/capability"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_account_password_capability_authentication_required.json"
+    },
+    {
+      "name": "get_account_password_capability_ok",
+      "operation_id": "getAccountPasswordCapability",
+      "scenario": "The password capability for an administrator with no profile declared: allowed, with the length limits changePassword enforces.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/account/password/capability",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AccountPasswordCapability",
+      "body_file": "get_account_password_capability_ok.json"
+    },
+    {
+      "name": "get_account_password_capability_secondary_profile",
+      "operation_id": "getAccountPasswordCapability",
+      "scenario": "A secondary profile is answered allowed=false rather than refused: the password is account-wide and only the primary profile may replace it.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/account/password/capability",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AccountPasswordCapability",
+      "body_file": "get_account_password_capability_secondary_profile.json"
     },
     {
       "name": "get_current_user_ok",
