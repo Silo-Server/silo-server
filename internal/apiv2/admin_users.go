@@ -67,6 +67,7 @@ func registerAdminUsers(reg *Registry) {
 			"List every login account with its policy overrides and effective policy."),
 		Class:          ClassActingAdmin,
 		DemoRestricted: true,
+		ServiceBacked:  true,
 	}, reg.listAdminUsers)
 }
 

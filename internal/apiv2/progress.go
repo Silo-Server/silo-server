@@ -63,7 +63,8 @@ func registerProgress(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/progress", opListProgress, "progress",
 			"List the acting profile's watch progress, newest change first."),
-		Class: ClassProfileScoped,
+		Class:         ClassProfileScoped,
+		ServiceBacked: true,
 	}, func(ctx context.Context, in *ProgressListInput) (*ProgressCollectionOutput, error) {
 		return reg.listProgress(ctx, cursors, in)
 	})

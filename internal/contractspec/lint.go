@@ -18,6 +18,7 @@ import (
 const (
 	extClass          = "x-silo-class"
 	extDemoRestricted = "x-silo-demo-restricted"
+	extServiceBacked  = "x-silo-service-backed"
 	extExtensionBag   = "x-silo-extension-bag"
 	securityScheme    = "bearerAuth"
 )
@@ -90,6 +91,7 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 		return
 	}
 	demo, _ := op.Extensions[extDemoRestricted].(bool)
+	serviceBacked, _ := op.Extensions[extServiceBacked].(bool)
 	success := false
 	for status := range op.Responses {
 		if code, err := strconv.Atoi(status); err == nil && code >= 200 && code < 300 {
@@ -99,7 +101,7 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 	if !success {
 		fail("%s: no success status is documented", where)
 	}
-	implied := apiv2.ImpliedStatuses(class, demo, op.RequestBody != nil, strings.Contains(path, "{"))
+	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"))
 	for _, status := range implied {
 		if _, ok := op.Responses[strconv.Itoa(status)]; !ok {
 			fail("%s: status %d is implied by class %s but not documented", where, status, class)

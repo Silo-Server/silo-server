@@ -1232,7 +1232,8 @@
         "tags": [
           "account"
         ],
-        "x-silo-class": "authenticated"
+        "x-silo-class": "authenticated",
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/admin/users": {
@@ -1246,6 +1247,17 @@
             "schema": {
               "examples": [
                 "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
               ],
               "type": "string"
             }
@@ -1291,6 +1303,16 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "406": {
             "content": {
@@ -1353,7 +1375,8 @@
           "admin"
         ],
         "x-silo-class": "acting_admin",
-        "x-silo-demo-restricted": true
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/openapi.json": {
@@ -1449,6 +1472,17 @@
             "schema": {
               "examples": [
                 "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
               ],
               "type": "string"
             }
@@ -1630,7 +1664,8 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/progress": {
@@ -1645,6 +1680,17 @@
             "schema": {
               "examples": [
                 "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
               ],
               "type": "string"
             }
@@ -1752,6 +1798,16 @@
             },
             "description": "Forbidden"
           },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "406": {
             "content": {
               "application/problem+json": {
@@ -1812,7 +1868,8 @@
         "tags": [
           "progress"
         ],
-        "x-silo-class": "profile_scoped"
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/system/info": {
@@ -1937,13 +1994,24 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Report whether the server still needs its first administrator.",
         "tags": [
           "system"
         ],
-        "x-silo-class": "public"
+        "x-silo-class": "public",
+        "x-silo-service-backed": true
       }
     }
   }

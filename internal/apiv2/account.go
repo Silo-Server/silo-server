@@ -37,7 +37,8 @@ func registerAccount(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/account/me", "getCurrentUser", "account",
 			"Get the authenticated caller's login account."),
-		Class: ClassAuthenticated,
+		Class:         ClassAuthenticated,
+		ServiceBacked: true,
 	}, reg.getCurrentUser)
 }
 

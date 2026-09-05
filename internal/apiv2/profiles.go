@@ -133,6 +133,7 @@ func registerProfiles(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		DemoRestricted:  true,
+		ServiceBacked:   true,
 	}, reg.updateProfile)
 }
 

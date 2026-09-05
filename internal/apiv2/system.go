@@ -70,7 +70,8 @@ func registerSystem(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/system/setup", "getSetupStatus", "system",
 			"Report whether the server still needs its first administrator."),
-		Class: ClassPublic,
+		Class:         ClassPublic,
+		ServiceBacked: true,
 	}, reg.getSetupStatus)
 }
 

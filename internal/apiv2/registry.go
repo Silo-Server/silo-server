@@ -86,6 +86,13 @@ type Operation struct {
 	// operation: Register applies the framework's off-by-one convention and
 	// records the declared limit so the 413 names it.
 	MaxBodyBytes int64
+	// ServiceBacked marks a handler that depends on a wired service and so
+	// answers 503 dependency_unavailable when the wiring lacks it. Every
+	// gated class already implies 503 (a missing gate fails closed); the
+	// flag matters on ClassPublic, where only the handler can produce it.
+	// The document and discovery operations answer from the build alone
+	// and leave it unset.
+	ServiceBacked bool
 }
 
 // Registry is the deterministic registration surface. Domain files call

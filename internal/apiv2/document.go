@@ -19,6 +19,7 @@ const (
 	extClass          = "x-silo-class"
 	extPermission     = "x-silo-permission"
 	extDemoRestricted = "x-silo-demo-restricted"
+	extServiceBacked  = "x-silo-service-backed"
 	// extExtensionBag marks the one legitimate use of additionalProperties:
 	// a named bag whose keys are not fixed by this contract. The spec lint
 	// refuses any other additionalProperties.
@@ -30,8 +31,16 @@ const (
 // it holds.
 const securitySchemeBearer = "bearerAuth"
 
-// profileHeader is the header every profile-resolving class reads.
-const profileHeader = "X-Profile-Id"
+// profileHeader is the header every profile-resolving class reads;
+// profileTokenHeader is the proof it reads alongside it for a PIN-locked
+// profile.
+const (
+	profileHeader      = "X-Profile-Id"
+	profileTokenHeader = "X-Profile-Token"
+)
+
+// paramInHeader is the OpenAPI parameter location of a request header.
+const paramInHeader = "header"
 
 // documentDeclaration writes the class-implied documentation onto the Huma
 // operation before registration: the security requirement, the profile
@@ -50,9 +59,12 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.DemoRestricted {
 		op.Extensions[extDemoRestricted] = true
 	}
+	if op.ServiceBacked {
+		op.Extensions[extServiceBacked] = true
+	}
 	hasBody := declaresBody(input)
 	hasPath := strings.Contains(op.Path, "{")
-	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, hasBody, hasPath) {
+	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath) {
 		op.Errors = appendUnique(op.Errors, status)
 	}
 	if op.Class == ClassPublic {
@@ -64,7 +76,20 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 		if op.ProfileOptional {
 			class = ClassAuthenticated // documented as optional
 		}
-		op.Parameters = append(op.Parameters, profileHeaderParam(class))
+		op.Parameters = append(op.Parameters, profileHeaderParam(class), profileTokenHeaderParam())
+	}
+}
+
+// profileTokenHeaderParam documents X-Profile-Token, which viewer access
+// reads next to X-Profile-Id: a PIN-locked profile resolves only with it,
+// and without it the gate answers profile_verification_required. It is never
+// required, since an unlocked profile needs no proof.
+func profileTokenHeaderParam() *huma.Param {
+	return &huma.Param{
+		Name:        profileTokenHeader,
+		In:          paramInHeader,
+		Description: "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+		Schema:      &huma.Schema{Type: "string", Examples: []any{"pvt_5f3a9c1e7b2d4e8fa0c6"}},
 	}
 }
 
@@ -77,7 +102,7 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 func profileHeaderParam(class Class) *huma.Param {
 	p := &huma.Param{
 		Name:   profileHeader,
-		In:     "header",
+		In:     paramInHeader,
 		Schema: &huma.Schema{Type: "string", Examples: []any{"1"}},
 	}
 	switch class {
@@ -101,12 +126,15 @@ func resolvesProfile(class Class) bool {
 // ImpliedStatuses lists the problem statuses an operation of the given shape
 // documents, in ascending order. Shared by every operation: 400 (malformed
 // request), 406 (negotiation), 422 (undeclared query parameter), 500. A body
-// adds 408 (the body-read deadline), 413 and 415; a path parameter adds 404;
-// every gated class adds 401, 429 and 503 (a gate the wiring lacks fails
-// closed); a class that resolves a profile or a demo-restricted mutation adds
-// 403. Statuses an operation produces on its own (409 for a name conflict,
-// say) are declared on that operation's Errors, not here.
-func ImpliedStatuses(class Class, demoRestricted, hasBody, hasPath bool) []int {
+// adds 408 (the body-read deadline), 413 and 415; a path parameter adds 404,
+// as does a profile-resolving class (viewer access answers 404 for an unknown
+// X-Profile-Id before the handler runs); a service-backed handler adds 503
+// (its service is not wired); every gated class adds 401, 429 and 503 (a
+// gate the wiring lacks fails closed); a class that resolves a profile or a
+// demo-restricted mutation adds 403. Statuses an operation produces on its
+// own (409 for a name conflict, say) are declared on that operation's
+// Errors, not here.
+func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPath bool) []int {
 	set := map[int]bool{
 		http.StatusBadRequest: true, http.StatusNotAcceptable: true,
 		http.StatusUnprocessableEntity: true, http.StatusInternalServerError: true,
@@ -116,8 +144,11 @@ func ImpliedStatuses(class Class, demoRestricted, hasBody, hasPath bool) []int {
 		set[http.StatusRequestEntityTooLarge] = true
 		set[http.StatusUnsupportedMediaType] = true
 	}
-	if hasPath {
+	if hasPath || resolvesProfile(class) {
 		set[http.StatusNotFound] = true
+	}
+	if serviceBacked {
+		set[http.StatusServiceUnavailable] = true
 	}
 	if class != ClassPublic {
 		set[http.StatusUnauthorized] = true

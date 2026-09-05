@@ -303,6 +303,8 @@ func TestListProgressDenied(t *testing.T) {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
+	// An unknown profile is the viewer-access 404 as a not_found problem, which
+	// the class implies without a path parameter (ImpliedStatuses).
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress", "", with(bearer(memberToken), "X-Profile-Id", "p-unknown")), TypeNotFound)
 	// A store failure is the v1 decision (500) as a problem.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress", "", with(bearer(memberToken), "X-Profile-Id", "p-owner")), TypeInternalError)
