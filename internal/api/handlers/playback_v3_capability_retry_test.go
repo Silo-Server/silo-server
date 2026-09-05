@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -84,8 +85,22 @@ func TestLookupRemoteCapabilitiesFetchesOnceWhenNothingInvalidates(t *testing.T)
 func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
 	handler := NewPlaybackHandler(nil)
 
+	// The invalidation under test also starts a background re-probe, and a
+	// local node answers it in well under a millisecond. Left free, that probe
+	// refills the cache between the invalidation and the check that it was
+	// emptied whenever the test goroutine is descheduled in between — which a
+	// loaded package run does routinely. The node holds the second read until
+	// the assertions have run, so the cache state they inspect is the
+	// invalidation's, not the scheduler's.
+	var fetches atomic.Int32
+	reprobeStarted := make(chan struct{})
+	releaseReprobe := make(chan struct{})
 	advertised := 136_000
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fetches.Add(1) == 2 {
+			close(reprobeStarted)
+			<-releaseReprobe
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"resolved":                 "qsv",
@@ -93,6 +108,11 @@ func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
 		})
 	}))
 	t.Cleanup(node.Close)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseReprobe) }) }
+	// Registered after node.Close so it runs first: Close waits for the held
+	// request, and a failed assertion must not turn into a hang.
+	t.Cleanup(release)
 
 	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), node.URL, false); err != nil {
 		t.Fatalf("lookupRemoteCapabilitiesV3: %v", err)
@@ -103,16 +123,28 @@ func TestRefreshNodeCapabilitiesKeepsTheLearnedProbeBudget(t *testing.T) {
 	}
 
 	handler.RefreshNodeCapabilitiesV3(node.URL)
+	select {
+	case <-reprobeStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("invalidation did not start the background re-probe it owes")
+	}
 
 	if got := handler.remoteToneMapProbeTimeoutV3(node.URL); got != learned {
 		t.Fatalf("budget after invalidation = %v, want the learned %v — the refresh it triggers is sized from this",
 			got, learned)
 	}
-	// The inventory itself is still discarded; only the budget survives.
+	// The inventory itself is still discarded; only the budget survives. With
+	// the re-probe held at the node, an entry here can only be the one the
+	// invalidation should have removed.
 	handler.v3NodeCapabilitiesMu.Lock()
 	_, cached := handler.v3NodeCapabilities[node.URL]
 	handler.v3NodeCapabilitiesMu.Unlock()
 	if cached {
 		t.Fatal("invalidation left the inventory cached")
 	}
+
+	// Let the re-probe finish and refill the cache before the node goes away,
+	// so the background goroutine does not outlive the test that started it.
+	release()
+	waitForCachedNodeCapabilitiesV3(t, handler, node.URL)
 }
