@@ -59,6 +59,14 @@ type probeItemInput struct {
 // ProbeSmallBodyLimit is the override the small-body probe declares.
 const ProbeSmallBodyLimit int64 = 256
 
+// The deprecated probes' fixed declaration: 2026-09-01T12:30:45Z, sunset
+// 2027-03-01T00:00:00Z.
+var (
+	probeDeprecatedAt     = time.Date(2026, time.September, 1, 12, 30, 45, 0, time.UTC)
+	probeDeprecatedSunset = time.Date(2027, time.March, 1, 0, 0, 0, 0, time.UTC)
+	probeDeprecatedLink   = DocsOrigin + "api/v2/migration/probe"
+)
+
 type probeCursor struct {
 	Offset int `json:"o"`
 }
@@ -72,9 +80,12 @@ type probeListOutput struct {
 func registerProbes(reg *Registry) {
 	for _, class := range []Class{ClassPublic, ClassAuthenticated, ClassProfileScoped, ClassActingAdmin, ClassPermissionGated} {
 		class := class
+		// The probe echoes its body and stores nothing, so a duplicate
+		// submission converges on the same (absent) state.
 		op := Operation{
-			Operation: humaOp(http.MethodPost, Prefix+"/probe/"+string(class), "probe"+string(class)+"Op", "probe", "probe"),
-			Class:     class,
+			Operation:   humaOp(http.MethodPost, Prefix+"/probe/"+string(class), "probe"+string(class)+"Op", "probe", "probe"),
+			Class:       class,
+			RetrySafety: RetrySafetyNaturalIdempotent,
 		}
 		op.OperationID = "probe" + lowerCamelFrom(string(class))
 		if class == ClassPermissionGated {
@@ -118,6 +129,7 @@ func registerProbes(reg *Registry) {
 		Operation:    humaOp(http.MethodPost, Prefix+"/probe/smallbody", "createProbeSmallBody", "probe", "small body"),
 		Class:        ClassPublic,
 		MaxBodyBytes: ProbeSmallBodyLimit,
+		RetrySafety:  RetrySafetyNaturalIdempotent,
 	}, probeHandler)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/probe/panic", "probePanic", "probe", "panic"),
@@ -149,6 +161,29 @@ func registerProbes(reg *Registry) {
 	}, func(context.Context, *struct{}) (*probeOutput, error) {
 		return nil, NewProblem(TypeDependencyUnavailable, "The database is unavailable.").WithRetryAfter(3)
 	})
+	// Deprecated operations: one public with a planned sunset, one
+	// authenticated without, so the headers are observed on a 200, on a gate
+	// denial, and on a guard problem.
+	sunset := probeDeprecatedSunset
+	Register(reg, Operation{
+		Operation:   humaOp(http.MethodGet, Prefix+"/probe/deprecated", "probeDeprecated", "probe", "deprecated"),
+		Class:       ClassPublic,
+		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink, Sunset: &sunset},
+	}, func(context.Context, *struct{}) (*SetupStatusOutput, error) {
+		// A committed schema, so the deprecated_ok fixture body validates.
+		return &SetupStatusOutput{Body: SetupStatus{NeedsSetup: false}}, nil
+	})
+	Register(reg, Operation{
+		Operation:   humaOp(http.MethodPost, Prefix+"/probe/deprecated-nosunset", "probeDeprecatedNoSunset", "probe", "deprecated, no sunset"),
+		Class:       ClassAuthenticated,
+		RetrySafety: RetrySafetyNaturalIdempotent,
+		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink},
+	}, probeHandler)
+	Register(reg, Operation{
+		Operation:   humaOp(http.MethodGet, Prefix+"/probe/deprecated-panic", "probeDeprecatedPanic", "probe", "deprecated, panics"),
+		Class:       ClassPublic,
+		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink, Sunset: &sunset},
+	}, func(context.Context, *struct{}) (*probeOutput, error) { panic("boom: deprecated") })
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/probe/zero", "probeZeroInstant", "probe", "zero"),
 		Class:     ClassPublic,
@@ -355,9 +390,10 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			return out, nil
 		})
 		Register(reg, Operation{
-			Operation: humaOp(http.MethodPut, Prefix+"/probe/guarded/{id}", "putGuardedProbe", "probe", "guarded replace"),
-			Class:     ClassPublic,
-			Guarded:   true,
+			Operation:   humaOp(http.MethodPut, Prefix+"/probe/guarded/{id}", "putGuardedProbe", "probe", "guarded replace"),
+			Class:       ClassPublic,
+			Guarded:     true,
+			RetrySafety: RetrySafetyNaturalIdempotent,
 		}, func(_ context.Context, in *guardedProbeWriteInput) (*guardedProbeWriteOutput, error) {
 			// Every attempt runs the whole sequence against the row it
 			// loaded: 404 before any precondition, then both preconditions
@@ -397,9 +433,10 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			}
 		})
 		Register(reg, Operation{
-			Operation: humaOp(http.MethodDelete, Prefix+"/probe/guarded/{id}", "deleteGuardedProbe", "probe", "guarded delete"),
-			Class:     ClassPublic,
-			Guarded:   true,
+			Operation:   humaOp(http.MethodDelete, Prefix+"/probe/guarded/{id}", "deleteGuardedProbe", "probe", "guarded delete"),
+			Class:       ClassPublic,
+			Guarded:     true,
+			RetrySafety: RetrySafetyNaturalIdempotent,
 		}, func(_ context.Context, in *guardedProbeDeleteInput) (*guardedProbeDeleteOutput, error) {
 			// The same shape as the guarded PUT: every attempt loads the
 			// row and runs the whole sequence, so a wildcard retry judges
@@ -432,9 +469,10 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 		// overwrite. It shares the store so a created row is then readable
 		// and guardable through the other probes.
 		Register(reg, Operation{
-			Operation:  humaOp(http.MethodPut, Prefix+"/probe/created/{id}", "putCreatedProbe", "probe", "create-only put"),
-			Class:      ClassPublic,
-			CreateOnly: true,
+			Operation:   humaOp(http.MethodPut, Prefix+"/probe/created/{id}", "putCreatedProbe", "probe", "create-only put"),
+			Class:       ClassPublic,
+			CreateOnly:  true,
+			RetrySafety: RetrySafetyUniqueConstraint, // client-selected id; the store refuses a second create
 		}, func(_ context.Context, in *createOnlyProbeInput) (*guardedProbeWriteOutput, error) {
 			var existing *EntityTag
 			row, ok := store.Get(in.ID)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/textproto"
 	"runtime/debug"
@@ -141,7 +142,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
-	api.UseMiddleware(observeOperation, defaultHeaders, classGate(deps), observeIdentity, normalizeAccept, encodingGuard, mediaTypeGuard, queryGuard)
+	api.UseMiddleware(observeOperation, defaultHeaders, deprecationHeaders, classGate(deps), observeIdentity, normalizeAccept, encodingGuard, mediaTypeGuard, queryGuard)
 
 	reg := &Registry{api: api, deps: deps}
 	registerAll(reg)
@@ -317,7 +318,8 @@ func dropDelegationPattern(next http.Handler) http.Handler {
 // cheap; raw media and streams are not served through Huma.
 func bufferResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bw := &bufferedWriter{w: w, ctx: r.Context()}
+		bw := &bufferedWriter{w: w, ctx: r.Context(), retirement: make(http.Header)}
+		r = r.WithContext(context.WithValue(r.Context(), retirementHeadersKey{}, bw.retirement))
 		defer func() {
 			if rec := recover(); rec != nil {
 				if rec == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
@@ -338,11 +340,12 @@ func bufferResponse(next http.Handler) http.Handler {
 }
 
 type bufferedWriter struct {
-	w       http.ResponseWriter
-	ctx     context.Context
-	status  int
-	body    bytes.Buffer
-	flushed bool
+	w          http.ResponseWriter
+	ctx        context.Context
+	status     int
+	body       bytes.Buffer
+	flushed    bool
+	retirement http.Header
 }
 
 func (b *bufferedWriter) Header() http.Header { return b.w.Header() }
@@ -364,19 +367,18 @@ func (b *bufferedWriter) Write(p []byte) (int, error) {
 // connection.
 func (b *bufferedWriter) Unwrap() http.ResponseWriter { return b.w }
 
-// discard drops whatever the failed handler produced, headers included,
-// except the request ID.
+// discard drops the failed response and restores only the operation's declared
+// retirement values, captured before downstream middleware can replace them.
 func (b *bufferedWriter) discard() {
 	b.status = 0
 	b.body.Reset()
 	h := b.w.Header()
-	id := h[RequestIDHeader] //nolint:staticcheck // the contract spells the header X-Request-ID; the map key is set the same way
-	for k := range h {
-		delete(h, k)
+	requestID := h[RequestIDHeader] //nolint:staticcheck // exact contract spelling
+	clear(h)
+	if len(requestID) > 0 {
+		h[RequestIDHeader] = requestID //nolint:staticcheck // exact contract spelling
 	}
-	if len(id) > 0 {
-		h[RequestIDHeader] = id
-	}
+	maps.Copy(h, b.retirement)
 }
 
 func (b *bufferedWriter) flush() {

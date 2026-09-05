@@ -1,8 +1,11 @@
 package apiv2
 
 import (
+	"time"
+
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
 	"sort"
@@ -29,6 +32,14 @@ const (
 	extGuarded     = "x-silo-guarded"
 	extConditional = "x-silo-conditional"
 	extCreateOnly  = "x-silo-create-only"
+	// extRetrySafety records the mutation retry-safety strategy so a reader
+	// of the document can see how each mutation tolerates a duplicate
+	// submission or a retry after a lost response.
+	extRetrySafety = "x-silo-retry-safety"
+	// extDeprecation documents a Deprecation next to `deprecated: true`:
+	// {at, link, sunset?} with RFC 3339 UTC instants. The spec lint requires
+	// the flag and the extension together (internal/contractspec).
+	extDeprecation = "x-silo-deprecation"
 	// extExtensionBag marks the one legitimate use of additionalProperties:
 	// a named bag whose keys are not fixed by this contract. The spec lint
 	// refuses any other additionalProperties.
@@ -85,6 +96,23 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.CreateOnly {
 		op.Extensions[extCreateOnly] = true
 		op.Parameters = append(op.Parameters, ifMatchOptionalParam(), ifNoneMatchCreateParam())
+	}
+	if op.RetrySafety != "" {
+		op.Extensions[extRetrySafety] = string(op.RetrySafety)
+	}
+	// Forward guard: the contract lets Idempotency-Key appear only on an
+	// operation that implements and documents it, never as an advertised
+	// field the server ignores.
+	if declaresHeader(input, idempotencyKeyField) && op.RetrySafety != RetrySafetyIdempotencyKey {
+		panic(fmt.Sprintf("apiv2: %s: input declares header %s but retry safety is %q, not %s", op.OperationID, idempotencyKeyField, op.RetrySafety, RetrySafetyIdempotencyKey))
+	}
+	if d := op.Deprecation; d != nil {
+		op.Deprecated = true
+		ext := map[string]any{"at": d.At.UTC().Format(time.RFC3339), "link": d.Link}
+		if d.Sunset != nil {
+			ext["sunset"] = d.Sunset.UTC().Format(time.RFC3339)
+		}
+		op.Extensions[extDeprecation] = ext
 	}
 	hasBody := declaresBody(input)
 	hasPath := strings.Contains(op.Path, "{")

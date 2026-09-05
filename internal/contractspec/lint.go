@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/apiv2"
@@ -23,6 +24,12 @@ const (
 	extConditional    = "x-silo-conditional"
 	extCreateOnly     = "x-silo-create-only"
 	extExtensionBag   = "x-silo-extension-bag"
+	extDeprecation    = "x-silo-deprecation"
+
+	// Members of x-silo-deprecation.
+	deprecationAt     = "at"
+	deprecationLink   = "link"
+	deprecationSunset = "sunset"
 	securityScheme    = "bearerAuth"
 )
 
@@ -62,6 +69,7 @@ func Lint(doc []byte) []string {
 			}
 			lintStatuses(fail, where, path, op)
 			lintSecurity(fail, where, op)
+			lintDeprecation(fail, where, op)
 			if op.RequestBody != nil {
 				for mt, media := range op.RequestBody.Content {
 					lintNamed(fail, where+" request "+mt, media.Schema)
@@ -134,6 +142,55 @@ func lintSecurity(fail func(string, ...any), where string, op operation) {
 	}
 	if !found {
 		fail("%s: class %s requires the %s security scheme", where, class, securityScheme)
+	}
+}
+
+// lintDeprecation requires `deprecated: true` and x-silo-deprecation to
+// travel together, and the extension to carry what the listener emits: an
+// RFC 3339 `at`, an https `link` under the documentation origin, and an
+// optional RFC 3339 `sunset` no earlier than `at`. A flag without the
+// extension documents a retirement the headers do not announce; the
+// extension without the flag hides one from generated clients.
+func lintDeprecation(fail func(string, ...any), where string, op operation) {
+	raw, has := op.Extensions[extDeprecation]
+	if !op.Deprecated && !has {
+		return
+	}
+	if op.Deprecated && !has {
+		fail("%s: deprecated: true without %s", where, extDeprecation)
+		return
+	}
+	if !op.Deprecated {
+		fail("%s: %s without deprecated: true", where, extDeprecation)
+	}
+	ext, ok := raw.(map[string]any)
+	if !ok {
+		fail("%s: %s is not an object", where, extDeprecation)
+		return
+	}
+	at, atErr := time.Parse(time.RFC3339, stringExt(ext, deprecationAt))
+	if atErr != nil {
+		fail("%s: %s.at is not an RFC 3339 instant", where, extDeprecation)
+	}
+	link := stringExt(ext, deprecationLink)
+	if !strings.HasPrefix(link, apiv2.DocsOrigin) {
+		fail("%s: %s.link %q is not an https URL under %s", where, extDeprecation, link, apiv2.DocsOrigin)
+	}
+	if rawSunset, planned := ext[deprecationSunset]; planned {
+		sunset, err := time.Parse(time.RFC3339, stringExt(ext, deprecationSunset))
+		switch {
+		case err != nil:
+			fail("%s: %s.sunset %v is not an RFC 3339 instant", where, extDeprecation, rawSunset)
+		case atErr == nil && sunset.Before(at):
+			fail("%s: %s.sunset precedes at", where, extDeprecation)
+		}
+	}
+	for key := range ext {
+		switch key {
+		case deprecationAt, deprecationLink, deprecationSunset:
+		default:
+			fail("%s: %s has unknown member %q", where, extDeprecation, key)
+		}
 	}
 }
 
@@ -211,6 +268,7 @@ type operation struct {
 	RequestBody *requestBody          `json:"requestBody"`
 	Responses   map[string]response   `json:"responses"`
 	Security    []map[string][]string `json:"security"`
+	Deprecated  bool                  `json:"deprecated"`
 	Extensions  map[string]any        `json:"-"`
 }
 

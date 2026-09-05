@@ -257,6 +257,14 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/probe/guarded/a",
 			headers: map[string]string{"If-None-Match": RenderETag(guardedProbeScope, "a", 1).String()},
 			status:  http.StatusNotModified, assertHeaders: []string{"Cache-Control", "ETag"}},
+		{name: "deprecated_ok",
+			scenario: "A deprecated operation answers normally and carries the RFC 9745 Deprecation and Link headers, plus Sunset because a removal is planned (RFC 8594).",
+			method:   http.MethodGet, path: "/api/v2/probe/deprecated",
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "Deprecation", "Link", "Sunset"}, schema: "#/components/schemas/SetupStatus"},
+		{name: "deprecated_problem",
+			scenario: "A problem from a deprecated operation, here the auth gate's 401, carries Deprecation and Link too; this operation has no planned removal, so no Sunset.",
+			method:   http.MethodPost, path: "/api/v2/probe/deprecated-nosunset", body: validBody,
+			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control", "Deprecation", "Link"}, schema: problem},
 		// Last: one handler serves every case, and the cases above read
 		// resource "a" at version 1.
 		{name: "guarded_delete_ok",
