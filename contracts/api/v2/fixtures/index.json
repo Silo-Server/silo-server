@@ -262,6 +262,111 @@
       "body_file": "delete_root_override_validation_failed.json"
     },
     {
+      "name": "dismiss_home_item_missing_anchor",
+      "operation_id": "dismissHomeItem",
+      "scenario": "A Continue Watching dismissal without progress_updated_at: a validation failure at body.progress_updated_at.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/home/dismissals/continue_watching/movie:heat-1995",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "dismiss_home_item_missing_anchor.json"
+    },
+    {
+      "name": "dismiss_home_item_profile_header_required",
+      "operation_id": "dismissHomeItem",
+      "scenario": "A dismissal without X-Profile-Id: a validation failure naming the header; success answers 204 with no body.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/home/dismissals/next_up/episode:severance-s02e01",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"series_id\":\"series:severance\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "dismiss_home_item_profile_header_required.json"
+    },
+    {
+      "name": "get_calendar_ok",
+      "operation_id": "getCalendar",
+      "scenario": "A week of airings and releases reckoned in the viewer's zone, grouped by local day.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/calendar?start=2026-01-05&end=2026-01-11&timezone=America%2FNew_York&filter=all",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Calendar",
+      "body_file": "get_calendar_ok.json"
+    },
+    {
+      "name": "get_calendar_profile_header_required",
+      "operation_id": "getCalendar",
+      "scenario": "A profile-scoped calendar read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/calendar?start=2026-01-05&end=2026-01-11",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_calendar_profile_header_required.json"
+    },
+    {
+      "name": "get_calendar_window_too_long",
+      "operation_id": "getCalendar",
+      "scenario": "An end more than 30 days after start: a validation failure at query.end.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/calendar?start=2026-01-01&end=2026-03-01",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_calendar_window_too_long.json"
+    },
+    {
       "name": "get_current_user_ok",
       "operation_id": "getCurrentUser",
       "scenario": "The signed-in account with no profile selected; impersonation is absent outside an admin impersonation session.",
@@ -280,6 +385,109 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Account",
       "body_file": "get_current_user_ok.json"
+    },
+    {
+      "name": "get_home_layout_ok",
+      "operation_id": "getHomeLayout",
+      "scenario": "The home page's section layout for the acting profile, without items.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/layout",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SectionLayout",
+      "body_file": "get_home_layout_ok.json"
+    },
+    {
+      "name": "get_home_layout_profile_header_required",
+      "operation_id": "getHomeLayout",
+      "scenario": "A profile-scoped home read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/layout",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_layout_profile_header_required.json"
+    },
+    {
+      "name": "get_home_section_items_not_found",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "A section identifier the home layout does not contain.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/nope/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_section_items_not_found.json"
+    },
+    {
+      "name": "get_home_section_items_ok",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "One section of the home page with its cards.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/continue_watching/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Section",
+      "body_file": "get_home_section_items_ok.json"
+    },
+    {
+      "name": "get_home_section_items_profile_header_required",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "A profile-scoped home read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/continue_watching/items",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_section_items_profile_header_required.json"
     },
     {
       "name": "get_library_collection_items_ok",
@@ -647,6 +855,68 @@
       "body_file": "list_admin_users_permission_denied.json"
     },
     {
+      "name": "list_home_sections_invalid_image_size",
+      "operation_id": "listHomeSections",
+      "scenario": "An image size outside the enum is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections?image_size=huge",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_home_sections_invalid_image_size.json"
+    },
+    {
+      "name": "list_home_sections_ok",
+      "operation_id": "listHomeSections",
+      "scenario": "The home page's sections with their catalog cards, artwork presigned at the requested size.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections?image_size=medium",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SectionCollection",
+      "body_file": "list_home_sections_ok.json"
+    },
+    {
+      "name": "list_home_sections_profile_header_required",
+      "operation_id": "listHomeSections",
+      "scenario": "A profile-scoped home read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_home_sections_profile_header_required.json"
+    },
+    {
       "name": "list_libraries_ok",
       "operation_id": "listLibraries",
       "scenario": "Every library in sort order with its presigned poster URL and scan warning.",
@@ -887,6 +1157,109 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_progress_profile_header_required.json"
+    },
+    {
+      "name": "list_section_recipe_candidates_ok",
+      "operation_id": "listSectionRecipeCandidates",
+      "scenario": "The values a parameterized recipe offers for its parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/recipes/custom_filter/candidates",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecipeCandidateCollection",
+      "body_file": "list_section_recipe_candidates_ok.json"
+    },
+    {
+      "name": "list_section_recipe_candidates_profile_header_required",
+      "operation_id": "listSectionRecipeCandidates",
+      "scenario": "A profile-scoped gallery read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/recipes/custom_filter/candidates",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_section_recipe_candidates_profile_header_required.json"
+    },
+    {
+      "name": "list_section_recipe_candidates_unknown_recipe",
+      "operation_id": "listSectionRecipeCandidates",
+      "scenario": "A recipe type with no candidate source.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/recipes/nope/candidates",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_section_recipe_candidates_unknown_recipe.json"
+    },
+    {
+      "name": "list_section_recipes_ok",
+      "operation_id": "listSectionRecipes",
+      "scenario": "The recipe gallery: visible recipes with their presets, grouped by category in key order.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/recipes",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecipeCatalog",
+      "body_file": "list_section_recipes_ok.json"
+    },
+    {
+      "name": "list_section_recipes_profile_header_required",
+      "operation_id": "listSectionRecipes",
+      "scenario": "A profile-scoped gallery read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/recipes",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_section_recipes_profile_header_required.json"
     },
     {
       "name": "list_skipped_roots_ok",
@@ -1191,6 +1564,47 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "set_root_override_validation_failed.json"
+    },
+    {
+      "name": "undismiss_home_item_profile_header_required",
+      "operation_id": "undismissHomeItem",
+      "scenario": "Clearing a dismissal without X-Profile-Id: a validation failure naming the header; success answers 204 with no body.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/home/dismissals/next_up/episode:severance-s02e01",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "undismiss_home_item_profile_header_required.json"
+    },
+    {
+      "name": "undismiss_home_item_unknown_surface",
+      "operation_id": "undismissHomeItem",
+      "scenario": "A surface outside the enum is a validation failure naming the path parameter.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/home/dismissals/watchlist/movie:heat-1995",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "undismiss_home_item_unknown_surface.json"
     },
     {
       "name": "unknown_query_parameter",

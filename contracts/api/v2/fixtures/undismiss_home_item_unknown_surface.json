@@ -1,0 +1,15 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:000000000000000000000046",
+  "errors": [
+    {
+      "location": "path.surface",
+      "code": "invalid_enum",
+      "detail": "expected value to be one of \"continue_watching, next_up\""
+    }
+  ]
+}
+
