@@ -94,6 +94,11 @@ type PlaybackMediaSource struct {
 	DefaultSubtitleStreamIndex  *int
 	SelectedSubtitleStreamIndex *int
 	ETag                        string
+	// MaxStreamingBitrateKbps is the client-requested ceiling negotiated for
+	// this source (0 = none). When the source's own bitrate exceeds it, direct
+	// play and any video-copy transport are withheld so only a real transcode
+	// remains, and that transcode is capped to this value.
+	MaxStreamingBitrateKbps int
 
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.

@@ -47,11 +47,15 @@ const (
 )
 
 type playbackInfoRequest struct {
-	UserID               string          `json:"UserId"`
-	MediaSourceID        string          `json:"MediaSourceId"`
-	AudioStreamIndex     *compatIntValue `json:"AudioStreamIndex,omitempty"`
-	SubtitleStreamIndex  *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
-	StartTimeTicks       int64           `json:"StartTimeTicks"`
+	UserID              string          `json:"UserId"`
+	MediaSourceID       string          `json:"MediaSourceId"`
+	AudioStreamIndex    *compatIntValue `json:"AudioStreamIndex,omitempty"`
+	SubtitleStreamIndex *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
+	StartTimeTicks      int64           `json:"StartTimeTicks"`
+	// MaxStreamingBitrate is the client's requested ceiling in bits per second
+	// (e.g. the "720p - 4 Mbps" quality profile), independent of any cap the
+	// device profile itself advertises. Zero means the client set no cap.
+	MaxStreamingBitrate  int64           `json:"MaxStreamingBitrate,omitempty"`
 	EnableDirectPlay     *bool           `json:"EnableDirectPlay"`
 	EnableDirectStream   *bool           `json:"EnableDirectStream"`
 	EnableTranscoding    *bool           `json:"EnableTranscoding"`
@@ -999,6 +1003,37 @@ func is4KResolution(res string) bool {
 	return access.CompareQuality(res, "2160p") >= 0
 }
 
+// Resolution labels shared by compatResolutionCeilingHeight and
+// compatMaxResolutionForBitrateKbps.
+const (
+	compatResolutionLabel480p  = "480p"
+	compatResolutionLabel720p  = "720p"
+	compatResolutionLabel1080p = "1080p"
+	compatResolutionLabel2160p = "2160p"
+	compatResolutionLabel4320p = "4320p"
+)
+
+// compatSourceVideoHeight resolves a version's pixel height from its probed
+// video track, falling back to the catalog resolution label when no track
+// carries a usable value.
+func compatSourceVideoHeight(version catalog.FileVersion) int {
+	for _, track := range version.VideoTracks {
+		if track.Height > 0 {
+			return track.Height
+		}
+	}
+	resolution := strings.ToLower(strings.TrimSpace(version.Resolution))
+	switch resolution {
+	case "8k":
+		return 4320
+	case "4k", "uhd":
+		return 2160
+	default:
+		height, _ := strconv.Atoi(strings.TrimSuffix(resolution, "p"))
+		return height
+	}
+}
+
 // compatVideoToolboxToneMapBitrateKbps chooses a resolution-aware bitrate for
 // Jellyfin-compatible VideoToolbox tone maps. Those requests intentionally
 // preserve source dimensions, so leaving the bitrate unset would make the
@@ -1008,25 +1043,7 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 		return 0
 	}
 
-	height := 0
-	for _, track := range version.VideoTracks {
-		if track.Height > 0 {
-			height = track.Height
-			break
-		}
-	}
-	if height == 0 {
-		resolution := strings.ToLower(strings.TrimSpace(version.Resolution))
-		switch resolution {
-		case "8k":
-			height = 4320
-		case "4k", "uhd":
-			height = 2160
-		default:
-			height, _ = strconv.Atoi(strings.TrimSuffix(resolution, "p"))
-		}
-	}
-
+	height := compatSourceVideoHeight(version)
 	switch {
 	case height >= 2160:
 		return 20_000
@@ -1040,6 +1057,50 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 		return version.Bitrate
 	default:
 		return 0
+	}
+}
+
+// compatResolutionCeilingHeight returns the maximum pixel height a resolution
+// label (as returned by compatMaxResolutionForBitrateKbps) permits. Cap
+// enforcement compares a source's actual, unbucketed height against this
+// number rather than against a bucketed label: flooring the source height
+// into the same coarse labels first would equate, say, a 1440p source with a
+// genuine 1080p one and let it slip past a 1080p cap unflagged.
+func compatResolutionCeilingHeight(label string) int {
+	switch label {
+	case compatResolutionLabel480p:
+		return 480
+	case compatResolutionLabel720p:
+		return 720
+	case compatResolutionLabel1080p:
+		return 1080
+	case compatResolutionLabel2160p:
+		return 2160
+	case compatResolutionLabel4320p:
+		return 4320
+	default:
+		return 0
+	}
+}
+
+// compatMaxResolutionForBitrateKbps maps a negotiated MaxStreamingBitrate
+// ceiling onto the resolution its Jellyfin quality-profile name implies (e.g.
+// "720p - 4 Mbps", "1080p - 10 Mbps"), so a forced transcode actually
+// downscales instead of spending a starved bitrate on full source dimensions.
+// A cap generous enough to carry 4K returns "": at that ceiling the encoder's
+// normal resolution-aware bitrate ladder already applies.
+func compatMaxResolutionForBitrateKbps(kbps int) string {
+	switch {
+	case kbps <= 0:
+		return ""
+	case kbps < 2_000:
+		return compatResolutionLabel480p
+	case kbps < 6_000:
+		return compatResolutionLabel720p
+	case kbps < 20_000:
+		return compatResolutionLabel1080p
+	default:
+		return ""
 	}
 }
 
@@ -2148,7 +2209,29 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		selectedAudioIndex = intPtr(int(*req.AudioStreamIndex))
 	}
 
-	supportsDirectPlay := enableDirectPlay && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
+	// A client picking a lower quality profile (e.g. "720p - 4 Mbps") caps the
+	// stream via MaxStreamingBitrate rather than declaring narrower codec
+	// support. Direct play and any video-copy transport (progressive remux or
+	// HLS remux) all serve the source video verbatim, so none of them can honor
+	// a cap below the source's own bitrate — only a real transcode can. The
+	// same cap implies a resolution ceiling too (a "720p - 4 Mbps" profile
+	// means 720p, not a 4K frame starved down to 4 Mbps): a source above that
+	// implied resolution is gated the same way, even if its bitrate alone
+	// happens to fit. Below both, negotiation proceeds exactly as before.
+	maxStreamingBitrateKbps := effectiveCompatMaxStreamingBitrateKbps(req, profile)
+	qualityCapExceeded := maxStreamingBitrateKbps > 0 && version.Bitrate > maxStreamingBitrateKbps
+	if !qualityCapExceeded && maxStreamingBitrateKbps > 0 {
+		if resCap := compatMaxResolutionForBitrateKbps(maxStreamingBitrateKbps); resCap != "" {
+			if sourceHeight := compatSourceVideoHeight(version); sourceHeight > 0 {
+				qualityCapExceeded = sourceHeight > compatResolutionCeilingHeight(resCap)
+			}
+		}
+	}
+	if qualityCapExceeded {
+		allowVideoCopy = false
+	}
+
+	supportsDirectPlay := enableDirectPlay && !qualityCapExceeded && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
 	audioSupported := profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	enableTranscoding := boolDefault(req.EnableTranscoding, true)
@@ -2213,7 +2296,28 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		SelectedAudioStreamIndex:   selectedAudioIndex,
 		DefaultSubtitleStreamIndex: subtitleIndex,
 		ETag:                       mediaSourceETag(version),
+		MaxStreamingBitrateKbps:    maxStreamingBitrateKbps,
 	}
+}
+
+// effectiveCompatMaxStreamingBitrateKbps returns the tighter of the two caps a
+// Jellyfin client can advertise: the per-request MaxStreamingBitrate (set when
+// the user picks a quality profile) and the device profile's own
+// MaxStreamingBitrate. Both arrive in bits per second; catalog.FileVersion.Bitrate
+// is kbps (see mediaSourceDTO's Bitrate*1000 conversion), so the result is
+// converted to match. Zero means neither side set a cap.
+func effectiveCompatMaxStreamingBitrateKbps(req playbackInfoRequest, profile DeviceProfile) int {
+	maxKbps := 0
+	if req.MaxStreamingBitrate > 0 {
+		maxKbps = int(req.MaxStreamingBitrate / 1000)
+	}
+	if profile.MaxStreamingBitrate > 0 {
+		profileMaxKbps := int(profile.MaxStreamingBitrate / 1000)
+		if maxKbps == 0 || profileMaxKbps < maxKbps {
+			maxKbps = profileMaxKbps
+		}
+	}
+	return maxKbps
 }
 
 // supportedHLSRemuxAudioStreamIndexes freezes the copy-safe switch targets. A
@@ -3134,6 +3238,9 @@ func applyPlaybackQueryOverrides(req *playbackInfoRequest, query url.Values) {
 	if value, ok := parseOptionalInt(firstQueryValue(query, "SubtitleStreamIndex")); ok {
 		req.SubtitleStreamIndex = compatIntValuePtr(value)
 	}
+	if value, ok := parseOptionalInt64(firstQueryValue(query, "MaxStreamingBitrate")); ok {
+		req.MaxStreamingBitrate = value
+	}
 	if value, ok := parseOptionalBool(firstQueryValue(query, "EnableDirectPlay")); ok {
 		req.EnableDirectPlay = &value
 	}
@@ -3176,6 +3283,17 @@ func parseOptionalInt(raw string) (int, bool) {
 		return 0, false
 	}
 	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+func parseOptionalInt64(raw string) (int64, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, false
 	}
