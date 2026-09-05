@@ -3645,6 +3645,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
@@ -4960,6 +4961,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {

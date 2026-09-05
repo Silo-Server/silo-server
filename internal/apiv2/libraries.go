@@ -107,9 +107,12 @@ type LibraryCollection struct {
 	Collection[Library]
 }
 
-// AdminJobAcceptedOutput is the answer of an operation that queued a job.
+// AdminJobAcceptedOutput is the answer of an operation that queued a job:
+// the job resource and, per the lifecycle convention for accepted
+// asynchronous work, its canonical URI in Location.
 type AdminJobAcceptedOutput struct {
-	Body AdminJob
+	Location string `header:"Location" doc:"URI of the queued job"`
+	Body     AdminJob
 }
 
 // LibraryMountCheckRoot is one root's reachability.
@@ -789,7 +792,7 @@ func (reg *Registry) refreshLibraryMetadata(ctx context.Context, in *LibraryRefr
 	if err != nil {
 		return nil, libraryProblem(err)
 	}
-	return &AdminJobAcceptedOutput{Body: adminJobOf(job)}, nil
+	return acceptedJob(job), nil
 }
 
 func (reg *Registry) getLibraryProviders(ctx context.Context, in *LibraryIDInput) (*LibraryProvidersOutput, error) {
@@ -1061,7 +1064,7 @@ func (reg *Registry) deleteLibrary(ctx context.Context, in *LibraryIDInput) (*Ad
 	if err != nil {
 		return nil, libraryProblem(err)
 	}
-	return &AdminJobAcceptedOutput{Body: adminJobOf(job)}, nil
+	return acceptedJob(job), nil
 }
 
 func (reg *Registry) checkLibraryMount(ctx context.Context, in *LibraryIDInput) (*LibraryMountCheckOutput, error) {

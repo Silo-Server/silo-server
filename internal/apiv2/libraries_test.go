@@ -407,6 +407,9 @@ func TestDeleteLibrary(t *testing.T) {
 	if _, has := body["started_at"]; has || fake.lastUserID != 2 {
 		t.Errorf("optional instant present or user %d: %s", fake.lastUserID, rec.Body.String())
 	}
+	if loc := rec.Header().Get("Location"); loc != "/api/v2/admin/jobs/job-1" {
+		t.Errorf("Location = %q, want the queued job's URI", loc)
+	}
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/libraries/2", "", bearer(adminToken)), TypeConflict)
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/libraries/9", "", bearer(adminToken)), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/libraries/1", "", bearer(memberToken)), TypePermissionDenied)

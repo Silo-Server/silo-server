@@ -294,6 +294,9 @@ func TestRefreshLibraryMetadata(t *testing.T) {
 	if rec.Code != 202 || fake.lastRefreshMode != adminjob.LibraryRefreshModeFull {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
+	if loc := rec.Header().Get("Location"); loc != "/api/v2/admin/jobs/job-2" {
+		t.Fatalf("Location = %q, want the queued job's URI", loc)
+	}
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/libraries/1/refresh-metadata", `{"mode":"deep"}`, bearer(adminToken)), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.mode" {
 		t.Fatalf("errors = %+v", p.Errors)

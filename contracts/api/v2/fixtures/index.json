@@ -239,7 +239,8 @@
       "expected_status": 202,
       "response_headers": {
         "Cache-Control": "no-store",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/job-1"
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminJob",
@@ -1331,7 +1332,8 @@
       "expected_status": 202,
       "response_headers": {
         "Cache-Control": "no-store",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/job-2"
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminJob",

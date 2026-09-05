@@ -7772,7 +7772,15 @@
                 }
               }
             },
-            "description": "Accepted"
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "description": "URI of the queued job",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -9664,7 +9672,15 @@
                 }
               }
             },
-            "description": "Accepted"
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "description": "URI of the queued job",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {

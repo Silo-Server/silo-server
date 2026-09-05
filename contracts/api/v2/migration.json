@@ -29866,7 +29866,7 @@
         "path": "/api/v2/libraries/{id}",
         "operation_id": "deleteLibrary"
       },
-      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Still 202 with the queued job resource (created_by_user_id is a string ID, instants UTC ms, request/result payloads never null); an active deletion is 409 conflict without the v1 active_job echo (job-monitor contract deferred)."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Still 202 with the queued job resource (created_by_user_id is a string ID, instants UTC ms, request/result payloads never null); an active deletion is 409 conflict without the v1 active_job echo (job-monitor contract deferred). Decisions: the 202 carries a Location header naming the job at GET /api/v2/admin/jobs/{id}, an operation the admin-tasks section owns and has not ported yet; no job read is added here."
     },
     {
       "listener": "api",
@@ -30525,7 +30525,7 @@
         "path": "/api/v2/libraries/{id}/refresh-metadata",
         "operation_id": "refreshLibraryMetadata"
       },
-      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 202 job body; mode is a strict enum (quick, full) answered 422 at body.mode; an active refresh is a 409 problem without the v1 active_job echo."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 202 job body; mode is a strict enum (quick, full) answered 422 at body.mode; an active refresh is a 409 problem without the v1 active_job echo. Decisions: the 202 carries a Location header naming the job at GET /api/v2/admin/jobs/{id}, an operation the admin-tasks section owns and has not ported yet; no job read is added here."
     },
     {
       "listener": "api",
