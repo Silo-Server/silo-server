@@ -396,7 +396,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   absent field earns.
   `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(scope, id, version)`
   (strong, quoted, opaque; the scope keeps redacted representations from sharing a
-  validator, the resource id keeps two resources at one version from sharing one, and the
+  validator, the resource id keeps two resources at one version from sharing one through a
+  SHA-256 binding over a length-prefixed encoding, since ids may be client-selected, and the
   version source must be monotonic across delete and recreate at the same id, so a
   validator minted for one resource or its deleted predecessor never matches another),
   `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),

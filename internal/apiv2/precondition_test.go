@@ -138,6 +138,11 @@ func TestRenderETag(t *testing.T) {
 	if a == RenderETag("group.editor", "43", 7) {
 		t.Fatal("two resources at one version share a tag")
 	}
+	// The binding is length-prefixed, so a scope/id boundary shift never
+	// yields the same input bytes.
+	if RenderETag("ab", "c", 7) == RenderETag("a", "bc", 7) {
+		t.Fatal("scope/id boundary is ambiguous in the binding")
+	}
 	if strings.Contains(a.Opaque, "7") && strings.Count(a.Opaque, "7") == 1 && strings.HasSuffix(a.Opaque, ".7") {
 		t.Fatalf("opaque text %q exposes the version as plain decimal", a.Opaque)
 	}

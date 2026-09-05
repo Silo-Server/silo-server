@@ -47,7 +47,7 @@
         "method": "DELETE",
         "path": "/api/v2/probe/guarded/a",
         "headers": {
-          "If-Match": "\"26637aec.h3gk9c9o533h\""
+          "If-Match": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
         }
       },
       "expected_status": 204,
@@ -103,13 +103,13 @@
         "method": "GET",
         "path": "/api/v2/probe/guarded/a",
         "headers": {
-          "If-None-Match": "\"26637aec.h3gk9c9o533h\""
+          "If-None-Match": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
         }
       },
       "expected_status": 304,
       "response_headers": {
         "Cache-Control": "no-store",
-        "ETag": "\"26637aec.h3gk9c9o533h\""
+        "ETag": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
       },
       "response_media_type": null,
       "schema": null,
@@ -141,7 +141,7 @@
         "method": "PUT",
         "path": "/api/v2/probe/guarded/a",
         "headers": {
-          "If-Match": "\"26637aec.h3gk9c9o533g\""
+          "If-Match": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt6\""
         },
         "body": "{\"name\":\"fixture\"}"
       },
@@ -149,7 +149,7 @@
       "response_headers": {
         "Cache-Control": "no-store",
         "Content-Type": "application/problem+json",
-        "ETag": "\"26637aec.h3gk9c9o533h\""
+        "ETag": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
@@ -171,7 +171,7 @@
       "response_headers": {
         "Cache-Control": "no-store",
         "Content-Type": "application/problem+json",
-        "ETag": "\"26637aec.h3gk9c9o533h\""
+        "ETag": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",

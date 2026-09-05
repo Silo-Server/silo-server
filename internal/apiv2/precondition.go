@@ -1,8 +1,10 @@
 package apiv2
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
-	"hash/fnv"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -45,22 +47,28 @@ func (t EntityTag) String() string {
 // editor representations of the same row from sharing a validator; the
 // resource id keeps two resources at the same version from sharing one, so a
 // tag copied from one resource never authorizes a mutation of another. The
-// text is opaque to clients: it is a stable encoding, not the decimal
+// (scope, id) binding is a SHA-256 over a length-prefixed encoding: resource
+// ids may be client-selected, so a client must not be able to search for two
+// ids that share a binding the way a 64-bit non-cryptographic hash would
+// allow. The text is opaque to clients: a stable encoding, not the decimal
 // version.
 func RenderETag(scope, id string, version int64) EntityTag {
-	h := fnv.New64a()
+	h := sha256.New()
+	var n [8]byte
+	binary.BigEndian.PutUint64(n[:], uint64(len(scope)))
+	_, _ = h.Write(n[:])
 	_, _ = h.Write([]byte(scope))
-	_, _ = h.Write([]byte{0})
+	binary.BigEndian.PutUint64(n[:], uint64(len(id)))
+	_, _ = h.Write(n[:])
 	_, _ = h.Write([]byte(id))
-	sum := h.Sum64()
-	prefix := strconv.FormatUint(sum&0xffffffff, 16)
-	for len(prefix) < 8 {
-		prefix = "0" + prefix
-	}
-	// XOR with the (scope, id) hash is a bijection in version for a fixed
-	// resource, so two versions of one resource never collide, and the text
-	// is not the version in plain decimal.
-	return EntityTag{Opaque: prefix + "." + strconv.FormatUint(uint64(version)^sum, 36)}
+	digest := h.Sum(nil)
+	// 96 bits of the digest name the resource; XOR of the version with a
+	// further 64 bits is a bijection in version for a fixed resource, so two
+	// versions of one resource never collide and the text is not the
+	// version in plain decimal.
+	binding := hex.EncodeToString(digest[:12])
+	mask := binary.BigEndian.Uint64(digest[12:20])
+	return EntityTag{Opaque: binding + "." + strconv.FormatUint(uint64(version)^mask, 36)}
 }
 
 // ErrMalformedEntityTag is the parse failure ParseEntityTag and ParseETagList
