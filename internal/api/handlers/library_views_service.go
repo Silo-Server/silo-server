@@ -184,12 +184,22 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 	return SectionView{}, apiError(http.StatusNotFound, "not_found", "Section not found")
 }
 
+// requireViewableLibrary is the collection reads' share of the gate above:
+// the library must be in scope, exist, and be enabled before any
+// collection is looked up. Without it an unrestricted viewer could name a
+// library id that was never a library and be answered with personal
+// collections that carry no explicit library membership, which the store
+// treats as visible on every tab.
+func (h *LibraryCollectionHandler) requireViewableLibrary(ctx context.Context, libraryID int) error {
+	return requireViewableLibrary(ctx, h.FolderRepo, libraryID)
+}
+
 // LibraryUserCollections answers the viewer's own collections opted into
 // the library's Collections tab. Personal collections are private to their
 // owner; this never reveals other users' rows.
 func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return nil, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return nil, err
 	}
 	if h.UserCollectionPool == nil {
 		return []usercollections.ServerVisibleCollection{}, nil
@@ -211,8 +221,8 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 // curated collection in full and, when groups are configured, the grouped
 // and ungrouped cards including the viewer's opted-in personal collections.
 func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (LibraryCollectionTabView, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return LibraryCollectionTabView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return LibraryCollectionTabView{}, err
 	}
 	adminCollections, err := h.repo.ListByLibrary(ctx, libraryID, catalog.ListLibraryCollectionsOptions{})
 	if err != nil {
@@ -322,8 +332,8 @@ func (h *LibraryCollectionHandler) libraryCollectionResponsesOf(ctx context.Cont
 // LibraryCollectionItems answers the items of one visible collection of the
 // library, in curated order or as the smart query resolves them.
 func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalog.AccessFilter) ([]CollectionItemView, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return nil, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return nil, err
 	}
 	collection, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil || !collectionSpansLibrary(collection, libraryID) || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {

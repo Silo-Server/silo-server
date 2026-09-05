@@ -178,3 +178,27 @@ func TestLibraryViewsRefuseDisabledLibraryDB(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
 	}
 }
+
+// TestLibraryCollectionReadsRefuseUnknownLibraryDB: an unrestricted profile
+// gets not_found from the Collections tab and the user-collections list of
+// a library id that does not exist, or that is disabled, instead of the
+// personal collections the store treats as visible on every tab. The same
+// handler answers 200 for a library that exists and is enabled.
+func TestLibraryCollectionReadsRefuseUnknownLibraryDB(t *testing.T) {
+	pool := viewerAccessTestPool(t)
+	suffix := time.Now().UnixNano()
+	libraryID := seedLibrary(t, pool, fmt.Sprintf("coll-known-%d", suffix))
+	disabledID := seedLibraryEnabled(t, pool, fmt.Sprintf("coll-disabled-%d", suffix), false)
+	svc := handlers.NewLibraryCollectionHandler(catalogpkg.NewLibraryCollectionRepository(pool), nil, catalogpkg.NewItemRepository(pool), 0, nil, nil)
+	svc.FolderRepo = catalogpkg.NewFolderRepository(pool)
+	svc.UserCollectionPool = pool
+	h := newTestHandler(t, scopedViewerDeps(t, &access.Scope{}, &fakeLibraryViews{}, svc))
+	for _, suffixPath := range []string{"/collections", "/user-collections"} {
+		if rec := do(t, h, http.MethodGet, fmt.Sprintf("/api/v2/library/%d%s", libraryID, suffixPath), "", viewerHeaders()); rec.Code != 200 {
+			t.Fatalf("existing library %s: %d %s", suffixPath, rec.Code, rec.Body.String())
+		}
+		for _, base := range []string{"/api/v2/library/999999", fmt.Sprintf("/api/v2/library/%d", disabledID)} {
+			requireProblem(t, do(t, h, http.MethodGet, base+suffixPath, "", viewerHeaders()), TypeNotFound)
+		}
+	}
+}
