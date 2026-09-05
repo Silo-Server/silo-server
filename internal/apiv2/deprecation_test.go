@@ -304,9 +304,7 @@ func TestSuccessfulResponseRestoresDeclaredRetirementHeaders(t *testing.T) {
 					next(ctx)
 					_, w := humachi.Unwrap(ctx)
 					w.Header().Set(DeprecationHeader, "overridden")
-					if sunset != nil {
-						w.Header().Set(SunsetHeader, "overridden")
-					}
+					w.Header().Set(SunsetHeader, "overridden")
 					w.Header().Set(LinkHeader, prior)
 				})
 				Register(reg, Operation{

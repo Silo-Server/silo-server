@@ -102,6 +102,8 @@ func setDeprecationHeaders(h http.Header, d *Deprecation) {
 	h.Set(LinkHeader, appendLink(existing, d.Link, deprecationRel))
 	if d.Sunset != nil {
 		h.Set(SunsetHeader, FormatSunset(*d.Sunset))
+	} else {
+		h.Del(SunsetHeader)
 	}
 }
 
