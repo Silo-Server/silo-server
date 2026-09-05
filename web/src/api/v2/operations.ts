@@ -6,6 +6,7 @@
 /** Operation ids keyed by `METHOD /path`, as the committed v2 OpenAPI document lists them. */
 export const v2Operations = {
   "DELETE /api/v2/settings/device/subtitle-appearance": "deleteSubtitleAppearanceDeviceOverride",
+  "DELETE /api/v2/settings/values/{key}": "deleteSettingValue",
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/admin/users": "listAdminUsers",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
@@ -16,8 +17,15 @@ export const v2Operations = {
   "GET /api/v2/settings/plugins": "listPluginSettings",
   "GET /api/v2/settings/plugins/{installation_id}": "getPluginSettings",
   "GET /api/v2/settings/subtitle-appearance/effective": "getEffectiveSubtitleAppearance",
+  "GET /api/v2/settings/values": "listSettingValues",
+  "GET /api/v2/settings/values/effective": "listEffectiveSettings",
+  "GET /api/v2/settings/values/{key}": "getSettingValue",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
   "PATCH /api/v2/profiles/{id}": "updateProfile",
+  "POST /api/v2/settings/values/effective": "resolveEffectiveSettings",
   "PUT /api/v2/settings/device/subtitle-appearance": "updateSubtitleAppearanceDeviceOverride",
+  "PUT /api/v2/settings/plugins/{installation_id}": "updatePluginSettings",
+  "PUT /api/v2/settings/values/nav.shortcuts/item": "updateNavigationShortcut",
+  "PUT /api/v2/settings/values/{key}": "updateSettingValue",
 } as const;
