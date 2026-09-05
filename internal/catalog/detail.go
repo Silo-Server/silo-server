@@ -1307,6 +1307,75 @@ func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*m
 
 // GetItemDetail retrieves a full item detail with presigned URLs and file versions.
 func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
+	target, err := s.resolveDetailTarget(ctx, contentID, filter)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case target.item != nil:
+		return s.buildMediaItemDetail(ctx, target.item, contentID, filter, nil)
+	case target.season != nil:
+		return s.buildSeasonDetail(ctx, target.season, filter)
+	case target.episode != nil:
+		seriesCtx, err := s.buildSeriesDetailContext(ctx, target.episode.SeriesID, filter)
+		if err != nil {
+			return nil, err
+		}
+		return s.buildEpisodeDetail(ctx, target.episode, seriesCtx, filter)
+	default:
+		return s.buildExtraItemDetail(ctx, target.extra, filter)
+	}
+}
+
+const detailTypeAudiobook = "audiobook"
+
+// GetItemVersions builds the browse version selector without loading unrelated
+// presentation data. It shares detail authorization and playback metadata, but
+// does not require localization, credits, artwork, or recommendations to succeed.
+func (s *DetailService) GetItemVersions(ctx context.Context, contentID string, filter AccessFilter) ([]FileVersion, error) {
+	target, err := s.resolveDetailTarget(ctx, contentID, filter)
+	if err != nil {
+		return nil, err
+	}
+	var files []*models.MediaFile
+	audioPreferenceContentID := contentID
+	switch {
+	case target.season != nil || (target.item != nil && target.item.Type == playableTypeSeries):
+		return []FileVersion{}, nil
+	case target.item != nil:
+		files, err = s.fileFetcher.GetByContentID(ctx, contentID)
+	case target.episode != nil:
+		files, err = s.fileFetcher.GetByEpisodeID(ctx, contentID)
+		audioPreferenceContentID = target.episode.SeriesID
+	default:
+		fetcher, ok := s.fileFetcher.(extraFileFetcher)
+		if !ok {
+			return nil, ErrItemNotFound
+		}
+		files, err = fetcher.GetByExtraID(ctx, contentID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fetching file versions: %w", err)
+	}
+	files = FilterMediaFilesByAccess(files, filter)
+	if target.item != nil && target.item.Type == detailTypeAudiobook {
+		sortAudiobookMediaFiles(files)
+	}
+	files = s.prepareBrowseFiles(ctx, files)
+	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID)
+	return versions, nil
+}
+
+// detailTarget is exactly one authorized catalog row. Keeping target resolution
+// shared prevents versions-only reads from drifting from detail access rules.
+type detailTarget struct {
+	item    *models.MediaItem
+	season  *models.Season
+	episode *models.Episode
+	extra   *models.MediaExtra
+}
+
+func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID string, filter AccessFilter) (*detailTarget, error) {
 	item, err := s.itemRepo.GetByID(ctx, contentID)
 	switch {
 	case err == nil:
@@ -1316,7 +1385,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err := s.validatePresentationItemAccess(ctx, filter, contentID); err != nil {
 			return nil, err
 		}
-		return s.buildMediaItemDetail(ctx, item, contentID, filter, nil)
+		return &detailTarget{item: item}, nil
 	case !errors.Is(err, ErrItemNotFound):
 		return nil, err
 	}
@@ -1333,7 +1402,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err := s.validatePresentationItemAccess(ctx, filter, season.SeriesID); err != nil {
 			return nil, err
 		}
-		return s.buildSeasonDetail(ctx, season, filter)
+		return &detailTarget{season: season}, nil
 	} else if !errors.Is(err, ErrSeasonNotFound) {
 		return nil, err
 	}
@@ -1345,11 +1414,23 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	episode, err := s.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
 		if errors.Is(err, ErrEpisodeNotFound) {
-			// Fourth tier: a local extra. Serving it from GetItemDetail keeps
-			// per-item consumers that resolve arbitrary content ids
-			// (jellycompat PlaybackInfo in particular) playable without a
-			// separate lookup path.
-			return s.buildExtraItemDetail(ctx, contentID, filter)
+			if s.extraRepo == nil {
+				return nil, ErrItemNotFound
+			}
+			extra, err := s.extraRepo.GetByID(ctx, contentID)
+			if err != nil {
+				if errors.Is(err, ErrExtraNotFound) {
+					return nil, ErrItemNotFound
+				}
+				return nil, err
+			}
+			if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
+				return nil, err
+			}
+			if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
+				return nil, err
+			}
+			return &detailTarget{extra: extra}, nil
 		}
 		return nil, err
 	}
@@ -1359,33 +1440,13 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
 		return nil, err
 	}
-	seriesCtx, err := s.buildSeriesDetailContext(ctx, episode.SeriesID, filter)
-	if err != nil {
-		return nil, err
-	}
-	return s.buildEpisodeDetail(ctx, episode, seriesCtx, filter)
+	return &detailTarget{episode: episode}, nil
 }
 
 // buildExtraItemDetail resolves a local extra as a minimal ItemDetail:
 // title/kind plus the ordinary playback surface (versions, subtitles) built
 // from its backing files. Access control is the parent item's.
-func (s *DetailService) buildExtraItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
-	if s.extraRepo == nil {
-		return nil, ErrItemNotFound
-	}
-	extra, err := s.extraRepo.GetByID(ctx, contentID)
-	if err != nil {
-		if errors.Is(err, ErrExtraNotFound) {
-			return nil, ErrItemNotFound
-		}
-		return nil, err
-	}
-	if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
-		return nil, err
-	}
-	if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
-		return nil, err
-	}
+func (s *DetailService) buildExtraItemDetail(ctx context.Context, extra *models.MediaExtra, filter AccessFilter) (*ItemDetail, error) {
 	fetcher, ok := s.fileFetcher.(extraFileFetcher)
 	if !ok {
 		return nil, ErrItemNotFound
@@ -1893,7 +1954,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		}
 
 		files = FilterMediaFilesByAccess(files, filter)
-		if item.Type == "audiobook" {
+		if item.Type == detailTypeAudiobook {
 			sortAudiobookMediaFiles(files)
 		}
 		files = s.prepareBrowseFiles(ctx, files)
@@ -1920,7 +1981,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		detail.Extras = s.fetchItemExtras(ctx, contentID, pf)
 	}
 
-	if item.Type == "audiobook" {
+	if item.Type == detailTypeAudiobook {
 		detail.Audiobook = s.buildAudiobookExtension(ctx, item, detail.Versions, crewCredits, filter)
 	}
 	if item.Type == "ebook" {

@@ -74,7 +74,7 @@ func (h *CatalogResourceHandler) HandleGetItemVersions(w http.ResponseWriter, r 
 		return
 	}
 
-	detail, err := h.items.detailSvc.GetItemDetail(r.Context(), id, filter)
+	versions, err := h.items.detailSvc.GetItemVersions(r.Context(), id, filter)
 	if err != nil {
 		if isNotFound(err) {
 			if _, _, ok := parseSyntheticSeasonID(id); ok {
@@ -89,12 +89,12 @@ func (h *CatalogResourceHandler) HandleGetItemVersions(w http.ResponseWriter, r 
 	}
 
 	if !h.items.requestCanViewFilePaths(r) {
-		for i := range detail.Versions {
-			detail.Versions[i].FilePath = ""
+		for i := range versions {
+			versions[i].FilePath = ""
 		}
 	}
 
-	writeJSON(w, http.StatusOK, detail.Versions)
+	writeJSON(w, http.StatusOK, versions)
 }
 
 // HandleGetMangaFiles returns the local file listing for a manga series (the
