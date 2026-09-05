@@ -12,6 +12,7 @@ import {
   useClearSettingValue,
   useSetNavigationShortcutPresence,
   useSetSettingValue,
+  useSettingsCapabilities,
 } from "./settingValues";
 
 const v2Mock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -87,7 +88,6 @@ describe("self-service setting identities", () => {
       await shortcutHook.result.current.mutateAsync({
         item: { type: "library", library_id: 42, label: "Movies" },
         present: true,
-        mutationId: "mutation-1",
         profileAuth,
         invalidateOnSettled: false,
       });
@@ -214,16 +214,10 @@ describe("settings capability gates", () => {
     expect(settingsCapabilitiesSupportKey(revisionFive, SETTING_KEYS.NAV_PRIMARY_MENU)).toBe(true);
   });
 
-  it("requires batched reads and idempotent replay semantics", () => {
+  it("requires batched reads but not idempotent replay", () => {
     expect(
       settingsCapabilitiesSupportKey(
         { ...revisionFive, supports_batched_effective: false },
-        SETTING_KEYS.NAV_PRIMARY_MENU,
-      ),
-    ).toBe(false);
-    expect(
-      settingsCapabilitiesSupportKey(
-        { ...revisionFive, supports_idempotent_writes: false },
         SETTING_KEYS.NAV_PRIMARY_MENU,
       ),
     ).toBe(false);
@@ -240,9 +234,32 @@ describe("settings capability gates", () => {
       supports_batched_effective: true,
     };
     expect(settingsCapabilitiesSupportKey(withoutBatch, SETTING_KEYS.NAV_PRIMARY_MENU)).toBe(false);
+    // The v2 writes send no mutation id, so a server flag for it is not a
+    // precondition of using the definition.
     expect(settingsCapabilitiesSupportKey(withoutIdempotency, SETTING_KEYS.NAV_PRIMARY_MENU)).toBe(
-      false,
+      true,
     );
+  });
+
+  it("does not report idempotent writes the v2 operations cannot carry", async () => {
+    v2Mock.mockResolvedValueOnce({
+      api_version: 1,
+      revision: 5,
+      contract_etag: "revision-five",
+      definition_count: 1,
+      scopes: [],
+      client_families: [],
+      supports_batched_effective: true,
+      supports_idempotent_writes: true,
+      supports_atomic_shortcuts: true,
+    });
+    const { result } = renderHook(() => useSettingsCapabilities(), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.data).toMatchObject({
+      supports_batched_effective: true,
+      supports_idempotent_writes: false,
+      supports_atomic_shortcuts: true,
+    });
   });
 
   it("requires an explicit atomic-shortcut capability", () => {

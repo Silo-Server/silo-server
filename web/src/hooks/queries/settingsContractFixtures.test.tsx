@@ -137,7 +137,12 @@ describe("settings hooks against the committed v2 fixtures", () => {
     const { result } = renderHook(() => useSettingsCapabilities(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(result.current.data).toEqual(getSettingsContractCapabilitiesOk);
+    // The fixture's supports_idempotent_writes describes the v1 mutation-id
+    // header; the v2 writes declare none, so the hook reports it false.
+    expect(result.current.data).toEqual({
+      ...getSettingsContractCapabilitiesOk,
+      supports_idempotent_writes: false,
+    });
     expect(settingsCapabilitiesSupportAtomicShortcuts(result.current.data)).toBe(true);
   });
 
@@ -182,7 +187,6 @@ describe("settings hooks against the committed v2 fixtures", () => {
     const stored = await result.current.mutateAsync({
       item: { type: "library", library_id: 3, label: "Movies" },
       present: true,
-      mutationId: "m-1",
       profileAuth,
       invalidateOnSettled: false,
     });

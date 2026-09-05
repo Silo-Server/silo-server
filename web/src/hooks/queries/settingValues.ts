@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isProfileRequestContextCurrent, type ProfileRequestContextSnapshot } from "@/api/client";
 import { v2, V2ProblemError, type V2Query, type V2Result } from "@/api/v2/request";
+import type { paths } from "@/api/v2/schema";
 import { storage } from "@/utils/storage";
 import {
   SETTING_DEFINITIONS,
@@ -294,12 +295,6 @@ export function useSetSettingValue() {
       value: unknown;
       identity: SettingIdentity;
       /**
-       * Stable across retries of one desired-state write. The v2 contract
-       * declares no idempotency header (a repeated PUT converges on the same
-       * value), so the id only identifies the intent to the queue that owns it.
-       */
-      mutationId?: string;
-      /**
        * Whole-document editors may serialize several optimistic writes and
        * invalidate once their queue drains. Intermediate refetches would
        * otherwise replace the newest optimistic document with an older server
@@ -347,8 +342,6 @@ export function useSetNavigationShortcutPresence() {
     }: {
       item: ShortcutTarget;
       present: boolean;
-      /** Stable across retries of this desired-state operation; see useSetSettingValue. */
-      mutationId: string;
       /** Profile id and matching PIN token captured with this intent. */
       profileAuth: ProfileAuthSnapshot;
       /** A local serialized editor can defer refetching until its queue drains. */
@@ -412,7 +405,27 @@ export type SettingsCapabilities = Pick<
     >
   >;
 
-/** Whether this server can safely read and write one vendored definition. */
+/**
+ * Whether the v2 write operations declare the X-Silo-Mutation-Id header. v1
+ * honored it for idempotent replay; the v2 operations declare no such header
+ * yet, so this client sends none and must not claim replay semantics. The
+ * constant is typed from the generated contract: when the header lands on
+ * both writes, this line stops compiling until the writes forward the id.
+ */
+type MutationIDHeader = "X-Silo-Mutation-Id";
+type SettingValueWriteHeaders =
+  paths["/api/v2/settings/values/{key}"]["put"]["parameters"]["header"];
+type NavigationShortcutWriteHeaders =
+  paths["/api/v2/settings/values/nav.shortcuts/item"]["put"]["parameters"]["header"];
+const V2_WRITES_DECLARE_MUTATION_ID: MutationIDHeader extends keyof SettingValueWriteHeaders &
+  keyof NavigationShortcutWriteHeaders
+  ? true
+  : false = false;
+
+/**
+ * Whether this server can safely read and write one vendored definition. The
+ * writes are plain desired-state PUTs, so idempotent replay is not required.
+ */
 export function settingsCapabilitiesSupportKey(
   capabilities: SettingsCapabilities | undefined,
   key: SettingKey,
@@ -420,8 +433,7 @@ export function settingsCapabilitiesSupportKey(
   return (
     capabilities?.api_version === SETTINGS_API_VERSION &&
     capabilities.revision >= SETTING_DEFINITIONS[key].introducedIn &&
-    capabilities.supports_batched_effective === true &&
-    capabilities.supports_idempotent_writes === true
+    capabilities.supports_batched_effective === true
   );
 }
 
@@ -441,7 +453,16 @@ export function settingsCapabilitiesSupportAtomicShortcuts(
 export function useSettingsCapabilities() {
   return useQuery({
     queryKey: [...settingsKeys.all, "capabilities"] as const,
-    queryFn: (): Promise<SettingsCapabilities> => v2("GET /api/v2/settings/contract/capabilities"),
+    queryFn: async (): Promise<SettingsCapabilities> => {
+      const capabilities = await v2("GET /api/v2/settings/contract/capabilities");
+      // The server's flag describes the v1 header. Report replay only when
+      // the v2 writes this client uses can actually carry a mutation id.
+      return {
+        ...capabilities,
+        supports_idempotent_writes:
+          V2_WRITES_DECLARE_MUTATION_ID && capabilities.supports_idempotent_writes,
+      };
+    },
     staleTime: 30 * 60 * 1000,
   });
 }

@@ -40702,7 +40702,7 @@
         "path": "/api/v2/settings/values/nav.shortcuts/item",
         "operation_id": "updateNavigationShortcut"
       },
-      "notes": "Settings (profile_scoped, demo-restricted). Same {item, present} desired-state list mutation on the acting profile's nav.shortcuts; item is a declared extension bag whose members the contract's navigation-shortcuts.json schema fixes, present is required at the schema (v1: 400 present is required). Answers the stored document as a SettingValue, as v1. The X-Silo-Mutation-Id idempotent replay is not carried; it lands with the foundation mutation-retry work."
+      "notes": "Settings (profile_scoped, demo-restricted). Same {item, present} desired-state list mutation on the acting profile's nav.shortcuts; item is a declared extension bag whose members the contract's navigation-shortcuts.json schema fixes, present is required at the schema (v1: 400 present is required). Answers the stored document as a SettingValue, as v1. The X-Silo-Mutation-Id idempotent replay is not carried and the v2 operation declares no mutation-id header; it lands with the foundation mutation-retry work (#943 forbids RetrySafetyIdempotencyKey today). The web client therefore sends no mutation id on this write and reports supports_idempotent_writes as false until the v2 operation declares the header."
     },
     {
       "listener": "api",
@@ -40928,7 +40928,7 @@
         "path": "/api/v2/settings/values/{key}",
         "operation_id": "updateSettingValue"
       },
-      "notes": "Settings (profile_scoped, demo-restricted). Same {value} body, validated and normalized against the key's value_schema by the seam (a refusal is a 422 at body.value; v1: 400 invalid_value), and the same stored-row answer as getSettingValue. A key the contract does not define, and the nav.shortcuts whole-document refusal, are 422s at path.key (v1: 404 and 400). The X-Silo-Mutation-Id idempotent replay is not carried; it lands with the foundation mutation-retry work."
+      "notes": "Settings (profile_scoped, demo-restricted). Same {value} body, validated and normalized against the key's value_schema by the seam (a refusal is a 422 at body.value; v1: 400 invalid_value), and the same stored-row answer as getSettingValue. A key the contract does not define, and the nav.shortcuts whole-document refusal, are 422s at path.key (v1: 404 and 400). The X-Silo-Mutation-Id idempotent replay is not carried and the v2 operation declares no mutation-id header; it lands with the foundation mutation-retry work (#943 forbids RetrySafetyIdempotencyKey today). The web client therefore sends no mutation id on this write and reports supports_idempotent_writes as false until the v2 operation declares the header."
     },
     {
       "listener": "api",
