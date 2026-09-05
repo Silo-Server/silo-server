@@ -176,6 +176,7 @@ func registerProbes(reg *Registry) {
 	Register(reg, Operation{
 		Operation:   humaOp(http.MethodPost, Prefix+"/probe/deprecated-nosunset", "probeDeprecatedNoSunset", "probe", "deprecated, no sunset"),
 		Class:       ClassAuthenticated,
+		RetrySafety: RetrySafetyNaturalIdempotent,
 		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink},
 	}, probeHandler)
 	Register(reg, Operation{
