@@ -544,10 +544,8 @@ type MetadataMatchQueueDetailV2 = V2Result<"GET /api/v2/libraries/{id}/metadata-
 
 /**
  * One page of a library's matcher backlog as the admin screen renders it.
- * The v2 listing is cursor paginated; the screen keeps a numeric offset for
- * its "Page N" label, and the hook resolves that offset by walking cursors
- * from the first page (the backlog view is ten rows per page, so the walk is
- * short in practice).
+ * The v2 listing is cursor paginated; the page carries the cursor of the
+ * next page so an infinite query can retain the chain across refetches.
  */
 export interface LibraryMetadataMatchQueuePage extends Omit<
   MetadataMatchQueueDetailV2,
@@ -555,7 +553,6 @@ export interface LibraryMetadataMatchQueuePage extends Omit<
 > {
   library_id: number;
   limit: number;
-  offset: number;
   /** The failure detail with the fields the screen reads narrowed. */
   movies: Array<
     Omit<MetadataMatchQueueDetailV2["movies"][number], "failure_detail" | "library_id"> & {
@@ -573,6 +570,8 @@ export interface LibraryMetadataMatchQueuePage extends Omit<
     Omit<MetadataMatchQueueDetailV2["raw_files"][number], "library_id"> & { library_id: number }
   >;
   has_more: boolean;
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
 }
 
 function failureDetailFromV2(detail: unknown): LibraryMetadataMatchFailureDetail | undefined {
@@ -582,14 +581,12 @@ function failureDetailFromV2(detail: unknown): LibraryMetadataMatchFailureDetail
 
 export function metadataMatchQueuePageFromV2(
   detail: MetadataMatchQueueDetailV2,
-  offset: number,
 ): LibraryMetadataMatchQueuePage {
   const { page, ...rest } = detail;
   return {
     ...rest,
     library_id: Number(detail.library_id),
     limit: METADATA_MATCH_QUEUE_PAGE_SIZE,
-    offset,
     movies: detail.movies.map((entry) => ({
       ...entry,
       library_id: Number(entry.library_id),
@@ -605,44 +602,41 @@ export function metadataMatchQueuePageFromV2(
       library_id: Number(entry.library_id),
     })),
     has_more: page.has_more,
+    nextCursor: page.has_more && page.next_cursor ? page.next_cursor : undefined,
   };
 }
 
+/** Fetches one page of a library's matcher backlog; `cursor` is the previous page's `nextCursor`. */
 export async function fetchLibraryMetadataMatchQueuePage(
   libraryId: number,
-  offset: number,
+  cursor?: string,
   signal?: AbortSignal,
 ): Promise<LibraryMetadataMatchQueuePage> {
-  let cursor: string | undefined;
-  let skipped = 0;
-  for (;;) {
-    const detail = await v2("GET /api/v2/libraries/{id}/metadata-match-queue", {
-      path: { id: String(libraryId) },
-      query: {
-        limit: METADATA_MATCH_QUEUE_PAGE_SIZE,
-        ...(cursor === undefined ? {} : { cursor }),
-      },
-      signal,
-    });
-    if (
-      skipped >= offset ||
-      !detail.page.has_more ||
-      !detail.page.next_cursor ||
-      detail.page.next_cursor === cursor
-    ) {
-      return metadataMatchQueuePageFromV2(detail, skipped);
-    }
-    skipped += METADATA_MATCH_QUEUE_PAGE_SIZE;
-    cursor = detail.page.next_cursor;
-  }
+  const detail = await v2("GET /api/v2/libraries/{id}/metadata-match-queue", {
+    path: { id: String(libraryId) },
+    query: {
+      limit: METADATA_MATCH_QUEUE_PAGE_SIZE,
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return metadataMatchQueuePageFromV2(detail);
 }
 
-export function useLibraryMetadataMatchQueueDetail(libraryId: number | null, offset = 0) {
+/**
+ * Pages a library's matcher backlog by cursor. The loaded pages keep their
+ * cursors, so the periodic refetch refreshes each page in place instead of
+ * walking the chain from the first page again.
+ */
+export function useLibraryMetadataMatchQueueDetail(libraryId: number | null) {
   const pageActivity = usePageActivity();
 
-  return useQuery({
-    queryKey: [...adminKeys.libraryMatchQueueDetail(libraryId ?? 0), offset],
-    queryFn: ({ signal }) => fetchLibraryMetadataMatchQueuePage(libraryId ?? 0, offset, signal),
+  return useInfiniteQuery({
+    queryKey: adminKeys.libraryMatchQueueDetail(libraryId ?? 0),
+    queryFn: ({ pageParam, signal }) =>
+      fetchLibraryMetadataMatchQueuePage(libraryId ?? 0, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: libraryId !== null,
     staleTime: 0,
     refetchInterval: pageActivity.canApplyRealtimeUpdates ? 10_000 : false,

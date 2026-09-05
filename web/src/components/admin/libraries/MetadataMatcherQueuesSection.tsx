@@ -26,23 +26,24 @@ function formatFailureKind(kind: string): string {
 export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library[] }) {
   const [open, setOpen] = useState(false);
   const [selectedLibraryID, setSelectedLibraryID] = useState<number | null>(null);
-  const [detailOffset, setDetailOffset] = useState(0);
+  // Index into the loaded pages of the detail query; the query retains every
+  // page's cursor so the periodic refetch refreshes them in place.
+  const [detailPageIndex, setDetailPageIndex] = useState(0);
   const { data: queues = [] } = useLibraryMetadataMatchQueues();
   // Passing null while collapsed disables the detail query entirely so a
   // hidden expansion does not keep polling the per-library endpoint.
-  const { data: detail, isFetching: detailFetching } = useLibraryMetadataMatchQueueDetail(
-    open ? selectedLibraryID : null,
-    detailOffset,
-  );
+  const {
+    data: detailPages,
+    isFetching: detailFetching,
+    hasNextPage,
+    fetchNextPage,
+  } = useLibraryMetadataMatchQueueDetail(open ? selectedLibraryID : null);
   const retry = useRetryLibraryMetadataMatchQueue();
   const total = queues.reduce((sum, queue) => sum + queue.total_count, 0);
-  const detailLimit = detail?.limit ?? 10;
-  const hasPreviousDetailPage = detailOffset > 0;
-  const hasNextDetailPage = detail
-    ? detailOffset + detail.movies.length < detail.movie_count ||
-      detailOffset + detail.series.length < detail.series_count ||
-      detailOffset + detail.raw_files.length < detail.raw_file_count
-    : false;
+  const loadedPages = detailPages?.pages ?? [];
+  const detail = loadedPages[Math.min(detailPageIndex, Math.max(loadedPages.length - 1, 0))];
+  const hasPreviousDetailPage = detailPageIndex > 0;
+  const hasNextDetailPage = detailPageIndex + 1 < loadedPages.length || hasNextPage;
 
   const detailEntries = detail
     ? [
@@ -95,7 +96,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
         setOpen(next);
         if (!next) {
           setSelectedLibraryID(null);
-          setDetailOffset(0);
+          setDetailPageIndex(0);
         }
       }}
     >
@@ -119,7 +120,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                     className="cursor-pointer"
                     onClick={() => {
                       setSelectedLibraryID(selected ? null : queue.library_id);
-                      setDetailOffset(0);
+                      setDetailPageIndex(0);
                     }}
                   >
                     <TableCell className="font-medium">
@@ -217,7 +218,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                           {hasPreviousDetailPage || hasNextDetailPage ? (
                             <div className="flex items-center justify-between pt-1">
                               <span className="text-muted-foreground text-xs">
-                                Page {Math.floor(detailOffset / detailLimit) + 1}
+                                Page {detailPageIndex + 1}
                               </span>
                               <div className="flex gap-2">
                                 <Button
@@ -226,7 +227,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                   variant="outline"
                                   disabled={!hasPreviousDetailPage || detailFetching}
                                   onClick={() =>
-                                    setDetailOffset((current) => Math.max(0, current - detailLimit))
+                                    setDetailPageIndex((current) => Math.max(0, current - 1))
                                   }
                                 >
                                   Previous
@@ -236,9 +237,18 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                   size="sm"
                                   variant="outline"
                                   disabled={!hasNextDetailPage || detailFetching}
-                                  onClick={() =>
-                                    setDetailOffset((current) => current + detailLimit)
-                                  }
+                                  onClick={() => {
+                                    if (detailPageIndex + 1 < loadedPages.length) {
+                                      setDetailPageIndex((current) => current + 1);
+                                      return;
+                                    }
+                                    // The next page is not loaded yet: fetch it, then show it.
+                                    void fetchNextPage().then((result) => {
+                                      if ((result.data?.pages.length ?? 0) > detailPageIndex + 1) {
+                                        setDetailPageIndex(detailPageIndex + 1);
+                                      }
+                                    });
+                                  }}
                                 >
                                   Next
                                 </Button>

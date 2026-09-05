@@ -31,6 +31,7 @@ import {
   useCreateLibrary,
   useDeleteLibrary,
   useLibraryMetadataMatchQueues,
+  useLibraryMetadataMatchQueueDetail,
   useLibraryProviders,
   useLibraryRoots,
   flattenLibraryRoots,
@@ -268,16 +269,54 @@ describe("library admin hooks on the v2 contract", () => {
   });
 
   it("decodes the matcher backlog detail with the page fields the section reads", async () => {
-    stubFetch(() => jsonResponse(getMetadataMatchQueueOk));
+    const fetchMock = stubFetch(() => jsonResponse(getMetadataMatchQueueOk));
 
-    const page = await fetchLibraryMetadataMatchQueuePage(1, 0);
+    const page = await fetchLibraryMetadataMatchQueuePage(1);
 
     expect(page.library_id).toBe(1);
-    expect(page.offset).toBe(0);
     expect(page.limit).toBe(10);
     expect(page.has_more).toBe(true);
+    expect(page.nextCursor).toBe(getMetadataMatchQueueOk.page.next_cursor);
     expect(page.movies[0]?.failure_kind).toBe("no_match");
     expect(page.movies[0]?.failure_detail).toEqual({ candidates: 0 });
+
+    // A later page is requested with its cursor directly, not by replaying earlier pages.
+    await fetchLibraryMetadataMatchQueuePage(1, page.nextCursor);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("cursor")).toBe(
+      getMetadataMatchQueueOk.page.next_cursor,
+    );
+  });
+
+  it("retains the matcher backlog cursor chain across refetches", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url.searchParams.get("cursor") === null) return jsonResponse(getMetadataMatchQueueOk);
+      return jsonResponse({
+        ...getMetadataMatchQueueOk,
+        movies: [{ ...getMetadataMatchQueueOk.movies[0], media_file_id: "121" }],
+        page: { has_more: false },
+      });
+    });
+
+    const { result } = renderHook(() => useLibraryMetadataMatchQueueDetail(1), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.pages).toHaveLength(1);
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await result.current.refetch();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    // The refetch replays exactly the loaded pages with their stored cursors.
+    expect(requestsOf(fetchMock).map((r) => r.url.searchParams.get("cursor"))).toEqual([
+      null,
+      getMetadataMatchQueueOk.page.next_cursor,
+      null,
+      getMetadataMatchQueueOk.page.next_cursor,
+    ]);
+    expect(result.current.data?.pages[1]?.movies[0]?.media_file_id).toBe("121");
   });
 
   it("lists matcher queue statuses with numeric library ids", async () => {
