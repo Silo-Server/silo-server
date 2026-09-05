@@ -1186,11 +1186,12 @@ func (m *SessionManager) RollbackReplacement(sessionID string, rollback SessionR
 }
 
 // SetTranscodeStreamDetails records the actual encode decisions of a running
-// transcode on the session — video copy vs re-encode, and whether audio is
-// re-encoded — together with the confirmed hardware and tone-map executors —
-// so session sync and the admin activity views describe what ffmpeg is doing
-// rather than relying on requested transport defaults.
-func (m *SessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode) error {
+// transcode on the session — video copy vs re-encode, whether audio is
+// re-encoded, and the resolution/bitrate ceiling the encode was capped to —
+// together with the confirmed hardware and tone-map executors — so session
+// sync and the admin activity views describe what ffmpeg is doing rather
+// than relying on requested transport defaults.
+func (m *SessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode, targetResolution string, targetBitrateKbps int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1204,6 +1205,8 @@ func (m *SessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, 
 	s.TranscodeAudio = transcodeAudio
 	s.TranscodeHWAccel = hwAccel
 	s.ToneMapMode = toneMapMode
+	s.TargetResolution = targetResolution
+	s.TargetBitrateKbps = targetBitrateKbps
 	m.touchSessionLocked(s)
 	return nil
 }
