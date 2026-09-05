@@ -1,0 +1,20 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:000000000000000000000018",
+  "errors": [
+    {
+      "location": "body.audio_track_index",
+      "code": "out_of_range",
+      "detail": "expected number >= -1"
+    },
+    {
+      "location": "body.track_signature.bitrate",
+      "code": "unknown_field",
+      "detail": "unexpected property"
+    }
+  ]
+}
+

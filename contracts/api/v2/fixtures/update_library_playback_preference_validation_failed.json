@@ -1,0 +1,20 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:000000000000000000000023",
+  "errors": [
+    {
+      "location": "body.show_forced_subtitles",
+      "code": "invalid_type",
+      "detail": "expected boolean"
+    },
+    {
+      "location": "body.library_id",
+      "code": "unknown_field",
+      "detail": "unexpected property"
+    }
+  ]
+}
+
