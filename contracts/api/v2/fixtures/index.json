@@ -47,7 +47,7 @@
         "method": "DELETE",
         "path": "/api/v2/probe/guarded/a",
         "headers": {
-          "If-Match": "\"23305467.1x02i55143o12\""
+          "If-Match": "\"26637aec.h3gk9c9o533h\""
         }
       },
       "expected_status": 204,
@@ -103,13 +103,13 @@
         "method": "GET",
         "path": "/api/v2/probe/guarded/a",
         "headers": {
-          "If-None-Match": "\"23305467.1x02i55143o12\""
+          "If-None-Match": "\"26637aec.h3gk9c9o533h\""
         }
       },
       "expected_status": 304,
       "response_headers": {
         "Cache-Control": "no-store",
-        "ETag": "\"23305467.1x02i55143o12\""
+        "ETag": "\"26637aec.h3gk9c9o533h\""
       },
       "response_media_type": null,
       "schema": null,
@@ -141,7 +141,7 @@
         "method": "PUT",
         "path": "/api/v2/probe/guarded/a",
         "headers": {
-          "If-Match": "\"23305467.1x02i55143o13\""
+          "If-Match": "\"26637aec.h3gk9c9o533g\""
         },
         "body": "{\"name\":\"fixture\"}"
       },
@@ -149,7 +149,7 @@
       "response_headers": {
         "Cache-Control": "no-store",
         "Content-Type": "application/problem+json",
-        "ETag": "\"23305467.1x02i55143o12\""
+        "ETag": "\"26637aec.h3gk9c9o533h\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
@@ -171,7 +171,7 @@
       "response_headers": {
         "Cache-Control": "no-store",
         "Content-Type": "application/problem+json",
-        "ETag": "\"23305467.1x02i55143o12\""
+        "ETag": "\"26637aec.h3gk9c9o533h\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",

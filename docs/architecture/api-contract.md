@@ -385,10 +385,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   9110 5.3), so a tag on a second line is evaluated, and rewrites a present but empty field
   to an empty list so it is `412` (an empty list matches nothing) rather than the `428` an
   absent field earns.
-  `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(version, scope)` (strong,
-  quoted, opaque; the scope keeps redacted representations from sharing a validator; the
+  `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(scope, id, version)`
+  (strong, quoted, opaque; the scope keeps redacted representations from sharing a
+  validator, the resource id keeps two resources at one version from sharing one, and the
   version source must be monotonic across delete and recreate at the same id, so a
-  validator minted for a deleted resource never matches its successor),
+  validator minted for one resource or its deleted predecessor never matches another),
   `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),
   `StrongMatch` / `WeakMatch`, `EvaluateIfMatch` (nil, `428`, `412` with the current `ETag`, or
   `400 malformed_request` without echoing the value), `EvaluateGuardedPreconditions` (the RFC

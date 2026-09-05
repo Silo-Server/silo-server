@@ -110,7 +110,7 @@ func TestEntityTagComparison(t *testing.T) {
 }
 
 func TestRenderETag(t *testing.T) {
-	a := RenderETag(7, "group.editor")
+	a := RenderETag("group.editor", "42", 7)
 	if a.Weak || a.IsZero() {
 		t.Fatalf("rendered tag is not a strong, non-empty tag: %+v", a)
 	}
@@ -126,21 +126,24 @@ func TestRenderETag(t *testing.T) {
 			t.Fatalf("opaque text %q holds a non-etagc byte", a.Opaque)
 		}
 	}
-	if a != RenderETag(7, "group.editor") {
+	if a != RenderETag("group.editor", "42", 7) {
 		t.Fatal("rendering is not stable")
 	}
-	if a == RenderETag(8, "group.editor") {
-		t.Fatal("two versions of one scope share a tag")
+	if a == RenderETag("group.editor", "42", 8) {
+		t.Fatal("two versions of one resource share a tag")
 	}
-	if a == RenderETag(7, "group.admin") {
-		t.Fatal("two scopes of one version share a tag")
+	if a == RenderETag("group.admin", "42", 7) {
+		t.Fatal("two scopes of one resource share a tag")
+	}
+	if a == RenderETag("group.editor", "43", 7) {
+		t.Fatal("two resources at one version share a tag")
 	}
 	if strings.Contains(a.Opaque, "7") && strings.Count(a.Opaque, "7") == 1 && strings.HasSuffix(a.Opaque, ".7") {
 		t.Fatalf("opaque text %q exposes the version as plain decimal", a.Opaque)
 	}
 	seen := map[EntityTag]bool{}
 	for v := int64(0); v < 1000; v++ {
-		tag := RenderETag(v, "s")
+		tag := RenderETag("s", "r", v)
 		if seen[tag] {
 			t.Fatalf("version %d collides", v)
 		}
@@ -149,8 +152,8 @@ func TestRenderETag(t *testing.T) {
 }
 
 func TestEvaluateIfMatch(t *testing.T) {
-	current := RenderETag(3, "probe")
-	stale := RenderETag(2, "probe")
+	current := RenderETag("probe", "a", 3)
+	stale := RenderETag("probe", "a", 2)
 	weakCurrent := EntityTag{Opaque: current.Opaque, Weak: true}
 	cases := []struct {
 		name     string
@@ -196,9 +199,9 @@ func TestEvaluateIfMatch(t *testing.T) {
 }
 
 func TestEvaluateIfNoneMatch(t *testing.T) {
-	current := RenderETag(3, "probe")
+	current := RenderETag("probe", "a", 3)
 	weak := EntityTag{Opaque: current.Opaque, Weak: true}
-	other := RenderETag(4, "probe")
+	other := RenderETag("probe", "a", 4)
 	for _, c := range []struct {
 		name    string
 		field   string
@@ -229,7 +232,7 @@ func TestEvaluateIfNoneMatch(t *testing.T) {
 }
 
 func TestEvaluateCreateOnly(t *testing.T) {
-	existing := RenderETag(1, "probe")
+	existing := RenderETag("probe", "a", 1)
 	if p := EvaluateCreateOnly("*", nil); p != nil {
 		t.Fatalf("no resource: %v", p)
 	}
@@ -243,7 +246,7 @@ func TestEvaluateCreateOnly(t *testing.T) {
 	if p := EvaluateCreateOnly(existing.String(), &existing); p == nil || p.Status != http.StatusPreconditionFailed {
 		t.Fatalf("matching tag against an existing resource: %v", p)
 	}
-	if p := EvaluateCreateOnly(RenderETag(2, "probe").String(), &existing); p != nil {
+	if p := EvaluateCreateOnly(RenderETag("probe", "a", 2).String(), &existing); p != nil {
 		t.Fatalf("non-matching tag: %v", p)
 	}
 	if p := EvaluateCreateOnly("abc", nil); p == nil || p.Status != http.StatusBadRequest {
@@ -255,7 +258,7 @@ func TestStaleVersionProblem(t *testing.T) {
 	if !errors.Is(ErrStaleVersion, ErrStaleVersion) || ErrStaleVersion.Error() == "" {
 		t.Fatal("sentinel")
 	}
-	cur := RenderETag(9, "probe")
+	cur := RenderETag("probe", "a", 9)
 	p := StaleVersionProblem(cur)
 	if p.Status != http.StatusPreconditionFailed || p.GetHeaders().Get("ETag") != cur.String() {
 		t.Fatalf("with current: %v %v", p, p.GetHeaders())

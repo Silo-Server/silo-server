@@ -341,7 +341,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			if !ok {
 				return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
 			}
-			current := RenderETag(row.Version, guardedProbeScope)
+			current := RenderETag(guardedProbeScope, in.ID, row.Version)
 			out := &guardedProbeReadOutput{ETag: current.String(), Body: guardedProbeBody{ID: in.ID, Name: row.Name, Version: row.Version}}
 			matched, p := EvaluateIfNoneMatch(in.IfNoneMatch, current)
 			if p != nil {
@@ -374,7 +374,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 					// advertise, so the 412 carries no ETag.
 					return nil, StaleVersionProblem(EntityTag{})
 				}
-				current := RenderETag(row.Version, guardedProbeScope)
+				current := RenderETag(guardedProbeScope, in.ID, row.Version)
 				if attempt > 0 && !IsOverwrite(in.IfMatch) {
 					return nil, StaleVersionProblem(current)
 				}
@@ -389,7 +389,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 					continue
 				}
 				return &guardedProbeWriteOutput{
-					ETag: RenderETag(updated.Version, guardedProbeScope).String(),
+					ETag: RenderETag(guardedProbeScope, in.ID, updated.Version).String(),
 					Body: guardedProbeBody{ID: in.ID, Name: updated.Name, Version: updated.Version},
 				}, nil
 			}
@@ -411,7 +411,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 					// The race winner deleted it: nothing current to advertise.
 					return nil, StaleVersionProblem(EntityTag{})
 				}
-				current := RenderETag(row.Version, guardedProbeScope)
+				current := RenderETag(guardedProbeScope, in.ID, row.Version)
 				if attempt > 0 && !IsOverwrite(in.IfMatch) {
 					return nil, StaleVersionProblem(current)
 				}
@@ -437,7 +437,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			var existing *EntityTag
 			row, ok := store.Get(in.ID)
 			if ok {
-				tag := RenderETag(row.Version, guardedProbeScope)
+				tag := RenderETag(guardedProbeScope, in.ID, row.Version)
 				existing = &tag
 			}
 			if p := EvaluateCreateOnly(in.IfNoneMatch, existing); p != nil {
@@ -467,7 +467,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 					row, ok = store.Get(in.ID)
 					existing = nil
 					if ok {
-						tag := RenderETag(row.Version, guardedProbeScope)
+						tag := RenderETag(guardedProbeScope, in.ID, row.Version)
 						existing = &tag
 					}
 					if p := EvaluateCreateOnly(in.IfNoneMatch, existing); p != nil {
@@ -476,7 +476,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				}
 			}
 			return &guardedProbeWriteOutput{
-				ETag: RenderETag(updated.Version, guardedProbeScope).String(),
+				ETag: RenderETag(guardedProbeScope, in.ID, updated.Version).String(),
 				Body: guardedProbeBody{ID: in.ID, Name: updated.Name, Version: updated.Version},
 			}, nil
 		})

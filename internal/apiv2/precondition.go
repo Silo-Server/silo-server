@@ -41,20 +41,25 @@ func (t EntityTag) String() string {
 }
 
 // RenderETag produces the strong, quoted validator for one row version of one
-// representation scope. The scope keeps differently redacted editor
-// representations of the same row from sharing a validator. The text is
-// opaque to clients: it is a stable encoding, not the decimal version.
-func RenderETag(version int64, scope string) EntityTag {
+// resource in one representation scope. The scope keeps differently redacted
+// editor representations of the same row from sharing a validator; the
+// resource id keeps two resources at the same version from sharing one, so a
+// tag copied from one resource never authorizes a mutation of another. The
+// text is opaque to clients: it is a stable encoding, not the decimal
+// version.
+func RenderETag(scope, id string, version int64) EntityTag {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(scope))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(id))
 	sum := h.Sum64()
 	prefix := strconv.FormatUint(sum&0xffffffff, 16)
 	for len(prefix) < 8 {
 		prefix = "0" + prefix
 	}
-	// XOR with the scope hash is a bijection in version for a fixed scope, so
-	// two versions of one scope never collide, and the text is not the
-	// version in plain decimal.
+	// XOR with the (scope, id) hash is a bijection in version for a fixed
+	// resource, so two versions of one resource never collide, and the text
+	// is not the version in plain decimal.
 	return EntityTag{Opaque: prefix + "." + strconv.FormatUint(uint64(version)^sum, 36)}
 }
 

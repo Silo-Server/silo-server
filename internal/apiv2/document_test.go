@@ -274,7 +274,7 @@ type embeddedConditionalDocOutput struct {
 }
 
 func registerConcurrencyDocProbes(reg *Registry) {
-	current := RenderETag(1, "doc")
+	current := RenderETag("doc", "a", 1)
 	Register(reg, Operation{
 		Operation: func() huma.Operation {
 			o := humaOp(http.MethodGet, Prefix+"/docprobe/{id}", "getDocProbe", "probe", "conditional")
@@ -499,7 +499,7 @@ func lintExtensions(raw []byte) []string {
 // the same read without a matching If-None-Match is a normal 200.
 func TestNotModifiedHasNoBody(t *testing.T) {
 	h := NewHandler(Dependencies{testRegister: registerConcurrencyDocProbes})
-	current := RenderETag(1, "doc")
+	current := RenderETag("doc", "a", 1)
 	rec := do(t, h, http.MethodGet, Prefix+"/docprobe/a", "", map[string]string{"If-None-Match": current.String()})
 	if rec.Code != http.StatusNotModified {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -516,7 +516,7 @@ func TestNotModifiedHasNoBody(t *testing.T) {
 	if requestIDHeader(rec) == "" {
 		t.Fatal("304 lacks X-Request-ID")
 	}
-	rec = do(t, h, http.MethodGet, Prefix+"/docprobe/a", "", map[string]string{"If-None-Match": RenderETag(2, "doc").String()})
+	rec = do(t, h, http.MethodGet, Prefix+"/docprobe/a", "", map[string]string{"If-None-Match": RenderETag("doc", "a", 2).String()})
 	if rec.Code != http.StatusOK || rec.Body.Len() == 0 || rec.Header().Get("ETag") != current.String() {
 		t.Fatalf("non-matching read: %d %q etag %q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
 	}

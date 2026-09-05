@@ -142,7 +142,7 @@ func fixtureCases() []fixtureCase {
 		{name: TypePreconditionFailed.ID,
 			scenario: "A guarded mutation whose If-Match names a stale version: nothing changes and ETag carries the current validator to retry with.",
 			method:   http.MethodPut, path: "/api/v2/probe/guarded/a", body: `{"name":"fixture"}`,
-			headers: map[string]string{"If-Match": RenderETag(0, guardedProbeScope).String()},
+			headers: map[string]string{"If-Match": RenderETag(guardedProbeScope, "a", 0).String()},
 			status:  http.StatusPreconditionFailed, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: problem},
 		{name: TypePreconditionFailed.ID + "_create_only",
 			scenario: "A create-only PUT (If-None-Match: *) at an id that already holds a resource: nothing changes and ETag carries the existing validator.",
@@ -152,14 +152,14 @@ func fixtureCases() []fixtureCase {
 		{name: "not_modified",
 			scenario: "A conditional read whose If-None-Match matches the current ETag: 304 with the validator, no body.",
 			method:   http.MethodGet, path: "/api/v2/probe/guarded/a",
-			headers: map[string]string{"If-None-Match": RenderETag(1, guardedProbeScope).String()},
+			headers: map[string]string{"If-None-Match": RenderETag(guardedProbeScope, "a", 1).String()},
 			status:  http.StatusNotModified, assertHeaders: []string{"Cache-Control", "ETag"}},
 		// Last: one handler serves every case, and the cases above read
 		// resource "a" at version 1.
 		{name: "guarded_delete_ok",
 			scenario: "A guarded DELETE whose If-Match names the current ETag: 204 with no body and no validator, since the representation is gone.",
 			method:   http.MethodDelete, path: "/api/v2/probe/guarded/a",
-			headers: map[string]string{"If-Match": RenderETag(1, guardedProbeScope).String()},
+			headers: map[string]string{"If-Match": RenderETag(guardedProbeScope, "a", 1).String()},
 			status:  http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
 	}
 }
