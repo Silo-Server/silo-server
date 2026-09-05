@@ -158,7 +158,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
 		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
 		"listHistory": true, "removeHistoryEntries": true,
-		"syncProgress": true,
+		"syncProgress":  true,
 		"getWatchState": true, "markWatched": true, "unmarkWatched": true,
 	}
 	for _, id := range libraryOperationIDs {

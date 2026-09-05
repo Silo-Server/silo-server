@@ -752,6 +752,65 @@
       "body_file": "get_system_info_ok.json"
     },
     {
+      "name": "get_watch_state_not_playable",
+      "operation_id": "getWatchState",
+      "scenario": "A series is not directly playable: a validation failure naming the path parameter, where v1 answered 400 invalid_watch_target.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watch/series:heat",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_watch_state_not_playable.json"
+    },
+    {
+      "name": "get_watch_state_ok",
+      "operation_id": "getWatchState",
+      "scenario": "The playable detail of a movie for the acting profile: versions with tracks and chapters, markers, subtitles and the profile's progress.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watch/movie:heat-1995?file_id=42&image_size=medium",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/WatchDetail",
+      "body_file": "get_watch_state_ok.json"
+    },
+    {
+      "name": "get_watch_state_unauthenticated",
+      "operation_id": "getWatchState",
+      "scenario": "The watch detail needs an account even though the profile header is optional.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watch/movie:heat-1995"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_watch_state_unauthenticated.json"
+    },
+    {
       "name": "list_admin_users_offset_rejected",
       "operation_id": "listAdminUsers",
       "scenario": "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
@@ -810,6 +869,68 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_admin_users_permission_denied.json"
+    },
+    {
+      "name": "list_history_invalid_image_size",
+      "operation_id": "listHistory",
+      "scenario": "image_size is a closed enum; an unknown value is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/history?image_size=huge",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_history_invalid_image_size.json"
+    },
+    {
+      "name": "list_history_ok",
+      "operation_id": "listHistory",
+      "scenario": "The first page of a profile's watch history as catalog cards, most recent watch first, with an opaque cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/history?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/HistoryCollection",
+      "body_file": "list_history_ok.json"
+    },
+    {
+      "name": "list_history_profile_header_required",
+      "operation_id": "listHistory",
+      "scenario": "A profile-scoped read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/history",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_history_profile_header_required.json"
     },
     {
       "name": "list_household_sessions_ok",
@@ -1218,6 +1339,47 @@
       "body_file": "list_unmatched_items_ok.json"
     },
     {
+      "name": "mark_watched_not_found",
+      "operation_id": "markWatched",
+      "scenario": "An item outside the viewer's catalog cannot be marked.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/watched/movie:missing",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "mark_watched_not_found.json"
+    },
+    {
+      "name": "mark_watched_profile_header_required",
+      "operation_id": "markWatched",
+      "scenario": "Marking watched without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/watched/movie:heat-1995",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "mark_watched_profile_header_required.json"
+    },
+    {
       "name": "not_acceptable",
       "operation_id": "getSystemInfo",
       "scenario": "An Accept header that admits no JSON representation.",
@@ -1379,6 +1541,72 @@
       "body_file": "rematch_stale_id_permission_denied.json"
     },
     {
+      "name": "remove_history_entries_not_found",
+      "operation_id": "removeHistoryEntries",
+      "scenario": "A target that is not in the viewer's catalog is not found; nothing is hidden.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/history/remove",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"targets\":[{\"content_id\":\"missing\"}]}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "remove_history_entries_not_found.json"
+    },
+    {
+      "name": "remove_history_entries_profile_locked",
+      "operation_id": "removeHistoryEntries",
+      "scenario": "A PIN-locked profile without X-Profile-Token cannot change its history.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/history/remove",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        },
+        "body": "{\"targets\":[{\"content_id\":\"movie:heat-1995\"}]}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "remove_history_entries_profile_locked.json"
+    },
+    {
+      "name": "remove_history_entries_validation_failed",
+      "operation_id": "removeHistoryEntries",
+      "scenario": "An empty target list and an unknown scope: one errors[] entry per failure.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/history/remove",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"targets\":[{\"content_id\":\"movie:heat-1995\",\"scope\":\"season\"}]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "remove_history_entries_validation_failed.json"
+    },
+    {
       "name": "reorder_libraries_validation_failed",
       "operation_id": "reorderLibraries",
       "scenario": "A negative position is out of range; a successful reorder answers 204 with no body.",
@@ -1484,6 +1712,71 @@
       "body_file": "set_root_override_validation_failed.json"
     },
     {
+      "name": "sync_progress_ok",
+      "operation_id": "syncProgress",
+      "scenario": "A batch of two progress writes, one with an offline event time; one result per item in request order.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/sync/progress",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"items\":[{\"media_item_id\":\"movie-8f2c1a\",\"position_ms\":1325500,\"duration_ms\":5400000,\"updated_at\":\"2026-01-02T03:04:05.250Z\"},{\"media_item_id\":\"episode-42\",\"position_ms\":0,\"duration_ms\":2600000,\"force_overwrite\":true}]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProgressSyncOutputBody",
+      "body_file": "sync_progress_ok.json"
+    },
+    {
+      "name": "sync_progress_profile_header_required",
+      "operation_id": "syncProgress",
+      "scenario": "A progress write without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/sync/progress",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"items\":[{\"media_item_id\":\"movie-8f2c1a\",\"position_ms\":1000,\"duration_ms\":2000}]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "sync_progress_profile_header_required.json"
+    },
+    {
+      "name": "sync_progress_validation_failed",
+      "operation_id": "syncProgress",
+      "scenario": "An empty item id and a negative position: one errors[] entry per failure, positions are integer milliseconds at least 0.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/sync/progress",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"items\":[{\"media_item_id\":\"\",\"position_ms\":-1,\"duration_ms\":0}]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "sync_progress_validation_failed.json"
+    },
+    {
       "name": "unknown_query_parameter",
       "operation_id": "getSystemInfo",
       "scenario": "A query parameter the operation does not declare is a validation failure naming the parameter.",
@@ -1499,6 +1792,48 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "unknown_query_parameter.json"
+    },
+    {
+      "name": "unmark_watched_not_found",
+      "operation_id": "unmarkWatched",
+      "scenario": "An item outside the viewer's catalog cannot be unmarked.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/watched/movie:missing",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "unmark_watched_not_found.json"
+    },
+    {
+      "name": "unmark_watched_profile_locked",
+      "operation_id": "unmarkWatched",
+      "scenario": "A PIN-locked profile without X-Profile-Token cannot change its watched state.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/watched/movie:heat-1995",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "unmark_watched_profile_locked.json"
     },
     {
       "name": "unsupported_media_type",
