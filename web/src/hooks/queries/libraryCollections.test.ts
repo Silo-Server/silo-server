@@ -16,8 +16,10 @@ import { setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
 import {
+  flattenLibraryCollectionItems,
   flattenLibraryCollections,
   getLibraryCollectionList,
+  LIBRARY_COLLECTION_ITEMS_PAGE_LIMIT,
   useLibraryCollectionItems,
   useLibraryCollections,
   useLibraryUserCollections,
@@ -100,13 +102,70 @@ describe("library viewer reads on the v2 contract", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/v2/library/1/collections/c1/items");
-    const [item] = result.current.data ?? [];
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), "http://localhost");
+    expect(url.pathname).toBe("/api/v2/library/1/collections/c1/items");
+    expect(url.searchParams.get("limit")).toBe(String(LIBRARY_COLLECTION_ITEMS_PAGE_LIMIT));
+    expect(url.searchParams.get("cursor")).toBeNull();
+    expect(result.current.hasNextPage).toBe(false);
+    const [item] = flattenLibraryCollectionItems(result.current.data);
     expect(item?.content_id).toBe("movie:heat-1995");
     expect(item?.poster_url).toBe("");
     expect(item?.overview).toBe("");
     expect(item?.rating_imdb).toBeNull();
     expect(item?.added_at).toBe("2026-01-02T03:04:05.678Z");
+  });
+
+  it("follows page.next_cursor for a collection with more positions than one page", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url.searchParams.get("cursor") === null) {
+        return jsonResponse({
+          ...getLibraryCollectionItemsOk,
+          page: { has_more: true, next_cursor: "c2" },
+        });
+      }
+      expect(url.searchParams.get("cursor")).toBe("c2");
+      return jsonResponse({
+        items: [{ ...getLibraryCollectionItemsOk.items[0], content_id: "movie:alien-1979" }],
+        page: { has_more: false },
+      });
+    });
+
+    const { result } = renderHook(() => useLibraryCollectionItems(1, "c1"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.hasNextPage).toBe(true);
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(flattenLibraryCollectionItems(result.current.data).map((i) => i.content_id)).toEqual([
+      "movie:heat-1995",
+      "movie:alien-1979",
+    ]);
+  });
+
+  it("reports more pages when access filtering empties the first window", async () => {
+    stubFetch((url) =>
+      url.searchParams.get("cursor") === null
+        ? jsonResponse({ items: [], page: { has_more: true, next_cursor: "c2" } })
+        : jsonResponse(getLibraryCollectionItemsOk),
+    );
+
+    const { result } = renderHook(() => useLibraryCollectionItems(1, "c1"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(flattenLibraryCollectionItems(result.current.data)).toEqual([]);
+    expect(result.current.hasNextPage).toBe(true);
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
+    expect(flattenLibraryCollectionItems(result.current.data).map((i) => i.content_id)).toEqual([
+      "movie:heat-1995",
+    ]);
   });
 
   it("loads the library layout and sections", async () => {

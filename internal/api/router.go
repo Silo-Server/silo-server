@@ -1910,6 +1910,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if recsHandler != nil {
 		v2deps.Recommendations = recsHandler
 	}
+	if sectionHandler != nil {
+		v2deps.ProfileSections = sectionHandler
+	}
+	if sectionSettingsHandler != nil {
+		v2deps.SectionFlags = sectionSettingsHandler
+	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {

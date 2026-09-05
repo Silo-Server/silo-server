@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -504,20 +503,15 @@ type LibraryProvidersSetInput struct {
 	Body LibraryProvidersSet
 }
 
-// LibraryPosterUpload documents the multipart form uploadLibraryPoster reads.
-type LibraryPosterUpload struct {
-	Poster string `json:"poster" format:"binary" doc:"The image file: image/jpeg, image/png or image/webp, at most 10 MiB"`
-}
-
-// libraryPosterForm is the form Huma decodes.
-type libraryPosterForm struct {
-	Poster huma.FormFile `form:"poster" contentType:"image/jpeg,image/png,image/webp" required:"true"`
+// LibraryPosterForm is the uploadLibraryPoster multipart form.
+type LibraryPosterForm struct {
+	Poster huma.FormFile `form:"poster" contentType:"image/jpeg,image/png,image/webp" required:"true" doc:"The image file: image/jpeg, image/png or image/webp, at most 10 MiB"`
 }
 
 // LibraryPosterUploadInput is the uploadLibraryPoster request.
 type LibraryPosterUploadInput struct {
 	ID      ID `path:"id" doc:"Library identifier" example:"1"`
-	RawBody huma.MultipartFormFiles[libraryPosterForm]
+	RawBody huma.MultipartFormFiles[LibraryPosterForm]
 }
 
 // offsetPosition is the cursor payload of the administrative listings that
@@ -622,23 +616,14 @@ func registerLibraries(reg *Registry) {
 	Register(reg, admin(refresh), reg.refreshLibraryMetadata)
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/{id}/providers", "getLibraryProviders", "libraries",
-		"The library's metadata provider chain, per content level.")), reg.getLibraryProviders)
+		"The library's metadata provider chain, per content level. Legacy unlevelled rows (content_level '') that an upgraded database keeps are not exposed; setLibraryProviders preserves them.")), reg.getLibraryProviders)
 	setProviders := humaOp(http.MethodPut, Prefix+"/libraries/{id}/providers", "setLibraryProviders", "libraries",
-		"Replace the library's whole provider chain and wake the matcher.")
+		"Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers.")
 	setProviders.DefaultStatus = http.StatusNoContent
 	Register(reg, admin(setProviders), reg.setLibraryProviders)
 
 	upload := humaOp(http.MethodPut, Prefix+"/libraries/{id}/poster", "uploadLibraryPoster", "libraries",
 		"Store a poster for the library from a multipart upload (JPEG, PNG or WebP, at most 10 MiB) and answer the library with its new poster URL.")
-	upload.RequestBody = &huma.RequestBody{
-		Required: true,
-		Content: map[string]*huma.MediaType{
-			mediaTypeMultipart: {
-				Schema:   reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeOf(LibraryPosterUpload{}), true, ""),
-				Encoding: map[string]*huma.Encoding{"poster": {ContentType: posterMediaTypeList}},
-			},
-		},
-	}
 	Register(reg, Operation{Operation: upload, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, MaxBodyBytes: maxPosterBytes + posterFormOverhead}, reg.uploadLibraryPoster)
 
 	deletePoster := humaOp(http.MethodDelete, Prefix+"/libraries/{id}/poster", "deleteLibraryPoster", "libraries",
@@ -656,9 +641,6 @@ const (
 	maxPosterBytes     = 10 << 20
 	posterFormOverhead = 4 << 10
 )
-
-// posterMediaTypeList is the comma-joined list of image types a poster may be.
-const posterMediaTypeList = "image/jpeg,image/png,image/webp"
 
 func (reg *Registry) confirmEmptyRootCleanup(ctx context.Context, in *LibraryIDInput) (*EmptyRootCleanupOutput, error) {
 	svc, p := reg.libraryAdmin()
@@ -823,8 +805,26 @@ func (reg *Registry) getLibraryProviders(ctx context.Context, in *LibraryIDInput
 	if err != nil {
 		return nil, libraryProblem(err)
 	}
+	// A database upgraded from before per-level chains keeps its legacy
+	// unlevelled rows (SyncBuiltinProviderChains copies them to every served
+	// level and leaves the originals for old binaries). v1 returns that level
+	// under the empty key; v2 content levels are named, so the legacy rows are
+	// not exposed here and setLibraryProviders carries them across.
+	if _, ok := levels[legacyContentLevel]; ok {
+		named := make(map[string][]handlers.ChainLevelEntryView, len(levels)-1)
+		for name, entries := range levels {
+			if name != legacyContentLevel {
+				named[name] = entries
+			}
+		}
+		levels = named
+	}
 	return &LibraryProvidersOutput{Body: LibraryProviders{Levels: providerChainLevelsOf(levels)}}, nil
 }
+
+// legacyContentLevel is the content_level of provider chain rows written
+// before chains were kept per level: the empty string.
+const legacyContentLevel = ""
 
 func (reg *Registry) setLibraryProviders(ctx context.Context, in *LibraryProvidersSetInput) (*struct{}, error) {
 	svc, p := reg.libraryAdmin()
@@ -851,6 +851,21 @@ func (reg *Registry) setLibraryProviders(ctx context.Context, in *LibraryProvide
 			entries = append(entries, handlers.ProviderChainEntryInput{PluginInstallationID: installation, CapabilityID: e.CapabilityID, Priority: e.Priority, Enabled: e.Enabled})
 		}
 		levels[level.ContentLevel] = entries
+	}
+	// The seam replaces every row of the library, and getLibraryProviders
+	// hides the legacy level, so carry the legacy rows across unchanged:
+	// v1 clients round-trip them, and dropping them would change which
+	// chain GetChain's legacy fallback resolves for a level left empty.
+	current, err := svc.LibraryProviders(ctx, id)
+	if err != nil {
+		return nil, libraryProblem(err)
+	}
+	if legacy := current[legacyContentLevel]; len(legacy) > 0 {
+		entries := make([]handlers.ProviderChainEntryInput, 0, len(legacy))
+		for _, e := range legacy {
+			entries = append(entries, handlers.ProviderChainEntryInput{PluginInstallationID: e.PluginInstallationID, CapabilityID: e.CapabilityID, Priority: e.Priority, Enabled: e.Enabled})
+		}
+		levels[legacyContentLevel] = entries
 	}
 	if err := svc.SetLibraryProviders(ctx, id, levels); err != nil {
 		return nil, libraryProblem(err)

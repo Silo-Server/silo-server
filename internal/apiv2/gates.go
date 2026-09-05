@@ -3,6 +3,7 @@ package apiv2
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -337,20 +338,28 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 		return
 	}
 	if op.RequestBody.Content[mediaTypeMultipart] != nil {
-		// A multipart operation takes multipart/form-data only. Huma reads
-		// the form without a byte cap, so the operation's limit is applied
-		// here: a declared length over it is refused outright, and the body
-		// reader is capped for a body that lies about or omits its length.
+		// A multipart operation takes the form and nothing else; the
+		// boundary parameter is the framework's to parse.
 		if !multipartMediaTypeOK(ct) {
 			writeProblem(w, r, NewProblem(TypeUnsupportedMediaType, "The request media type is not supported; send multipart/form-data."))
 			return
 		}
+		// The framework's body cap applies to bodies it reads itself; the
+		// form parser reads the request directly, so the declared limit is
+		// enforced here, before any part is parsed or stored.
 		limit := operationBodyLimit(op)
 		if r.ContentLength > limit {
-			writeProblem(w, r, NewProblem(TypePayloadTooLarge, humaDetail(TypePayloadTooLarge, "", limit)))
+			writeProblem(w, r, NewProblem(TypePayloadTooLarge, fmt.Sprintf("The request body exceeds the %d-byte limit.", limit)))
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		defer func() {
+			// Parts larger than the parser's memory threshold are spooled
+			// to temp files; the response is complete once next returns.
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
+		}()
 		next(ctx)
 		return
 	}
@@ -364,14 +373,20 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 	next(ctx)
 }
 
-// mediaTypeMultipart is the one non-JSON request media type: file uploads.
+// mediaTypeMultipart is the one non-JSON request media type the listener
+// accepts, on operations that declare a multipart form (avatar upload).
 const mediaTypeMultipart = "multipart/form-data"
 
-// multipartMediaTypeOK reports whether ct is multipart/form-data; the
-// boundary parameter is the form's own and passes through untouched.
+// multipartMediaTypeOK reports whether a Content-Type names a multipart
+// form; its parameters (boundary) are left to the form parser.
 func multipartMediaTypeOK(ct string) bool {
-	base, _, _ := strings.Cut(ct, ";")
-	return strings.ToLower(strings.TrimSpace(base)) == mediaTypeMultipart
+	return strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0])) == mediaTypeMultipart
+}
+
+// requestMediaTypeOK reports whether the listener can accept a request media
+// type on some operation: JSON everywhere, the multipart form where declared.
+func requestMediaTypeOK(mediaType string) bool {
+	return structuredMediaTypeOK(mediaType) || mediaType == mediaTypeMultipart
 }
 
 // contentEncodingOK reports whether a request body is unencoded. An absent

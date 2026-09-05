@@ -1,5 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, fetchWithSession, getAccessToken } from "@/api/client";
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, getAccessToken } from "@/api/client";
 import type {
   AdminJob,
   AdminJobsResponse,
@@ -39,14 +39,7 @@ import {
   staleMediaIDFromV2,
   unmatchedItemFromV2,
 } from "@/api/v2/libraries";
-import {
-  decodeV2Response,
-  v2,
-  V2_CLIENT_HEADERS,
-  V2ProblemError,
-  type V2Body,
-  type V2Result,
-} from "@/api/v2/request";
+import { v2, V2ProblemError, type V2Body, type V2Result } from "@/api/v2/request";
 import { adminKeys, libraryKeys } from "../keys";
 import { toast } from "sonner";
 import type { LibraryReorderEntry } from "@/pages/adminLibraryOrder";
@@ -244,47 +237,70 @@ export function useSkippedLibraryRoots() {
   });
 }
 
-/** Page size for the library root walk: the v2 maximum. */
-const LIBRARY_ROOTS_PAGE_LIMIT = 200;
+/** Page size of the library roots listing. */
+export const LIBRARY_ROOTS_PAGE_LIMIT = 50;
 
-/**
- * Fetches every observed root of one library by walking the cursor-paginated
- * v2 listing. The admin screen pages the rows client-side, so the walk runs
- * to completion.
- */
-export async function fetchAllLibraryRoots(
-  libraryId: number,
-  state?: string,
-  signal?: AbortSignal,
-): Promise<LibraryRoot[]> {
-  const roots: LibraryRoot[] = [];
-  let cursor: string | undefined;
-  for (;;) {
-    const page = await v2("GET /api/v2/libraries/roots", {
-      query: {
-        library_id: String(libraryId),
-        limit: LIBRARY_ROOTS_PAGE_LIMIT,
-        ...(state ? { state } : {}),
-        ...(cursor === undefined ? {} : { cursor }),
-      },
-      signal,
-    });
-    roots.push(...page.items.map(libraryRootFromV2));
-    if (!page.page?.has_more || !page.page.next_cursor) return roots;
-    cursor = page.page.next_cursor;
-  }
+export interface LibraryRootsPage {
+  roots: LibraryRoot[];
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
+  /** Roots matching the filter across every page, for the section header. */
+  total: number;
 }
 
-export function useLibraryRoots(libraryId?: number, state?: string) {
-  return useQuery({
-    queryKey: adminKeys.libraryRoots(libraryId, state),
-    queryFn: ({ signal }) => {
-      if (!libraryId) return Promise.resolve([] as LibraryRoot[]);
-      return fetchAllLibraryRoots(libraryId, state, signal);
+/**
+ * Fetches one page of a library's observed roots. Every page makes the server
+ * reload the library's overrides and item-group claims, so callers page on
+ * demand rather than walking the whole listing up front.
+ */
+export async function fetchLibraryRootsPage(
+  libraryId: number,
+  state?: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<LibraryRootsPage> {
+  const page = await v2("GET /api/v2/libraries/roots", {
+    query: {
+      library_id: String(libraryId),
+      limit: LIBRARY_ROOTS_PAGE_LIMIT,
+      ...(state ? { state } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
     },
-    enabled: !!libraryId,
+    signal,
+  });
+  return {
+    roots: page.items.map(libraryRootFromV2),
+    nextCursor: page.page?.has_more && page.page.next_cursor ? page.page.next_cursor : undefined,
+    total: page.total,
+  };
+}
+
+/**
+ * Pages a library's observed roots by cursor. The first page loads only while
+ * `enabled` holds (the diagnostics section that shows the rows is collapsed
+ * by default); further pages load through `fetchNextPage`.
+ */
+export function useLibraryRoots(
+  libraryId?: number,
+  state?: string,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: adminKeys.libraryRoots(libraryId, state),
+    queryFn: ({ pageParam, signal }) =>
+      fetchLibraryRootsPage(libraryId ?? 0, state, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled: enabled && !!libraryId,
     staleTime: ADMIN_STALE_TIME,
   });
+}
+
+/** Flattens the loaded pages of useLibraryRoots into one list. */
+export function flattenLibraryRoots(
+  data: { pages: LibraryRootsPage[] } | undefined,
+): LibraryRoot[] {
+  return data?.pages.flatMap((page) => page.roots) ?? [];
 }
 
 export function useUpsertLibraryRootOverride() {
@@ -683,20 +699,10 @@ export function useUploadLibraryPoster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, file }: { id: number; file: File }): Promise<Library> => {
-      // uploadLibraryPoster is the one multipart operation in this section;
-      // the typed boundary only encodes JSON bodies, so the fetch is issued
-      // here and the response is decoded through the contract.
-      const form = new FormData();
-      form.append("poster", file);
-      const { res } = await fetchWithSession(
-        `/api/v2/libraries/${encodeURIComponent(String(id))}/poster`,
-        {
-          method: "PUT",
-          headers: { Accept: "application/json", ...V2_CLIENT_HEADERS },
-          body: form,
-        },
-      );
-      const library = await decodeV2Response("PUT /api/v2/libraries/{id}/poster", res);
+      const library = await v2("PUT /api/v2/libraries/{id}/poster", {
+        path: { id: String(id) },
+        form: { poster: file },
+      });
       return libraryFromV2(library);
     },
     onSuccess: () => {

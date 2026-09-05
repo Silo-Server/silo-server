@@ -79,8 +79,13 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 
 func seedLibrary(t *testing.T, pool *pgxpool.Pool, name string) int {
 	t.Helper()
+	return seedLibraryEnabled(t, pool, name, true)
+}
+
+func seedLibraryEnabled(t *testing.T, pool *pgxpool.Pool, name string, enabled bool) int {
+	t.Helper()
 	var id int
-	if err := pool.QueryRow(context.Background(), `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, name).Scan(&id); err != nil {
+	if err := pool.QueryRow(context.Background(), `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, $2) RETURNING id`, name, enabled).Scan(&id); err != nil {
 		t.Fatalf("seed folder: %v", err)
 	}
 	t.Cleanup(func() { mustExec(t, pool, `DELETE FROM media_folders WHERE id = $1`, id) })
@@ -123,5 +128,77 @@ func TestLibraryViewsRefuseUnknownLibraryDB(t *testing.T) {
 	const missing = "/api/v2/library/999999"
 	for _, path := range []string{missing + "/layout", missing + "/sections", missing + "/sections/x/items"} {
 		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
+	}
+}
+
+// TestLibraryViewsRefuseHiddenLibrary: an unrestricted profile (no library
+// allowlist) that has hidden a library carries it in DisabledLibraryIDs, and
+// every profile-scoped library read refuses it as not_found while a library
+// the profile has not hidden still answers. The seams are built on nil
+// repositories, so the refusal must come from the scope check alone.
+func TestLibraryViewsRefuseHiddenLibrary(t *testing.T) {
+	policy := &access.Scope{DisabledLibraryIDs: []int{1}}
+	h := newTestHandler(t, scopedViewerDeps(t, policy, handlers.NewSectionHandler(nil, nil), handlers.NewLibraryCollectionHandler(nil, nil, nil, 0, nil, nil)))
+	for _, path := range []string{
+		"/api/v2/library/1/layout",
+		"/api/v2/library/1/sections",
+		"/api/v2/library/1/sections/continue_watching/items",
+		"/api/v2/library/1/collections/c1/items",
+		"/api/v2/library/1/user-collections",
+	} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
+	}
+	// The allowed neighbor is answered by the fakes, proving the refusal
+	// above was the hidden id and not a blanket one.
+	h = newTestHandler(t, scopedViewerDeps(t, policy, &fakeLibraryViews{}, &fakeLibraryViews{}))
+	for _, path := range []string{"/api/v2/library/2/layout", "/api/v2/library/2/sections", "/api/v2/library/2/collections/c1/items"} {
+		if rec := do(t, h, http.MethodGet, path, "", viewerHeaders()); rec.Code != 200 {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestLibraryViewsRefuseDisabledLibraryDB: a library that exists but is
+// disabled (the state DeleteLibrary leaves it in ahead of the asynchronous
+// removal) is not_found on every section read for an unrestricted profile,
+// exactly like a library that never existed.
+func TestLibraryViewsRefuseDisabledLibraryDB(t *testing.T) {
+	pool := viewerAccessTestPool(t)
+	suffix := time.Now().UnixNano()
+	enabledID := seedLibrary(t, pool, fmt.Sprintf("scope-enabled-%d", suffix))
+	disabledID := seedLibraryEnabled(t, pool, fmt.Sprintf("scope-disabled-%d", suffix), false)
+	svc := handlers.NewSectionHandler(sections.NewRepository(pool), sections.NewFetcher(pool))
+	svc.FolderRepo = catalogpkg.NewFolderRepository(pool)
+	h := newTestHandler(t, scopedViewerDeps(t, &access.Scope{}, svc, &fakeLibraryViews{}))
+	if rec := do(t, h, http.MethodGet, fmt.Sprintf("/api/v2/library/%d/layout", enabledID), "", viewerHeaders()); rec.Code != 200 {
+		t.Fatalf("enabled library: %d %s", rec.Code, rec.Body.String())
+	}
+	base := fmt.Sprintf("/api/v2/library/%d", disabledID)
+	for _, path := range []string{base + "/layout", base + "/sections", base + "/sections/default-recently-added/items"} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
+	}
+}
+
+// TestLibraryCollectionReadsRefuseUnknownLibraryDB: an unrestricted profile
+// gets not_found from the Collections tab and the user-collections list of
+// a library id that does not exist, or that is disabled, instead of the
+// personal collections the store treats as visible on every tab. The same
+// handler answers 200 for a library that exists and is enabled.
+func TestLibraryCollectionReadsRefuseUnknownLibraryDB(t *testing.T) {
+	pool := viewerAccessTestPool(t)
+	suffix := time.Now().UnixNano()
+	libraryID := seedLibrary(t, pool, fmt.Sprintf("coll-known-%d", suffix))
+	disabledID := seedLibraryEnabled(t, pool, fmt.Sprintf("coll-disabled-%d", suffix), false)
+	svc := handlers.NewLibraryCollectionHandler(catalogpkg.NewLibraryCollectionRepository(pool), nil, catalogpkg.NewItemRepository(pool), 0, nil, nil)
+	svc.FolderRepo = catalogpkg.NewFolderRepository(pool)
+	svc.UserCollectionPool = pool
+	h := newTestHandler(t, scopedViewerDeps(t, &access.Scope{}, &fakeLibraryViews{}, svc))
+	for _, suffixPath := range []string{"/collections", "/user-collections"} {
+		if rec := do(t, h, http.MethodGet, fmt.Sprintf("/api/v2/library/%d%s", libraryID, suffixPath), "", viewerHeaders()); rec.Code != 200 {
+			t.Fatalf("existing library %s: %d %s", suffixPath, rec.Code, rec.Body.String())
+		}
+		for _, base := range []string{"/api/v2/library/999999", fmt.Sprintf("/api/v2/library/%d", disabledID)} {
+			requireProblem(t, do(t, h, http.MethodGet, base+suffixPath, "", viewerHeaders()), TypeNotFound)
+		}
 	}
 }

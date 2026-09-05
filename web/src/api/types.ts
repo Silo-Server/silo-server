@@ -245,40 +245,6 @@ export interface Profile {
   updated_at: string;
 }
 
-export interface ProfileListResponse {
-  profiles: Profile[];
-  avatar_upload_enabled: boolean;
-}
-
-export interface CreateProfileRequest {
-  name: string;
-  avatar?: string;
-  pin?: string;
-  is_child?: boolean;
-  max_content_rating?: string;
-  quality_preference?: string;
-  language?: string;
-  preferred_metadata_language?: string;
-  subtitle_language?: string;
-  subtitle_mode?: string;
-  show_forced_subtitles?: boolean;
-  auto_skip_intro?: boolean;
-  auto_skip_credits?: boolean;
-  auto_skip_recap?: boolean;
-  auto_play_next_preview?: boolean;
-  library_restrictions_enabled?: boolean;
-  allowed_library_ids?: number[] | null;
-  max_playback_quality?: string;
-}
-
-export interface UpdateProfileRequest extends Partial<CreateProfileRequest> {}
-
-export interface VerifyPinResponse {
-  valid: boolean;
-  profile_token?: string;
-  expires_at?: string;
-}
-
 // History Import
 export interface HistoryImportSource {
   id: number;
@@ -4309,16 +4275,6 @@ export interface SectionOverride {
   removed?: boolean;
 }
 
-export interface SaveOverridesRequest {
-  scope: string;
-  library_id?: string;
-  overrides: SectionOverride[];
-}
-
-export interface ProfileSectionOverridesResponse {
-  overrides: SectionOverride[];
-}
-
 export interface SettingsSectionEntry {
   id: string;
   section_type: string;
@@ -4330,10 +4286,6 @@ export interface SettingsSectionEntry {
   customized: boolean;
   position: number;
   config?: Record<string, unknown>;
-}
-
-export interface SettingsSectionsResponse {
-  sections: SettingsSectionEntry[];
 }
 
 // Sidebar Pins

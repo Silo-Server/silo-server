@@ -280,19 +280,19 @@ func (reg *Registry) recommendationCards(ctx context.Context, fetch func(svc Rec
 
 func (reg *Registry) listBecauseWatched(ctx context.Context, in *BecauseWatchedInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.BecauseWatchedCards(ctx, userID, profileID, in.ItemID, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+		return svc.BecauseWatchedCards(ctx, userID, profileID, in.ItemID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	})
 }
 
 func (reg *Registry) listPopular(ctx context.Context, in *PopularInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.PopularCards(ctx, userID, profileID, in.Days, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+		return svc.PopularCards(ctx, userID, profileID, in.Days, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	})
 }
 
 func (reg *Registry) listRecentlyAdded(ctx context.Context, in *RecentlyAddedInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.RecentlyAddedCards(ctx, userID, profileID, in.Days, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+		return svc.RecentlyAddedCards(ctx, userID, profileID, in.Days, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	})
 }
 
@@ -305,7 +305,7 @@ func (reg *Registry) getForYouMain(ctx context.Context, in *ForYouInput) (*Recom
 	if p != nil {
 		return nil, p
 	}
-	row, err := svc.ForYouMainCards(ctx, userID, profileID, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+	row, err := svc.ForYouMainCards(ctx, userID, profileID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -334,13 +334,13 @@ func (reg *Registry) recommendationRows(ctx context.Context, fetch func(svc Reco
 
 func (reg *Registry) listForYouRows(ctx context.Context, in *ForYouInput) (*RecommendationRowCollectionOutput, error) {
 	return reg.recommendationRows(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.DiscoverRowView, error) {
-		return svc.ForYouRowCards(ctx, userID, profileID, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+		return svc.ForYouRowCards(ctx, userID, profileID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	})
 }
 
 func (reg *Registry) getDiscover(ctx context.Context, _ *struct{}) (*RecommendationRowCollectionOutput, error) {
 	return reg.recommendationRows(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.DiscoverRowView, error) {
-		view, err := svc.Discover(ctx, userID, profileID, handlers.ViewerAccessFilter(ctx, ""))
+		view, err := svc.Discover(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""))
 		if err != nil {
 			return nil, err
 		}
@@ -361,7 +361,7 @@ func (reg *Registry) getRecommendationSection(ctx context.Context, in *Recommend
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: "query.key", Code: codeRequired, Detail: "a " + in.Kind + " section needs a key"})
 	}
-	view, err := svc.Section(ctx, userID, profileID, in.Kind, in.Key, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+	view, err := svc.Section(ctx, userID, profileID, in.Kind, in.Key, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -370,13 +370,13 @@ func (reg *Registry) getRecommendationSection(ctx context.Context, in *Recommend
 
 func (reg *Registry) listSimilar(ctx context.Context, in *SimilarInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.SimilarCards(ctx, userID, profileID, in.ItemID, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+		return svc.SimilarCards(ctx, userID, profileID, in.ItemID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	})
 }
 
 func (reg *Registry) listSimilarUsersLiked(ctx context.Context, in *SimilarUsersInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.SimilarUsersCards(ctx, userID, profileID, in.Limit, handlers.ViewerAccessFilter(ctx, ""))
+		return svc.SimilarUsersCards(ctx, userID, profileID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	})
 }
 
@@ -421,7 +421,7 @@ func (reg *Registry) listTasteSeedItems(ctx context.Context, cursors *Cursors, i
 	if p != nil {
 		return nil, p
 	}
-	views, candidates, err := svc.TasteSeedItems(ctx, userID, profileID, handlers.ViewerAccessFilter(ctx, ""), in.Limit, offset)
+	views, candidates, err := svc.TasteSeedItems(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Limit, offset)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -474,7 +474,7 @@ func (reg *Registry) getWatchTonight(ctx context.Context, in *WatchTonightInput)
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.WatchTonight(ctx, userID, profileID, handlers.ViewerAccessFilter(ctx, ""), in.Limit)
+	view, err := svc.WatchTonight(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Limit)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -507,7 +507,7 @@ func (reg *Registry) listWatchTonightCards(ctx context.Context, in *WatchTonight
 			excludeIDs[id] = struct{}{}
 		}
 	}
-	view := svc.WatchTonightCards(ctx, userID, profileID, handlers.ViewerAccessFilter(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
+	view := svc.WatchTonightCards(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
 	items := make([]WatchTonightCard, 0, len(view.Cards))
 	for _, c := range view.Cards {
 		cast := make([]WatchTonightCastMember, 0, len(c.Cast))
