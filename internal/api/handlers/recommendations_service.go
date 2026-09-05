@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
@@ -290,4 +291,146 @@ func (h *RecommendationsHandler) ForYouRowCards(ctx context.Context, userID int,
 		return nil, err
 	}
 	return h.renderDiscoverRows(ctx, userID, profileID, filter, discoverRowModelsFromRecommendations(rows))
+}
+
+// SimilarItems answers items similar to itemID; an unavailable engine
+// answers an empty list. The list is not viewer-filtered, as in v1.
+func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string, limit int) ([]recommendations.ScoredItem, error) {
+	if h.engineUnavailable() {
+		return []recommendations.ScoredItem{}, nil
+	}
+	if limit <= 0 {
+		limit = recommendationsDefaultLimit
+	}
+	items, err := h.engine.SimilarItems(ctx, itemID, limit)
+	if err != nil {
+		return nil, recommendationsUnavailable("Failed to fetch similar items")
+	}
+	if items == nil {
+		items = []recommendations.ScoredItem{}
+	}
+	return items, nil
+}
+
+// SimilarUsersLiked answers what similar profiles liked; an unavailable
+// reader answers an empty list.
+func (h *RecommendationsHandler) SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	if h.reader == nil {
+		return []recommendations.ScoredItem{}, nil
+	}
+	if limit <= 0 {
+		limit = recommendationsDefaultLimit
+	}
+	items, err := h.reader.GetSimilarUsersLiked(ctx, userID, profileID, limit, filter)
+	if err != nil {
+		return nil, recommendationsUnavailable("Failed to fetch recommendations")
+	}
+	if items == nil {
+		items = []recommendations.ScoredItem{}
+	}
+	return items, nil
+}
+
+// SimilarCards is SimilarItems rendered as cards for the acting profile.
+func (h *RecommendationsHandler) SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
+	items, err := h.SimilarItems(ctx, itemID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return h.cardsOf(ctx, userID, profileID, filter, items)
+}
+
+// SimilarUsersCards is SimilarUsersLiked rendered as cards.
+func (h *RecommendationsHandler) SimilarUsersCards(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
+	items, err := h.SimilarUsersLiked(ctx, userID, profileID, limit, filter)
+	if err != nil {
+		return nil, err
+	}
+	return h.cardsOf(ctx, userID, profileID, filter, items)
+}
+
+// TasteProfile answers the profile's taste summary; an unavailable engine,
+// a failed read, or a profile without a summary all answer the empty
+// summary, as v1 does.
+func (h *RecommendationsHandler) TasteProfile(ctx context.Context, userID int, profileID string) recommendations.TasteProfileSummary {
+	if h.engineUnavailable() {
+		return emptyTasteProfileSummary()
+	}
+	summary, err := h.engine.GetTasteProfileSummary(ctx, userID, profileID)
+	if err != nil || summary == nil {
+		return emptyTasteProfileSummary()
+	}
+	return *summary
+}
+
+// TasteSeedItems answers one offset page of taste-seeding picker cards.
+// candidates is how many candidate identifiers the page window held before
+// hydration dropped inaccessible ones; a window as large as limit means a
+// next page may exist. An unwired repository or fetcher answers no cards.
+func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit, offset int) (items []SectionItemView, candidates int, err error) {
+	if h.recsRepo == nil || h.Fetcher == nil {
+		return []SectionItemView{}, 0, nil
+	}
+	candidateIDs, err := h.recsRepo.GetTasteSeedCandidates(ctx, limit, offset)
+	if err != nil {
+		slog.ErrorContext(ctx, "TasteSeedItems: candidate query failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return nil, 0, recommendationsUnavailable("Failed to fetch taste seed candidates")
+	}
+	if len(candidateIDs) == 0 {
+		return []SectionItemView{}, 0, nil
+	}
+	mediaItems, err := h.Fetcher.FetchItemsByContentIDs(ctx, candidateIDs, filter)
+	if err != nil {
+		slog.ErrorContext(ctx, "TasteSeedItems: hydrate failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return nil, 0, recommendationsUnavailable("Failed to hydrate taste seed items")
+	}
+	itemMap := make(map[string]*models.MediaItem, len(mediaItems))
+	for _, mi := range mediaItems {
+		itemMap[mi.ContentID] = mi
+	}
+	stateMap := h.resolveTasteSeedUserStates(ctx, userID, profileID, mediaItems)
+	items = make([]SectionItemView, 0, len(candidateIDs))
+	for _, id := range candidateIDs {
+		mi, ok := itemMap[id]
+		if !ok || mi == nil {
+			continue
+		}
+		items = append(items, h.tasteSeedSectionItem(ctx, mi, stateMap))
+	}
+	return items, len(candidateIDs), nil
+}
+
+// SubmitTasteSeed favourites every picked item for the profile and, when
+// any was added, queues a taste-profile refresh. It answers how many picks
+// were recorded; an item that fails to record is skipped, not fatal.
+// Favouriting is idempotent, so a retried submission converges on the same
+// favourite set and reports 0 added.
+func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string) (int, error) {
+	if h.storeProvider == nil {
+		return 0, apiError(http.StatusServiceUnavailable, "unavailable", "User store unavailable")
+	}
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil || store == nil {
+		slog.ErrorContext(ctx, "TasteSeed: failed to load user store", "component", "api", "user_id", userID, "error", err)
+		return 0, recommendationsUnavailable("Failed to load user store")
+	}
+	added := 0
+	for _, id := range itemIDs {
+		if id == "" {
+			continue
+		}
+		if err := store.AddFavorite(ctx, profileID, id); err != nil {
+			slog.WarnContext(ctx, "TasteSeed: failed to add favorite", "component", "api", "user_id", userID, "profile_id", profileID, "item_id", id, "error", err)
+			continue
+		}
+		added++
+	}
+	if added > 0 {
+		var staler ProfileStaler
+		if h.recsRepo != nil {
+			staler = h.recsRepo
+		}
+		triggerProfileRefresh(ctx, staler, h.RecWorker, userID, profileID)
+	}
+	return added, nil
 }

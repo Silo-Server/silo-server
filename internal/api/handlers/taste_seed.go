@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -38,85 +37,27 @@ type tasteSeedSubmitResponse struct {
 // content. The user_state field carries the existing is_favorite flag, so the UI
 // can pre-select items the profile already favorited.
 func (h *RecommendationsHandler) HandleTasteSeedItems(w http.ResponseWriter, r *http.Request) {
-	if h.recsRepo == nil || h.Fetcher == nil {
-		writeJSON(w, http.StatusOK, tasteSeedItemsResponse{Items: []sectionItemResponse{}})
-		return
-	}
-
 	limit := parseTasteSeedLimit(r)
 	offset := parseTasteSeedOffset(r)
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
-	// Fetch a page-sized window of candidate IDs ordered by engagement + rating.
-	candidateIDs, err := h.recsRepo.GetTasteSeedCandidates(r.Context(), limit, offset)
+	items, candidates, err := h.TasteSeedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit, offset)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "TasteSeedItems: candidate query failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch taste seed candidates")
+		writeAPIError(w, err)
 		return
 	}
-
-	if len(candidateIDs) == 0 {
-		writeJSON(w, http.StatusOK, tasteSeedItemsResponse{Items: []sectionItemResponse{}})
-		return
-	}
-
-	// Hydrate items, applying the user's library/content-rating access filter.
-	mediaItems, err := h.Fetcher.FetchItemsByContentIDs(r.Context(), candidateIDs, filter)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "TasteSeedItems: hydrate failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to hydrate taste seed items")
-		return
-	}
-
-	// Preserve the candidate ordering returned by the repo, since
-	// FetchItemsByContentIDs does not guarantee input order.
-	itemMap := make(map[string]*models.MediaItem, len(mediaItems))
-	for _, mi := range mediaItems {
-		itemMap[mi.ContentID] = mi
-	}
-
-	stateMap := h.resolveTasteSeedUserStates(r.Context(), userID, profileID, mediaItems)
-
-	items := make([]sectionItemResponse, 0, len(candidateIDs))
-	for _, id := range candidateIDs {
-		mi, ok := itemMap[id]
-		if !ok || mi == nil {
-			continue
-		}
-		items = append(items, h.tasteSeedSectionItem(r.Context(), mi, stateMap))
-	}
-
 	resp := tasteSeedItemsResponse{Items: items}
-	// Pagination is on the underlying SQL candidate stream (offset/limit on
-	// GetTasteSeedCandidates), so we gate on candidate page fullness, not on
-	// post-hydration visible count. Comparing on `items` would incorrectly
-	// terminate pagination whenever access filtering trims the visible page —
-	// even though more candidate rows exist. The trade-off is that pathologically
-	// filtered tails may produce one extra empty fetch before next_offset goes
-	// nil; the infinite-query consumer handles that gracefully.
-	if len(candidateIDs) == limit {
+	if candidates == limit {
 		next := offset + limit
 		resp.NextOffset = &next
 	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleTasteSeed handles POST /recommendations/taste-seed.
 //
-// Adds each of the provided content IDs to the active profile's favorites
-// (idempotent — re-adds are safe). After bulk-add, asynchronously requests a
-// taste profile refresh so recommendations re-rank using the new signals.
-// Already-favorited items are silently skipped.
+// Accepts a list of item IDs the user picked in the taste-seeding UI and
+// records each as a favourite for the active profile, then queues a
+// taste-profile refresh.
 func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.Request) {
-	if h.storeProvider == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "User store unavailable")
-		return
-	}
-
 	var req tasteSeedSubmitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
@@ -131,48 +72,15 @@ func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.
 		return
 	}
 
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil || store == nil {
-		slog.ErrorContext(r.Context(), "TasteSeed: failed to load user store", "component", "api", "user_id", userID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user store")
+	added, err := h.SubmitTasteSeed(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req.ItemIDs)
+	if err != nil {
+		writeAPIError(w, err)
 		return
-	}
-
-	added := 0
-	for _, id := range req.ItemIDs {
-		if id == "" {
-			continue
-		}
-		if err := store.AddFavorite(r.Context(), profileID, id); err != nil {
-			// Don't fail the whole request on a single item error — log and
-			// continue so the user's other picks still seed their profile.
-			slog.WarnContext(r.Context(), "TasteSeed: failed to add favorite", "component", "api", "user_id", userID, "profile_id", profileID, "item_id", id, "error", err)
-			continue
-		}
-		added++
-	}
-
-	// Trigger an async taste profile refresh so the next discover/for-you
-	// fetch sees the new signals. This is fire-and-forget by design — the
-	// worker handles staleness.
-	if added > 0 {
-		var staler ProfileStaler
-		if h.recsRepo != nil {
-			staler = h.recsRepo
-		}
-		triggerProfileRefresh(r.Context(), staler, h.RecWorker, userID, profileID)
 	}
 
 	writeJSON(w, http.StatusOK, tasteSeedSubmitResponse{Added: added})
 }
 
-// resolveTasteSeedUserStates returns the per-item user state map (favorite,
-// watchlist, played) so the UI can pre-mark items the profile already
-// favorited. Returns nil on any error — the UI falls back to "not favorited"
-// in that case.
 func (h *RecommendationsHandler) resolveTasteSeedUserStates(ctx context.Context, userID int, profileID string, mediaItems []*models.MediaItem) map[string]*itemUserStateResponse {
 	if h.storeProvider == nil || len(mediaItems) == 0 {
 		return nil

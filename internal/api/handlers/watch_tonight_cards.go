@@ -41,6 +41,25 @@ type swipeCardsPageResponse struct {
 	IsCold  bool                `json:"is_cold"`
 }
 
+// WatchTonightCardsView is one page of swipe cards as v1 renders it.
+type WatchTonightCardsView = swipeCardsPageResponse
+
+// WatchTonightCardView is one swipe card.
+type WatchTonightCardView = swipeCardResponse
+
+// WatchTonightCastMemberView is one cast member on a swipe card.
+type WatchTonightCastMemberView = swipeCardCastMember
+
+// KnownWatchTonightGenres is the validated genre set of the cards read, in
+// declaration order, for callers that declare it as an enum.
+var KnownWatchTonightGenres = []string{
+	"Action", "Adventure", "Animation", "Comedy",
+	"Crime", "Documentary", "Drama", "Family",
+	"Fantasy", "History", "Horror", "Music",
+	"Mystery", "Romance", "Science Fiction", "Thriller",
+	"War", "Western",
+}
+
 const (
 	swipeDefaultLimit   = 12
 	swipeMaxLimit       = 20
@@ -63,10 +82,6 @@ var knownGenres = map[string]struct{}{
 // It returns paginated, genre-filterable swipe cards with cast data for the
 // gamified Watch Tonight experience.
 func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
 	mode := r.URL.Query().Get("mode")
 	if mode != "continue" && mode != "discover" {
 		writeError(w, http.StatusBadRequest, "invalid_mode", `mode must be "continue" or "discover"`)
@@ -81,14 +96,23 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 			limit = n
 		}
 	}
+	resp := h.WatchTonightCards(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), mode, genres, excludeIDs, limit)
+	writeJSON(w, http.StatusOK, resp)
+}
 
+// WatchTonightCards is the swipe-card seam. mode is "continue" or
+// "discover", genres are already validated against KnownWatchTonightGenres,
+// excludeIDs is already bounded, and limit is within 1..swipeMaxLimit; the
+// seam never fails, every fetch failure degrades to an empty or shorter page
+// as v1 does.
+func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) WatchTonightCardsView {
 	var merged []mergedItem
 	var isCold bool
 
 	if mode == "continue" {
-		merged, isCold = h.buildContinueCards(r, userID, profileID, filter, excludeIDs, limit)
+		merged, isCold = h.buildContinueCards(ctx, userID, profileID, filter, excludeIDs, limit)
 	} else {
-		merged, isCold = h.buildDiscoverCards(r, userID, profileID, genres, excludeIDs, limit)
+		merged, isCold = h.buildDiscoverCards(ctx, userID, profileID, filter, genres, excludeIDs, limit)
 	}
 
 	resp := swipeCardsPageResponse{
@@ -97,8 +121,7 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 	}
 
 	if len(merged) == 0 {
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp
 	}
 
 	// Over-fetch for enrichment so we can still fill a full page after item
@@ -115,7 +138,7 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 		contentIDs[i] = m.scored.MediaItemID
 	}
 
-	itemMap, overlayMap, stateMap, enrichedEpMeta := h.enrichItems(r, userID, profileID, filter, contentIDs)
+	itemMap, overlayMap, stateMap, enrichedEpMeta := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
 
 	// Determine if there are more items beyond what we return.
 	resp.HasMore = len(merged) > limit
@@ -141,7 +164,7 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 			continue
 		}
 
-		item := h.buildSectionItem(r, mi, overlayMap, stateMap)
+		item := h.buildSectionItem(ctx, mi, overlayMap, stateMap)
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata.
@@ -197,7 +220,7 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 	}
 
 	// Fetch cast using the properly resolved lookup IDs.
-	castMap := h.fetchCastByIDs(r.Context(), castLookupIDs)
+	castMap := h.fetchCastByIDs(ctx, castLookupIDs)
 
 	// Second pass: assemble response cards with cast.
 	for i, ec := range enrichedCards {
@@ -212,14 +235,14 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 		})
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 // buildContinueCards returns CW + Next Up items as swipe cards.
-func (h *RecommendationsHandler) buildContinueCards(r *http.Request, userID int, profileID string, filter catalog.AccessFilter, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool) {
-	cwItems, nextUpItems, err := h.fetchLiveCWAndNextUp(r, userID, profileID, filter, limit+len(excludeIDs))
+func (h *RecommendationsHandler) buildContinueCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool) {
+	cwItems, nextUpItems, err := h.fetchLiveCWAndNextUp(ctx, userID, profileID, filter, limit+len(excludeIDs))
 	if err != nil {
-		slog.WarnContext(r.Context(), "WatchTonightCards: CW/NextUp fetch failed", "component", "api", "user_id", userID, "error", err)
+		slog.WarnContext(ctx, "WatchTonightCards: CW/NextUp fetch failed", "component", "api", "user_id", userID, "error", err)
 		return nil, false
 	}
 
@@ -267,17 +290,15 @@ func (h *RecommendationsHandler) buildContinueCards(r *http.Request, userID int,
 // It searches the user's taste profile against the full embedded library,
 // optionally requiring at least one selected genre match, and falls back to
 // cold-start caches when no taste profile is available.
-func (h *RecommendationsHandler) buildDiscoverCards(r *http.Request, userID int, profileID string, genres []string, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool) {
+func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, genres []string, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool) {
 	if h.recsRepo == nil {
 		return nil, true
 	}
 
-	ctx := r.Context()
-	filter := requestAccessFilter(r)
 	poolSize := discoverCandidatePoolSize(limit, len(genres))
 	embedding, err := h.recsRepo.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "WatchTonightCards: taste profile fetch failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		slog.WarnContext(ctx, "WatchTonightCards: taste profile fetch failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 	}
 
 	candidates := []recommendations.ScoredItem{}
@@ -294,7 +315,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(r *http.Request, userID int,
 			filter,
 		)
 		if err != nil {
-			slog.WarnContext(r.Context(), "WatchTonightCards: taste candidate query failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+			slog.WarnContext(ctx, "WatchTonightCards: taste candidate query failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		} else {
 			candidates = candidateItems
 			genreMap = candidateGenres
@@ -313,7 +334,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(r *http.Request, userID int,
 		}
 	}
 
-	candidates = h.filterRecommendations(r.Context(), userID, profileID, candidates)
+	candidates = h.filterRecommendations(ctx, userID, profileID, candidates)
 	candidates = recommendations.FilterAndRankGenreMatches(candidates, genres, genreMap)
 
 	return recommendationCardItems(candidates, excludeIDs), isCold

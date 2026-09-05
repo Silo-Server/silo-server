@@ -31,6 +31,13 @@ type watchTonightResponse struct {
 	IsCold bool                       `json:"is_cold"`
 }
 
+// WatchTonightView is the Watch Tonight list as the v1 handler renders it.
+type WatchTonightView = watchTonightResponse
+
+// WatchTonightItemView is one Watch Tonight card: a section card plus the
+// source it came from.
+type WatchTonightItemView = watchTonightItemResponse
+
 // Source boost multipliers for ranking.
 const (
 	boostCWInTaste    = 1.40 // in-progress AND in taste pool
@@ -44,17 +51,23 @@ const (
 // It merges live Continue Watching / Next Up items with recommendation-engine
 // candidates, applies taste-profile boosts, enriches, and returns a unified list.
 func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
 	limit := watchTonightLimit
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 20 {
 			limit = n
 		}
 	}
+	resp, err := h.WatchTonight(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
+// WatchTonight is the Watch Tonight seam: the merged, boosted and enriched
+// list the v1 and v2 handlers both answer. limit must already be validated.
+func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int) (WatchTonightView, error) {
 	// Fan out: recommendation candidates + live CW/Next-Up in parallel.
 	var (
 		recResult recommendations.WatchTonightResult
@@ -71,28 +84,27 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 	go func() {
 		defer wg.Done()
 		if h.reader != nil {
-			recResult, recErr = h.reader.GetWatchTonight(r.Context(), userID, profileID, limit*3, filter)
+			recResult, recErr = h.reader.GetWatchTonight(ctx, userID, profileID, limit*3, filter)
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		cwItems, nextUpItems, liveErr = h.fetchLiveCWAndNextUp(r, userID, profileID, filter, limit)
+		cwItems, nextUpItems, liveErr = h.fetchLiveCWAndNextUp(ctx, userID, profileID, filter, limit)
 	}()
 
 	wg.Wait()
 
 	if recErr != nil {
-		slog.ErrorContext(r.Context(), "WatchTonight: recommendations fetch failed", "component", "api", "user_id", userID, "error", recErr)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
-		return
+		slog.ErrorContext(ctx, "WatchTonight: recommendations fetch failed", "component", "api", "user_id", userID, "error", recErr)
+		return WatchTonightView{}, recommendationsUnavailable("Failed to fetch recommendations")
 	}
 	if liveErr != nil {
-		slog.WarnContext(r.Context(), "WatchTonight: live CW/NextUp fetch failed, continuing with recs only", "component", "api", "user_id", userID, "error", liveErr)
+		slog.WarnContext(ctx, "WatchTonight: live CW/NextUp fetch failed, continuing with recs only", "component", "api", "user_id", userID, "error", liveErr)
 	}
 
 	// Filter out already-watched and low-rated items from rec candidates.
-	recResult.Items = h.filterRecommendations(r.Context(), userID, profileID, recResult.Items)
+	recResult.Items = h.filterRecommendations(ctx, userID, profileID, recResult.Items)
 
 	// Build taste set from recommendation items for boost lookups.
 	tasteSet := make(map[string]struct{}, len(recResult.Items))
@@ -186,11 +198,10 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 	}
 
 	if len(contentIDs) == 0 {
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp, nil
 	}
 
-	itemMap, overlayMap, stateMap, enrichedEpMeta := h.enrichItems(r, userID, profileID, filter, contentIDs)
+	itemMap, overlayMap, stateMap, enrichedEpMeta := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
 
 	for _, m := range merged {
 		mi, ok := itemMap[m.scored.MediaItemID]
@@ -198,7 +209,7 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 			continue
 		}
 
-		item := h.buildSectionItem(r, mi, overlayMap, stateMap)
+		item := h.buildSectionItem(ctx, mi, overlayMap, stateMap)
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata (position, duration, progress).
@@ -243,7 +254,7 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 		})
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 type mergedItem struct {
@@ -258,12 +269,10 @@ type scoredCWItem struct {
 }
 
 // fetchLiveCWAndNextUp fetches live Continue Watching and Next Up items from the user store.
-func (h *RecommendationsHandler) fetchLiveCWAndNextUp(r *http.Request, userID int, profileID string, filter catalog.AccessFilter, limit int) (cwItems, nextUpItems []scoredCWItem, err error) {
+func (h *RecommendationsHandler) fetchLiveCWAndNextUp(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int) (cwItems, nextUpItems []scoredCWItem, err error) {
 	if h.storeProvider == nil || userID <= 0 || profileID == "" {
 		return nil, nil, nil
 	}
-
-	ctx := r.Context()
 
 	// Fetch in-progress items from user store.
 	store, err := h.storeProvider.ForUser(ctx, userID)
@@ -295,7 +304,7 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(r *http.Request, userID in
 	if h.WatchTonightFetcher != nil {
 		nuItems, nuMeta, nuErr := h.WatchTonightFetcher.FetchNextUpItems(ctx, userID, profileID, nil, nil, filter, limit)
 		if nuErr != nil {
-			slog.WarnContext(r.Context(), "WatchTonight: next-up fetch failed", "component", "api", "user_id", userID, "error", nuErr)
+			slog.WarnContext(ctx, "WatchTonight: next-up fetch failed", "component", "api", "user_id", userID, "error", nuErr)
 		} else {
 			for _, item := range nuItems {
 				meta, ok := nuMeta[item.ContentID]
@@ -316,7 +325,7 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(r *http.Request, userID in
 // enrichItems fetches full MediaItem objects, overlay summaries, and user states
 // for the given content IDs. Handles both movies/series (from media_items) and
 // episodes (from episodes table) since CW/Next-Up items are episode content IDs.
-func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profileID string, filter catalog.AccessFilter, contentIDs []string) (
+func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, contentIDs []string) (
 	itemMap map[string]*models.MediaItem,
 	overlayMap map[string]*models.OverlaySummary,
 	stateMap map[string]*itemUserStateResponse,
@@ -326,12 +335,10 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 		return nil, nil, nil, nil
 	}
 
-	ctx := r.Context()
-
 	// Fetch movies/series from media_items table.
 	mediaItems, err := h.Fetcher.FetchItemsByContentIDs(ctx, contentIDs, filter)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "WatchTonight: fetch items failed", "component", "api", "error", err)
+		slog.ErrorContext(ctx, "WatchTonight: fetch items failed", "component", "api", "error", err)
 		return nil, nil, nil, nil
 	}
 
@@ -343,7 +350,7 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 	// Also fetch episodes — CW/Next-Up content IDs are typically episode IDs.
 	episodeItems, epMeta, epErr := h.Fetcher.FetchEpisodesByContentIDs(ctx, contentIDs, filter)
 	if epErr != nil {
-		slog.ErrorContext(r.Context(), "WatchTonight: fetch episodes failed", "component", "api", "error", epErr)
+		slog.ErrorContext(ctx, "WatchTonight: fetch episodes failed", "component", "api", "error", epErr)
 	} else {
 		for _, item := range episodeItems {
 			itemMap[item.ContentID] = item
@@ -354,7 +361,7 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 
 	overlays, err := h.Fetcher.ListOverlaySummaries(ctx, contentIDs, filter)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "WatchTonight: overlay summaries failed", "component", "api", "error", err)
+		slog.ErrorContext(ctx, "WatchTonight: overlay summaries failed", "component", "api", "error", err)
 	} else {
 		overlayMap = overlays
 	}
@@ -377,7 +384,7 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 
 // buildSectionItem constructs a sectionItemResponse from a MediaItem,
 // applying presigning and overlay/state lookups.
-func (h *RecommendationsHandler) buildSectionItem(r *http.Request, mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse) sectionItemResponse {
+func (h *RecommendationsHandler) buildSectionItem(ctx context.Context, mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse) sectionItemResponse {
 	item := sectionItemResponse{
 		ContentID:         mi.ContentID,
 		Type:              mi.Type,
@@ -398,9 +405,9 @@ func (h *RecommendationsHandler) buildSectionItem(r *http.Request, mi *models.Me
 		item.Genres = []string{}
 	}
 	if h.DetailSvc != nil {
-		item.PosterURL = h.DetailSvc.PresignURL(r.Context(), featuredPosterPath(mi.PosterPath), "featured")
-		item.BackdropURL = h.DetailSvc.PresignURL(r.Context(), featuredBackdropPath(mi.BackdropPath), "featured")
-		item.LogoURL = h.DetailSvc.PresignURL(r.Context(), mi.LogoPath, "featured")
+		item.PosterURL = h.DetailSvc.PresignURL(ctx, featuredPosterPath(mi.PosterPath), "featured")
+		item.BackdropURL = h.DetailSvc.PresignURL(ctx, featuredBackdropPath(mi.BackdropPath), "featured")
+		item.LogoURL = h.DetailSvc.PresignURL(ctx, mi.LogoPath, "featured")
 	}
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]

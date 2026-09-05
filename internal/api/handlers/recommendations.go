@@ -117,18 +117,11 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 	if limit > 50 {
 		limit = 50
 	}
-	if limit <= 0 {
-		limit = 20
-	}
 
-	items, err := h.engine.SimilarItems(r.Context(), itemID, limit)
+	items, err := h.SimilarItems(r.Context(), itemID, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch similar items")
+		writeAPIError(w, err)
 		return
-	}
-
-	if items == nil {
-		items = []recommendations.ScoredItem{}
 	}
 
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
@@ -180,28 +173,11 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 
 // HandleSimilarUsers handles GET /recommendations/similar-users.
 func (h *RecommendationsHandler) HandleSimilarUsers(w http.ResponseWriter, r *http.Request) {
-	if h.reader == nil {
-		writeJSON(w, http.StatusOK, scoredItemsResponse{Items: []recommendations.ScoredItem{}})
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
 	limit, _ := parsePagination(r)
-	if limit <= 0 {
-		limit = 20
-	}
-
-	items, err := h.reader.GetSimilarUsersLiked(r.Context(), userID, profileID, limit, filter)
+	items, err := h.SimilarUsersLiked(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
+		writeAPIError(w, err)
 		return
-	}
-
-	if items == nil {
-		items = []recommendations.ScoredItem{}
 	}
 
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
@@ -209,21 +185,7 @@ func (h *RecommendationsHandler) HandleSimilarUsers(w http.ResponseWriter, r *ht
 
 // HandleTasteProfile handles GET /recommendations/taste-profile.
 func (h *RecommendationsHandler) HandleTasteProfile(w http.ResponseWriter, r *http.Request) {
-	if h.engineUnavailable() {
-		writeJSON(w, http.StatusOK, emptyTasteProfileSummary())
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	summary, err := h.engine.GetTasteProfileSummary(r.Context(), userID, profileID)
-	if err != nil || summary == nil {
-		writeJSON(w, http.StatusOK, emptyTasteProfileSummary())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, summary)
+	writeJSON(w, http.StatusOK, h.TasteProfile(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context())))
 }
 
 // HandlePopular handles GET /recommendations/popular?days=30&limit=20.
