@@ -249,9 +249,28 @@ func TitleScore(want, candidate string) float64 {
 	if w == c {
 		return 1
 	}
+	wv, wok := titleVolume(want)
+	return preparedWantedTitle{normalised: w, volume: wv, hasVolume: wok}.score(candidate, c)
+}
 
-	if wv, wok := titleVolume(want); wok {
-		if cv, cok := titleVolume(candidate); cok && wv != cv {
+type preparedWantedTitle struct {
+	normalised string
+	volume     volumeIdentity
+	hasVolume  bool
+}
+
+// score accepts the already-normalised candidate so TitleScore can keep its
+// empty/exact fast paths without parsing volumes or normalising twice.
+func (want preparedWantedTitle) score(candidate, c string) float64 {
+	w := want.normalised
+	if w == "" || c == "" {
+		return 0
+	}
+	if w == c {
+		return 1
+	}
+	if want.hasVolume {
+		if cv, cok := titleVolume(candidate); cok && want.volume != cv {
 			return 0
 		}
 	}
@@ -316,6 +335,11 @@ type bestMatchSelection struct {
 func selectBestMatchYear(want string, wantYear int, results []SearchResult) (bestMatchSelection, bool) {
 	best := bestMatchSelection{}
 	found := false
+	if len(results) == 0 {
+		return best, false
+	}
+	wanted := preparedWantedTitle{normalised: normaliseTitle(want)}
+	wanted.volume, wanted.hasVolume = titleVolume(want)
 
 	for _, r := range results {
 		name := r.Name
@@ -329,19 +353,19 @@ func selectBestMatchYear(want string, wantYear int, results []SearchResult) (bes
 		// wrong-volume primary would persist IDs for a different book --
 		// "Dungeon In My Closet, Book 5" must not be accepted for volume 2 via
 		// its generic "Dungeon In My Closet" alias.
-		if wv, wok := titleVolume(want); wok {
-			if cv, cok := titleVolume(name); cok && cv != wv {
+		if wanted.hasVolume {
+			if cv, cok := titleVolume(name); cok && cv != wanted.volume {
 				continue
 			}
 		}
 
-		score := TitleScore(want, name)
+		score := wanted.score(name, normaliseTitle(name))
 		matchedTitle := name
 
 		// Aliases are provider-confirmed titles for the same work, so a
 		// translated or regional spelling should not be penalized.
 		for _, alias := range r.TitleAliases {
-			if s := TitleScore(want, alias.Title); s > score {
+			if s := wanted.score(alias.Title, normaliseTitle(alias.Title)); s > score {
 				score = s
 				matchedTitle = alias.Title
 			}

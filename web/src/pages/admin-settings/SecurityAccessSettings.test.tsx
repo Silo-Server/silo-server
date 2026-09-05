@@ -58,6 +58,7 @@ const SERVER_CONFIG: RateLimitConfig = {
     login: { requests_per_minute: 20, burst: 10 },
     signup: { requests_per_minute: 10, burst: 6 },
     setup: { requests_per_minute: 10, burst: 6 },
+    password_change: { requests_per_minute: 10, burst: 5 },
     device_start: { requests_per_minute: 20, burst: 10 },
     device_lookup: { requests_per_minute: 60, burst: 20 },
     device_poll: { requests_per_minute: 120, burst: 30 },

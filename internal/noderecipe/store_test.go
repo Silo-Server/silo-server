@@ -3,7 +3,13 @@ package noderecipe
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"strconv"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -52,9 +58,55 @@ func TestNilStore_DeleteNoop(t *testing.T) {
 	}
 }
 
+func TestNilStore_RevokeNodeNoop(t *testing.T) {
+	var s *Store
+	if err := s.RevokeNode(t.Context(), "http://node"); err != nil {
+		t.Fatalf("nil store RevokeNode returned error: %v", err)
+	}
+	if err := NewStore(nil, 0).RevokeNode(t.Context(), "http://node"); err != nil {
+		t.Fatalf("disabled store RevokeNode returned error: %v", err)
+	}
+	if err := s.RevokeNodeID(t.Context(), 42); err != nil {
+		t.Fatalf("nil store RevokeNodeID returned error: %v", err)
+	}
+	if err := NewStore(nil, 0).RevokeNodeID(t.Context(), 42); err != nil {
+		t.Fatalf("disabled store RevokeNodeID returned error: %v", err)
+	}
+}
+
 func TestKeyNamespacing(t *testing.T) {
 	if got := NewStore(nil, 0).key("abc"); got != "silo:noderecipe:abc" {
 		t.Fatalf("key(abc) = %q, want silo:noderecipe:abc", got)
+	}
+}
+
+func TestNodeAuthorityGenerationKeyNormalizesNodeURL(t *testing.T) {
+	withoutSlash := nodeAuthorityGenerationKey("http://node:8070")
+	if withSlash := nodeAuthorityGenerationKey(" http://node:8070/ "); withSlash != withoutSlash {
+		t.Fatalf("generation keys differ: %q != %q", withSlash, withoutSlash)
+	}
+	if withoutSlash == nodeAuthorityGenerationKey("http://other-node:8070") {
+		t.Fatal("different nodes share an authority generation key")
+	}
+}
+
+func TestNodeAuthorityGenerationKeyUsesStableNodeIDWhenAvailable(t *testing.T) {
+	card := playback.RecipeCard{TranscodeNodeURL: "http://node:8070", RoutingExecutionNodeID: 42}
+	if got, want := nodeAuthorityGenerationKeyForCard(card), nodeAuthorityGenerationKeyForNodeID(42); got != want {
+		t.Fatalf("card authority key = %q, want stable ID key %q", got, want)
+	}
+	if nodeAuthorityGenerationKeyForNodeID(42) == nodeAuthorityGenerationKey("http://node-id:42") {
+		t.Fatal("stable node ID and route URL share an authority key")
+	}
+}
+
+func TestNodeAuthorityRecordSidecarKeysAreSeparate(t *testing.T) {
+	store := NewStore(nil, 0)
+	if got := nodeAuthorityRecordGenerationKey("abc"); got == store.key("abc") {
+		t.Fatalf("record generation key %q collides with recipe key", got)
+	}
+	if got := nodeAuthorityRecordDigestKey("abc"); got == store.key("abc") || got == nodeAuthorityRecordGenerationKey("abc") {
+		t.Fatalf("record digest key %q collides with another authority key", got)
 	}
 }
 
@@ -102,6 +154,195 @@ func TestDefaultTTLMatchesTokenLifetime(t *testing.T) {
 	}
 	if NewStore(nil, 0).ttl != DefaultTTL {
 		t.Fatal("NewStore with ttl<=0 did not default to DefaultTTL")
+	}
+}
+
+func TestNodeAuthorityKeepsPreviousRecipeWireFormat(t *testing.T) {
+	card := playback.RecipeCard{
+		SessionID: "sid", TranscodeNodeURL: "http://node:8070", PlayMethod: playback.PlayTranscode,
+		TranscodeAudio: true, TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2,
+	}
+	data, err := marshalCard(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, ok := unmarshalCard(data)
+	if !ok || decoded != card {
+		t.Fatalf("previous node decode = (%+v, %v), want (%+v, true)", decoded, ok, card)
+	}
+}
+
+func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
+	rawURL := os.Getenv("SILO_TEST_REDIS_URL")
+	if rawURL == "" {
+		t.Skip("SILO_TEST_REDIS_URL not set")
+	}
+	options, err := redis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatalf("parse SILO_TEST_REDIS_URL: %v", err)
+	}
+	client := redis.NewClient(options)
+	t.Cleanup(func() { _ = client.Close() })
+
+	unique := uuid.NewString()
+	parsedNodeID, err := strconv.ParseInt(unique[:8], 16, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeID := int(parsedNodeID%2_000_000_000) + 1
+	nodeURL := "http://node-" + unique
+	store := NewStore(client, time.Minute)
+	grants := NewProxyGrantStore(client, time.Minute)
+	oldSessionID := "old-" + unique
+	newSessionID := "new-" + unique
+	legacyBeforeSessionID := "legacy-before-" + unique
+	legacyAfterSessionID := "legacy-after-" + unique
+	legacyOverwriteBeforeSessionID := "legacy-overwrite-before-" + unique
+	legacyOverwriteSessionID := "legacy-overwrite-" + unique
+	grantID := "grant-" + unique
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
+		defer cancel()
+		_ = client.Del(cleanupCtx,
+			store.key(oldSessionID), store.key(newSessionID), store.key(legacyBeforeSessionID), store.key(legacyAfterSessionID), store.key(legacyOverwriteBeforeSessionID), store.key(legacyOverwriteSessionID),
+			nodeAuthorityRecordGenerationKey(oldSessionID), nodeAuthorityRecordGenerationKey(newSessionID),
+			nodeAuthorityRecordGenerationKey(legacyBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyAfterSessionID), nodeAuthorityRecordGenerationKey(legacyOverwriteBeforeSessionID), nodeAuthorityRecordGenerationKey(legacyOverwriteSessionID),
+			nodeAuthorityRecordDigestKey(oldSessionID), nodeAuthorityRecordDigestKey(newSessionID),
+			nodeAuthorityRecordDigestKey(legacyBeforeSessionID), nodeAuthorityRecordDigestKey(legacyAfterSessionID), nodeAuthorityRecordDigestKey(legacyOverwriteBeforeSessionID), nodeAuthorityRecordDigestKey(legacyOverwriteSessionID),
+			grants.key(grantID), nodeAuthorityGenerationKey(nodeURL), nodeAuthorityGenerationKeyForNodeID(nodeID),
+		).Err()
+	})
+
+	card := playback.RecipeCard{
+		SessionID: oldSessionID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux,
+		RoutingExecutionNodeID: nodeID,
+	}
+	if err := store.Put(t.Context(), oldSessionID, card); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), oldSessionID); !ok {
+		t.Fatal("fresh node recipe missed before revocation")
+	}
+	rawRecipe, err := client.Get(t.Context(), store.key(oldSessionID)).Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, ok := unmarshalCard(rawRecipe); !ok || decoded != card {
+		t.Fatalf("stored recipe is not readable by the previous node: (%+v, %v)", decoded, ok)
+	}
+	legacyBeforeCard := card
+	legacyBeforeCard.SessionID = legacyBeforeSessionID
+	legacyBeforeData, err := marshalCard(legacyBeforeCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacyBeforeSessionID), legacyBeforeData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	legacyOverwriteCard := card
+	legacyOverwriteCard.SessionID = legacyOverwriteSessionID
+	if err := store.Put(t.Context(), legacyOverwriteSessionID, legacyOverwriteCard); err != nil {
+		t.Fatal(err)
+	}
+	legacyOverwriteBeforeCard := card
+	legacyOverwriteBeforeCard.SessionID = legacyOverwriteBeforeSessionID
+	if err := store.Put(t.Context(), legacyOverwriteBeforeSessionID, legacyOverwriteBeforeCard); err != nil {
+		t.Fatal(err)
+	}
+	legacyOverwriteBeforeCard.InputPath = "/media/stale-legacy-overwrite.mkv"
+	legacyOverwriteBeforeData, err := marshalCard(legacyOverwriteBeforeCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacyOverwriteBeforeSessionID), legacyOverwriteBeforeData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeNodeID(t.Context(), nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), oldSessionID); ok {
+		t.Fatal("recipe issued before node revocation remained valid")
+	}
+	if _, ok := NewStore(client, time.Minute).Get(t.Context(), oldSessionID); ok {
+		t.Fatal("fresh store instance forgot the stable node revocation")
+	}
+
+	card.SessionID = newSessionID
+	if err := store.Put(t.Context(), newSessionID, card); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), newSessionID); !ok {
+		t.Fatal("recipe issued after node revocation was rejected")
+	}
+
+	if _, ok := store.Get(t.Context(), legacyBeforeSessionID); ok {
+		t.Fatal("legacy generation-zero recipe survived node revocation")
+	}
+	if _, ok := store.Get(t.Context(), legacyOverwriteBeforeSessionID); ok {
+		t.Fatal("pre-reload legacy overwrite with stale sidecars survived node revocation")
+	}
+
+	revokedAt, err := client.Get(t.Context(), nodeAuthorityGenerationKeyForNodeID(nodeID)).Int64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		redisTime, timeErr := client.Time(t.Context()).Result()
+		if timeErr != nil {
+			t.Fatal(timeErr)
+		}
+		if redisTime.UnixMilli() > revokedAt {
+			break
+		}
+	}
+	legacyAfterCard := card
+	legacyAfterCard.SessionID = legacyAfterSessionID
+	legacyAfterData, err := marshalCard(legacyAfterCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacyAfterSessionID), legacyAfterData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(t.Context(), legacyAfterSessionID); !ok {
+		t.Fatal("legacy recipe issued after node revocation was rejected")
+	}
+	legacyOverwriteCard.InputPath = "/media/updated-by-legacy-api.mkv"
+	legacyOverwriteData, err := marshalCard(legacyOverwriteCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(t.Context(), store.key(legacyOverwriteSessionID), legacyOverwriteData, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := store.Get(t.Context(), legacyOverwriteSessionID); !ok || got.InputPath != legacyOverwriteCard.InputPath {
+		t.Fatalf("legacy overwrite with stale sidecars = (%+v, %t), want updated recipe", got, ok)
+	}
+
+	grant := playback.RecipeCard{SessionID: grantID, TranscodeNodeURL: nodeURL, PlayMethod: playback.PlayRemux}
+	if err := grants.Put(t.Context(), grantID, grant); err != nil {
+		t.Fatal(err)
+	}
+	if err := grants.RevokeNode(t.Context(), nodeURL); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := grants.Get(t.Context(), grantID); !ok {
+		t.Fatal("node authority revocation affected proxy-grant key space")
+	}
+
+	if err := store.Delete(t.Context(), newSessionID); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := client.Exists(t.Context(),
+		store.key(newSessionID),
+		nodeAuthorityRecordGenerationKey(newSessionID),
+		nodeAuthorityRecordDigestKey(newSessionID),
+	).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatal("node recipe delete left an authority sidecar behind")
 	}
 }
 

@@ -203,11 +203,10 @@ type PlaybackHandler struct {
 	ProxyGrantStore recipeCardStoreV3
 	// NodeRecipeStore hands a transcode node the recipe it rebuilds a
 	// header-authenticated remote transcode from after its own restart, keyed by
-	// the transport id the node serves it under. A legacy attempt needs none —
-	// its client URL carries the recipe in a stream token — but a tokenless
-	// relayed request has nothing to reconstruct from. Optional and best effort:
-	// without it (or without Redis behind it) such a session replans instead of
-	// recovering, exactly as before.
+	// the transport id the node serves it under. It is also the active authority
+	// for transcode-executed progressive remuxes, whose signed tokens otherwise
+	// outlive a node's in-memory stop fence. Without a usable store those remuxes
+	// use another legal route; tokenless HLS sessions replan instead of recovering.
 	NodeRecipeStore    recipeCardStoreV3
 	ItemAccess         PlaybackItemAccessChecker // optional; enables file authorization checks
 	EpisodeLookup      PlaybackEpisodeLookup     // optional; resolves episode files to their series
@@ -237,11 +236,14 @@ type PlaybackHandler struct {
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig    func() config.PlaybackConfig
-	FFmpegLogSink     playback.FFmpegLogSink
-	copySeekAnchor    copySeekAnchorResolver
-	realtimeCommandMu sync.Mutex
-	realtimeCommands  map[string]playbackCommandRecord
+	PlaybackConfig func() config.PlaybackConfig
+	FFmpegLogSink  playback.FFmpegLogSink
+	copySeekAnchor copySeekAnchorResolver
+	// beforeIdentityLifecycleLockV3 is a test seam for proving that identity
+	// route authority remains unpublished until the shared lifecycle boundary.
+	beforeIdentityLifecycleLockV3 func()
+	realtimeCommandMu             sync.Mutex
+	realtimeCommands              map[string]playbackCommandRecord
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.
@@ -781,8 +783,11 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	card.OriginalStartedAt = s.StartedAt
 	card.RoutingWorkload = s.RoutingWorkload
 	card.RoutingExecution = s.RoutingExecution
+	card.RoutingExecutionNodeID = s.RoutingExecutionNodeID
 	card.RoutingEgress = s.RoutingEgress
 	card.RoutingEgressNodeID = s.RoutingEgressNodeID
+	card.TranscodeNodeURL = s.TranscodeNodeURL
+	card.TranscodeTransportID = s.TranscodeTransportID
 	return card
 }
 

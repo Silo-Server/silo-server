@@ -28,6 +28,7 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 		FeaturePlaybackPlanV3:             {},
 		FeatureNeutralContractV3:          {},
 		FeatureLayoutPassthrough:          {},
+		FeatureEmbeddedSubtitlesV3:        {},
 		FeatureRouteDiagnostics:           {},
 		FeatureDeviceQuirksV3:             {},
 		FeatureSeekReanchorV3:             {},
@@ -38,6 +39,7 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 		FeatureSoftwareVideoDecodeV3:      {},
 		FeaturePlanInvalidatedV3:          {},
 		FeaturePlanSourceDurationV3:       {},
+		FeatureOutputDisplayEvidenceV3:    {},
 	}
 	if len(first) != len(expected) {
 		t.Fatalf("server features = %v, want %d entries", first, len(expected))
@@ -3195,6 +3197,174 @@ func TestPlanPlaybackV3NonDefaultAudioSelectionRequiresScopedOriginalClaim(t *te
 	if result.Plan.SelectedTracks.Audio == nil || result.Plan.SelectedTracks.Audio.Index == nil || *result.Plan.SelectedTracks.Audio.Index != 1 {
 		t.Fatalf("selected audio = %#v", result.Plan.SelectedTracks.Audio)
 	}
+}
+
+func TestPlanPlaybackV3AndroidMedia3FFmpegPayloadUsesOriginalMKV(t *testing.T) {
+	codecs := []struct {
+		name     string
+		codec    string
+		channels int
+	}{
+		{name: "AC3", codec: "ac3", channels: 6},
+		{name: "EAC3", codec: "eac3", channels: 6},
+		{name: "TrueHD", codec: "truehd", channels: 8},
+		{name: "DTS", codec: "dts", channels: 6},
+		{name: "DTS-HD", codec: "dts_hd", channels: 8},
+		{name: "ALAC", codec: "alac", channels: 2},
+	}
+	for _, formFactor := range []string{"mobile", "tv"} {
+		for _, codec := range codecs {
+			t.Run(formFactor+"/"+codec.name, func(t *testing.T) {
+				tracks := []models.AudioTrack{{Codec: codec.codec, Channels: codec.channels, Default: true}}
+				file, request := androidMedia3FFmpegFixtureV3(formFactor, tracks, []string{"aac", codec.codec}, codec.channels)
+				selectAndroidAudioTrackV3(&request, file.ID, 0)
+
+				result := PlanPlaybackV3(PlannerInputV3{
+					Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+					Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+					Registry: testTransformationRegistryV3(),
+				})
+				if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio {
+					t.Fatalf("Android Media3/FFmpeg result = %s", ExplainPlannerResultV3(result))
+				}
+			})
+		}
+	}
+}
+
+func TestPlanPlaybackV3AndroidMedia3SelectsNonDefaultAudioAndSkipsFailedOriginal(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Codec: "aac", Channels: 2, Layout: "stereo", Language: "en", Default: true},
+		{Codec: "truehd", Channels: 8, Layout: "7.1", Language: "ja"},
+	}
+	file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", "truehd"}, 8)
+	selectAndroidAudioTrackV3(&request, file.ID, 1)
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 1,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry: testTransformationRegistryV3(),
+	}
+
+	direct := PlanPlaybackV3(input)
+	if direct.Plan == nil || direct.Plan.Delivery != DeliveryOriginalHTTPV3 || direct.PlayMethod != PlayDirect {
+		t.Fatalf("non-default Android audio did not direct play: %s", ExplainPlannerResultV3(direct))
+	}
+	if direct.Plan.SelectedTracks.Audio == nil || direct.Plan.SelectedTracks.Audio.Index == nil || *direct.Plan.SelectedTracks.Audio.Index != 1 {
+		t.Fatalf("selected audio = %#v", direct.Plan.SelectedTracks.Audio)
+	}
+
+	input.AttemptedKeys = []string{direct.Plan.PlanAttemptKey}
+	fallback := PlanPlaybackV3(input)
+	if fallback.Plan == nil || fallback.Plan.Delivery != DeliveryRemuxHLSV3 || fallback.PlayMethod != PlayRemux || fallback.TargetVideoCodec != "copy" {
+		t.Fatalf("typed-failure fallback = %s", ExplainPlannerResultV3(fallback))
+	}
+	if fallback.Plan.PlanAttemptKey == direct.Plan.PlanAttemptKey {
+		t.Fatalf("fallback reused rejected route %q", fallback.Plan.PlanAttemptKey)
+	}
+	if fallback.Plan.SelectedTracks.Audio == nil || fallback.Plan.SelectedTracks.Audio.Index == nil || *fallback.Plan.SelectedTracks.Audio.Index != 1 {
+		t.Fatalf("fallback selected audio = %#v", fallback.Plan.SelectedTracks.Audio)
+	}
+}
+
+func TestPlanPlaybackV3AndroidMedia3AudioConstraintsFallBackToAAC(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		maxChannels    int
+		originalCodecs []string
+		hlsCodecs      []string
+		wantChannels   int
+	}{
+		{name: "output channel ceiling", maxChannels: 2, originalCodecs: []string{"aac", "truehd"}, hlsCodecs: []string{"aac", "truehd"}, wantChannels: 2},
+		{name: "missing source decoder", maxChannels: 8, originalCodecs: []string{"aac"}, hlsCodecs: []string{"aac"}, wantChannels: 8},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tracks := []models.AudioTrack{{Codec: "truehd", Channels: 8, Layout: "7.1", Default: true}}
+			file, request := androidMedia3FFmpegFixtureV3("mobile", tracks, []string{"aac", "truehd"}, test.maxChannels)
+			original := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			original.AudioDecodeCodecs = test.originalCodecs
+			request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+			hls := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+			hls.AudioDecodeCodecs = test.hlsCodecs
+			request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+			selectAndroidAudioTrackV3(&request, file.ID, 0)
+
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+				Registry: testTransformationRegistryV3(),
+			})
+			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.PlayMethod != PlayRemux || result.TargetVideoCodec != "copy" || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+				t.Fatalf("constrained Android audio result = %s", ExplainPlannerResultV3(result))
+			}
+			if result.TargetAudioChannels <= 0 || result.TargetAudioChannels > test.wantChannels {
+				t.Fatalf("target channels = %d, want <= %d", result.TargetAudioChannels, test.wantChannels)
+			}
+		})
+	}
+}
+
+func androidMedia3FFmpegFixtureV3(
+	formFactor string,
+	audioTracks []models.AudioTrack,
+	audioDecodeCodecs []string,
+	maxChannels int,
+) (*models.MediaFile, StartRequestV3) {
+	file := &models.MediaFile{
+		ID: 42, FilePath: "/media/movie.mkv", Container: "mkv", CodecVideo: "h264",
+		CodecAudio: audioTracks[0].Codec, Resolution: "1080p", Bitrate: 12_000,
+		AudioChannels: audioTracks[0].Channels,
+		VideoTracks: []models.VideoTrack{{
+			Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080,
+			FrameRate: "24000/1001", Bitrate: 12_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR",
+		}},
+		AudioTracks: audioTracks,
+	}
+	request := validStartRequestV3()
+	request.FileID = file.ID
+	request.Capabilities = ClientCodecCapabilitiesV3{
+		VideoEvidence: EvidenceExactV3, AudioEvidence: EvidenceExactV3,
+		CodecsVideo: []string{"h264"}, CodecsVideoHardware: []string{"h264"},
+		CodecsAudio: audioDecodeCodecs, Containers: []string{"mkv", "matroska", "m3u8", "hls"},
+		MaxResolution: "1080p",
+		VideoDecode: []VideoDecodeCapabilityV3{{
+			Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8},
+			MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000, Hardware: true,
+		}},
+	}
+	request.ClientPlaybackContext = ClientPlaybackContextV3{
+		ProtocolVersion: ProtocolV3, FormFactor: formFactor, AppVersion: "1.0.0", AppBuild: "16", AppChannel: "beta",
+		Device: DeviceContextV3{
+			Platform: "android", OSVersion: "16", Manufacturer: "Android", Model: "Media3 device",
+			PlatformDetails: map[string]string{"sdk_int": "36", "abis": "arm64-v8a"},
+		},
+		Output: OutputContextV3{CurrentSink: "local_output", SinkType: "local", OutputContextID: "route-1"},
+		Deliveries: map[string]DeliveryCapabilityV3{
+			DeliveryClassOriginalHTTPV3: {
+				Enabled: true, SupportedOnDevice: true, Containers: []string{"mkv", "matroska"},
+				VideoCodecs: []string{"h264"}, AudioDecodeCodecs: audioDecodeCodecs, MaxChannels: intPointerV3(maxChannels),
+				Subtitles: DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true, EmbeddedBitmap: true, SidecarBitmap: true},
+				Features:  []string{"track_switching", "buffer_reporting"}, AuthHeaderRefresh: true,
+				ValidatedClaims: []string{ClaimClientSelectedAudioTrackV3},
+			},
+			DeliveryClassProgressiveV3: {
+				Enabled: false, SupportedOnDevice: false, FailureReason: "disabled_pending_seekable_transport",
+				Containers:  []string{"mp4", "m4v", "webm", "mkv", "matroska"},
+				VideoCodecs: []string{"h264"}, AudioDecodeCodecs: audioDecodeCodecs, MaxChannels: intPointerV3(maxChannels),
+			},
+			DeliveryClassHLSV3: {
+				Enabled: true, SupportedOnDevice: true, Containers: []string{"m3u8", "hls"},
+				VideoCodecs: []string{"h264"}, AudioDecodeCodecs: audioDecodeCodecs, MaxChannels: intPointerV3(maxChannels),
+				Subtitles: DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true, EmbeddedBitmap: true, SidecarBitmap: true},
+				Features:  []string{"hls", ClientNativeHLSPlaybackV3, "track_switching", "buffer_reporting"}, AuthHeaderRefresh: true,
+			},
+		},
+	}
+	return file, request
+}
+
+func selectAndroidAudioTrackV3(request *StartRequestV3, fileID int, audioIndex int) {
+	request.AudioTrackIndex = intPointerV3(audioIndex)
+	request.AudioTrackID = TrackIDV3(fileID, "audio", audioIndex)
 }
 
 func TestPlanPlaybackV3AetherManagedHDRWithNonDefaultAudioAndPGSUsesOriginalHTTP(t *testing.T) {

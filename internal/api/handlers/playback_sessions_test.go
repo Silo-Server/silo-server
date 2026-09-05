@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -102,8 +103,11 @@ func TestPlaybackRoutingCapabilitiesAdvertisePolicyVocabulary(t *testing.T) {
 	if len(response.Features) != 1 || response.Features[0] != "playback_node_routing_v1" {
 		t.Fatalf("features = %v", response.Features)
 	}
-	if len(response.Workloads) != 3 || len(response.ExecutionPreferences) != 4 || len(response.EgressPreferences) != 4 {
+	if len(response.Workloads) != 3 || len(response.ExecutionPreferences) != 5 || len(response.EgressPreferences) != 4 {
 		t.Fatalf("capabilities = %+v", response)
+	}
+	if !slices.Contains(response.ExecutionPreferences, "prefer_transcode") {
+		t.Fatalf("execution preferences = %v, want prefer_transcode", response.ExecutionPreferences)
 	}
 }
 

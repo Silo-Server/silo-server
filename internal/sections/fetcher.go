@@ -2378,9 +2378,10 @@ func (f *Fetcher) fetchTVRecentlyAdded(
 	}
 
 	targets, total, _, err := catalog.NewRecentTVRepository(f.pool).List(ctx, catalog.RecentTVQuery{
-		LibraryIDs: effectiveLibraryIDs,
-		Access:     filter,
-		Limit:      s.ItemLimit,
+		LibraryIDs:    effectiveLibraryIDs,
+		Access:        filter,
+		Limit:         s.ItemLimit,
+		UniqueTargets: true,
 	})
 	if err != nil {
 		return nil, 0, true, err
@@ -3294,7 +3295,7 @@ func (f *Fetcher) fetchNewToLibrary(ctx context.Context, s ResolvedSection, libr
 
 	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
-	conditions = append(conditions, fmt.Sprintf("mi.created_at > NOW() - ($%d || ' days')::interval", argIdx))
+	conditions = append(conditions, fmt.Sprintf("mi.created_at > NOW() - make_interval(days => $%d)", argIdx))
 	args = append(args, days)
 	argIdx++
 
@@ -3957,7 +3958,7 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 			FROM episodes ne
 			WHERE ne.series_id = mi.content_id
 			  AND ne.season_number > 0
-			  AND ne.created_at > NOW() - ($3 || ' days')::interval
+			  AND ne.created_at > NOW() - make_interval(days => $3)
 			  AND ne.season_number > COALESCE((
 				SELECT MAX(we2.season_number)
 				FROM episodes we2
@@ -3991,7 +3992,7 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 			SELECT MAX(ord.created_at)
 			FROM episodes ord
 			WHERE ord.series_id = mi.content_id
-			  AND ord.created_at > NOW() - ($3 || ' days')::interval
+			  AND ord.created_at > NOW() - make_interval(days => $3)
 		) DESC NULLS LAST, mi.content_id ASC
 		LIMIT $%d`,
 		itemColumns("mi"), fromClause, strings.Join(conditions, " AND "), argIdx,

@@ -450,17 +450,18 @@ type AudioTrack struct {
 
 // SubtitleTrack represents an embedded subtitle track stored as JSONB.
 type SubtitleTrack struct {
-	Index           int    `json:"index"`
-	Language        string `json:"language"`
-	Codec           string `json:"codec"`
-	Title           string `json:"title,omitempty"`
-	EmbeddedTitle   string `json:"embedded_title,omitempty"`
-	Resolution      string `json:"resolution,omitempty"`
-	Forced          bool   `json:"forced"`
-	Default         bool   `json:"default"`
-	HearingImpaired bool   `json:"hearing_impaired"`
-	External        bool   `json:"external"`
-	FileName        string `json:"file_name,omitempty"`
+	ContainerTrackID string `json:"container_track_id,omitempty"`
+	Index            int    `json:"index"`
+	Language         string `json:"language"`
+	Codec            string `json:"codec"`
+	Title            string `json:"title,omitempty"`
+	EmbeddedTitle    string `json:"embedded_title,omitempty"`
+	Resolution       string `json:"resolution,omitempty"`
+	Forced           bool   `json:"forced"`
+	Default          bool   `json:"default"`
+	HearingImpaired  bool   `json:"hearing_impaired"`
+	External         bool   `json:"external"`
+	FileName         string `json:"file_name,omitempty"`
 }
 
 // ExternalSubtitle represents a sidecar subtitle file stored as JSONB.

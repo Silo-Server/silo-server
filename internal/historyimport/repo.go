@@ -1032,6 +1032,45 @@ func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value
 	return matches, nil
 }
 
+func (r *Repository) MatchEpisodeBySeriesExternalID(
+	ctx context.Context,
+	column, value string,
+	seasonNumber, episodeNumber int,
+) ([]mediaLookupRow, error) {
+	if value == "" {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
+		FROM episodes e
+		JOIN media_items series ON series.content_id = e.series_id
+		WHERE series.type = 'series'
+		  AND series.status = 'matched'
+		  AND series.`+column+` = $1
+		  AND e.season_number = $2
+		  AND e.episode_number = $3
+		ORDER BY e.content_id ASC`,
+		value, seasonNumber, episodeNumber,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("matching episode by series %s: %w", column, err)
+	}
+	defer rows.Close()
+
+	var matches []mediaLookupRow
+	for rows.Next() {
+		var row mediaLookupRow
+		if err := rows.Scan(&row.ContentID, &row.Title, &row.Year); err != nil {
+			return nil, fmt.Errorf("scanning episode series lookup row: %w", err)
+		}
+		matches = append(matches, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating episode series lookup rows: %w", err)
+	}
+	return matches, nil
+}
+
 func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)

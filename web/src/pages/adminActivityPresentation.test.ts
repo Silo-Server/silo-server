@@ -18,6 +18,7 @@ import {
   formatVideoSummary,
   getSessionClientLabel,
   getSessionClientLabelFull,
+  getSessionRouteNodes,
   normalizeContainerDecision,
   normalizeStreamDecision,
 } from "./adminActivityPresentation";
@@ -34,6 +35,7 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     media_type: overrides.media_type ?? "movie",
     play_method: overrides.play_method ?? "transcode",
     reporting_node: overrides.reporting_node ?? "local",
+    node_display_name: overrides.node_display_name,
     file_duration: overrides.file_duration ?? 3600,
     started_at: overrides.started_at ?? new Date().toISOString(),
     updated_at: overrides.updated_at ?? new Date().toISOString(),
@@ -48,6 +50,13 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     client_user_agent: overrides.client_user_agent,
     effective_play_method: overrides.effective_play_method,
     is_jellyfin_client: overrides.is_jellyfin_client,
+    routing_workload: overrides.routing_workload,
+    routing_execution: overrides.routing_execution,
+    routing_execution_node_id: overrides.routing_execution_node_id,
+    routing_execution_node_name: overrides.routing_execution_node_name,
+    routing_egress: overrides.routing_egress,
+    routing_egress_node_id: overrides.routing_egress_node_id,
+    routing_egress_node_name: overrides.routing_egress_node_name,
     audio_track_index: overrides.audio_track_index ?? 0,
     transcode_audio: overrides.transcode_audio ?? true,
     stream_bitrate_kbps: overrides.stream_bitrate_kbps ?? 8000,
@@ -350,6 +359,142 @@ describe("adminActivityPresentation", () => {
     // even when the client name looks like a Jellyfin client.
     expect(isJellyfinSession(makeSession({ client_name: "Jellyfin Web" }))).toBe(false);
     expect(isJellyfinSession(makeSession())).toBe(false);
+  });
+
+  it("shows both transcode and proxy nodes in playback route order", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          reporting_node: "transcode-legacy",
+          routing_workload: "video_transcode",
+          routing_execution: "transcode",
+          routing_execution_node_id: 21,
+          routing_execution_node_name: "silo-transcode-01",
+          routing_egress: "proxy",
+          routing_egress_node_id: 34,
+          routing_egress_node_name: "silo-proxy-02",
+        }),
+      ),
+    ).toEqual([
+      {
+        key: "transcode:21",
+        kind: "transcode",
+        label: "Transcode",
+        name: "silo-transcode-01",
+      },
+      { key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-02" },
+    ]);
+  });
+
+  it("shows a proxy once when it both executes and serves a remux", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          routing_workload: "remux",
+          routing_execution: "proxy",
+          routing_execution_node_id: 34,
+          routing_execution_node_name: "silo-proxy-02",
+          routing_egress: "proxy",
+          routing_egress_node_id: 34,
+          routing_egress_node_name: "silo-proxy-02",
+        }),
+      ),
+    ).toEqual([{ key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-02" }]);
+  });
+
+  it("preserves distinct proxy execution and egress nodes", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          routing_workload: "remux",
+          routing_execution: "proxy",
+          routing_execution_node_id: 34,
+          routing_execution_node_name: "silo-proxy-executor",
+          routing_egress: "proxy",
+          routing_egress_node_id: 35,
+          routing_egress_node_name: "silo-proxy-egress",
+        }),
+      ),
+    ).toEqual([
+      { key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-executor" },
+      { key: "proxy:35", kind: "proxy", label: "Proxy", name: "silo-proxy-egress" },
+    ]);
+  });
+
+  it("keeps the reporting server identity for API-local routes", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          reporting_node: "api-a",
+          routing_workload: "direct_play",
+          routing_execution: "none",
+          routing_egress: "api",
+        }),
+      ),
+    ).toEqual([{ key: "server:api-a", kind: "server", label: "Server", name: "api-a" }]);
+  });
+
+  it("keeps local and legacy activity rows readable", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          reporting_node: "local",
+          routing_workload: "direct_play",
+          routing_execution: "none",
+          routing_egress: "api",
+        }),
+      ),
+    ).toEqual([{ key: "server:local", kind: "server", label: "Server", name: "Local server" }]);
+
+    expect(
+      getSessionRouteNodes(
+        makeSession({ reporting_node: "worker-legacy", node_display_name: "Basement worker" }),
+      ),
+    ).toEqual([
+      {
+        key: "legacy:Basement worker",
+        kind: "legacy",
+        label: "Node",
+        name: "Basement worker",
+      },
+    ]);
+  });
+
+  it("uses the resolved display name for a reconstructed remote transcode", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          node_display_name: "silo-transcode-recovered",
+          routing_workload: "video_transcode",
+          routing_execution: "transcode",
+          routing_egress: "api",
+        }),
+      ),
+    ).toEqual([
+      {
+        key: "transcode:silo-transcode-recovered",
+        kind: "transcode",
+        label: "Transcode",
+        name: "silo-transcode-recovered",
+      },
+    ]);
+  });
+
+  it("falls back to routing node IDs when a registered node name is unavailable", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          routing_workload: "video_transcode",
+          routing_execution: "transcode",
+          routing_execution_node_id: 21,
+          routing_egress: "proxy",
+          routing_egress_node_id: 34,
+        }),
+      ),
+    ).toEqual([
+      { key: "transcode:21", kind: "transcode", label: "Transcode", name: "Node #21" },
+      { key: "proxy:34", kind: "proxy", label: "Proxy", name: "Node #34" },
+    ]);
   });
 
   it("labels HLS copy-original sessions as container HLS with copied video", () => {

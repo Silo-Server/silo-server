@@ -15,6 +15,199 @@ import (
 	"time"
 )
 
+func TestServeExtractTextCacheVariants(t *testing.T) {
+	c, source := newTestCache(t)
+	for _, target := range []string{"", "vtt", ""} {
+		opts := StreamExtractOpts{InputPath: source, SourceCodec: "ass", TargetFormat: target}
+		_, format := streamExtractOutput(opts.SourceCodec, opts.TargetFormat)
+		payload := "complete " + format + " track"
+		calls := 0
+		extract := func(_ context.Context, opts StreamExtractOpts) error {
+			calls++
+			_, err := io.WriteString(opts.Writer, payload)
+			return err
+		}
+		for range 2 {
+			rec := httptest.NewRecorder()
+			if err := c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, extract); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Body.String() != payload {
+				t.Fatalf("format %q body = %q, want %q", target, rec.Body.String(), payload)
+			}
+		}
+		if calls > 1 {
+			t.Fatalf("format %q extracted %d times, want at most once", target, calls)
+		}
+	}
+	// Both current variants must survive another variant's commit.
+	for _, format := range []string{"ass", "vtt"} {
+		f, _, ok := c.lookup(source, 0, format)
+		if !ok {
+			t.Fatalf("missing %s variant", format)
+		}
+		_ = f.Close()
+	}
+}
+
+func TestServeExtractTextWindowDoesNotPoisonFullTrack(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip", DurationSeconds: 600}
+	rec := httptest.NewRecorder()
+	if err := c.ServeExtract(rec, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
+		_, err := io.WriteString(opts.Writer, "partial window")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f, _, ok := c.lookup(source, 0, "vtt"); ok {
+		_ = f.Close()
+		t.Fatal("window was cached as a complete track")
+	}
+}
+
+func TestServeExtractTextConcurrentViewerDoesNotWaitForFill(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}
+	started, release := make(chan struct{}), make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/subtitle", nil), opts, func(ctx context.Context, opts StreamExtractOpts) error {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			_, err := io.WriteString(opts.Writer, "complete owner track")
+			return err
+		})
+	}()
+	<-started
+	defer func() {
+		close(release)
+		if err := <-firstDone; err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	err := c.ServeExtract(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
+		_, err := io.WriteString(opts.Writer, "independent viewer track")
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Body.String() != "independent viewer track" {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+	// The second viewer must not publish or discard the first viewer's fill.
+	if f, _, ok := c.lookup(source, 0, "vtt"); ok {
+		_ = f.Close()
+		t.Fatal("concurrent viewer published another viewer's fill")
+	}
+}
+
+func TestServeExtractTextCancelledViewerDoesNotDiscardFill(t *testing.T) {
+	c, source := newTestCache(t)
+	fill := c.beginFill(source, 0, "vtt")
+	if fill == nil {
+		t.Fatal("failed to reserve fill")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil),
+		StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}, func(context.Context, StreamExtractOpts) error {
+			t.Error("canceled request must not extract")
+			return nil
+		})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want cancellation", err)
+	}
+	if _, err := fill.Tee(io.Discard).Write([]byte("complete track")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fill.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	f, _, ok := c.lookup(source, 0, "vtt")
+	if !ok {
+		t.Fatal("canceled viewer discarded the active fill")
+	}
+	_ = f.Close()
+}
+
+func TestServeExtractOutlivesServerWriteTimeout(t *testing.T) {
+	for _, codec := range []string{"subrip", "ass", "hdmv_pgs_subtitle"} {
+		t.Run(codec, func(t *testing.T) {
+			c, source := newTestCache(t)
+			const timeout = 25 * time.Millisecond
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				err := c.ServeExtract(w, r, StreamExtractOpts{InputPath: source, SourceCodec: codec}, func(ctx context.Context, opts StreamExtractOpts) error {
+					// Explicitly cross the listener's absolute deadline before producing cues.
+					timer := time.NewTimer(3 * timeout)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+					_, err := io.WriteString(opts.Writer, "complete subtitle track")
+					return err
+				})
+				if err != nil {
+					t.Errorf("extract: %v", err)
+				}
+			}))
+			server.Config.WriteTimeout = timeout
+			server.Start()
+			defer server.Close()
+			resp, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil || string(body) != "complete subtitle track" {
+				t.Fatalf("body=%q error=%v", body, err)
+			}
+			f, _, ok := c.lookup(source, 0, map[string]string{"subrip": "vtt", "ass": "ass", "hdmv_pgs_subtitle": "sup"}[codec])
+			if !ok {
+				t.Fatal("completed extraction not cached")
+			}
+			_ = f.Close()
+		})
+	}
+}
+
+func TestServeExtractTextFailedFillRetries(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}
+	for _, fail := range []bool{true, false} {
+		err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
+			if _, err := io.WriteString(opts.Writer, "partial track"); err != nil {
+				return err
+			}
+			if fail {
+				return errors.New("demux interrupted")
+			}
+			return nil
+		})
+		if (err != nil) != fail {
+			t.Fatalf("fail=%v extract error=%v", fail, err)
+		}
+		f, _, ok := c.lookup(source, 0, "vtt")
+		if ok {
+			_ = f.Close()
+		}
+		if ok == fail {
+			t.Fatalf("fail=%v cache hit=%v", fail, ok)
+		}
+	}
+}
+
 // newTestCache builds a cache rooted under a temp transcode dir and returns
 // it with the path of a fake source media file.
 func newTestCache(t *testing.T) (*SubtitleCache, string) {
@@ -575,6 +768,19 @@ func TestWarmInBackgroundSemaphoreDrop(t *testing.T) {
 		t.Fatal("dropped warm must not populate the cache")
 	}
 
+	// A committed file is visible before the worker releases its warm slot.
+	// Acquire every slot to wait for those deferred releases, then return them.
+	for range subtitleCacheWarmSlots {
+		select {
+		case c.warmSem <- struct{}{}:
+		case <-time.After(5 * time.Second):
+			t.Fatal("completed warms did not release their slots")
+		}
+	}
+	for range subtitleCacheWarmSlots {
+		<-c.warmSem
+	}
+
 	// With slots free again, the overflow track's warm goes through.
 	c.WarmInBackground(supExtractOpts(source, overflow), extract)
 	waitForCacheEntry(t, c, source, overflow)
@@ -671,7 +877,7 @@ func entryPath(t *testing.T, c *SubtitleCache, source string, track int) string 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(c.dir(), subtitleCacheKey(source, track, src.ModTime(), src.Size()))
+	return filepath.Join(c.dir(), subtitleCacheFormatKey(source, track, src.ModTime(), src.Size(), "sup"))
 }
 
 // countCacheEntries counts committed .sup entries in the cache dir.

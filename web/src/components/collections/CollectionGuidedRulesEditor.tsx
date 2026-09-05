@@ -1,3 +1,4 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import { useMemo } from "react";
 
 import {
@@ -380,7 +381,7 @@ interface CollectionGuidedRulesEditorProps {
   allowLibrarySelection?: boolean;
   showMediaScopeSelector?: boolean;
   allowPersonalizedFilters?: boolean;
-  allowPersonalizedSorts?: boolean;
+  allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   readOnly?: boolean;
   showSortControls?: boolean;

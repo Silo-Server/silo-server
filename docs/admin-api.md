@@ -86,7 +86,7 @@ advertises the supported contract:
 {
   "features": ["playback_node_routing_v1"],
   "workloads": ["direct_play", "remux", "video_transcode"],
-  "execution_preferences": ["prefer_worker", "worker_only", "prefer_api", "api_only"],
+  "execution_preferences": ["prefer_worker", "prefer_transcode", "worker_only", "prefer_api", "api_only"],
   "egress_preferences": ["prefer_proxy", "proxy_only", "prefer_api", "api_only"]
 }
 ```
@@ -96,15 +96,30 @@ The existing atomic admin settings update writes the five primitive policies:
 | Setting | Default |
 |---|---|
 | `playback.routing.direct_play_egress` | `prefer_proxy` |
-| `playback.routing.remux_execution` | `prefer_worker` |
+| `playback.routing.remux_execution` | `prefer_transcode` |
 | `playback.routing.remux_egress` | `prefer_proxy` |
-| `playback.routing.video_transcode_execution` | `prefer_worker` |
+| `playback.routing.video_transcode_execution` | `prefer_transcode` |
 | `playback.routing.video_transcode_egress` | `prefer_proxy` |
 
 `prefer_*` permits fallback; `*_only` is a hard boundary. An atomic update is
 rejected when API-only execution is combined with proxy-only egress for remux
 or video transcode, because no implemented transport can satisfy that shape.
 The policy is read as one immutable snapshot for each playback start or replan.
+
+A **worker** is either a proxy node or a transcode node; the selected route says
+which kind executes the work. Progressive remux can run on a proxy, on the API
+process, or on a transcode node that streams its output through a proxy. HLS
+remux and video transcode can run on a transcode node (or the API process).
+`prefer_transcode` ranks a legal transcode-node shape first, then another worker,
+then the API without changing the delivery selected for the client. For video
+transcode, `prefer_transcode` and `prefer_worker` currently choose the same kind
+of worker because only transcode nodes can execute that workload. Egress is
+selected independently, and a proxy used only for egress does not run FFmpeg.
+
+Jellyfin-compatible clients select progressive or HLS transport through their
+protocol request. Routing does not rewrite a Jellyfin client's requested
+transport; progressive Jellyfin remux retains its existing proxy/API execution
+path.
 
 `GET /api/v1/admin/sessions/capabilities` advertises `node_routing: true`.
 Rows from `GET /api/v1/admin/sessions` may then include

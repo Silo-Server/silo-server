@@ -3,6 +3,8 @@ package jellycompat
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -41,6 +44,60 @@ var (
 )
 
 var jsonNULCodePoint = []byte(`\u0000`)
+
+const (
+	negotiatedSessionLegacyAdvisoryLockQuery = `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`
+	negotiatedSessionAdvisoryLockQuery       = `SELECT pg_advisory_xact_lock($1::bigint)`
+)
+
+// negotiatedSessionAdvisoryLockKey maps one negotiation scope into Postgres's
+// signed 64-bit advisory-lock key space without sending any client-derived text
+// to the versioned lock query. PostgreSQL text parameters reject NUL; deriving
+// a fixed-width key locally lets a later release retire the legacy text lock
+// after this release has bridged rolling upgrades.
+//
+// Length framing keeps component boundaries unambiguous even when a value
+// itself contains a NUL or another delimiter. SHA-256 distributes keys before
+// truncation to PostgreSQL's 64-bit bigint advisory-lock namespace. A collision
+// only serializes unrelated negotiations because the subsequent DELETE remains
+// scoped by exact values.
+func negotiatedSessionAdvisoryLockKey(compatToken, clientDeviceID, routeItemID string) int64 {
+	const domain = "silo:jellycompat:negotiated-session:v1"
+	framed := make([]byte, 0, len(domain)+3*8+len(compatToken)+len(clientDeviceID)+len(routeItemID))
+	framed = append(framed, domain...)
+	for _, component := range [...]string{compatToken, clientDeviceID, routeItemID} {
+		framed = binary.BigEndian.AppendUint64(framed, uint64(len(component)))
+		framed = append(framed, component...)
+	}
+	digest := sha256.Sum256(framed)
+	return int64(binary.BigEndian.Uint64(digest[:8]))
+}
+
+type negotiatedSessionAdvisoryLockExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func acquireNegotiatedSessionAdvisoryLock(
+	ctx context.Context,
+	executor negotiatedSessionAdvisoryLockExecutor,
+	compatToken, clientDeviceID, routeItemID string,
+) error {
+	// Current-main processes know only the legacy text-derived key. Taking it
+	// first preserves mutual exclusion during a rolling upgrade; every upgraded
+	// process then takes the versioned bigint key in the same order. Once this
+	// bridge has shipped for a full release, a later release can remove the
+	// legacy acquisition while still coordinating with bridged processes.
+	legacyScope := negotiatedPlaybackScope(compatToken, clientDeviceID, routeItemID)
+	if _, err := executor.Exec(ctx, negotiatedSessionLegacyAdvisoryLockQuery, legacyScope); err != nil {
+		return fmt.Errorf("acquiring legacy negotiated playback session advisory lock: %w", err)
+	}
+
+	lockKey := negotiatedSessionAdvisoryLockKey(compatToken, clientDeviceID, routeItemID)
+	if _, err := executor.Exec(ctx, negotiatedSessionAdvisoryLockQuery, lockKey); err != nil {
+		return fmt.Errorf("acquiring versioned negotiated playback session advisory lock: %w", err)
+	}
+	return nil
+}
 
 // marshalPlaybackSession removes NUL code points from every nested string in
 // the JSON document. PostgreSQL JSONB rejects U+0000 even when Go's encoder
@@ -218,8 +275,9 @@ func (d *DurableCompatPlaybackStore) replaceUnstartedNegotiation(
 
 	var removed []string
 	if session.CompatToken != "" && session.ClientDeviceID != "" && session.RouteItemID != "" {
-		scope := negotiatedPlaybackScope(session.CompatToken, session.ClientDeviceID, session.RouteItemID)
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, scope); err != nil {
+		if err := acquireNegotiatedSessionAdvisoryLock(
+			ctx, tx, session.CompatToken, session.ClientDeviceID, session.RouteItemID,
+		); err != nil {
 			return nil, err
 		}
 		rows, err := tx.Query(ctx, `

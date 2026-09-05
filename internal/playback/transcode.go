@@ -193,13 +193,6 @@ type TranscodeSession struct {
 	pruneBeforeStart     bool
 	copyDurationMu       sync.Mutex
 	copyDurationIndex    copyManifestDurationIndex
-	copyManifestMu       sync.Mutex
-	copyManifest         []byte
-	copyManifestTimeline manifestTimeline
-	copyManifestStarted  bool
-	copyManifestDone     chan struct{}
-	copyManifestCancel   context.CancelFunc
-	copyManifestProbe    copyVideoKeyframeProbe
 	segmentGeneration    uint64
 	segmentIncarnation   string
 	throttler            *TranscodeThrottler
@@ -787,7 +780,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// race with fMP4 (hls.js #6337).
 	var segmentPattern string
 	segmentType := "mpegts"
-	copyVideoUsesFMP4 := isVideoCopy && !opts.CopyVideoMPEGTS && !IsMPEG2VideoCodec(opts.SourceVideoCodec)
+	copyVideoUsesFMP4 := copyVideoUsesFMP4(opts)
 	if copyVideoUsesFMP4 {
 		segmentType = "fmp4"
 		segmentPattern = filepath.Join(opts.OutputDir, "seg_%05d.m4s")
@@ -907,16 +900,40 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 	return args
 }
 
+// copyVideoUsesFMP4 reports whether copied video is packaged as fragmented MP4
+// rather than MPEG-TS. Shared by segment-type selection and timestamp policy
+// so the two cannot disagree.
+func copyVideoUsesFMP4(opts TranscodeOpts) bool {
+	return strings.EqualFold(opts.TargetCodecVideo, "copy") &&
+		!opts.CopyVideoMPEGTS &&
+		!IsMPEG2VideoCodec(opts.SourceVideoCodec)
+}
+
 // appendTimestampNormalizationArgs selects timestamp handling based on the
 // playback mode. Jellyfin-compatible copy-video fMP4 preserves source timing
 // while start_at_zero makes the output presentation timeline begin at zero.
 // This keeps initial fragments decodable without losing the source-relative
 // timing required by segment-driven resume restarts.
+//
+// Negative timestamps must still be lifted. When the audio is re-encoded to
+// AAC the encoder's 1024-sample priming delay places the first audio packet
+// before zero, and with "disabled" the mov muxer writes that value straight
+// into the first fragment's tfdt (baseMediaDecodeTime -1024). ExoPlayer/Media3
+// rejects any tfdt with the sign bit set ("Top bit not zero"), so every
+// full-file copy-video start with audio adaptation failed on Android before
+// the first frame. make_non_negative shifts all streams by the same minimal
+// offset only when a timestamp is negative; resumes and audio-copy starts
+// carry no negative timestamps and are therefore unaffected. MPEG-TS copy
+// output has no tfdt and keeps the source timestamps untouched.
 func appendTimestampNormalizationArgs(args []string, opts TranscodeOpts) []string {
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
+		negativeTS := "disabled"
+		if copyVideoUsesFMP4(opts) {
+			negativeTS = "make_non_negative"
+		}
 		return append(args,
 			"-copyts",
-			"-avoid_negative_ts", "disabled",
+			"-avoid_negative_ts", negativeTS,
 			"-start_at_zero",
 		)
 	}
@@ -1988,37 +2005,16 @@ func stabilizeCopyHLSRemountTimeline(manifest []byte, opts TranscodeOpts) []byte
 // HLS timeline themselves.
 const SourceTimelineQueryParam = "source_timeline"
 
-// BuildSourceAlignedPlaybackManifest builds a complete keyframe-aligned copy
-// playlist when possible. Otherwise, when it is a seeked real playlist, it
-// prepends a virtual unavailable span so the first produced segment retains its
-// source-time position. Encoded synthetic manifests already cover the source
-// timeline and need no adjustment.
+// BuildSourceAlignedPlaybackManifest builds the normal playback manifest and,
+// when it is a seeked real playlist, prepends a virtual unavailable span so the
+// first produced segment retains its source-time position. Synthetic manifests
+// already cover the full source timeline and need no adjustment.
 func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
-	return s.BuildSourceAlignedPlaybackManifestContext(context.Background(), segPrefix, rawQuery)
-}
-
-// BuildSourceAlignedPlaybackManifestContext is the request-cancellable form of
-// BuildSourceAlignedPlaybackManifest. Compatibility clients need a complete
-// VOD timeline for forward seeking, including while copy-video FFmpeg output is
-// throttled, so copy sessions first try to build it from source keyframes.
-func (s *TranscodeSession) BuildSourceAlignedPlaybackManifestContext(ctx context.Context, segPrefix, rawQuery string) ([]byte, error) {
-	opts := s.Opts()
-	if strings.EqualFold(opts.TargetCodecVideo, "copy") &&
-		CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
-		if manifest := s.completeCopyVideoManifest(); len(manifest) > 0 {
-			return RewriteManifestPaths(manifest, segPrefix, rawQuery)
-		}
-		done := s.startCompleteCopyVideoManifest(ctx, opts)
-		if manifest := s.waitForCompleteCopyVideoManifest(ctx, done); len(manifest) > 0 {
-			return RewriteManifestPaths(manifest, segPrefix, rawQuery)
-		}
-	}
-
 	manifest, err := s.BuildPlaybackManifest(segPrefix, rawQuery)
 	if err != nil {
 		return nil, err
 	}
-	opts = s.Opts()
+	opts := s.Opts()
 	usesRealManifest := strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration)
 	if opts.SeekSeconds <= 0 || !usesRealManifest {
@@ -2661,13 +2657,6 @@ func (s *TranscodeSession) CloseProcess() error {
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	s.StopThrottler()
-	s.copyManifestMu.Lock()
-	cancelCopyManifest := s.copyManifestCancel
-	s.copyManifestCancel = nil
-	s.copyManifestMu.Unlock()
-	if cancelCopyManifest != nil {
-		cancelCopyManifest()
-	}
 	// Cancel the context to kill the process (no mutex needed for cancel).
 	if s.cancel != nil {
 		s.cancel()
@@ -3337,14 +3326,6 @@ func (s *TranscodeSession) SegmentStartTime(segNum int) (float64, bool, error) {
 }
 
 func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline, error) {
-	s.copyManifestMu.Lock()
-	if len(s.copyManifestTimeline.entries) > 0 {
-		timeline := cloneManifestTimeline(s.copyManifestTimeline)
-		s.copyManifestMu.Unlock()
-		return 0, timeline, nil
-	}
-	s.copyManifestMu.Unlock()
-
 	s.mu.Lock()
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
 	baseSeekSeconds := s.opts.SeekSeconds
@@ -3370,13 +3351,6 @@ func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline
 		return 0, manifestTimeline{}, ErrManifestNotReady
 	}
 	return baseSeekSeconds, timeline, nil
-}
-
-func cloneManifestTimeline(timeline manifestTimeline) manifestTimeline {
-	return manifestTimeline{
-		mediaSequence: timeline.mediaSequence,
-		entries:       append([]manifestSegmentEntry(nil), timeline.entries...),
-	}
 }
 
 const copySegmentStartMatchTolerance = 50 * time.Millisecond

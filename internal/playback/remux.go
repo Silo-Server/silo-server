@@ -465,7 +465,8 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	mode, ffmpegPath := opts.DVMode, opts.FFmpegPath
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
-	w = httpstream.NewRollingDeadlineWriter(w)
+	streamWriter := httpstream.NewRollingDeadlineWriter(w)
+	w = streamWriter
 	// Check file exists before starting ffmpeg to return a proper 404.
 	// Headers must be written before streaming begins, so we can't detect
 	// ffmpeg errors after WriteHeader(200) has been sent.
@@ -489,10 +490,16 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		// Deferred after session.Close, so it runs before it: the watcher is
 		// gone by the time the owner drains and reaps the process.
 		served := make(chan struct{})
-		defer close(served)
+		watcherDone := make(chan struct{})
+		defer func() {
+			close(served)
+			<-watcherDone
+		}()
 		go func() {
+			defer close(watcherDone)
 			select {
 			case <-opts.Abort:
+				_ = streamWriter.Abort()
 				session.Abort()
 			case <-served:
 			}

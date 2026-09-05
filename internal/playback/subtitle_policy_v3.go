@@ -2,6 +2,9 @@ package playback
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -77,8 +80,17 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 		// would produce a plan the transcoder cannot honor.
 		return subtitleTerminalV3("subtitle_codec_unsupported", fmt.Sprintf("Subtitle format %s has no validated rendering or burn-in route.", codec))
 	}
+	if source == SubtitleSourceEmbeddedV3 && (text || clientBitmap) {
+		if native, nativeCaps, ok := nativeEmbeddedSubtitleV3(file, request, deliveryClass, transportIndex); ok {
+			return SubtitlePolicyResultV3{
+				Decision:      SubtitleDecisionV3{Mode: SubtitleRenderV3, TrackID: trackID, Embedded: native},
+				Claims:        SubtitleClaimsV3{ASSStylingPreserved: !ass || nativeCaps.ASSStyling, Reason: "client_embedded_subtitle_supported"},
+				SelectedIndex: index, TransportIndex: transportIndex, Codec: codec, Source: source,
+			}
+		}
+	}
 	if text {
-		renderable := source != "embedded" && deliveryCaps.Subtitles.SidecarText || source == "embedded" && deliveryCaps.Subtitles.EmbeddedText
+		renderable := deliveryCaps.Subtitles.SidecarText
 		if ass && request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3 {
 			renderable = renderable && deliveryCaps.Subtitles.ASSStyling && deliveryCaps.Subtitles.FontAttachments
 		}
@@ -90,7 +102,7 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 				DownloadedSubtitleID: entry.DownloadedSubtitleID,
 			}
 		}
-		if request.SubtitleFidelityPreference == SubtitleFidelityCompatibleV3 {
+		if request.SubtitleFidelityPreference == SubtitleFidelityCompatibleV3 && deliveryCaps.Subtitles.SidecarText {
 			return SubtitlePolicyResultV3{
 				Decision:      SubtitleDecisionV3{Mode: SubtitleConvertV3, TrackID: trackID},
 				Claims:        SubtitleClaimsV3{Reason: "server_text_conversion"},
@@ -168,4 +180,74 @@ func isClientRenderableBitmapSubtitleV3(codec string) bool {
 
 func subtitleTerminalV3(reason, message string) SubtitlePolicyResultV3 {
 	return SubtitlePolicyResultV3{Decision: SubtitleDecisionV3{Mode: SubtitleOffV3}, SelectedIndex: -1, TransportIndex: -1, Terminal: &TerminalV3{Reason: reason, Message: message}}
+}
+
+func nativeEmbeddedSubtitleV3(file *models.MediaFile, request StartRequestV3, deliveryClass string, ordinal int) (*EmbeddedSubtitleV3, NativeEmbeddedSubtitleCapabilityV3, bool) {
+	var none NativeEmbeddedSubtitleCapabilityV3
+	if deliveryClass != DeliveryClassOriginalHTTPV3 || !HasFeatureV3(request.ClientFeatures, FeatureEmbeddedSubtitlesV3) || ordinal < 0 || ordinal >= len(file.SubtitleTracks) {
+		return nil, none, false
+	}
+	delivery := request.ClientPlaybackContext.Deliveries[deliveryClass]
+	if !delivery.Enabled || !delivery.SupportedOnDevice {
+		return nil, none, false
+	}
+	track := file.SubtitleTracks[ordinal]
+	if track.Index < 0 {
+		return nil, none, false
+	}
+	// Reject ambiguous source metadata instead of selecting a different stream.
+	for i, other := range file.SubtitleTracks {
+		if i != ordinal && other.Index == track.Index {
+			return nil, none, false
+		}
+	}
+	for _, capability := range delivery.Subtitles.NativeEmbedded {
+		if !strings.EqualFold(capability.Container, file.Container) {
+			continue
+		}
+		if !slices.ContainsFunc(capability.Codecs, func(codec string) bool {
+			return normalizeNativeSubtitleCodecV3(codec) == normalizeNativeSubtitleCodecV3(track.Codec)
+		}) {
+			continue
+		}
+		if IsASS(track.Codec) && request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3 && (!capability.ASSStyling || !capability.FontAttachments) {
+			continue
+		}
+		switch capability.TrackIdentity {
+		case subtitleIdentityFFmpegV3:
+		case subtitleIdentityContainerV3:
+			id, err := strconv.ParseUint(track.ContainerTrackID, 10, 32)
+			if err != nil || id == 0 || strconv.FormatUint(id, 10) != track.ContainerTrackID {
+				continue
+			}
+			ambiguous := false
+			for i, other := range file.SubtitleTracks {
+				if i != ordinal && other.ContainerTrackID == track.ContainerTrackID {
+					ambiguous = true
+				}
+			}
+			if ambiguous {
+				continue
+			}
+		default:
+			continue
+		}
+		return &EmbeddedSubtitleV3{StreamIndex: track.Index, ContainerTrackID: track.ContainerTrackID}, capability, true
+	}
+	return nil, none, false
+}
+
+func normalizeNativeSubtitleCodecV3(codec string) string {
+	switch codec = normalizeCodecV3(codec); codec {
+	case "srt":
+		return "subrip"
+	case "vtt":
+		return "webvtt"
+	case "tx3g":
+		return "mov_text"
+	case subtitleCodecPGS:
+		return subtitleCodecPGSFFmpeg
+	default:
+		return codec
+	}
 }

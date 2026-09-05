@@ -20,6 +20,7 @@ import {
   Bell,
   MonitorSmartphone,
   PanelTop,
+  KeyRound,
 } from "lucide-react";
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
@@ -400,6 +401,15 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: "Account",
     items: [
+      {
+        path: "account",
+        label: "Account",
+        icon: KeyRound,
+        description: "Change the password shared by every household profile.",
+        keywords: ["password", "credential", "sign in", "security", "account"],
+        settings: settingIndex("Current password", "New password", "Confirm new password"),
+        primaryOrAdmin: true,
+      },
       {
         path: "profiles",
         label: "Profiles",

@@ -55,6 +55,13 @@ body:
     validations:
       required: true
   - type: input
+    id: ai-harness
+    attributes:
+      label: AI harness
+      description: Enter the exact agent harness or application, or "none".
+    validations:
+      required: true
+  - type: input
     id: ai-tools
     attributes:
       label: AI tool(s)
@@ -77,5 +84,12 @@ body:
         - Human-written, AI-reviewed
         - AI-assisted
         - Fully AI-generated, human verified
+    validations:
+      required: true
+  - type: textarea
+    id: ai-review
+    attributes:
+      label: Independent or adversarial review
+      description: Summarize the scope, method, findings, and resolutions, or enter "n/a" when this issue does not require independent or adversarial review.
     validations:
       required: true

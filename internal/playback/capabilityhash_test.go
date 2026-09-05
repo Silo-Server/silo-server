@@ -25,6 +25,7 @@ func sampleCapabilityInfo() HWAccelInfo {
 			{Name: "tone_map", Executor: "node", RecipeVersion: "v2", ValidatedClaims: []string{"hdr10", "hlg"}},
 			{Name: "audio_to_aac", Executor: "node", RecipeVersion: "v1"},
 		},
+		TransportFeatures: []string{"feature-b", "feature-a"},
 		ToneMapCapabilities: tonemap.Capabilities{
 			{Mode: tonemap.ModeHardware, Backend: "nvenc", Filter: "tonemap_cuda", SourceKinds: []tonemap.SourceKind{"hdr10", "hlg"}},
 			{Mode: tonemap.ModeSoftware, Backend: "software", Filter: "tonemap", SourceKinds: []tonemap.SourceKind{"hdr10"}},
@@ -45,6 +46,7 @@ func TestComputeCapabilityHashIgnoresSliceOrder(t *testing.T) {
 	shuffled.DetectedBackends[0].Devices = []string{"/dev/dri/renderD128", "/dev/dri/renderD129"}
 	shuffled.Transformations = []TransformationV3{shuffled.Transformations[1], shuffled.Transformations[0]}
 	shuffled.Transformations[1].ValidatedClaims = []string{"hlg", "hdr10"}
+	shuffled.TransportFeatures = []string{"feature-a", "feature-b"}
 	shuffled.ToneMapCapabilities = tonemap.Capabilities{shuffled.ToneMapCapabilities[1], shuffled.ToneMapCapabilities[0]}
 	shuffled.ToneMapCapabilities[1].SourceKinds = []tonemap.SourceKind{"hlg", "hdr10"}
 
@@ -116,6 +118,7 @@ func TestComputeCapabilityHashDetectsRealChanges(t *testing.T) {
 		{"verified device", func(i *HWAccelInfo) { i.DetectedBackends[0].Device = "/dev/dri/renderD129" }},
 		{"transformation recipe version", func(i *HWAccelInfo) { i.Transformations[0].RecipeVersion = "v3" }},
 		{"validated claims", func(i *HWAccelInfo) { i.Transformations[0].ValidatedClaims = []string{"hdr10"} }},
+		{"transport feature", func(i *HWAccelInfo) { i.TransportFeatures = []string{"feature-a"} }},
 		{"tone map filter", func(i *HWAccelInfo) { i.ToneMapCapabilities[0].Filter = "tonemap_opencl" }},
 		{"tone map source kinds", func(i *HWAccelInfo) {
 			i.ToneMapCapabilities[0].SourceKinds = []tonemap.SourceKind{"hdr10"}

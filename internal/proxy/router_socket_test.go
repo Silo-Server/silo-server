@@ -20,7 +20,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
@@ -388,5 +390,41 @@ func TestMountedProxyRouterRelaysToNode(t *testing.T) {
 	forwardedClaims, err := streamtoken.Verify(forwardedToken, secret)
 	if err != nil || forwardedClaims.SessionID != snapshot.Sessions[0].SessionID {
 		t.Fatalf("forwarded claims = %+v, err=%v", forwardedClaims, err)
+	}
+}
+
+func TestMountedProxyRouterRelaysProgressiveRemuxToTranscodeNode(t *testing.T) {
+	const secret = "socket-proxy-remux-secret"
+	const body = "progressive-remux-bytes"
+	var relayPath, relayQuery, forwardedToken string
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		relayPath = r.URL.Path
+		relayQuery = r.URL.RawQuery
+		forwardedToken = r.Header.Get("X-Silo-Stream-Token")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(node.Close)
+
+	claims := streamtoken.Claims{
+		SessionID: "socket-remux-1", PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: node.URL, TranscodeTransportID: "transport-remux-1",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress: string(noderouting.EgressProxy), RoutingEgressNodeID: 11,
+	}
+	token, err := streamtoken.Sign(claims, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newSocketProxyServer(t, secret, nil)
+	srv.nodeRowID = func() (int, bool) { return 11, true }
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(server.Close)
+
+	got := socketProxyRequest(t, server.Client(), http.MethodGet, server.URL+"/stream/remux/"+token+"?seek=12.5", nil)
+	if got.status != http.StatusOK || got.body != body {
+		t.Fatalf("relayed remux = %d %q, want 200 %q", got.status, got.body, body)
+	}
+	if relayPath != "/remux/transport-remux-1" || relayQuery != "seek=12.5" || forwardedToken != token {
+		t.Fatalf("relay = %q?%s token-match=%v", relayPath, relayQuery, forwardedToken == token)
 	}
 }

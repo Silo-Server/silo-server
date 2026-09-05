@@ -101,7 +101,7 @@ export function QualityMenu({
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
       <button
         type="button"
-        className="player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3"
+        className="player-quality-trigger player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3"
         onClick={() => setOpen((v) => !v)}
         aria-label="Quality"
         aria-expanded={open}

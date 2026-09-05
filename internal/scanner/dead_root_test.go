@@ -190,6 +190,76 @@ func TestDeleteMissingByFolderProtectedRoots(t *testing.T) {
 	}
 }
 
+func TestScannedRootRepository_DeleteMissingByFolder(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID1 := seedDeadRootTestFolder(t, pool, "movies", "Scanned Root Repo Test 1")
+	folderID2 := seedDeadRootTestFolder(t, pool, "movies", "Scanned Root Repo Test 2")
+
+	repo := NewScannedRootRepository(pool)
+
+	root1 := models.ScannedMediaRoot{
+		MediaFolderID: folderID1,
+		RootPath:      "/media/movies1/Movie A",
+		Title:         "Movie A",
+		State:         "matched",
+		Year:          2020,
+	}
+	root2 := models.ScannedMediaRoot{
+		MediaFolderID: folderID1,
+		RootPath:      "/media/movies2/Movie B", // path that will be removed
+		Title:         "Movie B",
+		State:         "ambiguous",
+		Year:          2021,
+	}
+	rootOtherFolder := models.ScannedMediaRoot{
+		MediaFolderID: folderID2,
+		RootPath:      "/media/movies2/Movie B",
+		Title:         "Movie B",
+		State:         "ambiguous",
+		Year:          2021,
+	}
+
+	if err := repo.UpsertMany(ctx, []models.ScannedMediaRoot{root1, root2, rootOtherFolder}); err != nil {
+		t.Fatalf("UpsertMany: %v", err)
+	}
+
+	// Scoped delete under /media/movies1 does not touch /media/movies2
+	if err := repo.DeleteMissingInScope(ctx, folderID1, "/media/movies1", []string{root1.RootPath}); err != nil {
+		t.Fatalf("DeleteMissingInScope: %v", err)
+	}
+	got, err := repo.Get(ctx, folderID1, root2.RootPath)
+	if err != nil {
+		t.Fatalf("Get root2: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("root2 was deleted by DeleteMissingInScope for unrelated scope")
+	}
+
+	// Full scan delete (only saw root1) removes root2 from folderID1, but leaves folderID2 intact
+	if err := repo.DeleteMissingByFolder(ctx, folderID1, []string{root1.RootPath}); err != nil {
+		t.Fatalf("DeleteMissingByFolder: %v", err)
+	}
+
+	got, err = repo.Get(ctx, folderID1, root2.RootPath)
+	if err != nil {
+		t.Fatalf("Get root2: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("root2 remained after DeleteMissingByFolder")
+	}
+
+	got1, err := repo.Get(ctx, folderID1, root1.RootPath)
+	if err != nil || got1 == nil {
+		t.Fatalf("root1 was removed unexpectedly: %v", err)
+	}
+
+	gotOther, err := repo.Get(ctx, folderID2, rootOtherFolder.RootPath)
+	if err != nil || gotOther == nil {
+		t.Fatalf("other folder root was removed unexpectedly: %v", err)
+	}
+}
+
 // TestScanFolderDeadRootProtection walks the real scan pipeline end to end
 // with two on-disk roots and verifies the full dead-root story:
 //

@@ -850,19 +850,14 @@ func (s *PostgresUserStore) ListProgressByMediaItems(ctx context.Context, profil
 		return result, nil
 	}
 
-	placeholders := make([]string, len(mediaItemIDs))
-	args := make([]any, 0, len(mediaItemIDs)+2)
-	args = append(args, s.userID, profileID)
-	for i, mediaItemID := range mediaItemIDs {
-		placeholders[i] = fmt.Sprintf("$%d", i+3)
-		args = append(args, mediaItemID)
-	}
-
+	// Keep one statement shape for every batch size. Expanding IDs into IN
+	// parameters can make a reused plan scan all profile progress and compare
+	// each row against thousands of parameters instead of using the item index.
 	rows, err := s.pool.Query(ctx, `
 		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
 		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
 		FROM user_watch_progress
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id IN (`+strings.Join(placeholders, ",")+`)
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = ANY($3::text[])
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM user_history_hidden_items hhi
@@ -871,7 +866,7 @@ func (s *PostgresUserStore) ListProgressByMediaItems(ctx context.Context, profil
 			  AND hhi.media_item_id = user_watch_progress.media_item_id
 			  AND user_watch_progress.updated_at <= hhi.hidden_before
 		  )`,
-		args...,
+		s.userID, profileID, mediaItemIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing progress by media items: %w", err)

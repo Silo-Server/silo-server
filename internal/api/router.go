@@ -453,6 +453,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			profileTokenService,
 		)
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
+		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
 		if accessGroupStore != nil {
 			authHandler.SetAccessGroupProvider(accessGroupStore)
 		}
@@ -2006,6 +2007,19 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/me", authHandler.HandleMe)
 						r.Get("/sessions", authHandler.HandleListSessions)
 						r.Delete("/sessions/{id}", authHandler.HandleDeleteSession)
+						r.With(optionalProfileViewerAccess(viewerAccessMiddleware)).
+							Get("/account/capability", authHandler.HandleAccountPasswordCapability)
+						passwordChangeMiddlewares := []func(http.Handler) http.Handler{
+							optionalProfileViewerAccess(viewerAccessMiddleware),
+						}
+						if deps.RateLimitMW != nil {
+							passwordChangeMiddlewares = append(
+								passwordChangeMiddlewares,
+								deps.RateLimitMW.AuthEndpointHandler("password_change"),
+							)
+						}
+						r.With(passwordChangeMiddlewares...).
+							Post("/account/password", authHandler.HandleChangePassword)
 						r.Post("/device/approve", authHandler.HandleDeviceApprove)
 						r.Post("/device/deny", authHandler.HandleDeviceDeny)
 					})
@@ -2128,6 +2142,49 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Apple notification display metadata: authenticated by either the
+		// normal access token or the long-lived display token minted at Apple
+		// push registration. Sits outside the RequireAuth group because the
+		// display token is not an access token; RequireApplePushDisplayAuth
+		// still validates the session and binds the profile from the claims.
+		if authMiddleware != nil && deps.Notifications != nil {
+			// The route only left the authenticated group to accept the
+			// display token. Both credential paths share the same
+			// post-auth chain: the limiter (per-API-key budgets need
+			// claims), then viewer access so a deleted or foreign profile
+			// is rejected and rejected resolutions still consume budget.
+			// The limiter also runs once before auth: a display token lives
+			// as long as a refresh token, so its session lookup must not be
+			// reachable outside the global and per-IP budgets.
+			var limiter func(http.Handler) http.Handler
+			if deps.RateLimitMW != nil {
+				limiter = deps.RateLimitMW.Handler
+			}
+			postAuth := func(next http.Handler) http.Handler {
+				chain := apimw.RequireProfile(next)
+				if viewerAccessMiddleware != nil {
+					chain = viewerAccessMiddleware.RequireViewerAccess(chain)
+				}
+				if limiter != nil {
+					chain = limiter(chain)
+				}
+				return chain
+			}
+			standardDisplayAuth := func(next http.Handler) http.Handler {
+				return authMiddleware.RequireAuth(postAuth(next))
+			}
+			displayMiddlewares := []func(http.Handler) http.Handler{}
+			if limiter != nil {
+				displayMiddlewares = append(displayMiddlewares, limiter)
+			}
+			displayMiddlewares = append(displayMiddlewares,
+				authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, postAuth))
+			r.With(displayMiddlewares...).Get(
+				"/notifications/push/apple/display/{delivery_id}",
+				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,
+			)
+		}
+
 		// All remaining routes require auth.
 		if authMiddleware != nil {
 			r.Group(func(r chi.Router) {
@@ -2172,6 +2229,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.Notifications.SetImageResolver(detailSvc)
 					}
 					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
+					notificationsHandler.SetApplePushDisplayTokenIssuer(jwtService)
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
 					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
 					// Discord DM channel: the linked identity and mode hang off
@@ -2192,7 +2250,6 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/capability", notificationsHandler.HandleCapability)
 						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
-						r.Get("/push/apple/display/{delivery_id}", notificationsHandler.HandleApplePushDisplay)
 						// Platform-generic registration used by the Android
 						// client; Apple keeps its dedicated route above.
 						r.Post("/push/devices", notificationsHandler.HandleRegisterPushDevice)

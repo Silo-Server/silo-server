@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   Info,
   ListVideo,
@@ -62,6 +62,7 @@ interface PlayerControlsProps {
   onSubtitleSelect: (index: number | null) => void;
   subtitleDelayMs: number;
   onSubtitleDelayChange: (ms: number) => void;
+  preferredSubtitleLanguage?: string | null;
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
@@ -128,6 +129,7 @@ export function PlayerControls({
   onSubtitleSelect,
   subtitleDelayMs,
   onSubtitleDelayChange,
+  preferredSubtitleLanguage,
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
@@ -160,9 +162,29 @@ export function PlayerControls({
   onSurfaceTap,
 }: PlayerControlsProps) {
   const isCoarsePointer = useCoarsePointer();
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const [narrowPlayer, setNarrowPlayer] = useState(false);
+  const compactControls = isCoarsePointer || narrowPlayer;
+
+  useLayoutEffect(() => {
+    const element = controlsRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const measure = () => setNarrowPlayer(element.clientWidth < 1536);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
+  // Discard compact menus when switching layouts so they cannot reappear
+  // after a resize or fullscreen round trip.
+  if (!compactControls && (overflowOpen || audioOpen || chaptersOpen)) {
+    setOverflowOpen(false);
+    setAudioOpen(false);
+    setChaptersOpen(false);
+  }
   const safeDuration = duration > 0 ? duration : 0;
   const handleSkipBack = () => onSeek(Math.max(0, currentTime - SKIP_BACK_SECONDS));
   const handleSkipForward = () =>
@@ -174,6 +196,9 @@ export function PlayerControls({
 
   return (
     <div
+      ref={controlsRef}
+      data-compact={compactControls}
+      data-touch={isCoarsePointer}
       className={`player-controls absolute inset-0 z-10 transition-opacity duration-300 ${
         visible ? "opacity-100" : "pointer-events-none opacity-0"
       }`}
@@ -186,8 +211,8 @@ export function PlayerControls({
       {/* Touch transport cluster. pointer-events pass through the empty area
           so surface taps still toggle controls / double-tap-seek; only the
           cluster itself is interactive. */}
-      {isCoarsePointer && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]">
+      {compactControls && (
+        <div className="player-compact-transport pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]">
           <div
             className="pointer-events-auto flex items-center gap-2"
             onClick={(event) => event.stopPropagation()}
@@ -252,10 +277,7 @@ export function PlayerControls({
         </div>
       )}
 
-      {/* ───── BOTTOM HUD ─────
-          Three-column grid: metadata left, main playback cluster center,
-          utility rail right. Seek bar spans the full width above the row
-          so the playhead is always anchored to the frame edge.           */}
+      {/* Narrow players use centered transport and a compact bottom utility row. */}
       <div
         className="player-hud player-rise absolute inset-x-0 bottom-0 z-10 px-[max(0.75rem,env(safe-area-inset-left))] pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] sm:pb-[max(1.25rem,env(safe-area-inset-bottom))]"
         onClick={(e) => e.stopPropagation()}
@@ -272,13 +294,9 @@ export function PlayerControls({
           onSeek={onSeek}
         />
 
-        {/* Grid keeps the playback cluster visually locked to the centerline
-            of the frame regardless of how long the title or utility rail is.
-            `minmax(0,1fr)` forces the side columns to honor 1fr behaviour
-            rather than growing with their content — the cluster stays put. */}
-        {isCoarsePointer ? (
-          <div className="mt-2 flex min-w-0 items-center gap-2">
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {compactControls ? (
+          <div className="player-compact-row mt-2 flex min-w-0 items-center gap-2">
+            <div className="player-compact-metadata flex min-w-0 flex-1 flex-col gap-0.5">
               {title ? (
                 <div
                   className="truncate text-[15px] leading-tight font-semibold tracking-tight text-white"
@@ -295,6 +313,7 @@ export function PlayerControls({
             </div>
             <SubtitleMenu
               tracks={subtitleTracks}
+              preferredSubtitleLanguage={preferredSubtitleLanguage}
               activeIndex={activeSubtitleIndex}
               onSelect={onSubtitleSelect}
               delayMs={subtitleDelayMs}
@@ -339,7 +358,7 @@ export function PlayerControls({
             </button>
           </div>
         ) : (
-          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-5">
+          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-5">
             {/* ─── Left: Title / episode / time ─── */}
             <div className="flex min-w-0 flex-col gap-0.5">
               {title ? (
@@ -363,7 +382,7 @@ export function PlayerControls({
                     <span className="text-white/25">·</span>
                   </>
                 ) : null}
-                <span className="font-mono text-[11px] tracking-[0.12em] text-white/75 normal-case tabular-nums">
+                <span className="shrink-0 font-mono text-[11px] tracking-[0.12em] whitespace-nowrap text-white/75 normal-case tabular-nums">
                   {formatTime(currentTime)}
                   <span className="mx-1 text-white/30">/</span>
                   {formatTime(duration)}
@@ -443,7 +462,7 @@ export function PlayerControls({
 
             {/* ─── Right: Utility rail ─── */}
             <div className="flex items-center justify-end gap-0.5">
-              <div className="hidden sm:pointer-fine:block">
+              <div className="shrink-0">
                 <VolumeControl
                   volume={volume}
                   muted={muted}
@@ -452,7 +471,7 @@ export function PlayerControls({
                 />
               </div>
 
-              <div className="player-hud-divider mx-1 hidden sm:block" />
+              <div className="player-hud-divider mx-1" />
 
               {onAudioSelect && (
                 <AudioTrackMenu
@@ -467,6 +486,7 @@ export function PlayerControls({
 
               <SubtitleMenu
                 tracks={subtitleTracks}
+                preferredSubtitleLanguage={preferredSubtitleLanguage}
                 activeIndex={activeSubtitleIndex}
                 onSelect={onSubtitleSelect}
                 delayMs={subtitleDelayMs}
@@ -542,9 +562,31 @@ export function PlayerControls({
         )}
       </div>
 
-      {isCoarsePointer && overflowOpen && (
-        <PlayerMenuSurface className="" onClose={() => setOverflowOpen(false)}>
+      {compactControls && overflowOpen && !isCoarsePointer && (
+        <button
+          type="button"
+          className="absolute inset-0 z-40"
+          aria-label="Close menu"
+          onClick={(event) => {
+            event.stopPropagation();
+            setOverflowOpen(false);
+          }}
+        />
+      )}
+      {compactControls && overflowOpen && (
+        <PlayerMenuSurface className="player-overflow-menu" onClose={() => setOverflowOpen(false)}>
           <div className="py-1">
+            {!isCoarsePointer && (
+              <div className="flex items-center justify-between border-b border-white/10 px-5 py-3 text-sm text-white/80">
+                <span>Volume</span>
+                <VolumeControl
+                  volume={volume}
+                  muted={muted}
+                  onVolumeChange={onVolumeChange}
+                  onMutedChange={onMutedChange}
+                />
+              </div>
+            )}
             {onAudioSelect && audioTracks.length > 0 && (
               <OverflowAction
                 icon={<AudioLines className="h-5 w-5" />}
@@ -598,7 +640,7 @@ export function PlayerControls({
           </div>
         </PlayerMenuSurface>
       )}
-      {isCoarsePointer && onAudioSelect && (
+      {compactControls && onAudioSelect && (
         <AudioTrackMenu
           tracks={audioTracks}
           activeIndex={activeAudioIndex}
@@ -609,7 +651,7 @@ export function PlayerControls({
           hideTrigger
         />
       )}
-      {isCoarsePointer && (
+      {compactControls && (
         <ChaptersMenu
           chapters={chapters ?? []}
           currentTime={currentTime}

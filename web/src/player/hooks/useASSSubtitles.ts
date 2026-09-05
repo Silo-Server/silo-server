@@ -35,7 +35,10 @@ export function useASSSubtitles(
   isDetached: boolean,
   streamOriginSeconds: number,
   subtitleDelayMs: number,
+  onLoadState?: (state: "idle" | "loading" | "ready" | "error") => void,
 ): { isActive: boolean } {
+  const onLoadStateRef = useRef(onLoadState);
+  onLoadStateRef.current = onLoadState;
   const jassubRef = useRef<JASSUB | null>(null);
   const jassubImportRef = useRef<Promise<typeof JASSUB> | null>(null);
   // Effective JASSUB time offset. JASSUB renders the ASS event matching
@@ -62,6 +65,7 @@ export function useASSSubtitles(
   // Main effect: create/destroy JASSUB based on active track.
   useEffect(() => {
     const video = videoRef.current;
+    onLoadStateRef.current?.("idle");
 
     // Destroy JASSUB if the active track is not ASS, or player is detached,
     // or no video element is available.
@@ -74,26 +78,48 @@ export function useASSSubtitles(
     }
 
     let cancelled = false;
-    const controller = new AbortController();
+    let controller = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
 
-    async function initJASSUB() {
+    async function initJASSUB(signal: AbortSignal, progress: () => void) {
       if (!video || cancelled) return;
+      onLoadStateRef.current?.("loading");
 
       // Lazy-load JASSUB module (only once).
       if (!jassubImportRef.current) {
-        jassubImportRef.current = import("jassub").then((m) => m.default);
+        jassubImportRef.current = import("jassub")
+          .then((m) => m.default)
+          .catch((err) => {
+            jassubImportRef.current = null;
+            throw err;
+          });
       }
 
-      const JASSUBClass = await jassubImportRef.current;
-      if (cancelled) return;
+      const classPromise = jassubImportRef.current;
+      void classPromise.catch(() => {});
 
       let subContent: string;
       let attachedFontData: Uint8Array[] = [];
       try {
-        const [response, loadedAttachedFontData] = await Promise.all([
-          fetch(activeUrl!, { signal: controller.signal }),
+        const [content, loadedAttachedFontData] = await Promise.all([
+          fetch(activeUrl!, { signal }).then(async (response) => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            progress();
+            if (!response.body) return response.text();
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let text = "";
+            while (!signal.aborted && !cancelled) {
+              const { value, done } = await reader.read();
+              if (done) return text + decoder.decode();
+              progress();
+              text += decoder.decode(value, { stream: true });
+            }
+            throw new DOMException("Subtitle loading cancelled", "AbortError");
+          }),
           activeFontBundleUrl
-            ? loadSubtitleFontBundle(activeFontBundleUrl, controller.signal).catch((err) => {
+            ? loadSubtitleFontBundle(activeFontBundleUrl, signal).catch((err) => {
                 if ((err as Error).name !== "AbortError") {
                   console.error(
                     `[useASSSubtitles] Failed to load subtitle font bundle ${activeFontBundleUrl}:`,
@@ -104,19 +130,16 @@ export function useASSSubtitles(
               })
             : Promise.resolve([]),
         ]);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        subContent = await response.text();
+        subContent = content;
         attachedFontData = loadedAttachedFontData;
       } catch (err) {
         if (!cancelled && (err as Error).name !== "AbortError") {
           console.error(`[useASSSubtitles] Failed to fetch ${activeUrl}:`, err);
         }
-        return;
+        throw err;
       }
 
-      if (cancelled) return;
+      if (cancelled || signal.aborted) return;
 
       // libass renders missing glyphs with its *default* font — it does not
       // search other loaded fonts for coverage. JASSUB's built-in default
@@ -148,6 +171,8 @@ export function useASSSubtitles(
           : subContent;
       const fonts = [...attachedFontData, ...(fallbackFontData ?? [])];
 
+      const JASSUBClass = await classPromise;
+      if (cancelled || signal.aborted) return;
       const instance = new JASSUBClass({
         video,
         subContent: renderedSubContent,
@@ -172,12 +197,45 @@ export function useASSSubtitles(
       }
 
       jassubRef.current = instance;
+      await instance.ready;
+      if (!cancelled && !signal.aborted) onLoadStateRef.current?.("ready");
     }
 
-    initJASSUB();
+    async function load() {
+      controller = new AbortController();
+      const attemptController = controller;
+      let progress = () => {};
+      const stalled = new Promise<never>((_, reject) => {
+        progress = () => {
+          if (cancelled || attemptController.signal.aborted) return;
+          if (timeout !== null) clearTimeout(timeout);
+          timeout = setTimeout(() => {
+            attemptController.abort();
+            reject(new Error("Subtitle loading stalled"));
+          }, 30_000);
+        };
+        progress();
+      });
+      try {
+        await Promise.race([initJASSUB(controller.signal, progress), stalled]);
+      } catch (err) {
+        if (cancelled) return;
+        attemptController.abort();
+        console.error("[useASSSubtitles] Unable to load subtitles:", err);
+        jassubRef.current?.destroy();
+        jassubRef.current = null;
+        onLoadStateRef.current?.("error");
+        retryTimer = setTimeout(() => void load(), 5_000);
+      } finally {
+        if (timeout !== null) clearTimeout(timeout);
+      }
+    }
+    void load();
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      if (timeout !== null) clearTimeout(timeout);
       controller.abort();
       // Destroy the current instance if the effect is being torn down
       // (e.g. track switch or unmount). This covers the common case where
@@ -200,7 +258,15 @@ export function useASSSubtitles(
     if (!instance || !activeUrl) return;
 
     instance.timeOffset = effectiveOffset;
-    void instance.resize(true);
+    void instance.ready
+      .then(() => {
+        if (jassubRef.current === instance) return instance.resize(true);
+      })
+      .catch((err) => {
+        if (jassubRef.current === instance) {
+          console.error("[useASSSubtitles] Unable to repaint subtitles:", err);
+        }
+      });
   }, [effectiveOffset, activeUrl]);
 
   // Cleanup on unmount.
