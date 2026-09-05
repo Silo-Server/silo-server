@@ -974,9 +974,24 @@ rows: the engine's `score`, `reason`, and bare `media_item_id` lists are not car
 reads them); `label` is `title` and `section_kind`/`section_key` are `kind`/`key`; `for-you/main`
 answers an empty row rather than `null`; `days` and `limit` are declared parameters answered
 `422` out of range where v1 silently fell back to a default; `section/{kind}/{key}` folds into
-`getRecommendationSection` with `key` as a query parameter, and `kind` is a strict enum. Stage B
-ports the remaining eight rows (`similar`, `similar-users`, `taste-profile`, `taste-seed`,
-`taste-seed/items`, `watch-tonight`, `watch-tonight/cards`).
+`getRecommendationSection` with `key` as a query parameter, and `kind` is a strict enum.
+
+**Section catalog-recommendations, stage B (Phase 4).** The remaining seven rows: `listSimilar`,
+`listSimilarUsersLiked`, `getTasteProfile`, `listTasteSeedItems`, `createTasteSeed`,
+`getWatchTonight`, `listWatchTonightCards`, on the same seams. The two similar lists are
+`CatalogItemCollection`s; `TasteProfile` keeps v1's members with `updated_at` a UTC instant that
+is absent until the profile has been computed; `listTasteSeedItems` pages by cursor (the cursor
+carries the offset v1's `next_offset` did, minted under the same full-window rule) and rejects
+`offset`; `createTasteSeed` is the section's one command, naturally idempotent because a
+favourite is set membership, so a retried submission converges on the same set and reports
+`added` 0; its `item_ids` bounds (1..200) are schema validation (`422`, where v1 was `400`).
+`WatchTonight` and `WatchTonightCardPage` embed the shared `CatalogItem` with a strict
+`watch_tonight_source` enum, `cards` is `items`, `mode` is a required enum, the `genres[]` /
+`exclude_ids[]` parameters are the exploded `genres` / `exclude_ids`, and an unknown genre is
+`422` at `query.genres[i]` where v1 dropped it silently. Every `limit` answers `422` out of range
+where v1 silently clamped or fell back to its default. Apple and Android consume `similar`
+(`media_item_id` is now the card's `content_id`), `discover` (the member renames above), and
+`taste-profile` (`updated_at` only).
 
 ## v1 lifecycle and release sequence
 
