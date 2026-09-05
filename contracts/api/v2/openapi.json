@@ -666,11 +666,11 @@
         "additionalProperties": false,
         "properties": {
           "contexts": {
-            "description": "The content contexts to resolve under",
+            "description": "The content contexts to resolve under; each context may name a library and a series",
             "items": {
               "$ref": "#/components/schemas/SettingContextRequest"
             },
-            "maxItems": 200,
+            "maxItems": 100,
             "minItems": 1,
             "type": "array"
           },

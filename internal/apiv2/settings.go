@@ -882,9 +882,15 @@ type SettingContextRequest struct {
 }
 
 // EffectiveSettingsBatch is the resolveEffectiveSettings request body.
+//
+// The contexts bound is half the seam's content-id budget (200, shared with
+// the single-shot GET's library_ids plus series_ids) so that every context
+// shape the schema admits — a library, a series, or both — fits in one
+// request. Declaring 200 would advertise a capacity the seam refuses once
+// more than 100 contexts name both ids.
 type EffectiveSettingsBatch struct {
 	Keys     []string                `json:"keys" required:"true" minItems:"1" maxItems:"200" doc:"The setting keys to resolve under every context" example:"[\"playback.preferred_quality\"]"`
-	Contexts []SettingContextRequest `json:"contexts" required:"true" minItems:"1" maxItems:"200" doc:"The content contexts to resolve under"`
+	Contexts []SettingContextRequest `json:"contexts" required:"true" minItems:"1" maxItems:"100" doc:"The content contexts to resolve under; each context may name a library and a series"`
 }
 
 // EffectiveSettingsBatchTarget is what a batch resolution names beyond the

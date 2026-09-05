@@ -498,6 +498,17 @@ func TestResolveEffectiveSettings(t *testing.T) {
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
+	// The declared contexts bound fits every context shape: 100 contexts
+	// naming both a library and a series is the seam's whole id budget and
+	// resolves; one more context is refused at the schema.
+	full := effectiveBatchBody(100)
+	if rec := do(t, h, http.MethodPost, "/api/v2/settings/values/effective", full, settingsOwner()); rec.Code != 200 {
+		t.Fatalf("100 two-id contexts: %d %s", rec.Code, rec.Body.String())
+	}
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/settings/values/effective", effectiveBatchBody(101), settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationBodyContexts {
+		t.Fatalf("101 contexts errors = %+v", p.Errors)
+	}
 	cases := []struct{ name, body, location string }{
 		{"keys required", `{"contexts":[{"context_id":"a","library_id":"3"}]}`, locationBodyKeys},
 		{"keys empty", `{"keys":[],"contexts":[{"context_id":"a","library_id":"3"}]}`, locationBodyKeys},
@@ -518,6 +529,21 @@ func TestResolveEffectiveSettings(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/settings/values/effective", body, bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/settings/values/effective", body, nil), TypeAuthenticationRequired)
+}
+
+// effectiveBatchBody is a resolveEffectiveSettings body of n contexts that
+// each name both a library and a series.
+func effectiveBatchBody(n int) string {
+	var b strings.Builder
+	b.WriteString(`{"keys":["ui.theme"],"contexts":[`)
+	for i := 1; i <= n; i++ {
+		if i > 1 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"context_id":"c%d","library_id":"%d","series_id":"tv:%d"}`, i, i, i)
+	}
+	b.WriteString(`]}`)
+	return b.String()
 }
 
 func TestUpdateNavigationShortcut(t *testing.T) {

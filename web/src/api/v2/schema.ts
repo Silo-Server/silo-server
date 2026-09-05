@@ -668,7 +668,7 @@ export interface components {
       revision: number;
     };
     EffectiveSettingsBatch: {
-      /** @description The content contexts to resolve under */
+      /** @description The content contexts to resolve under; each context may name a library and a series */
       contexts: components["schemas"]["SettingContextRequest"][];
       /**
        * @description The setting keys to resolve under every context

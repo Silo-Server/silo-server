@@ -444,6 +444,14 @@ The batch resolves for the acting profile and declared device, so the operation 
 device and client-family headers: the `profile_id`, `device_id`, `library_ids` and `series_ids`
 query parameters of the single-shot GET are not accepted here (v1 parsed and then ignored them).
 
+`contexts` is bounded at 100 entries (`maxItems`), not the 200 the seam's content-id budget might
+suggest. The seam bounds the *ids* in one request at 200 — the same budget the single-shot GET
+spends on `library_ids` plus `series_ids` — and a context may name both a `library_id` and a
+`series_id`, so declaring 200 contexts would advertise a capacity the seam refuses as soon as
+more than 100 contexts name both. Halving the declared bound keeps every valid context shape
+inside one request and leaves v1 and the store query untouched; a 101st context is a 422 at
+`body.contexts`.
+
 ```http
 POST /api/v2/settings/values/effective
 X-Profile-Id: <profile-id>

@@ -815,6 +815,7 @@ func (f *fakeSettingValuesSeam) ResolveEffectiveSettingContexts(_ context.Contex
 	}
 	out := make([]handlers.EffectiveSettingContextView, 0, len(contexts))
 	seen := map[string]bool{}
+	contentIDs := 0
 	for _, c := range contexts {
 		if seen[c.ContextID] {
 			return nil, settingAPIError(400, "bad_request", "contexts", "context_id values must be unique")
@@ -822,6 +823,15 @@ func (f *fakeSettingValuesSeam) ResolveEffectiveSettingContexts(_ context.Contex
 		seen[c.ContextID] = true
 		if len(c.LibraryID) == 0 && c.SeriesID == "" {
 			return nil, settingAPIError(400, "bad_request", "contexts", "Every context requires library_id or series_id")
+		}
+		if len(c.LibraryID) > 0 {
+			contentIDs++
+		}
+		if c.SeriesID != "" {
+			contentIDs++
+		}
+		if contentIDs > fakeMaxEffectiveContentIDs {
+			return nil, settingAPIError(400, "bad_request", "contexts", "Too many content ids in one request; resolve in smaller batches")
 		}
 		views, apiErr := f.effective(q, q.Keys, "keys")
 		if apiErr != nil {
