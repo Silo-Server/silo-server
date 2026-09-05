@@ -1537,6 +1537,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SourceAudioChannels:    compatHLSRecipeSourceAudioChannels(source),
 		TotalDuration:          float64(source.Version.Duration),
 		RequireReady:           toneMapRecipe.mode != "",
+		ThrottleSeconds:        playback.ConfiguredTranscodeThrottleSeconds(ctx, h.SettingsRepo),
 	}
 	if playback.IsAudioToAACStereoDownmixV3(reqBody.SourceAudioChannels, reqBody.TargetCodecAudio, reqBody.TargetAudioChannels) {
 		reqBody.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3
@@ -1772,6 +1773,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SourceAudioChannels:    reqBody.SourceAudioChannels,
 		TargetAudioChannels:    reqBody.TargetAudioChannels,
 		TotalDuration:          reqBody.TotalDuration,
+		ThrottleSeconds:        reqBody.ThrottleSeconds,
 	}
 	toneMapRecipe.apply(&opts)
 	opts.HWAccel = strings.TrimSpace(nodeResponse.HWAccel)
@@ -2360,12 +2362,8 @@ func supportedHLSRemuxAudioStreamIndexes(version catalog.FileVersion, profile De
 	return indexes
 }
 
-func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken string, source PlaybackMediaSource, profiles ...DeviceProfile) mediaSourceDTO {
+func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken string, source PlaybackMediaSource) mediaSourceDTO {
 	selectedAudioStreamIndex := effectiveCompatAudioStreamIndex(source)
-	var profile DeviceProfile
-	if len(profiles) > 0 {
-		profile = profiles[0]
-	}
 	dto := mediaSourceDTO{
 		SiloSeekReanchor:                    source.SiloSeekReanchor,
 		Protocol:                            "File",
@@ -2399,12 +2397,18 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		Bitrate:                             source.Version.Bitrate * 1000,
 		DefaultAudioStreamIndex:             selectedAudioStreamIndex,
 		DefaultSubtitleStreamIndex:          effectiveCompatSubtitleStreamIndex(source),
-		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, source.SelectedSubtitleStreamIndex, compatToken, playSessionID, profile),
+		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, source.SelectedSubtitleStreamIndex, compatToken, playSessionID),
 	}
 	for i := range dto.MediaStreams {
 		stream := &dto.MediaStreams[i]
 		if stream.Type == "Subtitle" && source.SubtitleExternalDelivery && dto.DefaultSubtitleStreamIndex != nil && stream.Index == *dto.DefaultSubtitleStreamIndex {
 			stream.DeliveryMethod = "External"
+		}
+		if stream.Type == "Subtitle" && source.SubtitleDeliveryFormat != "" && dto.DefaultSubtitleStreamIndex != nil && stream.Index == *dto.DefaultSubtitleStreamIndex {
+			stream.DeliveryURL = subtitleDeliveryURL(routeItemID, source.ID, stream.Index, source.SubtitleDeliveryFormat, compatToken, playSessionID)
+			if stream.IsExternal {
+				stream.Path = fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, source.ID, stream.Index, source.SubtitleDeliveryFormat)
+			}
 		}
 		if stream.Type == "Subtitle" && !source.SupportsDirectPlay {
 			if source.SubtitleBurnIn && source.SelectedSubtitleStreamIndex != nil && stream.Index == *source.SelectedSubtitleStreamIndex {
@@ -2454,11 +2458,7 @@ func buildMediaStreams(routeItemID, mediaSourceID string, version catalog.FileVe
 	return buildMediaStreamsWithSelection(routeItemID, mediaSourceID, version, nil, nil, "", "")
 }
 
-func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedAudioStreamIndex, selectedSubtitleStreamIndex *int, compatToken, playSessionID string, profiles ...DeviceProfile) []mediaStreamDTO {
-	var profile DeviceProfile
-	if len(profiles) > 0 {
-		profile = profiles[0]
-	}
+func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedAudioStreamIndex, selectedSubtitleStreamIndex *int, compatToken, playSessionID string) []mediaStreamDTO {
 	streams := make([]mediaStreamDTO, 0, len(version.VideoTracks)+len(version.AudioTracks)+len(version.SubtitleTracks))
 	effectiveAudioStreamIndex := selectedAudioStreamIndex
 	if effectiveAudioStreamIndex != nil && !isValidCompatAudioStreamIndex(version, *effectiveAudioStreamIndex) {
@@ -2540,17 +2540,6 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 	for index, track := range version.SubtitleTracks {
 		streamIndex := subtitleTrackIndex(version, track, index)
 		format := subtitleRouteFormat(track.Codec)
-		deliveryMethod := subtitleDeliveryMethod(track.External)
-		supportsExternalStream := track.External
-		isExternalURL := subtitleExternalURL(track)
-		if externalFormat, ok := profile.ExternalSubtitleFormat(track.Codec); ok && !playback.NeedsBurnIn(track.Codec) {
-			format = externalFormat
-			if !track.External {
-				deliveryMethod = "External"
-				supportsExternalStream = true
-				isExternalURL = boolPtr(false)
-			}
-		}
 		displayTitle := compatSubtitleDisplayTitle(track)
 		// When the client has made an explicit subtitle selection, only that
 		// stream is the default. A negative selection ("subtitles off") matches
@@ -2577,7 +2566,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			DeliveryURL:            compatSubtitleExtractionURL(track, routeItemID, mediaSourceID, streamIndex, format, compatToken, playSessionID),
 			DeliveryMethod:         subtitleDeliveryMethod(track.External),
 			Path:                   subtitlePath(track, routeItemID, mediaSourceID, streamIndex, format),
-			IsExternalURL:          isExternalURL,
+			IsExternalURL:          subtitleExternalURL(track),
 		})
 	}
 
@@ -3437,6 +3426,10 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 			external = external || strings.EqualFold(sub.Method, "External")
 		}
 		text := !playback.NeedsBurnIn(track.Codec)
+		if format, ok := profile.ExternalSubtitleFormat(track.Codec); ok && text {
+			external = true
+			source.SubtitleDeliveryFormat = format
+		}
 		source.SubtitleExternalDelivery = text && external && !embed
 		if (track.External && !external) || (!embed && (!external || !text)) {
 			source.SupportsDirectPlay = false
@@ -3480,11 +3473,13 @@ func applyCompatDownloadedSubtitleDelivery(source *PlaybackMediaSource, profile 
 	if index < 0 {
 		return
 	}
-	if index < len(downloaded) && slices.ContainsFunc(profile.SubtitleProfiles, func(sub SubtitleProfile) bool {
-		return strings.EqualFold(sub.Method, "External") && compatSubtitleProfileFormat(sub.Format) == compatSubtitleProfileFormat(string(downloaded[index].Format))
-	}) {
-		return
+	if index < len(downloaded) {
+		if format, ok := profile.ExternalSubtitleFormat(string(downloaded[index].Format)); ok {
+			source.SubtitleDeliveryFormat = format
+			return
+		}
 	}
+
 	source.SupportsDirectPlay = false
 	source.SupportsDirectStream = false
 	source.SupportsTranscoding = false

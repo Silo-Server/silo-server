@@ -23,8 +23,8 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 	if requested == "" {
 		requested = compatSubtitleVTT
 	}
-	if requested != compatSubtitleVTT && requested != compatSubtitleSRT && requested != compatSubtitleASS {
-		writeError(w, 400, "BadRequest", "Supported subtitle formats are vtt, srt and ass")
+	if requested != compatSubtitleVTT && requested != compatSubtitleSRT && requested != compatSubtitleASS && requested != "js" {
+		writeError(w, 400, "BadRequest", "Supported subtitle formats are vtt, srt, ass and js")
 		return
 	}
 	startRaw := chiURLParam(r, "routeStartPositionTicks")
@@ -62,9 +62,23 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	result, err := windowSubtitleVTT(data, requested, start, end, copyTimestamps, timeMap)
+	windowFormat := requested
+	if requested == "js" {
+		windowFormat = compatSubtitleVTT
+	}
+	result, err := windowSubtitleVTT(data, windowFormat, start, end, copyTimestamps, timeMap)
 	if err != nil {
 		writeError(w, 500, "ServerError", "Invalid subtitle timing")
+		return
+	}
+	if requested == "js" {
+		if !strings.Contains(string(result), " --> ") {
+			writeJSON(w, http.StatusOK, map[string]any{"TrackEvents": []jellyfinSubtitleTrackEvent{}})
+			return
+		}
+		if err := writeJellyfinJSONSubtitleResponse(w, result); err != nil {
+			writeError(w, 500, "ServerError", "Failed to encode subtitle")
+		}
 		return
 	}
 	writeSubtitleResponse(w, requested, result)

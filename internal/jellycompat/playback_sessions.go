@@ -85,6 +85,7 @@ type PlaybackMediaSource struct {
 	SiloSeekReanchor         bool
 	SubtitleBurnIn           bool
 	SubtitleExternalDelivery bool
+	SubtitleDeliveryFormat   string
 	SubtitleTrackIndex       int
 	SubtitleCodec            string
 	CanBurnSubtitle          bool

@@ -51,7 +51,11 @@ func TestCompatCopySeekSourceTimelineRealFFmpeg(t *testing.T) {
 		"-an", source)
 	shifted := filepath.Join(dir, "shifted.mkv")
 	run(ffmpeg, "-v", "error", "-i", source, "-c", "copy", "-output_ts_offset", "7", shifted)
-	for _, input := range []string{source, shifted} {
+	mp4 := filepath.Join(dir, "variable-gop.mp4")
+	run(ffmpeg, "-v", "error", "-i", source, "-c", "copy", mp4)
+	shiftedMP4 := filepath.Join(dir, "shifted.mp4")
+	run(ffmpeg, "-v", "error", "-i", source, "-c", "copy", "-output_ts_offset", "7", shiftedMP4)
+	for _, input := range []string{source, shifted, mp4, shiftedMP4} {
 		for _, requested := range []float64{900, 23.5} {
 			t.Run(fmt.Sprintf("%s/seek-%g", filepath.Base(input), requested), func(t *testing.T) {
 				anchor, segment, err := ResolveCopySeekAnchor(ctx, ffmpeg, input, requested, 2)

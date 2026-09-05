@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -253,5 +254,47 @@ func TestEmbeddedSubtitleBurnInLocalAndRemoteRecipe(t *testing.T) {
 	persisted, _ := remoteStore.Get("play-1")
 	if persisted.Recipe == nil || !persisted.Recipe.SubtitleBurnIn || persisted.Recipe.SubtitleCodec != "hdmv_pgs_subtitle" {
 		t.Fatalf("recipe=%+v", persisted.Recipe)
+	}
+}
+
+func TestJSONSubtitleTimingWindow(t *testing.T) {
+	for _, copyTimestamps := range []bool{false, true} {
+		t.Run(strconv.FormatBool(copyTimestamps), func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/subtitle?EndPositionTicks=40000000&CopyTimestamps="+strconv.FormatBool(copyTimestamps), nil)
+			route := chi.NewRouteContext()
+			route.URLParams.Add("routeFormat", "js")
+			route.URLParams.Add("routeStartPositionTicks", "20000000")
+			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+			rr := httptest.NewRecorder()
+			(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n\n00:00:03.500 --> 00:00:06.000\nsecond\n\n00:00:07.000 --> 00:00:08.000\nlast\n"))
+			var response struct {
+				TrackEvents []struct {
+					Text                                 string
+					StartPositionTicks, EndPositionTicks int64
+				}
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			offset := int64(0)
+			if copyTimestamps {
+				offset = 20000000
+			}
+			if rr.Code != 200 || len(response.TrackEvents) != 2 || response.TrackEvents[0].Text != "first" || response.TrackEvents[0].StartPositionTicks != offset || response.TrackEvents[0].EndPositionTicks != offset+10000000 || response.TrackEvents[1].StartPositionTicks != offset+15000000 || response.TrackEvents[1].EndPositionTicks != offset+20000000 {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
+	r := httptest.NewRequest("GET", "/subtitle?StartPositionTicks=90000000", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("routeFormat", "js")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+	rr := httptest.NewRecorder()
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n"))
+	if rr.Code != 200 || strings.TrimSpace(rr.Body.String()) != `{"TrackEvents":[]}` {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

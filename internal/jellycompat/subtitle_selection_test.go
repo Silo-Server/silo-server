@@ -667,3 +667,68 @@ func TestPlaybackInfoEmbeddedExternalDeliveryExtractsSubtitle(t *testing.T) {
 	}
 	t.Fatal("missing selected subtitle")
 }
+
+func TestSelectedVTTDeliverySurvivesPersistence(t *testing.T) {
+	for _, index := range []int{2, 3, 5} {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			source := PlaybackMediaSource{ID: "source", Version: subtitleSelectionVersion(), SupportsDirectPlay: true, SelectedSubtitleStreamIndex: new(index)}
+			profile := DeviceProfile{SubtitleProfiles: []SubtitleProfile{{Format: "vtt", Method: "External"}}}
+			applyCompatSubtitleDelivery(&source, profile, false)
+			applyCompatDownloadedSubtitleDelivery(&source, profile, []subtitles.DownloadedSubtitle{{Format: subtitles.FormatSRT}})
+			encoded, err := json.Marshal(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var recovered PlaybackMediaSource
+			if err := json.Unmarshal(encoded, &recovered); err != nil {
+				t.Fatal(err)
+			}
+			if recovered.SubtitleDeliveryFormat != "vtt" || !recovered.SupportsDirectPlay {
+				t.Fatalf("recovered=%+v", recovered)
+			}
+			if index == 5 {
+				return
+			}
+			dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", recovered)
+			found := false
+			for _, stream := range dto.MediaStreams {
+				if stream.Type != "Subtitle" {
+					continue
+				}
+				if stream.Index == index {
+					found = true
+					if stream.DeliveryMethod != "External" || !strings.Contains(stream.DeliveryURL, "/stream.vtt?") || stream.IsExternal != (index == 3) {
+						t.Fatalf("stream=%+v", stream)
+					}
+				} else if !stream.IsExternal && stream.DeliveryMethod != "Embed" {
+					t.Fatalf("nonselected stream=%+v", stream)
+				}
+			}
+			if !found {
+				t.Fatal("selected stream missing")
+			}
+		})
+	}
+}
+
+func TestSelectedSubtitleEmbedCapabilitySurvivesPersistence(t *testing.T) {
+	source := PlaybackMediaSource{ID: "source", Version: subtitleSelectionVersion(), SupportsDirectPlay: true, SelectedSubtitleStreamIndex: new(2)}
+	applyCompatSubtitleDelivery(&source, DeviceProfile{SubtitleProfiles: []SubtitleProfile{{Format: "srt", Method: "Embed"}, {Format: "vtt", Method: "External"}}}, false)
+	before := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+	encoded, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recovered PlaybackMediaSource
+	if err := json.Unmarshal(encoded, &recovered); err != nil {
+		t.Fatal(err)
+	}
+	after := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", recovered)
+	for _, dto := range []mediaSourceDTO{before, after} {
+		for _, stream := range dto.MediaStreams {
+			if stream.Type == "Subtitle" && stream.Index == 2 && (stream.DeliveryMethod != "Embed" || !strings.Contains(stream.DeliveryURL, "/stream.vtt?")) {
+				t.Fatalf("stream=%+v", stream)
+			}
+		}
+	}
+}

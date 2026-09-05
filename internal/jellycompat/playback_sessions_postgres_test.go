@@ -438,29 +438,44 @@ func TestDurableCompatPlaybackStorePutNegotiatedReplacesAcrossInstances(t *testi
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	firstID := "compat-negotiated-first-" + suffix
 	secondID := "compat-negotiated-second-" + suffix
+	differentID := "compat-negotiated-different-" + suffix
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = ANY($1)`, []string{firstID, secondID})
+		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = ANY($1)`, []string{firstID, secondID, differentID})
 	})
 
 	first := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	first.PutNegotiated(PlaybackSession{
-		ID:             firstID,
-		CompatToken:    "negotiated-token-" + suffix,
-		ClientDeviceID: "web-device",
-		RouteItemID:    "route-1",
+		ID:                 firstID,
+		NegotiationVariant: "subtitle=2",
+		CompatToken:        "negotiated-token-" + suffix,
+		ClientDeviceID:     "web-device",
+		RouteItemID:        "route-1",
+	})
+
+	other := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	other.PutNegotiated(PlaybackSession{
+		ID:                 differentID,
+		CompatToken:        "negotiated-token-" + suffix,
+		ClientDeviceID:     "web-device",
+		RouteItemID:        "route-1",
+		NegotiationVariant: "subtitle=3",
 	})
 
 	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	second.PutNegotiated(PlaybackSession{
-		ID:             secondID,
-		CompatToken:    "negotiated-token-" + suffix,
-		ClientDeviceID: "web-device",
-		RouteItemID:    "route-1",
+		ID:                 secondID,
+		NegotiationVariant: "subtitle=2",
+		CompatToken:        "negotiated-token-" + suffix,
+		ClientDeviceID:     "web-device",
+		RouteItemID:        "route-1",
 	})
 
 	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	if _, ok := fresh.Get(firstID); ok {
 		t.Fatal("superseded negotiation remained durable")
+	}
+	if got, ok := fresh.Get(differentID); !ok || got.NegotiationVariant != "subtitle=3" {
+		t.Fatalf("distinct negotiation was replaced: %+v, exists=%t", got, ok)
 	}
 	if _, ok := fresh.Get(secondID); !ok {
 		t.Fatal("replacement negotiation was not durable")
