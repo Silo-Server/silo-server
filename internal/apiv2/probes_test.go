@@ -181,10 +181,19 @@ type guardedProbeRow struct {
 type guardedProbeStore struct {
 	mu   sync.Mutex
 	rows map[string]guardedProbeRow
-	// afterGet, when set, runs once after the next Get returns its row and
-	// before the caller's compare-and-update: the test's way to land a
-	// concurrent writer in the window the precondition exists to cover.
-	afterGet func()
+	// afterGet runs after each of the next afterGetRemaining Gets return
+	// their row and before the caller's compare-and-update: the test's way
+	// to land a concurrent writer in the window the precondition exists to
+	// cover, once or several times in a row.
+	afterGet          func()
+	afterGetRemaining int
+}
+
+// raceNextGets arms afterGet for the next n Gets.
+func (s *guardedProbeStore) raceNextGets(n int, fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.afterGet, s.afterGetRemaining = fn, n
 }
 
 func newGuardedProbeStore() *guardedProbeStore {
@@ -197,8 +206,11 @@ func newGuardedProbeStore() *guardedProbeStore {
 func (s *guardedProbeStore) Get(id string) (guardedProbeRow, bool) {
 	s.mu.Lock()
 	row, ok := s.rows[id]
-	hook := s.afterGet
-	s.afterGet = nil
+	var hook func()
+	if s.afterGetRemaining > 0 {
+		s.afterGetRemaining--
+		hook = s.afterGet
+	}
 	s.mu.Unlock()
 	if hook != nil {
 		hook()
@@ -378,18 +390,20 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
 				return nil, p
 			}
-			if err := store.Delete(in.ID, row.Version); err != nil {
+			expected := row.Version
+			for err := store.Delete(in.ID, expected); err != nil; err = store.Delete(in.ID, expected) {
 				latest, exists := store.Get(in.ID)
 				if !exists {
+					// The winner deleted it: nothing current to advertise.
 					return nil, StaleVersionProblem(EntityTag{})
 				}
 				if !IsOverwrite(in.IfMatch) {
 					return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
 				}
-				// "*": the resource still exists, so delete whatever is there.
-				if err := store.Delete(in.ID, latest.Version); err != nil {
-					return nil, StaleVersionProblem(EntityTag{})
-				}
+				// "*": the resource still exists, so the precondition still
+				// holds; delete whatever is there now, however many writers
+				// land in between.
+				expected = latest.Version
 			}
 			// The deleted representation has no ETag: 204 with no validator.
 			return &guardedProbeDeleteOutput{}, nil
@@ -418,18 +432,30 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				// concurrent writer can make fail.
 				updated = store.Upsert(in.ID, in.Body.Name)
 			} else {
-				// The precondition passed against the row read above; the
-				// write re-checks it atomically, and a writer that landed in
-				// between is the 412 the precondition exists to report.
-				var err error
-				if ok {
-					updated, err = store.Update(in.ID, row.Version, in.Body.Name)
-				} else {
-					updated, err = store.Create(in.ID, in.Body.Name)
-				}
-				if err != nil {
-					latest, _ := store.Get(in.ID)
-					return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				// The precondition passed against the state read above; the
+				// write re-checks that state atomically. A writer that landed
+				// in between does not by itself falsify If-None-Match, so the
+				// condition is evaluated again against the latest state and
+				// the write retried while it still holds.
+				for {
+					var err error
+					if ok {
+						updated, err = store.Update(in.ID, row.Version, in.Body.Name)
+					} else {
+						updated, err = store.Create(in.ID, in.Body.Name)
+					}
+					if err == nil {
+						break
+					}
+					row, ok = store.Get(in.ID)
+					existing = nil
+					if ok {
+						tag := RenderETag(row.Version, guardedProbeScope)
+						existing = &tag
+					}
+					if p := EvaluateCreateOnly(in.IfNoneMatch, existing); p != nil {
+						return nil, p
+					}
 				}
 			}
 			return &guardedProbeWriteOutput{

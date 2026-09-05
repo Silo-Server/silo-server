@@ -353,8 +353,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
   DELETE only), `Conditional` (GET, HEAD only) or `CreateOnly` (PUT only, exclusive with
   `Guarded`); `Register` panics when a guarded input does not bind a string
-  `header:"If-Match"` or its output a string `header:"ETag"` (a guarded DELETE answers `204`
-  with no validator and must declare none), when a conditional input does not bind
+  `header:"If-Match"` or its output a string `header:"ETag"` (a guarded DELETE answers a
+  bodyless `204` and nothing else: its output declares no `ETag`, no body, and no
+  `Status`), when a conditional input does not bind
   `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
   create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
   output. Header fields and the conditional `Status` count only as direct exported struct
@@ -362,8 +363,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   so one declared either way is refused rather than silently unsent. A guarded handler
   treats `If-Match: *` as a deliberate overwrite through the compare-and-update as well:
   a race lost to a writer who left the resource in place is re-applied against the latest
-  version, a race lost to a delete is `412` with no `ETag`, and only an exact tag turns a
-  lost race into `412` with the current `ETag`. `TestGuardedOperationsAreMarkedIfMatch`
+  version, however many writers land, a race lost to a delete is `412` with no `ETag`, and
+  only an exact tag turns a lost race into `412` with the current `ETag`. A create-only
+  handler that loses its write evaluates `If-None-Match` again against the latest state and
+  retries while the condition holds, so only a state that falsifies the condition is `412`. `TestGuardedOperationsAreMarkedIfMatch`
   reconciles both directions and refuses a guarded operation that maps to no legacy row
   unless `guardedWithoutLegacyRow` names it with a reason. A
   guarded operation documents `412` and `428`, a required `If-Match` parameter, and the

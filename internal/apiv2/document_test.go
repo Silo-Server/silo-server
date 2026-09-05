@@ -567,6 +567,12 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"guarded DELETE with ETag": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}, "must not declare"},
+		"guarded DELETE with Body": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*struct{ Body probeEcho }, error) { return nil, nil })
+		}, "bodyless"},
+		"guarded DELETE with Status": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*struct{ Status int }, error) { return nil, nil })
+		}, "must not declare Status"},
 		"conditional with embedded ETag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*embeddedConditionalDocOutput, error) { return nil, nil })
 		}, "ETag"},

@@ -278,11 +278,19 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"`", ifMatchField)
 		}
 		if op.Method == http.MethodDelete {
-			// The deleted representation has no validator: a 204 carries
-			// no ETag, so the output must not declare one (Huma would
-			// document it on the 204).
+			// The deleted representation has no validator: a guarded DELETE
+			// answers a bodyless 204 and nothing else, so the output must
+			// declare no ETag, no body, and no Status that could turn it
+			// into a representation-bearing success the document would
+			// decorate with a header the handler cannot send.
 			if declaresHeaderString(out, etagField) {
 				return fmt.Errorf("guarded delete: output must not declare `header:\"%s\"`; a 204 has no representation to validate", etagField)
+			}
+			if declaresBody(out) {
+				return fmt.Errorf("guarded delete: output must be bodyless; the deleted representation is not returned")
+			}
+			if _, ok := out.FieldByName("Status"); ok {
+				return fmt.Errorf("guarded delete: output must not declare Status; the only success is 204")
 			}
 		} else if !declaresHeaderString(out, etagField) {
 			return fmt.Errorf("guarded: output must declare a string field with `header:\"%s\"`", etagField)

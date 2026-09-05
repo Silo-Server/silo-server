@@ -240,11 +240,11 @@ func TestGuardedProbeLostRaceIs412(t *testing.T) {
 func TestGuardedProbeWildcardSurvivesLostRace(t *testing.T) {
 	store := newGuardedProbeStore()
 	h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
-	store.afterGet = func() {
+	store.raceNextGets(1, func() {
 		if _, err := store.Update("a", 1, "racer"); err != nil {
 			t.Errorf("race setup: %v", err)
 		}
-	}
+	})
 	rec := do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"beta"}`, map[string]string{"If-Match": "*"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -256,15 +256,90 @@ func TestGuardedProbeWildcardSurvivesLostRace(t *testing.T) {
 		t.Fatalf("ETag = %q", got)
 	}
 	// An exact tag in the same race is still 412: the caller named a version.
-	store.afterGet = func() {
+	store.raceNextGets(1, func() {
 		if _, err := store.Update("a", 3, "racer"); err != nil {
 			t.Errorf("race setup: %v", err)
 		}
-	}
+	})
 	rec = do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"gamma"}`, map[string]string{"If-Match": RenderETag(3, guardedProbeScope).String()})
 	requireProblem(t, rec, TypePreconditionFailed)
 	if got := rec.Header().Get("ETag"); got != RenderETag(4, guardedProbeScope).String() {
 		t.Fatalf("412 ETag = %q", got)
+	}
+}
+
+// TestGuardedProbeWildcardDeleteSurvivesRepeatedRaces: "*" on a DELETE keeps
+// reloading and retrying while the resource exists, however many writers
+// land in the window.
+func TestGuardedProbeWildcardDeleteSurvivesRepeatedRaces(t *testing.T) {
+	store := newGuardedProbeStore()
+	h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	// Each Get (the handler's load, then each reload after a lost race)
+	// is followed by another writer bumping the version.
+	store.raceNextGets(3, func() {
+		// Bump unconditionally: Upsert never consumes a race slot the way
+		// a Get inside the hook would.
+		store.Upsert("a", "racer")
+	})
+	rec := do(t, h, http.MethodDelete, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": "*"})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, exists := store.Get("a"); exists {
+		t.Fatal("resource survived a wildcard delete")
+	}
+}
+
+// TestCreateOnlyProbeReEvaluatesAfterRace: a create-only PUT that loses the
+// compare-and-update evaluates If-None-Match again against the latest state
+// and retries while the condition holds; it is 412 only when the latest
+// state falsifies the condition, and a winning delete leaves no ETag.
+func TestCreateOnlyProbeReEvaluatesAfterRace(t *testing.T) {
+	// Non-matching tag: another writer bumps the row, but the tag still does
+	// not match the new version, so the replace lands.
+	store := newGuardedProbeStore()
+	h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() {
+		if _, err := store.Update("a", 1, "racer"); err != nil {
+			t.Errorf("race setup: %v", err)
+		}
+	})
+	rec := do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"after-race"}`, map[string]string{"If-None-Match": RenderETag(99, guardedProbeScope).String()})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("non-matching tag after a race: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if row, _ := store.Get("a"); row.Name != "after-race" || row.Version != 3 {
+		t.Fatalf("row = %+v", row)
+	}
+	// "*" on a missing id: another writer creates it first, so the latest
+	// state falsifies the condition and the answer is 412 with its ETag.
+	store = newGuardedProbeStore()
+	h = NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() {
+		if _, err := store.Create("new", "intruder"); err != nil {
+			t.Errorf("race setup: %v", err)
+		}
+	})
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"mine"}`, map[string]string{"If-None-Match": "*"})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got := rec.Header().Get("ETag"); got != RenderETag(1, guardedProbeScope).String() {
+		t.Fatalf("412 ETag = %q", got)
+	}
+	// Non-matching tag on an existing id: the winner deletes the row, so
+	// the condition holds against the empty state and the create lands.
+	store = newGuardedProbeStore()
+	h = NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() {
+		if err := store.Delete("a", 1); err != nil {
+			t.Errorf("race setup: %v", err)
+		}
+	})
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"recreated"}`, map[string]string{"If-None-Match": RenderETag(99, guardedProbeScope).String()})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create after a winning delete: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if row, _ := store.Get("a"); row.Name != "recreated" || row.Version != 1 {
+		t.Fatalf("row = %+v", row)
 	}
 }
 
@@ -277,11 +352,11 @@ func TestGuardedProbeRaceWinnerDeletedOmitsETag(t *testing.T) {
 		for _, method := range []string{http.MethodPut, http.MethodDelete} {
 			store := newGuardedProbeStore()
 			h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
-			store.afterGet = func() {
+			store.raceNextGets(1, func() {
 				if err := store.Delete("a", 1); err != nil {
 					t.Errorf("race setup: %v", err)
 				}
-			}
+			})
 			body := ""
 			if method == http.MethodPut {
 				body = `{"name":"beta"}`
