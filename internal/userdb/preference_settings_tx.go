@@ -33,19 +33,9 @@ func (s *SQLiteUserStore) WithPreferenceSettingsTransaction(
 	ctx context.Context,
 	fn func(userstore.PreferenceSettingsWriter) error,
 ) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning preference settings transaction: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	if err := fn(&preferenceSettingsTx{exec: tx}); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing preference settings transaction: %w", err)
-	}
-	return nil
+	return s.withImmediateSettingsTransaction(ctx, func(exec preferenceSettingsExecutor) error {
+		return fn(&preferenceSettingsTx{exec: exec})
+	})
 }
 
 func (tx *preferenceSettingsTx) ListProfileIDs(_ context.Context) ([]string, error) {

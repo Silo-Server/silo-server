@@ -38,8 +38,8 @@ func (s *PostgresUserStore) WithPreferenceSettingsTransaction(
 		return fmt.Errorf("beginning preference settings transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	// Serialize legacy account-setting fan-out with profile creation for this
-	// user across every server replica. Both paths run through this wrapper.
+	// Serialize preference planning, profile creation and canonical setting
+	// mutations for this account across every server replica.
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)",
 		preferenceSettingsAdvisoryClass, int32(s.userID)); err != nil {
 		return fmt.Errorf("locking preference settings transaction: %w", err)

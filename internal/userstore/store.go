@@ -47,6 +47,8 @@ type PreferenceSettingsWriter interface {
 
 // PreferenceSettingsTransactioner is implemented by stores that can atomically
 // synchronize a shipped legacy preference row with its canonical values.
+// The callback runs after serialization with other preference plans and
+// canonical SettingMutationTransactioner writes for this account.
 type PreferenceSettingsTransactioner interface {
 	WithPreferenceSettingsTransaction(ctx context.Context, fn func(PreferenceSettingsWriter) error) error
 }
