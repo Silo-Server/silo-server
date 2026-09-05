@@ -18900,6 +18900,7 @@
           "match": "mechanical"
         }
       ],
+      "section": "auth-core",
       "release_flow": "login",
       "tier": 1,
       "disposition": "ported",
@@ -18963,6 +18964,7 @@
           "match": "mechanical"
         }
       ],
+      "section": "auth-core",
       "release_flow": "login",
       "tier": 1,
       "disposition": "ported",
