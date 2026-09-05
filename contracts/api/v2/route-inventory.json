@@ -26,7 +26,7 @@
       "id": "api",
       "entrypoint": "internal/api.NewRouter",
       "description": "Main Silo API listener: the /api/v1 namespace and the routes mounted beside it.",
-      "route_count": 700
+      "route_count": 702
     },
     {
       "id": "api_v2",
@@ -48,8 +48,8 @@
     }
   ],
   "totals": {
-    "routes": 771,
-    "conditional_routes": 689,
+    "routes": 773,
+    "conditional_routes": 691,
     "streaming_routes": 42,
     "websocket_routes": 4
   },
@@ -235,7 +235,7 @@
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
         "authMiddleware.RequireAuth",
-        "requireActingAdmin"
+        "passwordChangeMiddlewares"
       ]
     },
     {
@@ -249,7 +249,7 @@
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
         "authMiddleware.RequireAuth",
-        "viewerAccessMiddleware.RequireViewerAccess"
+        "requireActingAdmin"
       ]
     },
     {
@@ -262,7 +262,8 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"autoscan_webhook\")"
+        "authMiddleware.RequireAuth",
+        "viewerAccessMiddleware.RequireViewerAccess"
       ]
     },
     {
@@ -275,7 +276,7 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"device_lookup\")"
+        "deps.RateLimitMW.AuthEndpointHandler(\"autoscan_webhook\")"
       ]
     },
     {
@@ -288,7 +289,7 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"device_poll\")"
+        "deps.RateLimitMW.AuthEndpointHandler(\"device_lookup\")"
       ]
     },
     {
@@ -301,7 +302,7 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"device_start\")"
+        "deps.RateLimitMW.AuthEndpointHandler(\"device_poll\")"
       ]
     },
     {
@@ -314,7 +315,7 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"invitation\")"
+        "deps.RateLimitMW.AuthEndpointHandler(\"device_start\")"
       ]
     },
     {
@@ -327,7 +328,7 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"login\")"
+        "deps.RateLimitMW.AuthEndpointHandler(\"invitation\")"
       ]
     },
     {
@@ -340,7 +341,7 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"setup\")"
+        "deps.RateLimitMW.AuthEndpointHandler(\"login\")"
       ]
     },
     {
@@ -353,18 +354,44 @@
         "apimw.Metrics",
         "httpstream.CompressExcept(5, skipNativeMediaCompression)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"signup\")"
+        "deps.RateLimitMW.AuthEndpointHandler(\"setup\")"
       ]
     },
     {
       "id": 22,
+      "middleware": [
+        "apimw.RequestID",
+        "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "apimw.RequestLogger(deps.NodeID)",
+        "middleware.Recoverer",
+        "apimw.Metrics",
+        "httpstream.CompressExcept(5, skipNativeMediaCompression)",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "deps.RateLimitMW.AuthEndpointHandler(\"signup\")"
+      ]
+    },
+    {
+      "id": 23,
+      "middleware": [
+        "apimw.RequestID",
+        "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "apimw.RequestLogger(deps.NodeID)",
+        "middleware.Recoverer",
+        "apimw.Metrics",
+        "httpstream.CompressExcept(5, skipNativeMediaCompression)",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "displayMiddlewares"
+      ]
+    },
+    {
+      "id": 24,
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
         "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", \"Range\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })"
       ]
     },
     {
-      "id": 23,
+      "id": 25,
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
         "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", \"Range\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
@@ -372,7 +399,7 @@
       ]
     },
     {
-      "id": 24,
+      "id": 26,
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
         "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", \"Range\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
@@ -380,7 +407,7 @@
       ]
     },
     {
-      "id": 25,
+      "id": 27,
       "middleware": [
         "s.requireBearer"
       ]
@@ -11169,6 +11196,69 @@
       "listener": "api",
       "namespace": "api_v1",
       "method": "GET",
+      "path": "/api/v1/auth/account/capability",
+      "route_group": "/api/v1/auth",
+      "handler": "(*internal/api/handlers.AuthHandler).HandleAccountPasswordCapability",
+      "handler_expr": "authHandler.HandleAccountPasswordCapability",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 11,
+      "auth_class": "authenticated",
+      "auth_traits": [
+        "authenticated",
+        "optional_viewer_access"
+      ],
+      "conditions": [
+        "authHandler != nil",
+        "authMiddleware != nil"
+      ],
+      "conditional": true,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v1",
+      "method": "POST",
+      "path": "/api/v1/auth/account/password",
+      "route_group": "/api/v1/auth",
+      "handler": "(*internal/api/handlers.AuthHandler).HandleChangePassword",
+      "handler_expr": "authHandler.HandleChangePassword",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 12,
+      "auth_class": "authenticated",
+      "auth_traits": [
+        "authenticated",
+        "optional_viewer_access",
+        "rate_limited"
+      ],
+      "conditions": [
+        "authHandler != nil",
+        "authMiddleware != nil"
+      ],
+      "conditional": true,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v1",
+      "method": "GET",
       "path": "/api/v1/auth/device",
       "route_group": "/api/v1/auth",
       "handler": "(*internal/api/handlers.AuthHandler).HandleDeviceLookup",
@@ -11203,7 +11293,7 @@
       "handler_expr": "authHandler.HandleDeviceLookup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 15,
+      "middleware_chain": 16,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -11263,7 +11353,7 @@
       "handler_expr": "authHandler.HandleDeviceApproveHandoff",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 13,
+      "middleware_chain": 14,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
@@ -11380,7 +11470,7 @@
       "handler_expr": "authHandler.HandleDevicePoll",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 16,
+      "middleware_chain": 17,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -11438,7 +11528,7 @@
       "handler_expr": "authHandler.HandleDeviceStart",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 17,
+      "middleware_chain": 18,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -11526,7 +11616,7 @@
       "handler_expr": "authHandler.HandleLogin",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 19,
+      "middleware_chain": 20,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -11900,7 +11990,7 @@
       "handler_expr": "authHandler.HandleSetup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 20,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -11985,7 +12075,7 @@
       "handler_expr": "authHandler.HandleSignup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 21,
+      "middleware_chain": 22,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -12043,7 +12133,7 @@
       "handler_expr": "autoscanHandler.HandleWebhookDelivery",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 14,
+      "middleware_chain": 15,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -15683,7 +15773,7 @@
       "handler_expr": "invitationHandler.HandleLookupInvitation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 18,
+      "middleware_chain": 19,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -15743,7 +15833,7 @@
       "handler_expr": "invitationHandler.HandleAcceptInvitation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 18,
+      "middleware_chain": 19,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -17739,23 +17829,21 @@
       "namespace": "api_v1",
       "method": "GET",
       "path": "/api/v1/notifications/push/apple/display/{delivery_id}",
-      "route_group": "/api/v1/notifications",
+      "route_group": "/api/v1",
       "handler": "(*internal/api/handlers.NotificationsHandler).HandleApplePushDisplay",
-      "handler_expr": "notificationsHandler.HandleApplePushDisplay",
+      "handler_expr": "handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 6,
+      "middleware_chain": 23,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "profile_required",
         "rate_limited",
         "viewer_access"
       ],
       "conditions": [
-        "authMiddleware != nil",
-        "deps.Notifications != nil"
+        "authMiddleware != nil && deps.Notifications != nil"
       ],
       "conditional": true,
       "request_kind": "none",
@@ -22947,7 +23035,7 @@
       "handler_expr": "themeHandler.HandleCatalogRefresh",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 12,
+      "middleware_chain": 13,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -24593,7 +24681,7 @@
       "handler_expr": "s.handleForceReload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -24621,7 +24709,7 @@
       "handler_expr": "s.handleReloadConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -24649,7 +24737,7 @@
       "handler_expr": "s.handleReprobeCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -24677,7 +24765,7 @@
       "handler_expr": "s.handleHealth",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 22,
+      "middleware_chain": 24,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -24704,7 +24792,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/downloads/file/{token}\", s.handleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -24732,7 +24820,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/downloads/file/{token}\", s.handleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -24760,7 +24848,7 @@
       "handler_expr": "s.handleHWCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -24788,7 +24876,7 @@
       "handler_expr": "promhttp.Handler()",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 22,
+      "middleware_chain": 24,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -24815,7 +24903,7 @@
       "handler_expr": "s.handleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -24843,7 +24931,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/direct/{token}\", s.handleDirectPlay)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -24871,7 +24959,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/direct/{token}\", s.handleDirectPlay)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -24899,7 +24987,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/remux/audio-v2/{token}\", s.handleAudioV2Remux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -24927,7 +25015,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/remux/audio-v2/{token}\", s.handleAudioV2Remux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -24955,7 +25043,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/remux/{token}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -24983,7 +25071,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/remux/{token}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25011,7 +25099,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/subtitles/{token}/{track}\", s.handleSubtitle)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25039,7 +25127,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/subtitles/{token}/{track}/fonts\", s.handleSubtitleFonts)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25067,7 +25155,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/transcode/{token}/master.m3u8\", s.handleTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25095,7 +25183,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/transcode/{token}/master.m3u8\", s.handleTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25123,7 +25211,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/transcode/{token}/segment/{name}\", s.handleTranscodeSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25151,7 +25239,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}\", s.handleGrantIdentity)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25179,7 +25267,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/v3/{session_id}\", s.handleGrantIdentity)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25207,7 +25295,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}/master.m3u8\", s.handleGrantTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25235,7 +25323,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/v3/{session_id}/master.m3u8\", s.handleGrantTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25263,7 +25351,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}/segment/{name}\", s.handleGrantTranscodeSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -25291,7 +25379,7 @@
       "handler_expr": "s.handleForceReload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25318,7 +25406,7 @@
       "handler_expr": "s.handleReloadConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25345,7 +25433,7 @@
       "handler_expr": "s.handleReprobeCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25397,7 +25485,7 @@
       "handler_expr": "s.handleChapterThumbnailExtract",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25424,7 +25512,7 @@
       "handler_expr": "s.handleDeleteDownloadArtifact",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25451,7 +25539,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/downloads/artifacts/{artifact_id}\", s.handleDownloadArtifact)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25478,7 +25566,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodHead, \"/downloads/artifacts/{artifact_id}\", s.handleDownloadArtifact)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25505,7 +25593,7 @@
       "handler_expr": "s.handleDownloadPrepare",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25532,7 +25620,7 @@
       "handler_expr": "s.handleHWCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25584,7 +25672,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/remux/{session_id}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25611,7 +25699,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodHead, \"/remux/{session_id}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25638,7 +25726,7 @@
       "handler_expr": "s.handleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25665,7 +25753,7 @@
       "handler_expr": "s.handleStart",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25692,7 +25780,7 @@
       "handler_expr": "s.handleStop",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25719,7 +25807,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/transcode/{session_id}/master.m3u8\", s.handleManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25746,7 +25834,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/transcode/{session_id}/segment/{name}\", s.handleSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -25773,7 +25861,7 @@
       "handler_expr": "s.handleSegmentDownloaded",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
