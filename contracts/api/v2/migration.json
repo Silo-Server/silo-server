@@ -12958,7 +12958,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; policyHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "SetEnabled writes the requested boolean unconditionally, bumps the policy generation, and notifies the cluster, so a delayed retry landing after another admin changed the document restores the obsolete state and triggers another reload. The v2 port must require If-Match on the document."
     },
     {
       "listener": "api",
@@ -43785,7 +43786,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; watchProviderHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "For a plugin-backed provider the API-key exchange runs before persistConnection consults durable state, so a retry after a lost response performs the external exchange twice and the second result overwrites the first. The v2 port must claim the request durably before calling out."
     },
     {
       "listener": "api",

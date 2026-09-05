@@ -430,9 +430,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (129
+  tier-1 ported mutation rows (218 distinct operations) are classified (127
   `natural_idempotent`, 28 `unique_constraint`, 15 `domain_identity`, 10 `coalescing`, 8
-  `durable_dispatch`, 28 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 30 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
@@ -444,11 +444,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   notifications read-all), a playback command minted fresh on every call (admin session
   pause and resume, whose delayed retry reverts the newer state), a fresh server-side cutoff a retry would move (history remove,
   mark-unwatched), an external call made before any durable claim (provider device-auth
-  start), a one-shot token-bearing or secret-bearing response that cannot be replayed
+  start and API-key exchange), a one-shot token-bearing or secret-bearing response that cannot be replayed
   (device-pairing poll, OAuth completion, API-key and webhook creation), an unconditional
   repoint of
-  cluster-wide state (policy version activation, whose stale retry restores an obsolete
-  policy), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
+  cluster-wide state (policy version activation and document enable/disable, whose stale
+  retry restores an obsolete policy), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
   confirmation), a
   command that re-runs its side effect on every call (watch-together selection and
   suggestion promotion, which reset playback and clear member sessions each time;
