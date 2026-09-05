@@ -436,6 +436,48 @@ func TestClassifyAuthReportsUnknownMiddleware(t *testing.T) {
 	}
 }
 
+// TestClassifyAuthSpreadMiddlewareSlices covers the two router.go sites that
+// register middleware through a spread slice; the analyzer prints the slice
+// identifier rather than its elements, so the rules key on that name.
+func TestClassifyAuthSpreadMiddlewareSlices(t *testing.T) {
+	cases := []struct {
+		name       string
+		middleware []string
+		wantClass  string
+		wantTraits []string
+	}{
+		{
+			name:       "password change",
+			middleware: []string{"middleware.RequestID", "authMiddleware.RequireAuth", "passwordChangeMiddlewares"},
+			wantClass:  "authenticated",
+			wantTraits: []string{"authenticated", "optional_viewer_access", "rate_limited"},
+		},
+		{
+			name:       "apple push display slice",
+			middleware: []string{"middleware.RequestID", "displayMiddlewares"},
+			wantClass:  "profile_scoped",
+			wantTraits: []string{"authenticated", "profile_required", "rate_limited", "viewer_access"},
+		},
+		{
+			name:       "apple push display gate",
+			middleware: []string{"deps.RateLimitMW.Handler", "authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, postAuth)"},
+			wantClass:  "profile_scoped",
+			wantTraits: []string{"authenticated", "profile_required", "rate_limited", "viewer_access"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			class, traits := classifyAuth(tc.middleware)
+			if class != tc.wantClass {
+				t.Errorf("class = %q, want %q", class, tc.wantClass)
+			}
+			if strings.Join(traits, ",") != strings.Join(tc.wantTraits, ",") {
+				t.Errorf("traits = %v, want %v", traits, tc.wantTraits)
+			}
+		})
+	}
+}
+
 func TestReconcileDetectsSeededDiscrepancy(t *testing.T) {
 	inv := &Inventory{Routes: []Route{
 		{Listener: ListenerAPI, Method: "GET", Path: "/api/v1/health"},
