@@ -6,11 +6,12 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { ApiClientError, type SessionFetchResult } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
 import deleteSubtitlePreferenceProfileVerificationRequired from "../../../../contracts/api/v2/fixtures/delete_subtitle_preference_profile_verification_required.json";
+import updateSubtitlePreferenceValidationFailed from "../../../../contracts/api/v2/fixtures/update_subtitle_preference_validation_failed.json";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
 import { buildSubtitleChoiceRequests } from "@/player/utils/subtitleChoicePersistence";
 import type { PlayerSubtitleInfo } from "@/player/types";
-import { useDeleteSubtitlePreference } from "./subtitles";
+import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "./subtitles";
 
 const apiMock = vi.hoisted(() => vi.fn());
 const fetchWithSessionMock = vi.hoisted(() => vi.fn());
@@ -24,7 +25,7 @@ function sessionResponse(res: Response): SessionFetchResult {
   return { res, requestProfileId: null, requestProfileToken: null };
 }
 
-/** The v2 DELETE requests the hook issued, as `METHOD url` strings. */
+/** The v2 requests the hook issued, as `METHOD url` strings. */
 function v2Requests(): string[] {
   return fetchWithSessionMock.mock.calls.map(
     ([url, init]) => `${(init as RequestInit).method} ${url as string}`,
@@ -155,5 +156,95 @@ describe("useDeleteSubtitlePreference", () => {
     expect(failure).toBeInstanceOf(V2ProblemError);
     expect((failure as V2ProblemError).problemType).toBe("profile_verification_required");
     expect((failure as V2ProblemError).status).toBe(403);
+  });
+});
+
+describe("useSetSubtitlePreference", () => {
+  beforeEach(() => {
+    apiMock.mockReset();
+    fetchWithSessionMock
+      .mockReset()
+      .mockResolvedValue(sessionResponse(new Response(null, { status: 204 })));
+  });
+
+  /** The JSON body of the single v2 request the hook issued. */
+  function v2Body(): unknown {
+    const [, init] = fetchWithSessionMock.mock.calls[0] as [string, RequestInit];
+    return JSON.parse(init.body as string) as unknown;
+  }
+
+  it("replaces the preference through v2 with the chosen track's signature", async () => {
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
+
+    await result.current.mutateAsync({
+      prefId: "series-1",
+      selection: {
+        source: "embedded",
+        language: "ja",
+        codec: "subrip",
+        label: "Japanese",
+        forced: false,
+        hearing_impaired: false,
+        track_index: 0,
+      },
+      showForcedSubtitles: true,
+    });
+
+    expect(v2Requests()).toEqual(["PUT /api/v2/subtitle-prefs/series-1"]);
+    expect(v2Body()).toEqual({
+      subtitle_language: "ja",
+      subtitle_track_index: 0,
+      subtitle_mode: "always",
+      track_signature: {
+        source: "embedded",
+        language: "ja",
+        codec: "subrip",
+        label: "Japanese",
+        forced: false,
+        hearing_impaired: false,
+      },
+      show_forced_subtitles: true,
+    });
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it('stores "subtitles off" as the -1 sentinel with mode off and no signature', async () => {
+    // -1 is the "no track" value every first-party client stores; the v2
+    // contract admits it (minimum -1) and spells "no signature" as an absent
+    // member rather than null.
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
+
+    await result.current.mutateAsync({ prefId: "series-1", selection: null });
+
+    expect(v2Requests()).toEqual(["PUT /api/v2/subtitle-prefs/series-1"]);
+    expect(v2Body()).toEqual({
+      subtitle_language: "",
+      subtitle_track_index: -1,
+      subtitle_mode: "off",
+    });
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a v2 validation problem as the contract emits it", async () => {
+    fetchWithSessionMock.mockResolvedValue(
+      sessionResponse(
+        new Response(JSON.stringify(updateSubtitlePreferenceValidationFailed), {
+          status: 422,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+      ),
+    );
+
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
+
+    const failure = await result.current
+      .mutateAsync({ prefId: "series-1", selection: null })
+      .catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(V2ProblemError);
+    expect((failure as V2ProblemError).problemType).toBe("validation_failed");
+    expect((failure as V2ProblemError).status).toBe(422);
   });
 });

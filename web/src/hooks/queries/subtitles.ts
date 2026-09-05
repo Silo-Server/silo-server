@@ -185,14 +185,16 @@ export function useSetSubtitlePreference() {
 
   return useMutation({
     mutationFn: ({ prefId, selection, showForcedSubtitles }: SetSubtitlePreferenceInput) =>
-      api<void>(`/subtitle-prefs/${prefId}`, {
-        method: "PUT",
-        body: JSON.stringify({
+      v2("PUT /api/v2/subtitle-prefs/{series_id}", {
+        path: { series_id: prefId },
+        body: {
           subtitle_language: selection?.language ?? "",
+          // -1 is the "no track" sentinel the contract admits for "off".
           subtitle_track_index: selection?.track_index ?? -1,
           subtitle_mode: derivePersistedSubtitleMode(
             selection ? (selection.track_index ?? -1) : null,
           ),
+          // The contract spells "no signature" as an absent member, not null.
           track_signature: selection
             ? {
                 source: selection.source,
@@ -202,9 +204,9 @@ export function useSetSubtitlePreference() {
                 forced: selection.forced,
                 hearing_impaired: selection.hearing_impaired,
               }
-            : null,
+            : undefined,
           show_forced_subtitles: showForcedSubtitles,
-        }),
+        },
       }),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
