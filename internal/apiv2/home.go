@@ -204,9 +204,15 @@ func registerHome(reg *Registry) {
 		"The home page's sections with their cards, as the acting profile sees them.")), reg.listHomeSections)
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
 		"One section of the home page with its cards.")), reg.getHomeSectionItems)
-	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/sections/recipes", opListSectionRecipes, "home",
+	// The recipe gallery is profile scoped without a required header, as
+	// v1 GET /sections/recipes: the routes run viewer access but no
+	// RequireProfile, so an account-scoped caller reads the static gallery.
+	gallery := func(op huma.Operation) Operation {
+		return Operation{Operation: op, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
+	}
+	Register(reg, gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes", opListSectionRecipes, "home",
 		"The section recipe gallery: every visible recipe with its presets, grouped by category.")), reg.listSectionRecipes)
-	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/sections/recipes/{type}/candidates", opListSectionRecipeCandidates, "home",
+	Register(reg, gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes/{type}/candidates", opListSectionRecipeCandidates, "home",
 		"The values a parameterized recipe offers for its parameter.")), reg.listSectionRecipeCandidates)
 }
 
@@ -438,8 +444,8 @@ func (reg *Registry) listSectionRecipes(ctx context.Context, _ *struct{}) (*Reci
 	if p != nil {
 		return nil, p
 	}
-	if _, _, p := viewerIdentity(ctx); p != nil {
-		return nil, p
+	if claimsFrom(ctx) == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
 	out := RecipeCatalog{Categories: []RecipeCategory{}}
 	for _, cat := range svc.Recipes() {
@@ -457,8 +463,8 @@ func (reg *Registry) listSectionRecipeCandidates(ctx context.Context, in *Recipe
 	if p != nil {
 		return nil, p
 	}
-	if _, _, p := viewerIdentity(ctx); p != nil {
-		return nil, p
+	if claimsFrom(ctx) == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
 	cands, err := svc.RecipeCandidates(ctx, in.Type)
 	if err != nil {

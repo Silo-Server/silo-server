@@ -277,7 +277,9 @@ func TestListSectionRecipes(t *testing.T) {
 		strings.Contains(body, "hidden") {
 		t.Fatal(rec.Code, body)
 	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes", "", bearer(memberToken)), TypeValidationFailed)
+	if rec := do(t, h, http.MethodGet, "/api/v2/sections/recipes", "", bearer(memberToken)); rec.Code != 200 || rec.Body.String() != body {
+		t.Fatal("account-scoped gallery read:", rec.Code, rec.Body.String())
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes", "", nil), TypeAuthenticationRequired)
 	deps.Recipes = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/sections/recipes", "", viewerHeaders()), TypeDependencyUnavailable)
@@ -291,7 +293,9 @@ func TestListSectionRecipeCandidates(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/nope/candidates", "", viewerHeaders()), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", bearer(memberToken)), TypeValidationFailed)
+	if rec2 := do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", bearer(memberToken)); rec2.Code != 200 || rec2.Body.String() != rec.Body.String() {
+		t.Fatal("account-scoped candidates read:", rec2.Code, rec2.Body.String())
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", nil), TypeAuthenticationRequired)
 	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "candidate_error", Message: "boom"}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", viewerHeaders()), TypeInternalError)

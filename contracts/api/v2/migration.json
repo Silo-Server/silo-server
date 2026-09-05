@@ -39379,7 +39379,7 @@
         "path": "/api/v2/sections/recipes",
         "operation_id": "listSectionRecipes"
       },
-      "notes": "Section catalog-home (profile_scoped). categories is an ordered array of {category, recipes} rather than v1's map keyed by category; hidden is never emitted; preset default_params is the section-config extension bag and description_long is always present."
+      "notes": "Section catalog-home (profile_scoped, no profile header required, as v1). categories is an ordered array of {category, recipes} rather than v1's map keyed by category; hidden is never emitted; preset default_params is the section-config extension bag and description_long is always present."
     },
     {
       "listener": "api",
@@ -39438,7 +39438,7 @@
         "path": "/api/v2/sections/recipes/{type}/candidates",
         "operation_id": "listSectionRecipeCandidates"
       },
-      "notes": "Section catalog-home (profile_scoped). Same body; subtitle is always present (empty when none) and an unknown recipe type is a not_found problem."
+      "notes": "Section catalog-home (profile_scoped, no profile header required, as v1). Same body; subtitle is always present (empty when none) and an unknown recipe type is a not_found problem."
     },
     {
       "listener": "api",

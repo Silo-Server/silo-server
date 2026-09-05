@@ -1159,6 +1159,26 @@
       "body_file": "list_progress_profile_header_required.json"
     },
     {
+      "name": "list_section_recipe_candidates_account_scoped",
+      "operation_id": "listSectionRecipeCandidates",
+      "scenario": "Candidates without X-Profile-Id: the header is optional here, as on v1, so an account-scoped caller reads the same values.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/recipes/custom_filter/candidates",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecipeCandidateCollection",
+      "body_file": "list_section_recipe_candidates_account_scoped.json"
+    },
+    {
       "name": "list_section_recipe_candidates_ok",
       "operation_id": "listSectionRecipeCandidates",
       "scenario": "The values a parameterized recipe offers for its parameter.",
@@ -1178,26 +1198,6 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/RecipeCandidateCollection",
       "body_file": "list_section_recipe_candidates_ok.json"
-    },
-    {
-      "name": "list_section_recipe_candidates_profile_header_required",
-      "operation_id": "listSectionRecipeCandidates",
-      "scenario": "A profile-scoped gallery read without X-Profile-Id: a validation failure naming the header.",
-      "request": {
-        "method": "GET",
-        "path": "/api/v2/sections/recipes/custom_filter/candidates",
-        "headers": {
-          "Authorization": "Bearer tok-member"
-        }
-      },
-      "expected_status": 422,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/problem+json"
-      },
-      "response_media_type": "application/problem+json",
-      "schema": "#/components/schemas/Problem",
-      "body_file": "list_section_recipe_candidates_profile_header_required.json"
     },
     {
       "name": "list_section_recipe_candidates_unknown_recipe",
@@ -1221,6 +1221,26 @@
       "body_file": "list_section_recipe_candidates_unknown_recipe.json"
     },
     {
+      "name": "list_section_recipes_account_scoped",
+      "operation_id": "listSectionRecipes",
+      "scenario": "The gallery without X-Profile-Id: the header is optional here, as on v1, so an account-scoped caller reads the same catalog.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/recipes",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecipeCatalog",
+      "body_file": "list_section_recipes_account_scoped.json"
+    },
+    {
       "name": "list_section_recipes_ok",
       "operation_id": "listSectionRecipes",
       "scenario": "The recipe gallery: visible recipes with their presets, grouped by category in key order.",
@@ -1240,26 +1260,6 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/RecipeCatalog",
       "body_file": "list_section_recipes_ok.json"
-    },
-    {
-      "name": "list_section_recipes_profile_header_required",
-      "operation_id": "listSectionRecipes",
-      "scenario": "A profile-scoped gallery read without X-Profile-Id: a validation failure naming the header.",
-      "request": {
-        "method": "GET",
-        "path": "/api/v2/sections/recipes",
-        "headers": {
-          "Authorization": "Bearer tok-member"
-        }
-      },
-      "expected_status": 422,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/problem+json"
-      },
-      "response_media_type": "application/problem+json",
-      "schema": "#/components/schemas/Problem",
-      "body_file": "list_section_recipes_profile_header_required.json"
     },
     {
       "name": "list_skipped_roots_ok",

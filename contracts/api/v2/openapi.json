@@ -11481,10 +11481,9 @@
         "operationId": "listSectionRecipes",
         "parameters": [
           {
-            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
-            "required": true,
             "schema": {
               "examples": [
                 "1"
@@ -11624,10 +11623,9 @@
         "operationId": "listSectionRecipeCandidates",
         "parameters": [
           {
-            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
-            "required": true,
             "schema": {
               "examples": [
                 "1"

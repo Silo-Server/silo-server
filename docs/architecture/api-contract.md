@@ -965,7 +965,9 @@ wrapper, `getLibraryCollectionItems` drops v1's `total`/`has_more` on a bounded 
 
 **Section catalog-home (Phase 4).** Eight profile-scoped operations under the `home` tag:
 `getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeLayout`, `listHomeSections`,
-`getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. Home is the same
+`getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
+gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registers them without
+`RequireProfile`, so an account-scoped caller reads the gallery. Home is the same
 shape as a library page with scope=home, so the layout, section, and card reads reuse
 `SectionLayout`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
