@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -339,9 +340,19 @@ func registerSettings(reg *Registry) {
 		ServiceBacked: true,
 	}, reg.resolveEffectiveSettings)
 
+	shortcut := humaOp(http.MethodPut, Prefix+"/settings/values/nav.shortcuts/item", "updateNavigationShortcut", "settings",
+		"Add or remove one navigation shortcut of the acting profile.")
+	// The seam applies the mutation with a bounded compare-and-set loop and
+	// answers 409 setting_update_conflict when concurrent shortcut updates
+	// exhaust it; serviceProblem carries that through as conflict. The
+	// status is this operation's own, not one the class implies, and the
+	// response says the request is safe to retry.
+	shortcut.Errors = []int{http.StatusConflict}
+	shortcut.Responses = map[string]*huma.Response{
+		strconv.Itoa(http.StatusConflict): {Description: navigationShortcutConflictDescription},
+	}
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodPut, Prefix+"/settings/values/nav.shortcuts/item", "updateNavigationShortcut", "settings",
-			"Add or remove one navigation shortcut of the acting profile."),
+		Operation:      shortcut,
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
@@ -1143,6 +1154,11 @@ func (reg *Registry) resolveEffectiveSettings(ctx context.Context, in *Effective
 		Collection: NewCollection(items), Revision: reg.deps.SettingValues.ContractRevision(),
 	}}, nil
 }
+
+// navigationShortcutConflictDescription documents updateNavigationShortcut's
+// 409: the seam's compare-and-set loop lost every retry to concurrent
+// writers, nothing was stored, and the same request may be sent again.
+const navigationShortcutConflictDescription = "retryable conflict: concurrent shortcut updates exhausted the compare-and-set retries; retry the request"
 
 func (reg *Registry) updateNavigationShortcut(ctx context.Context, in *NavigationShortcutMutationInput) (*SettingValueOutput, error) {
 	userID, p := reg.settingValuesReady(ctx)

@@ -547,7 +547,8 @@ func effectiveBatchBody(n int) string {
 }
 
 func TestUpdateNavigationShortcut(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
+	deps := pilotDeps(nil, nil)
+	h := newTestHandler(t, deps)
 	item := `{"type":"library","library_id":3,"label":"Movies"}`
 	rec := do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":true}`, settingsOwner())
 	if rec.Code != 200 {
@@ -574,5 +575,16 @@ func TestUpdateNavigationShortcut(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":"movies","present":true}`, settingsOwner()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":true}`, bearer(memberToken)), TypeValidationFailed)
+	// Exhausted compare-and-set retries: the seam's 409 setting_update_conflict
+	// is the conflict problem type, and the operation documents it as a
+	// retryable conflict.
+	seam := deps.SettingValues.(*fakeSettingValuesSeam)
+	contention := settingContentionError()
+	seam.err = contention
+	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":true}`, settingsOwner()), TypeConflict)
+	if p.Detail != contention.Message {
+		t.Fatalf("detail = %q", p.Detail)
+	}
+	seam.err = nil
 	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":true}`, settingsOwner()), TypePermissionDenied)
 }

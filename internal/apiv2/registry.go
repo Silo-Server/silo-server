@@ -216,7 +216,13 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
 		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly})
 	reg.mu.Unlock()
+	// Huma's defineErrors rewrites every status in Errors with the bare
+	// http.StatusText, and the registration's Responses map is shared with
+	// the copy it rewrites, so the declared descriptions are read first and
+	// restored after.
+	descriptions := declaredResponseDescriptions(op)
 	huma.Register(reg.api, op.Operation, handler)
+	documentDeclaredResponseDescriptions(reg.api.OpenAPI(), op, descriptions)
 	documentConcurrencyResponses(reg.api.OpenAPI(), op)
 }
 

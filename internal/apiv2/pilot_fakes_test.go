@@ -560,6 +560,11 @@ type fakeSettingValuesSeam struct {
 	values   map[string]handlers.SettingValueView
 	revision int64
 	err      error
+	// contendedLabel, when set, is the shortcut label whose mutation answers
+	// the 409 setting_update_conflict the real seam returns once
+	// mutateNavigationShortcut exhausts its compare-and-set retries, so a
+	// fixture can record that answer deterministically.
+	contendedLabel string
 }
 
 func newFakeSettingValuesSeam() *fakeSettingValuesSeam {
@@ -577,6 +582,15 @@ func (f *fakeSettingValuesSeam) ContractRevision() int { return 8 }
 
 func settingAPIError(status int, code, field, msg string) *handlers.APIError {
 	return &handlers.APIError{Status: status, Code: code, Message: msg, Field: field}
+}
+
+// settingContentionError is the error the real seam returns when
+// mutateNavigationShortcut exhausts its compare-and-set retries: a 409
+// setting_update_conflict with no field, which serviceProblem renders as the
+// conflict problem type.
+func settingContentionError() *handlers.APIError {
+	return &handlers.APIError{Status: http.StatusConflict, Code: "setting_update_conflict",
+		Message: "Navigation shortcuts changed too quickly; retry this mutation"}
 }
 
 func (f *fakeSettingValuesSeam) identity(req handlers.SettingIdentityRequest) (handlers.SettingValueView, *handlers.APIError) {
@@ -734,6 +748,9 @@ func (f *fakeSettingValuesSeam) SetNavigationShortcut(_ context.Context, _ int, 
 	}
 	if err := json.Unmarshal(item, &parsed); err != nil || parsed.Type == "" || parsed.Label == "" {
 		return handlers.SettingValueView{}, settingAPIError(400, "invalid_value", "item", "shortcut requires type and label")
+	}
+	if f.contendedLabel != "" && parsed.Label == f.contendedLabel {
+		return handlers.SettingValueView{}, settingContentionError()
 	}
 	row := handlers.SettingValueView{Key: "nav.shortcuts", Scope: "profile", ProfileID: profileID}
 	items := []json.RawMessage{}

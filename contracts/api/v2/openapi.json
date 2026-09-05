@@ -8812,6 +8812,16 @@
             },
             "description": "Request Timeout"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "retryable conflict: concurrent shortcut updates exhausted the compare-and-set retries; retry the request"
+          },
           "413": {
             "content": {
               "application/problem+json": {

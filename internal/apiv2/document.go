@@ -208,23 +208,7 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 	if !op.Guarded && !op.Conditional && !op.CreateOnly {
 		return
 	}
-	item := oapi.Paths[op.Path]
-	if item == nil {
-		return
-	}
-	var registered *huma.Operation
-	switch op.Method {
-	case http.MethodGet:
-		registered = item.Get
-	case http.MethodHead:
-		registered = item.Head
-	case http.MethodPut:
-		registered = item.Put
-	case http.MethodPatch:
-		registered = item.Patch
-	case http.MethodDelete:
-		registered = item.Delete
-	}
+	registered := registeredOperation(oapi, op)
 	if registered == nil {
 		return
 	}
@@ -284,6 +268,63 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 			continue
 		}
 		mergeETagHeader(resp, etag)
+	}
+}
+
+// registeredOperation finds the operation Huma recorded for op's method and
+// path in the document, or nil.
+func registeredOperation(oapi *huma.OpenAPI, op Operation) *huma.Operation {
+	item := oapi.Paths[op.Path]
+	if item == nil {
+		return nil
+	}
+	switch op.Method {
+	case http.MethodGet:
+		return item.Get
+	case http.MethodHead:
+		return item.Head
+	case http.MethodPost:
+		return item.Post
+	case http.MethodPut:
+		return item.Put
+	case http.MethodPatch:
+		return item.Patch
+	case http.MethodDelete:
+		return item.Delete
+	}
+	return nil
+}
+
+// declaredResponseDescriptions collects the description a registration
+// declared on each response, keyed by status, before Huma rewrites the
+// error statuses.
+func declaredResponseDescriptions(op Operation) map[string]string {
+	out := map[string]string{}
+	for status, resp := range op.Responses {
+		if resp != nil && resp.Description != "" {
+			out[status] = resp.Description
+		}
+	}
+	return out
+}
+
+// documentDeclaredResponseDescriptions restores the descriptions a
+// registration declared on responses Huma's defineErrors rewrote with the
+// bare status text (a status in Errors that the registration also described,
+// such as the 409 updateNavigationShortcut answers when the compare-and-set
+// retries are exhausted). Content and headers stay as Huma documented them.
+func documentDeclaredResponseDescriptions(oapi *huma.OpenAPI, op Operation, descriptions map[string]string) {
+	if len(descriptions) == 0 {
+		return
+	}
+	registered := registeredOperation(oapi, op)
+	if registered == nil {
+		return
+	}
+	for status, description := range descriptions {
+		if resp := registered.Responses[status]; resp != nil {
+			resp.Description = description
+		}
 	}
 }
 

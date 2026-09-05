@@ -401,6 +401,10 @@ func fixtureCases() []fixtureCase {
 			scenario: "present is required: the mutation states the desired membership rather than toggling it.",
 			method:   http.MethodPut, path: "/api/v2/settings/values/nav.shortcuts/item", headers: profileOwner(), body: `{"item":{"type":"library","library_id":3,"label":"Movies"}}`,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "update_navigation_shortcut_conflict", operationID: "updateNavigationShortcut",
+			scenario: "Concurrent shortcut updates exhausted the seam's compare-and-set retries: a retryable 409 conflict; nothing was stored and the same request may be sent again.",
+			method:   http.MethodPut, path: "/api/v2/settings/values/nav.shortcuts/item", headers: profileOwner(), body: `{"item":{"type":"library","library_id":4,"label":"Contended"},"present":true}`,
+			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "delete_setting_value_authentication_required", operationID: "deleteSettingValue",
 			scenario: "A value cleared without a credential.",
 			method:   http.MethodDelete, path: "/api/v2/settings/values/ui.theme?scope=profile",
@@ -461,6 +465,7 @@ func profileOwner() map[string]string { return with(bearer(memberToken), "X-Prof
 func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.CursorSecret = []byte("fixture-cursor-key")
+	deps.SettingValues.(*fakeSettingValuesSeam).contendedLabel = "Contended"
 	deps.RateLimit = func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/api/v2/probe/authenticated" {

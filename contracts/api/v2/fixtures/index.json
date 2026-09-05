@@ -1324,6 +1324,28 @@
       "body_file": "update_navigation_shortcut_authentication_required.json"
     },
     {
+      "name": "update_navigation_shortcut_conflict",
+      "operation_id": "updateNavigationShortcut",
+      "scenario": "Concurrent shortcut updates exhausted the seam's compare-and-set retries: a retryable 409 conflict; nothing was stored and the same request may be sent again.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/settings/values/nav.shortcuts/item",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"item\":{\"type\":\"library\",\"library_id\":4,\"label\":\"Contended\"},\"present\":true}"
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_navigation_shortcut_conflict.json"
+    },
+    {
       "name": "update_navigation_shortcut_ok",
       "operation_id": "updateNavigationShortcut",
       "scenario": "One shortcut added to the acting profile's nav.shortcuts document; the answer is the stored document as a setting value.",

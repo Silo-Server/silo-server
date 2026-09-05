@@ -1045,7 +1045,9 @@ member and the nav.shortcuts whole-document refusal (v1: `400`); `keys`, `librar
 writes answer `200` with the resolved document rather than `204`; plugin `values` and the
 shortcut `item` are declared extension bags because the plugin and the contract's object
 schema own their keys; `X-Silo-Device-Id` is a required declared header on device-override
-mutations; ids are string `ID`s and `updated_at` is an instant. Not carried here: the
+mutations; ids are string `ID`s and `updated_at` is an instant. `updateNavigationShortcut` declares
+the `409` `conflict` its seam answers when concurrent shortcut updates exhaust the bounded
+compare-and-set loop; nothing is stored and the same request may be retried. Not carried here: the
 `If-None-Match` conditional manifest GET, the `X-Silo-Mutation-Id` idempotent replay, and the
 admin-only `admin_form` descriptor; the first two land with the foundation caching and
 mutation-retry work.

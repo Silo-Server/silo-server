@@ -105,6 +105,21 @@ func TestDocumentDeclarationKeepsDeclaredErrors(t *testing.T) {
 	}
 }
 
+// TestDeclaredResponseDescriptionSurvivesRegistration: a description a
+// registration declares on a status it also lists in Errors is what the
+// document carries, not the bare status text Huma's defineErrors writes.
+func TestDeclaredResponseDescriptionSurvivesRegistration(t *testing.T) {
+	doc := generatedDocument(t)
+	op := doc["paths"].(map[string]any)["/api/v2/settings/values/nav.shortcuts/item"].(map[string]any)["put"].(map[string]any)
+	resp := op["responses"].(map[string]any)[strconv.Itoa(http.StatusConflict)].(map[string]any)
+	if got := resp["description"]; got != navigationShortcutConflictDescription {
+		t.Fatalf("409 description = %q", got)
+	}
+	if _, ok := resp["content"].(map[string]any)[problemContentType]; !ok {
+		t.Fatalf("409 lost its problem content: %v", resp)
+	}
+}
+
 // generatedDocument decodes the generator's output for the tests that walk it.
 func generatedDocument(t *testing.T) map[string]any {
 	t.Helper()
@@ -153,6 +168,10 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"getSettingsContract":                    {http.StatusNotFound: true, http.StatusServiceUnavailable: true},
 		"getPluginSettings":                      {http.StatusNotFound: true},
 		"updateSubtitleAppearanceDeviceOverride": {http.StatusNotFound: true, http.StatusRequestTimeout: true},
+		// The shortcut mutation documents the 409 the seam answers when its
+		// compare-and-set retries are exhausted; the single-key writes do not.
+		"updateNavigationShortcut": {http.StatusConflict: true, http.StatusNotFound: true},
+		"updateSettingValue":       {http.StatusConflict: false},
 	}
 	profileToken := map[string]bool{
 		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
