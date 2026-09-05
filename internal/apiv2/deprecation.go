@@ -109,18 +109,20 @@ func setDeprecationHeaders(h http.Header, d *Deprecation) {
 // the outer response buffer; handlers only receive the separate response headers.
 type retirementHeadersKey struct{}
 
-// deprecationHeaders is the API middleware that emits a deprecated
-// operation's headers. It runs after defaultHeaders and before classGate, so
-// the headers are on the response before any gate, guard, or handler writes
-// it: a 401 from the auth gate or a 422 from the query guard carries them as
-// a 200 does. A non-deprecated operation gets nothing from it.
+// deprecationHeaders records the declaration for panic recovery, then applies it
+// after downstream middleware and handlers finish. The listener buffers responses,
+// so success and gate errors both receive authoritative retirement headers before
+// anything reaches the client; downstream Link values remain alongside migration.
 func deprecationHeaders(ctx huma.Context, next func(huma.Context)) {
-	if d, ok := ctx.Operation().Metadata[metaDeprecation].(*Deprecation); ok && d != nil {
-		_, w := humachi.Unwrap(ctx)
-		setDeprecationHeaders(w.Header(), d)
+	d, _ := ctx.Operation().Metadata[metaDeprecation].(*Deprecation)
+	if d != nil {
 		if declared, ok := ctx.Context().Value(retirementHeadersKey{}).(http.Header); ok {
 			setDeprecationHeaders(declared, d)
 		}
 	}
 	next(ctx)
+	if d != nil {
+		_, w := humachi.Unwrap(ctx)
+		setDeprecationHeaders(w.Header(), d)
+	}
 }

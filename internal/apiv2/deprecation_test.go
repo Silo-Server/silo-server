@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -291,5 +292,37 @@ func TestDeprecatedOperationsAreDocumented(t *testing.T) {
 	plain := op("get", "/probe/zero")
 	if plain["deprecated"] == true || plain[extDeprecation] != nil {
 		t.Fatalf("plain probe carries deprecation metadata: deprecated=%v ext=%v", plain["deprecated"], plain[extDeprecation])
+	}
+}
+
+func TestSuccessfulResponseRestoresDeclaredRetirementHeaders(t *testing.T) {
+	for _, sunset := range []*time.Time{nil, &probeDeprecatedSunset} {
+		t.Run(fmt.Sprint(sunset != nil), func(t *testing.T) {
+			prior := `<https://siloserver.org/docs/api/v2/>; rel="service-doc"`
+			h := NewHandler(Dependencies{testRegister: func(reg *Registry) {
+				reg.api.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
+					next(ctx)
+					_, w := humachi.Unwrap(ctx)
+					w.Header().Set(DeprecationHeader, "overridden")
+					if sunset != nil {
+						w.Header().Set(SunsetHeader, "overridden")
+					}
+					w.Header().Set(LinkHeader, prior)
+				})
+				Register(reg, Operation{
+					Operation:   humaOp(http.MethodGet, Prefix+"/probe/retirement-success", "retirementSuccess", "probe", "success"),
+					Class:       ClassPublic,
+					Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink, Sunset: sunset},
+				}, func(context.Context, *struct{}) (*struct{}, error) { return &struct{}{}, nil })
+			}})
+			rec := do(t, h, http.MethodGet, Prefix+"/probe/retirement-success", "", nil)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			wantDeprecated(t, rec.Header(), sunset != nil)
+			if got, want := rec.Header().Get(LinkHeader), prior+", <"+probeDeprecatedLink+`>; rel="deprecation"`; got != want {
+				t.Fatalf("Link = %q, want %q", got, want)
+			}
+		})
 	}
 }
