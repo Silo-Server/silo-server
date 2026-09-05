@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "item_id": "movie:c",
+      "rating": 5,
+      "rated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7Im8iOjF9fQ.ejq5WZZv-XllXwX_D0PbkaTyrc8xnflIwoBvrDI_HGw",
+    "has_more": true
+  }
+}
+

@@ -1,6 +1,88 @@
 {
   "fixtures": [
     {
+      "name": "add_favorite_not_found",
+      "operation_id": "addFavorite",
+      "scenario": "An item the viewer may not see cannot be added.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/favorites/movie:hidden",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "add_favorite_not_found.json"
+    },
+    {
+      "name": "add_favorite_profile_header_required",
+      "operation_id": "addFavorite",
+      "scenario": "A profile-scoped mutation called without X-Profile-Id.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/favorites/movie:new",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "add_favorite_profile_header_required.json"
+    },
+    {
+      "name": "add_to_watchlist_not_found",
+      "operation_id": "addToWatchlist",
+      "scenario": "An item the viewer may not see cannot be added.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/watchlist/series:hidden",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "add_to_watchlist_not_found.json"
+    },
+    {
+      "name": "add_to_watchlist_profile_header_required",
+      "operation_id": "addToWatchlist",
+      "scenario": "A profile-scoped mutation called without X-Profile-Id.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/watchlist/series:new",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "add_to_watchlist_profile_header_required.json"
+    },
+    {
       "name": "authentication_required",
       "operation_id": null,
       "scenario": "An authenticated operation called without a credential.",
@@ -182,6 +264,27 @@
       "body_file": "create_library_validation_failed.json"
     },
     {
+      "name": "delete_favorite_locked_profile",
+      "operation_id": "deleteFavorite",
+      "scenario": "A PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/favorites/movie:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_favorite_locked_profile.json"
+    },
+    {
       "name": "delete_library_accepted",
       "operation_id": "deleteLibrary",
       "scenario": "Deletion is queued as an admin job: 202 with the job.",
@@ -242,6 +345,27 @@
       "body_file": "delete_library_poster_not_found.json"
     },
     {
+      "name": "delete_rating_locked_profile",
+      "operation_id": "deleteRating",
+      "scenario": "A PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/ratings/movie:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_rating_locked_profile.json"
+    },
+    {
       "name": "delete_root_override_validation_failed",
       "operation_id": "deleteRootOverride",
       "scenario": "The root is named in the query, not a body; without it the delete is a validation failure. Success answers 204 with no body.",
@@ -262,6 +386,27 @@
       "body_file": "delete_root_override_validation_failed.json"
     },
     {
+      "name": "delete_watchlist_entry_locked_profile",
+      "operation_id": "deleteWatchlistEntry",
+      "scenario": "A PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/watchlist/series:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_watchlist_entry_locked_profile.json"
+    },
+    {
       "name": "get_current_user_ok",
       "operation_id": "getCurrentUser",
       "scenario": "The signed-in account with no profile selected; impersonation is absent outside an admin impersonation session.",
@@ -280,6 +425,65 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Account",
       "body_file": "get_current_user_ok.json"
+    },
+    {
+      "name": "get_favorite_authentication_required",
+      "operation_id": "getFavorite",
+      "scenario": "A favorites read without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:c"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_favorite_authentication_required.json"
+    },
+    {
+      "name": "get_favorite_not_found",
+      "operation_id": "getFavorite",
+      "scenario": "The item is not one of the profile's favorites.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:nope",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_favorite_not_found.json"
+    },
+    {
+      "name": "get_favorite_ok",
+      "operation_id": "getFavorite",
+      "scenario": "The item is one of the profile's favorites: the entry with when it was added.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/FavoriteEntry",
+      "body_file": "get_favorite_ok.json"
     },
     {
       "name": "get_library_collection_items_ok",
@@ -549,6 +753,65 @@
       "body_file": "get_metadata_match_queue_ok.json"
     },
     {
+      "name": "get_rating_authentication_required",
+      "operation_id": "getRating",
+      "scenario": "A ratings read without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/ratings/movie:c"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_rating_authentication_required.json"
+    },
+    {
+      "name": "get_rating_not_found",
+      "operation_id": "getRating",
+      "scenario": "The profile has not rated the item.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/ratings/movie:nope",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_rating_not_found.json"
+    },
+    {
+      "name": "get_rating_ok",
+      "operation_id": "getRating",
+      "scenario": "The profile's rating of the item with when it was set.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/ratings/movie:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RatingEntry",
+      "body_file": "get_rating_ok.json"
+    },
+    {
       "name": "get_setup_status_ok",
       "operation_id": "getSetupStatus",
       "scenario": "First-run discovery before login: whether the server still needs its initial admin account.",
@@ -585,6 +848,65 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/SystemInfo",
       "body_file": "get_system_info_ok.json"
+    },
+    {
+      "name": "get_watchlist_entry_authentication_required",
+      "operation_id": "getWatchlistEntry",
+      "scenario": "A watchlist read without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist/series:c"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_watchlist_entry_authentication_required.json"
+    },
+    {
+      "name": "get_watchlist_entry_not_found",
+      "operation_id": "getWatchlistEntry",
+      "scenario": "The item is not on the profile's watchlist.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist/series:nope",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_watchlist_entry_not_found.json"
+    },
+    {
+      "name": "get_watchlist_entry_ok",
+      "operation_id": "getWatchlistEntry",
+      "scenario": "The item is on the profile's watchlist: the entry with when it was added.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist/series:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/WatchlistEntry",
+      "body_file": "get_watchlist_entry_ok.json"
     },
     {
       "name": "list_admin_users_offset_rejected",
@@ -645,6 +967,68 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_admin_users_permission_denied.json"
+    },
+    {
+      "name": "list_favorites_offset_rejected",
+      "operation_id": "listFavorites",
+      "scenario": "The v1 offset parameter is not part of v2 pagination; the favorites listing refuses it as unknown.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites?offset=50",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_favorites_offset_rejected.json"
+    },
+    {
+      "name": "list_favorites_ok",
+      "operation_id": "listFavorites",
+      "scenario": "The first page of a profile's favorites as catalog cards, newest first, with an opaque cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/FavoriteCollection",
+      "body_file": "list_favorites_ok.json"
+    },
+    {
+      "name": "list_favorites_profile_header_required",
+      "operation_id": "listFavorites",
+      "scenario": "A profile-scoped list called without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_favorites_profile_header_required.json"
     },
     {
       "name": "list_libraries_ok",
@@ -889,6 +1273,68 @@
       "body_file": "list_progress_profile_header_required.json"
     },
     {
+      "name": "list_ratings_offset_rejected",
+      "operation_id": "listRatings",
+      "scenario": "The v1 offset parameter is not part of v2 pagination; the ratings listing refuses it as unknown.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/ratings?offset=50",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_ratings_offset_rejected.json"
+    },
+    {
+      "name": "list_ratings_ok",
+      "operation_id": "listRatings",
+      "scenario": "The first page of a profile's ratings, most recently rated first, with an opaque cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/ratings?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RatingCollection",
+      "body_file": "list_ratings_ok.json"
+    },
+    {
+      "name": "list_ratings_profile_header_required",
+      "operation_id": "listRatings",
+      "scenario": "A profile-scoped list called without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/ratings",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_ratings_profile_header_required.json"
+    },
+    {
       "name": "list_skipped_roots_ok",
       "operation_id": "listSkippedRoots",
       "scenario": "Every root the scanner skipped, across libraries.",
@@ -947,6 +1393,68 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/UnmatchedItemCollection",
       "body_file": "list_unmatched_items_ok.json"
+    },
+    {
+      "name": "list_watchlist_offset_rejected",
+      "operation_id": "listWatchlist",
+      "scenario": "The v1 offset parameter is not part of v2 pagination; the watchlist listing refuses it as unknown.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist?offset=50",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_watchlist_offset_rejected.json"
+    },
+    {
+      "name": "list_watchlist_ok",
+      "operation_id": "listWatchlist",
+      "scenario": "The first page of a profile's watchlist as catalog cards, newest entry first, with an opaque cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/WatchlistCollection",
+      "body_file": "list_watchlist_ok.json"
+    },
+    {
+      "name": "list_watchlist_profile_header_required",
+      "operation_id": "listWatchlist",
+      "scenario": "A profile-scoped list called without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_watchlist_profile_header_required.json"
     },
     {
       "name": "not_acceptable",
@@ -1170,6 +1678,49 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "set_library_providers_duplicate_level.json"
+    },
+    {
+      "name": "set_rating_out_of_range",
+      "operation_id": "setRating",
+      "scenario": "A rating outside 1 to 5 is a validation failure naming the member.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/ratings/movie:new",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"rating\":6}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "set_rating_out_of_range.json"
+    },
+    {
+      "name": "set_rating_profile_header_required",
+      "operation_id": "setRating",
+      "scenario": "A profile-scoped mutation called without X-Profile-Id.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/ratings/movie:new",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"rating\":4}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "set_rating_profile_header_required.json"
     },
     {
       "name": "set_root_override_validation_failed",

@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/not_found",
+  "title": "Not found",
+  "status": 404,
+  "detail": "The profile has not rated the item.",
+  "instance": "urn:silo:request:000000000000000000000053"
+}
+
