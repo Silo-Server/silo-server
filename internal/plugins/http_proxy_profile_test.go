@@ -2,8 +2,11 @@ package plugins
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -22,11 +25,16 @@ func (c *profileTestRouteClient) Handle(
 
 type profileTestProxyService struct {
 	client *profileTestRouteClient
+	access string
 }
 
 func (s profileTestProxyService) RouteDescriptors(context.Context, int) ([]*pluginv1.HttpRouteDescriptor, error) {
+	access := s.access
+	if access == "" {
+		access = "authenticated"
+	}
 	return []*pluginv1.HttpRouteDescriptor{{
-		Method: http.MethodGet, Path: "/page", Access: "authenticated",
+		Method: http.MethodGet, Path: "/page", Access: access,
 	}}, nil
 }
 
@@ -88,3 +96,75 @@ func TestHTTPProxyUsesLaunchProfileWithoutRequestHeader(t *testing.T) {
 		t.Fatalf("forwarded request = %#v", client.request)
 	}
 }
+
+func TestHTTPProxyRejectsOversizedPublicBodyBeforePlugin(t *testing.T) {
+	client := &profileTestRouteClient{}
+	proxy := NewHTTPProxy(
+		profileTestProxyService{client: client, access: "public"}, profileTestInstallationStore{},
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/page", strings.NewReader(strings.Repeat("x", 3<<20+1)))
+	req.ContentLength = -1
+	rec := httptest.NewRecorder()
+	proxy.ServeRoute(rec, req, 1, false, false)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if client.request != nil {
+		t.Fatal("plugin was invoked for an oversized public request")
+	}
+}
+
+func TestHTTPProxyAcceptsExactLimitForPublicAndAuthenticatedRoutes(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		access        string
+		authenticated bool
+	}{
+		{name: "public", access: "public"},
+		{name: "authenticated", access: "authenticated", authenticated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &profileTestRouteClient{}
+			proxy := NewHTTPProxy(
+				profileTestProxyService{client: client, access: tc.access}, profileTestInstallationStore{},
+			)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/page", strings.NewReader(strings.Repeat("x", maxPluginRouteBodyBytes)))
+			rec := httptest.NewRecorder()
+			proxy.ServeRoute(rec, req, 1, tc.authenticated, false)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			}
+			if client.request == nil || len(client.request.GetBody()) != maxPluginRouteBodyBytes {
+				t.Fatalf("forwarded body length = %d", len(client.request.GetBody()))
+			}
+		})
+	}
+}
+
+func TestHTTPProxyRejectsUnreadableBodyBeforePlugin(t *testing.T) {
+	client := &profileTestRouteClient{}
+	proxy := NewHTTPProxy(
+		profileTestProxyService{client: client, access: "public"}, profileTestInstallationStore{},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/page", nil)
+	req.Body = &proxyFailingReadCloser{err: errors.New("read failed")}
+	rec := httptest.NewRecorder()
+	proxy.ServeRoute(rec, req, 1, false, false)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if client.request != nil {
+		t.Fatal("plugin was invoked with a partial unreadable body")
+	}
+}
+
+type proxyFailingReadCloser struct{ err error }
+
+func (r *proxyFailingReadCloser) Read([]byte) (int, error) { return 0, r.err }
+func (*proxyFailingReadCloser) Close() error               { return nil }
+
+var _ io.ReadCloser = (*proxyFailingReadCloser)(nil)

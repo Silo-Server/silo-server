@@ -56,6 +56,31 @@ func TestEmbyProviderParseWebhook(t *testing.T) {
 	}
 }
 
+func TestPlexProviderParseWebhookIgnoresUnsupportedEvent(t *testing.T) {
+	provider := NewPlexProvider(nil)
+	var body strings.Builder
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormField("payload")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte(`{"event":"media.play","Account":{"id":1,"title":"Alice"},"Metadata":{"ratingKey":"item-1","type":"movie"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader(body.String()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	event, err := provider.ParseWebhook(t.Context(), &Connection{}, req)
+	if err != nil {
+		t.Fatalf("ParseWebhook() error = %v", err)
+	}
+	if event == nil || event.Apply {
+		t.Fatalf("expected ignored Plex event, got %#v", event)
+	}
+}
+
 func TestEmbyProviderParseWebhookMultipart(t *testing.T) {
 	t.Parallel()
 
@@ -257,6 +282,33 @@ func TestJellyfinProviderParseWebhookIgnoresNonStop(t *testing.T) {
 	}
 	if event == nil || event.Apply {
 		t.Fatalf("expected ignored event, got %#v", event)
+	}
+}
+
+func TestWebhookProvidersRejectMalformedBodies(t *testing.T) {
+	tests := []struct {
+		name        string
+		provider    Provider
+		contentType string
+		body        string
+	}{
+		{name: "plex multipart", provider: NewPlexProvider(nil), contentType: "multipart/form-data; boundary=missing", body: "not multipart"},
+		{name: "emby JSON", provider: NewEmbyProvider(), contentType: "application/json", body: "{"},
+		{name: "jellyfin JSON", provider: NewJellyfinProvider(), contentType: "application/json", body: "{"},
+		{name: "compressed bytes are not decompressed", provider: NewJellyfinProvider(), contentType: "application/json", body: "\x1f\x8bnot-json"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/webhook", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", tc.contentType)
+			if tc.name == "compressed bytes are not decompressed" {
+				req.Header.Set("Content-Encoding", "gzip")
+			}
+			if _, err := tc.provider.ParseWebhook(t.Context(), &Connection{}, req); err == nil {
+				t.Fatal("ParseWebhook() accepted malformed body")
+			}
+		})
 	}
 }
 

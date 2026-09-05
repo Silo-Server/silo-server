@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -29,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/requestbody"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -44,6 +46,10 @@ var compatRemoteTranscodeStartTimeout time.Duration
 const (
 	compatRemoteNodeProbeFallbackTimeout = 2 * time.Minute
 	compatToneMapNegotiationTimeout      = 5 * time.Second
+	// Jellyfin PlaybackInfo and Capabilities carry control JSON and generated
+	// device profiles, never media. Real profiles are tens of KiB; 256 KiB
+	// preserves substantial headroom without retaining attacker-sized slices.
+	maxCompatProfileRequestBodyBytes = 256 << 10
 )
 
 type playbackInfoRequest struct {
@@ -1875,7 +1881,12 @@ func (h *PlaybackHandler) HandleCapabilitiesFull(w http.ResponseWriter, r *http.
 		return
 	}
 
-	profile, err := decodeDeviceProfile(r.Body)
+	body, err := requestbody.Read(w, r, maxCompatProfileRequestBodyBytes)
+	if err != nil {
+		writeCompatControlBodyError(w, err, "Invalid capabilities payload")
+		return
+	}
+	profile, err := decodeDeviceProfile(bytes.NewReader(body))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid capabilities payload")
 		return
@@ -1913,9 +1924,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	req, profile, err := h.parsePlaybackRequest(r, session.Token)
+	req, profile, err := h.parsePlaybackRequest(w, r, session.Token)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid playback request")
+		writeCompatControlBodyError(w, err, "Invalid playback request")
 		return
 	}
 	// PlaybackInfo is authorized by the token-derived session. Some clients
@@ -2095,9 +2106,9 @@ func stripCompatNUL(value string) string {
 	return strings.ReplaceAll(value, "\x00", "")
 }
 
-func (h *PlaybackHandler) parsePlaybackRequest(r *http.Request, compatToken string) (playbackInfoRequest, DeviceProfile, error) {
+func (h *PlaybackHandler) parsePlaybackRequest(w http.ResponseWriter, r *http.Request, compatToken string) (playbackInfoRequest, DeviceProfile, error) {
 	var req playbackInfoRequest
-	body, err := io.ReadAll(r.Body)
+	body, err := requestbody.Read(w, r, maxCompatProfileRequestBodyBytes)
 	if err != nil {
 		return req, DeviceProfile{}, err
 	}
@@ -2126,6 +2137,14 @@ func (h *PlaybackHandler) parsePlaybackRequest(r *http.Request, compatToken stri
 	}
 
 	return req, profile, nil
+}
+
+func writeCompatControlBodyError(w http.ResponseWriter, err error, invalidMessage string) {
+	if requestbody.IsTooLarge(err) {
+		writeError(w, http.StatusRequestEntityTooLarge, "PayloadTooLarge", "Request body is too large")
+		return
+	}
+	writeError(w, http.StatusBadRequest, "BadRequest", invalidMessage)
 }
 
 func (h *PlaybackHandler) buildPlaybackSource(

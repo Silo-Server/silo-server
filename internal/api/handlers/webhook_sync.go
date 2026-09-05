@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -13,11 +16,24 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/requestbody"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
+// Webhook-sync JSON payloads are normally a few KiB. Plex may attach a small
+// thumbnail file, so this aggregate cap leaves upload headroom while ensuring
+// multipart parsers cannot spill an unbounded request to temporary disk.
+const maxWebhookSyncBodyBytes = 4 << 20
+
+type webhookDeliveryService interface {
+	ResolveWebhook(ctx context.Context, secret string) (*webhooksync.Connection, error)
+	ProcessWebhook(ctx context.Context, conn *webhooksync.Connection, r *http.Request) (*webhooksync.ProcessWebhookResult, error)
+	CreateEventLog(ctx context.Context, entry webhooksync.WebhookEventLog) (*webhooksync.WebhookEventLog, error)
+}
+
 type WebhookSyncHandler struct {
-	service *webhooksync.Service
+	service  *webhooksync.Service
+	delivery webhookDeliveryService
 }
 
 type legacyPlexSyncConnection struct {
@@ -89,7 +105,7 @@ type legacyUpdatePlexSyncActorsRequest struct {
 }
 
 func NewWebhookSyncHandler(service *webhooksync.Service) *WebhookSyncHandler {
-	return &WebhookSyncHandler{service: service}
+	return &WebhookSyncHandler{service: service, delivery: service}
 }
 
 func (h *WebhookSyncHandler) HandleListConnections(w http.ResponseWriter, r *http.Request) {
@@ -357,10 +373,25 @@ func (h *WebhookSyncHandler) HandleWebhook(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
+	conn, err := h.delivery.ResolveWebhook(r.Context(), secret)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	body, err := requestbody.Read(w, r, maxWebhookSyncBodyBytes)
+	if err != nil {
+		if requestbody.IsTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "Request body exceeds the webhook payload cap")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "bad_request", "Could not read request body")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	capture := webhooksync.NewBodyCaptureReadCloser(r.Body, webhooksync.WebhookBodyCaptureLimit)
 	r.Body = capture
 
-	result, err := h.service.ProcessWebhook(r.Context(), secret, r)
+	result, err := h.delivery.ProcessWebhook(r.Context(), conn, r)
 	logContext := webhooksync.BuildWebhookRequestLogContext(
 		r,
 		webhooksync.SanitizeWebhookBodyExcerpt(r.Header.Get("Content-Type"), capture.Captured()),
@@ -371,7 +402,7 @@ func (h *WebhookSyncHandler) HandleWebhook(w http.ResponseWriter, r *http.Reques
 	}
 
 	if result != nil {
-		if _, logErr := h.service.CreateEventLog(r.Context(), webhooksync.WebhookEventLog{
+		if _, logErr := h.delivery.CreateEventLog(r.Context(), webhooksync.WebhookEventLog{
 			ConnectionID: result.ConnectionID,
 			RequestID:    logContext.RequestID,
 			HTTPStatus:   statusCode,
