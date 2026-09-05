@@ -446,16 +446,18 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				return nil, p
 			}
 			var updated guardedProbeRow
-			if in.IfNoneMatch == "" {
-				// No precondition: an ordinary create-or-replace that no
-				// concurrent writer can make fail.
+			if in.IfNoneMatch == "" && in.IfMatch == "" {
+				// No precondition at all: an ordinary create-or-replace that
+				// no concurrent writer can make fail.
 				updated = store.Upsert(in.ID, in.Body.Name)
 			} else {
-				// The precondition passed against the state read above; the
-				// write re-checks that state atomically. A writer that landed
-				// in between does not by itself falsify If-None-Match, so the
-				// condition is evaluated again against the latest state and
-				// the write retried while it still holds.
+				// Either precondition passed against the state read above;
+				// the write re-checks that state atomically. A writer that
+				// landed in between does not by itself falsify the
+				// preconditions (If-Match: * still holds while the resource
+				// exists; a non-matching If-None-Match may still not match),
+				// so both are evaluated again against the latest state and
+				// the write retried while they hold.
 				for {
 					var err error
 					if ok {

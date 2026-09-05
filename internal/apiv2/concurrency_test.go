@@ -378,6 +378,51 @@ func TestCreateOnlyEvaluatesIfMatchFirst(t *testing.T) {
 	}
 }
 
+// TestCreateOnlyIfMatchOnlyStaysOnCASPath: a create-only PUT that supplies
+// If-Match but no If-None-Match is not an unconditional replace: a writer
+// landing after the load makes an exact tag 412 with the newer ETag, makes
+// "*" after a delete 412 with no recreate, and lets "*" after an update
+// re-apply against the latest version.
+func TestCreateOnlyIfMatchOnlyStaysOnCASPath(t *testing.T) {
+	current := RenderETag(guardedProbeScope, "a", 1).String()
+	store := newGuardedProbeStore()
+	h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() { store.Upsert("a", "racer") })
+	rec := do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"mine"}`, map[string]string{"If-Match": current})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got := rec.Header().Get("ETag"); got != RenderETag(guardedProbeScope, "a", 2).String() {
+		t.Fatalf("412 ETag = %q", got)
+	}
+	if row, _ := store.Get("a"); row.Name != "racer" {
+		t.Fatalf("exact If-Match overwrote after a race: %+v", row)
+	}
+	store = newGuardedProbeStore()
+	h = NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() {
+		if err := store.Delete("a", 1); err != nil {
+			t.Errorf("race setup: %v", err)
+		}
+	})
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"mine"}`, map[string]string{"If-Match": "*"})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if rec.Header().Get("ETag") != "" {
+		t.Fatal("412 after a winning delete must carry no ETag")
+	}
+	if _, exists := store.Get("a"); exists {
+		t.Fatal("If-Match: * recreated a deleted resource")
+	}
+	store = newGuardedProbeStore()
+	h = NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() { store.Upsert("a", "racer") })
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"mine"}`, map[string]string{"If-Match": "*"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("If-Match: * after an update: %d %s", rec.Code, rec.Body.String())
+	}
+	if row, _ := store.Get("a"); row.Name != "mine" || row.Version != 3 {
+		t.Fatalf("row = %+v", row)
+	}
+}
+
 // TestGuardedProbeWildcardSurvivesLostRace: "*" is a deliberate overwrite,
 // so a writer that lands between the load and the compare-and-update does
 // not turn it into a 412 while the resource still exists.
