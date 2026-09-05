@@ -184,8 +184,26 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 	if !bytes.Equal(generated, contracts.OpenAPI) {
 		t.Fatal("contracts/api/v2/openapi.json is stale; run make apiv2-openapi")
 	}
-	if len(RawHandshakes()) != 0 {
-		t.Fatalf("the manual registry is expected to be empty until a raw handshake is ratified: %+v", RawHandshakes())
+	// Every manual-registry entry is documented as a raw handshake with a
+	// redirect or success status, never as a JSON operation.
+	var parsed struct {
+		Paths map[string]map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(contracts.OpenAPI, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range RawHandshakes() {
+		op := parsed.Paths[h.Path][strings.ToLower(h.Method)]
+		if op == nil {
+			t.Errorf("%s %s: not documented", h.Method, h.Path)
+			continue
+		}
+		if op[extRawHandshake] != h.Protocol || op["operationId"] != h.OperationID {
+			t.Errorf("%s %s: documented as %v/%v", h.Method, h.Path, op[extRawHandshake], op["operationId"])
+		}
+		if _, ok := op["requestBody"]; ok {
+			t.Errorf("%s %s: a raw handshake documents no request body", h.Method, h.Path)
+		}
 	}
 }
 
@@ -199,24 +217,34 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		"GET " + Prefix + "/auth/device", "GET " + Prefix + "/auth/device/capability", "POST " + Prefix + "/auth/device/approve", "POST " + Prefix + "/auth/device/approve-handoff",
 		"POST " + Prefix + "/auth/device/deny", "POST " + Prefix + "/auth/device/poll", "POST " + Prefix + "/auth/device/start",
 		"POST " + Prefix + "/auth/impersonation/end", "POST " + Prefix + "/auth/login", "POST " + Prefix + "/auth/logout", "POST " + Prefix + "/auth/oauth/complete",
+		"GET " + Prefix + "/auth/providers", "POST " + Prefix + "/auth/refresh", "GET " + Prefix + "/auth/sessions", "DELETE " + Prefix + "/auth/sessions/{id}",
+		"POST " + Prefix + "/auth/setup", "GET " + Prefix + "/auth/signup", "POST " + Prefix + "/auth/signup", "POST " + Prefix + "/auth/plugin-launch",
+		"POST " + Prefix + "/auth/oauth/{install_id}/init", "GET " + Prefix + "/auth/oauth/{install_id}/callback",
+		"GET " + Prefix + "/onboarding/flow", "GET " + Prefix + "/onboarding/state", "POST " + Prefix + "/onboarding/progress",
+		"GET " + Prefix + "/policy/capability", "GET " + Prefix + "/user/libraries",
 	}
+	registry := RawHandshakes()
 
-	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
+	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, registry)
 	if err != nil || len(unaccounted) != 0 || len(unserved) != 0 {
 		t.Fatalf("baseline: %v %v %v", unaccounted, unserved, err)
 	}
+	// A documented raw handshake missing from the registry is refused.
+	if _, _, err := reconcileSpec(observed, contracts.OpenAPI, nil); err == nil {
+		t.Fatal("a documented raw handshake without a registry entry was accepted")
+	}
 	// A raw route the router serves but nothing describes.
-	unaccounted, _, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, nil)
+	unaccounted, _, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, registry)
 	if len(unaccounted) != 1 || unaccounted[0] != "GET "+ws.Path {
 		t.Fatalf("raw route not reported: %v", unaccounted)
 	}
 	// The same route with its manual-registry entry.
-	unaccounted, unserved, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, []RawHandshake{ws})
+	unaccounted, unserved, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, append(registry, ws))
 	if len(unaccounted) != 0 || len(unserved) != 0 {
 		t.Fatalf("manual entry did not account for the raw route: %v %v", unaccounted, unserved)
 	}
 	// A manual entry for a route nobody serves is reported.
-	_, unserved, _ = reconcileSpec(observed, contracts.OpenAPI, []RawHandshake{ws})
+	_, unserved, _ = reconcileSpec(observed, contracts.OpenAPI, append(registry, ws))
 	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+ws.Path) {
 		t.Fatalf("unserved manual entry not reported: %v", unserved)
 	}
@@ -227,12 +255,12 @@ func TestReconcileSpecSeeded(t *testing.T) {
 			withoutInfo = append(withoutInfo, route)
 		}
 	}
-	_, unserved, _ = reconcileSpec(withoutInfo, contracts.OpenAPI, nil)
+	_, unserved, _ = reconcileSpec(withoutInfo, contracts.OpenAPI, registry)
 	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+Prefix+"/system/info") {
 		t.Fatalf("stale artifact not reported: %v", unserved)
 	}
-	// A route cannot be both.
-	if _, _, err := reconcileSpec(observed, contracts.OpenAPI, []RawHandshake{{Method: http.MethodGet, Path: Prefix + "/system/info"}}); err == nil {
+	// A JSON operation cannot double as a manual entry.
+	if _, _, err := reconcileSpec(observed, contracts.OpenAPI, append(registry, RawHandshake{Method: http.MethodGet, Path: Prefix + "/system/info"})); err == nil {
 		t.Fatal("an operation doubling as a manual entry was accepted")
 	}
 }

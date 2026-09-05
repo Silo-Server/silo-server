@@ -200,13 +200,34 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
-	if h == nil || h.system == nil {
+	view, ok := h.Capability()
+	if !ok {
 		writeError(w, http.StatusServiceUnavailable, policyErrorUnavailable, "Policy system is not configured")
 		return
 	}
+	writeJSON(w, http.StatusOK, policyCapabilityResponse(view))
+}
 
+// PolicyCapabilityView is the policy engine's capability document.
+type PolicyCapabilityView struct {
+	Enabled         bool
+	EditorAvailable bool
+	DecisionTypes   []string
+	Generation      int64
+	Degraded        bool
+	DegradedReason  string
+	DegradedDomains []string
+	EvalTimeouts    int64
+}
+
+// Capability describes the policy engine. v1 GET /policy/capability and v2
+// getPolicyCapability both call it; ok is false when no engine is configured.
+func (h *PolicyHandler) Capability() (PolicyCapabilityView, bool) {
+	if h == nil || h.system == nil {
+		return PolicyCapabilityView{}, false
+	}
 	degraded := h.system.DegradedState()
-	writeJSON(w, http.StatusOK, policyCapabilityResponse{
+	return PolicyCapabilityView{
 		Enabled:         true,
 		EditorAvailable: h.editorEnabled(),
 		DecisionTypes:   policy.DecisionTypes(),
@@ -215,7 +236,7 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 		DegradedReason:  degraded.Reason,
 		DegradedDomains: degraded.Domains,
 		EvalTimeouts:    h.system.EvalTimeouts(),
-	})
+	}, true
 }
 
 // HandleListVendor handles GET /admin/policy/vendor.

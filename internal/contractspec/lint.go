@@ -20,7 +20,10 @@ const (
 	extDemoRestricted = "x-silo-demo-restricted"
 	extServiceBacked  = "x-silo-service-backed"
 	extExtensionBag   = "x-silo-extension-bag"
-	securityScheme    = "bearerAuth"
+	// extRawHandshake marks a manual-registry route served outside Huma;
+	// its value is the protocol name.
+	extRawHandshake = "x-silo-raw-handshake"
+	securityScheme  = "bearerAuth"
 )
 
 const typeObject = "object"
@@ -92,6 +95,10 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 	}
 	demo, _ := op.Extensions[extDemoRestricted].(bool)
 	serviceBacked, _ := op.Extensions[extServiceBacked].(bool)
+	if raw := stringExt(op.Extensions, extRawHandshake); raw != "" {
+		lintRawHandshake(fail, where, class, raw, op)
+		return
+	}
 	success := false
 	for status := range op.Responses {
 		if code, err := strconv.Atoi(status); err == nil && code >= 200 && code < 300 {
@@ -109,6 +116,36 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 	}
 	if _, ok := op.Responses["default"]; ok {
 		fail("%s: a default response hides undocumented statuses", where)
+	}
+}
+
+// lintRawHandshake checks a manual-registry route: the Huma status table
+// does not apply (no JSON negotiation, no body decoding), so it must be
+// public, name a redirect or success status, document no request body or
+// JSON response content, and not take a default response.
+func lintRawHandshake(fail func(string, ...any), where string, class apiv2.Class, protocol string, op operation) {
+	if class != apiv2.ClassPublic {
+		fail("%s: a raw handshake (%s) must be class %s, not %s", where, protocol, apiv2.ClassPublic, class)
+	}
+	if op.RequestBody != nil {
+		fail("%s: a raw handshake documents no request body", where)
+	}
+	success := false
+	for status, resp := range op.Responses {
+		code, err := strconv.Atoi(status)
+		if err != nil {
+			fail("%s: a default response hides undocumented statuses", where)
+			continue
+		}
+		if code >= 200 && code < 400 {
+			success = true
+		}
+		if len(resp.Content) != 0 {
+			fail("%s: a raw handshake response %s documents content; the exchange is covered by protocol tests", where, status)
+		}
+	}
+	if !success {
+		fail("%s: no success or redirect status is documented", where)
 	}
 }
 

@@ -50,6 +50,10 @@ type CompleteOAuthLoginOutput struct {
 	Body OAuthCompletion
 }
 
+// loginDomain names the login-session service in problems and the v1 rate
+// limit bucket of the login operation.
+const loginDomain = "login"
+
 func registerAuth(reg *Registry) {
 	end := humaOp(http.MethodPost, Prefix+"/auth/impersonation/end", "endImpersonation", "auth",
 		"Return an impersonating session to the administrator who started it.")
@@ -64,7 +68,7 @@ func registerAuth(reg *Registry) {
 	login.Errors = []int{http.StatusUnauthorized, http.StatusForbidden}
 	Register(reg, Operation{
 		Operation: login,
-		Class:     ClassPublic, ServiceBacked: true, RateLimitBucket: "login",
+		Class:     ClassPublic, ServiceBacked: true, RateLimitBucket: loginDomain,
 	}, reg.login)
 	complete := humaOp(http.MethodPost, Prefix+"/auth/oauth/complete", "completeOAuthLogin", "auth",
 		"Redeem the one-time code an OAuth callback issued for the token pair.")
@@ -80,7 +84,7 @@ func registerAuth(reg *Registry) {
 
 func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
 	if reg.deps.Sessions == nil {
-		return nil, unavailable("login")
+		return nil, unavailable(loginDomain)
 	}
 	input := handlers.LoginInput{
 		Provider: in.Body.Provider,
@@ -100,7 +104,7 @@ func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, e
 
 func (reg *Registry) logout(ctx context.Context, _ *struct{}) (*struct{}, error) {
 	if reg.deps.Sessions == nil {
-		return nil, unavailable("login")
+		return nil, unavailable(loginDomain)
 	}
 	claims := claimsFrom(ctx)
 	if claims == nil {
@@ -114,7 +118,7 @@ func (reg *Registry) logout(ctx context.Context, _ *struct{}) (*struct{}, error)
 
 func (reg *Registry) endImpersonation(ctx context.Context, _ *struct{}) (*struct{}, error) {
 	if reg.deps.Sessions == nil {
-		return nil, unavailable("login")
+		return nil, unavailable(loginDomain)
 	}
 	claims := claimsFrom(ctx)
 	if claims == nil {

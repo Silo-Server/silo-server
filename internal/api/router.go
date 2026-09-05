@@ -1935,6 +1935,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if adminHandler != nil {
 		v2deps.AdminUsers = adminHandler
 	}
+	if onboardingHandler != nil {
+		v2deps.Onboarding = onboardingHandler
+	}
+	if policyHandler != nil {
+		v2deps.Policy = policyHandler
+	}
+	if libraryHandler != nil {
+		v2deps.UserLibraries = libraryHandler
+	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {

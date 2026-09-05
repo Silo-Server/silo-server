@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/session_expired",
+  "title": "Session expired",
+  "status": 401,
+  "detail": "Session has been revoked.",
+  "instance": "urn:silo:request:00000000000000000000002d"
+}
+

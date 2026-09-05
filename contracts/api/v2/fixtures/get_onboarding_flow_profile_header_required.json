@@ -1,0 +1,15 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:00000000000000000000003d",
+  "errors": [
+    {
+      "location": "header.x-profile-id",
+      "code": "required",
+      "detail": "The X-Profile-Id header is required."
+    }
+  ]
+}
+

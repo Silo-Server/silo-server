@@ -20376,13 +20376,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/auth/oauth/{install_id}/callback",
+        "operation_id": "completeOAuthCallback"
       },
-      "notes": "External caller: OAuth provider browser redirect. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; oauthHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Raw handshake in the manual registry (apiv2.RawHandshake), documented in openapi.json as x-silo-raw-handshake: redirect, never a JSON operation. Same 302 targets and failure reasons as v1; the OAuth state is bound to the v2 callback URL so a provider used through v2 must have that redirect URI registered. Cache-Control: no-store; 503 dependency_unavailable when OAuth is not configured (v1: route absent)."
     },
     {
       "listener": "api",
@@ -20429,13 +20429,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/oauth/{install_id}/init",
+        "operation_id": "startOAuthLogin"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; oauthHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Raw handshake in the manual registry: a browser form POST answered 302 to the provider, with v1's plain-text 400/502/500 failures kept as is. Hands the provider the v2 callback as its redirect URI. Cache-Control: no-store; 503 dependency_unavailable when OAuth is not configured (v1: route absent)."
     },
     {
       "listener": "api",
@@ -20489,11 +20489,11 @@
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
-        "method": null,
-        "path": null,
+        "method": "POST",
+        "path": "/api/v2/auth/plugin-launch",
         "operation_id": null
       },
-      "notes": "Administrator action: none beyond the coordinated upgrade; plugin pages open before the cutover need one fresh launch afterwards. Client action: the v2 launch reissues the five-minute HttpOnly SameSite=Lax plugin access cookie on the narrow v2 plugin-content parent path; the /api/v1-path cookie is expired on launch/logout where practical and otherwise dies within its five-minute maximum. Never broadened to /. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Ported as launchPlugin (authenticated): same {expires_in} body and the same five-minute HttpOnly SameSite=Lax silo_plugin_access cookie, issued on Path=/api/v2/plugins instead of /api/v1; the profile is the declared X-Profile-Id, as on v1; Set-Cookie is a documented response header. Stays proposed until the redesign names an owner: the gate refuses ratifying a redesigned row with a placeholder owner."
     },
     {
       "listener": "api",
@@ -20541,13 +20541,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/auth/providers",
+        "operation_id": "listAuthProviders"
       },
-      "notes": "Conditionally registered: authHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Public. The v1 bare array becomes a bounded {items} collection; installation_id is a string ID and absent for the built-in provider. OAuth providers are omitted when the OAuth handshake is not configured, as on v1."
     },
     {
       "listener": "api",
@@ -20648,13 +20648,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/refresh",
+        "operation_id": "refreshSession"
       },
-      "notes": "Conditionally registered: authHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Public. Same {access_token, refresh_token, expires_in} body. Missing refresh_token is 422 at the member (v1: 400); a revoked session is 401 session_expired (v1: session_revoked) and any other refusal 401 invalid_token. Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -20695,13 +20695,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/auth/sessions",
+        "operation_id": "listSessions"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Authenticated. The v1 {sessions:[...]} envelope becomes {items:[...]}; ids are string IDs, instants are UTC milliseconds, revoked_at is always present and null while active (v1 omitted it)."
     },
     {
       "listener": "api",
@@ -20742,13 +20742,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/auth/sessions/{id}",
+        "operation_id": "deleteSession"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Authenticated. Same 204; a session that is not the caller's or does not exist is 404 not_found as on v1."
     },
     {
       "listener": "api",
@@ -20890,13 +20890,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/setup",
+        "operation_id": "setupServer"
       },
-      "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, rate limited through the setup bucket; the two v1 registrations are one operation. Same 201 token pair with user in the getCurrentUser shape. Missing members are 422 at the member (v1: 400); setup already completed is 409 conflict (v1: 401 setup_complete). Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -20957,13 +20957,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/setup",
+        "operation_id": "setupServer"
       },
-      "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, rate limited through the setup bucket; the two v1 registrations are one operation. Same 201 token pair with user in the getCurrentUser shape. Missing members are 422 at the member (v1: 400); setup already completed is 409 conflict (v1: 401 setup_complete). Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -21030,13 +21030,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/auth/signup",
+        "operation_id": "getSignupStatus"
       },
-      "notes": "Conditionally registered: authHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Public. Same {enabled} body."
     },
     {
       "listener": "api",
@@ -21095,13 +21095,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/signup",
+        "operation_id": "signup"
       },
-      "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, rate limited through the signup bucket; the two v1 registrations are one operation. Same 201 token pair. Missing members are 422 at the member (v1: 400); an unknown, exhausted or disabled invite code is 422 at body.invite_code (v1: 400 invalid_code/code_exhausted/code_disabled); a taken username or email is 409 conflict (v1: 400 duplicate); signup disabled stays 403. Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -21162,13 +21162,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/signup",
+        "operation_id": "signup"
       },
-      "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, rate limited through the signup bucket; the two v1 registrations are one operation. Same 201 token pair. Missing members are 422 at the member (v1: 400); an unknown, exhausted or disabled invite code is 422 at body.invite_code (v1: 400 invalid_code/code_exhausted/code_disabled); a taken username or email is 409 conflict (v1: 400 duplicate); signup disabled stays 403. Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -33778,13 +33778,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/onboarding/flow",
+        "operation_id": "getOnboardingFlow"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; onboardingHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Profile scoped (X-Profile-Id required by the class gate; v1 answered 400). surface is a declared enum, so an unknown value is 422 at query.surface (v1: 400). Same flow body; links and options are always emitted as arrays."
     },
     {
       "listener": "api",
@@ -33855,13 +33855,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/onboarding/progress",
+        "operation_id": "recordOnboardingProgress"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; onboardingHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Profile scoped. Same members and 204; a tour_id other than the current tour stays 409."
     },
     {
       "listener": "api",
@@ -33936,13 +33936,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/onboarding/state",
+        "operation_id": "getOnboardingState"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; onboardingHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Profile scoped. Same body."
     },
     {
       "listener": "api",
@@ -35829,13 +35829,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/policy/capability",
+        "operation_id": "getPolicyCapability"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; policyHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Profile scoped with an optional X-Profile-Id, as v1's viewer-access group. Capability document in the system/info shape: revision and state head, then the v1 members; an unconfigured policy engine is state not_configured with a 200 (v1: 503). decision_types and degraded_domains are always arrays. Cache-Control: no-cache."
     },
     {
       "listener": "api",
@@ -43337,13 +43337,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/user/libraries",
+        "operation_id": "listUserLibraries"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Profile scoped with an optional X-Profile-Id, as v1's viewer-access group. The v1 bare array becomes a bounded {items} collection; ids are string IDs. Same access filtering (profile allowlist, else the account's effective policy)."
     },
     {
       "listener": "api",

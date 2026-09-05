@@ -1,6 +1,109 @@
 {
   "fixtures": [
     {
+      "name": "approve_device_handoff_ok",
+      "operation_id": "approveDeviceHandoff",
+      "scenario": "The verified profile approves a remote-playback pairing request.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/approve-handoff",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"code\":\"br-remote\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLoginDecision",
+      "body_file": "approve_device_handoff_ok.json"
+    },
+    {
+      "name": "approve_device_handoff_profile_header_required",
+      "operation_id": "approveDeviceHandoff",
+      "scenario": "A handoff approval without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/approve-handoff",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"code\":\"br-remote\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "approve_device_handoff_profile_header_required.json"
+    },
+    {
+      "name": "approve_device_login_authentication_required",
+      "operation_id": "approveDeviceLogin",
+      "scenario": "A decision without a credential.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/approve",
+        "body": "{\"code\":\"ABCD-1234\"}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "approve_device_login_authentication_required.json"
+    },
+    {
+      "name": "approve_device_login_expired",
+      "operation_id": "approveDeviceLogin",
+      "scenario": "A decision on a request that outlived its window: 410 under the domain's own type.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/approve",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"code\":\"br-expired\"}"
+      },
+      "expected_status": 410,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "approve_device_login_expired.json"
+    },
+    {
+      "name": "approve_device_login_ok",
+      "operation_id": "approveDeviceLogin",
+      "scenario": "A signed-in account approves a pending pairing request by its user code.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/approve",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"code\":\"ABCD-1234\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLoginDecision",
+      "body_file": "approve_device_login_ok.json"
+    },
+    {
       "name": "authentication_required",
       "operation_id": null,
       "scenario": "An authenticated operation called without a credential.",
@@ -17,6 +120,158 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "authentication_required.json"
+    },
+    {
+      "name": "complete_oauth_login_code_required",
+      "operation_id": "completeOAuthLogin",
+      "scenario": "A completion without its code is a validation failure naming the member.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/oauth/complete",
+        "body": "{}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "complete_oauth_login_code_required.json"
+    },
+    {
+      "name": "complete_oauth_login_ok",
+      "operation_id": "completeOAuthLogin",
+      "scenario": "The SPA redeems the one-time code the OAuth callback redirected it with.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/oauth/complete",
+        "body": "{\"code\":\"c0de\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/OAuthCompletion",
+      "body_file": "complete_oauth_login_ok.json"
+    },
+    {
+      "name": "delete_session_authentication_required",
+      "operation_id": "deleteSession",
+      "scenario": "A session revocation without a credential.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/auth/sessions/s9"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_session_authentication_required.json"
+    },
+    {
+      "name": "delete_session_not_found",
+      "operation_id": "deleteSession",
+      "scenario": "A session id that is not the caller's, or does not exist: not found either way.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/auth/sessions/other",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_session_not_found.json"
+    },
+    {
+      "name": "deny_device_login_code_required",
+      "operation_id": "denyDeviceLogin",
+      "scenario": "A decision naming neither code is a validation failure.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/deny",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "deny_device_login_code_required.json"
+    },
+    {
+      "name": "deny_device_login_ok",
+      "operation_id": "denyDeviceLogin",
+      "scenario": "A signed-in account denies a pending pairing request.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/deny",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"code\":\"ABCD-1234\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLoginDecision",
+      "body_file": "deny_device_login_ok.json"
+    },
+    {
+      "name": "end_impersonation_authentication_required",
+      "operation_id": "endImpersonation",
+      "scenario": "Ending impersonation without a credential.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/impersonation/end"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "end_impersonation_authentication_required.json"
+    },
+    {
+      "name": "end_impersonation_not_impersonating",
+      "operation_id": "endImpersonation",
+      "scenario": "Ending impersonation from a session that is not impersonating is a conflict with the session's state (v1: 400).",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/impersonation/end",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "end_impersonation_not_impersonating.json"
     },
     {
       "name": "get_current_user_ok",
@@ -39,6 +294,201 @@
       "body_file": "get_current_user_ok.json"
     },
     {
+      "name": "get_device_login_capability_ok",
+      "operation_id": "getDeviceLoginCapability",
+      "scenario": "Device pairing support before login.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/device/capability"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLoginCapability",
+      "body_file": "get_device_login_capability_ok.json"
+    },
+    {
+      "name": "get_device_login_code_required",
+      "operation_id": "getDeviceLogin",
+      "scenario": "A lookup naming neither code is a validation failure; v1 forwarded it to the store as a 404.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/device"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_device_login_code_required.json"
+    },
+    {
+      "name": "get_device_login_ok",
+      "operation_id": "getDeviceLogin",
+      "scenario": "A browser looks a pairing request up by its user code before deciding.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/device?code=ABCD-1234"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLogin",
+      "body_file": "get_device_login_ok.json"
+    },
+    {
+      "name": "get_onboarding_flow_ok",
+      "operation_id": "getOnboardingFlow",
+      "scenario": "The first-run tour for a TV surface: server-composed steps for the acting profile.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/onboarding/flow?surface=tv",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/OnboardingFlow",
+      "body_file": "get_onboarding_flow_ok.json"
+    },
+    {
+      "name": "get_onboarding_flow_profile_header_required",
+      "operation_id": "getOnboardingFlow",
+      "scenario": "A profile-scoped read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/onboarding/flow",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_onboarding_flow_profile_header_required.json"
+    },
+    {
+      "name": "get_onboarding_flow_surface_rejected",
+      "operation_id": "getOnboardingFlow",
+      "scenario": "A surface outside the enum is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/onboarding/flow?surface=watch",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_onboarding_flow_surface_rejected.json"
+    },
+    {
+      "name": "get_onboarding_state_authentication_required",
+      "operation_id": "getOnboardingState",
+      "scenario": "The onboarding state without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/onboarding/state",
+        "headers": {
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_onboarding_state_authentication_required.json"
+    },
+    {
+      "name": "get_onboarding_state_ok",
+      "operation_id": "getOnboardingState",
+      "scenario": "The acting profile's progress: it reached a step but has not finished or skipped the tour.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/onboarding/state",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/OnboardingState",
+      "body_file": "get_onboarding_state_ok.json"
+    },
+    {
+      "name": "get_policy_capability_ok",
+      "operation_id": "getPolicyCapability",
+      "scenario": "The policy engine's capability document for a signed-in viewer.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/policy/capability",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PolicyCapability",
+      "body_file": "get_policy_capability_ok.json"
+    },
+    {
+      "name": "get_policy_capability_profile_verification_required",
+      "operation_id": "getPolicyCapability",
+      "scenario": "A declared PIN-locked profile without X-Profile-Token is judged by viewer access even though the header is optional.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/policy/capability",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_policy_capability_profile_verification_required.json"
+    },
+    {
       "name": "get_setup_status_ok",
       "operation_id": "getSetupStatus",
       "scenario": "First-run discovery before login: whether the server still needs its initial admin account.",
@@ -54,6 +504,23 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/SetupStatus",
       "body_file": "get_setup_status_ok.json"
+    },
+    {
+      "name": "get_signup_status_ok",
+      "operation_id": "getSignupStatus",
+      "scenario": "Whether invited signup is on, before login.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/signup"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SignupStatus",
+      "body_file": "get_signup_status_ok.json"
     },
     {
       "name": "get_system_info_ok",
@@ -75,6 +542,45 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/SystemInfo",
       "body_file": "get_system_info_ok.json"
+    },
+    {
+      "name": "launch_plugin_authentication_required",
+      "operation_id": "launchPlugin",
+      "scenario": "A plugin launch without a credential.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/plugin-launch"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "launch_plugin_authentication_required.json"
+    },
+    {
+      "name": "launch_plugin_ok",
+      "operation_id": "launchPlugin",
+      "scenario": "The plugin access cookie for the declared profile, scoped to the v2 plugin content parent path; the body carries only the lifetime.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/plugin-launch",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json",
+        "Set-Cookie": "silo_plugin_access=plugin-s1-p-owner; Path=/api/v2/plugins; Max-Age=300; HttpOnly; SameSite=Lax"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PluginLaunch",
+      "body_file": "launch_plugin_ok.json"
     },
     {
       "name": "list_admin_users_offset_rejected",
@@ -135,6 +641,23 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_admin_users_permission_denied.json"
+    },
+    {
+      "name": "list_auth_providers_ok",
+      "operation_id": "listAuthProviders",
+      "scenario": "The sign-in providers a client may offer before login: the built-in one and a plugin-backed OAuth provider.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/providers"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AuthProviderCollection",
+      "body_file": "list_auth_providers_ok.json"
     },
     {
       "name": "list_progress_offset_rejected",
@@ -199,6 +722,151 @@
       "body_file": "list_progress_profile_header_required.json"
     },
     {
+      "name": "list_sessions_authentication_required",
+      "operation_id": "listSessions",
+      "scenario": "The session list without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/sessions"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_sessions_authentication_required.json"
+    },
+    {
+      "name": "list_sessions_ok",
+      "operation_id": "listSessions",
+      "scenario": "The caller's login sessions: an active one and a revoked one (revoked_at null while active).",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/sessions",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LoginSessionCollection",
+      "body_file": "list_sessions_ok.json"
+    },
+    {
+      "name": "list_user_libraries_authentication_required",
+      "operation_id": "listUserLibraries",
+      "scenario": "The library list without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/user/libraries"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_user_libraries_authentication_required.json"
+    },
+    {
+      "name": "list_user_libraries_ok",
+      "operation_id": "listUserLibraries",
+      "scenario": "The libraries the account may browse, with a short-lived poster URL where a poster is set.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/user/libraries",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/UserLibraryCollection",
+      "body_file": "list_user_libraries_ok.json"
+    },
+    {
+      "name": "login_invalid_credentials",
+      "operation_id": "login",
+      "scenario": "Wrong credentials are invalid_token, not authentication_required: the client presented one and it was refused.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/login",
+        "body": "{\"username\":\"laura\",\"password\":\"nope\"}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "login_invalid_credentials.json"
+    },
+    {
+      "name": "login_ok",
+      "operation_id": "login",
+      "scenario": "A password login: the token pair with the account in the getCurrentUser shape; never cached.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/login",
+        "body": "{\"username\":\"laura\",\"password\":\"pw\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/TokenPair",
+      "body_file": "login_ok.json"
+    },
+    {
+      "name": "login_password_required",
+      "operation_id": "login",
+      "scenario": "A blank password is refused by the schema at the member; v1 answered a bare 400.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/login",
+        "body": "{\"username\":\"laura\",\"password\":\"\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "login_password_required.json"
+    },
+    {
+      "name": "logout_authentication_required",
+      "operation_id": "logout",
+      "scenario": "A logout without a credential.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/logout"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "logout_authentication_required.json"
+    },
+    {
       "name": "not_acceptable",
       "operation_id": "getSystemInfo",
       "scenario": "An Accept header that admits no JSON representation.",
@@ -254,6 +922,42 @@
       "body_file": "payload_too_large.json"
     },
     {
+      "name": "poll_device_login_device_code_required",
+      "operation_id": "pollDeviceLogin",
+      "scenario": "A poll without its device code is a validation failure naming the member.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "body": "{}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "poll_device_login_device_code_required.json"
+    },
+    {
+      "name": "poll_device_login_ok",
+      "operation_id": "pollDeviceLogin",
+      "scenario": "The device polls an approved request and collects its token pair under tokens.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "body": "{\"device_code\":\"dev-approved\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLoginPoll",
+      "body_file": "poll_device_login_ok.json"
+    },
+    {
       "name": "profile_verification_required",
       "operation_id": null,
       "scenario": "A profile-scoped operation called for a PIN-locked profile without X-Profile-Token; clients start PIN entry on this type.",
@@ -296,6 +1000,230 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "rate_limited.json"
+    },
+    {
+      "name": "record_onboarding_progress_tour_mismatch",
+      "operation_id": "recordOnboardingProgress",
+      "scenario": "Progress for a tour that is no longer current is a conflict; the stored state is untouched.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/onboarding/progress",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"tour_id\":\"core-2025-01\",\"completed\":true}"
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "record_onboarding_progress_tour_mismatch.json"
+    },
+    {
+      "name": "record_onboarding_progress_unknown_member",
+      "operation_id": "recordOnboardingProgress",
+      "scenario": "A member the operation does not declare is a validation failure naming it.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/onboarding/progress",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"step\":\"apps\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "record_onboarding_progress_unknown_member.json"
+    },
+    {
+      "name": "refresh_session_ok",
+      "operation_id": "refreshSession",
+      "scenario": "A refresh token exchanged for a new pair; the account is not repeated.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/refresh",
+        "body": "{\"refresh_token\":\"ref\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RefreshedTokens",
+      "body_file": "refresh_session_ok.json"
+    },
+    {
+      "name": "refresh_session_revoked",
+      "operation_id": "refreshSession",
+      "scenario": "A refresh token of a revoked session is session_expired: the client must log in again.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/refresh",
+        "body": "{\"refresh_token\":\"revoked\"}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "refresh_session_revoked.json"
+    },
+    {
+      "name": "refresh_session_token_required",
+      "operation_id": "refreshSession",
+      "scenario": "A refresh without its token is a validation failure naming the member.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/refresh",
+        "body": "{}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "refresh_session_token_required.json"
+    },
+    {
+      "name": "setup_server_email_required",
+      "operation_id": "setupServer",
+      "scenario": "Setup without an email is a validation failure naming the member.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/setup",
+        "body": "{\"username\":\"admin\",\"password\":\"correct horse battery staple\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "setup_server_email_required.json"
+    },
+    {
+      "name": "setup_server_ok",
+      "operation_id": "setupServer",
+      "scenario": "First-run setup creates the administrator and opens its session: 201 with the token pair.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/setup",
+        "body": "{\"username\":\"admin\",\"email\":\"admin@example.test\",\"password\":\"correct horse battery staple\",\"create_default_profile\":true}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/TokenPair",
+      "body_file": "setup_server_ok.json"
+    },
+    {
+      "name": "signup_duplicate",
+      "operation_id": "signup",
+      "scenario": "A username or email already taken is a conflict (v1: 400 duplicate).",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/signup",
+        "body": "{\"username\":\"laura\",\"email\":\"laura@example.test\",\"password\":\"correct horse battery staple\",\"invite_code\":\"WELCOME-2026\"}"
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "signup_duplicate.json"
+    },
+    {
+      "name": "signup_invite_code_rejected",
+      "operation_id": "signup",
+      "scenario": "An exhausted, disabled or unknown invite code is a validation failure at body.invite_code (v1: 400 with a per-case code).",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/signup",
+        "body": "{\"username\":\"alice\",\"email\":\"alice@example.test\",\"password\":\"correct horse battery staple\",\"invite_code\":\"USED\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "signup_invite_code_rejected.json"
+    },
+    {
+      "name": "signup_ok",
+      "operation_id": "signup",
+      "scenario": "An invited signup creates the account and opens its session: 201 with the token pair.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/signup",
+        "body": "{\"username\":\"alice\",\"email\":\"alice@example.test\",\"password\":\"correct horse battery staple\",\"invite_code\":\"WELCOME-2026\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/TokenPair",
+      "body_file": "signup_ok.json"
+    },
+    {
+      "name": "start_device_login_ok",
+      "operation_id": "startDeviceLogin",
+      "scenario": "A device opens a pairing request: the codes it shows and polls with, and the request's expiry.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/start",
+        "body": "{\"device_name\":\"Living room TV\",\"device_platform\":\"tvos\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLoginStart",
+      "body_file": "start_device_login_ok.json"
+    },
+    {
+      "name": "start_device_login_purpose_rejected",
+      "operation_id": "startDeviceLogin",
+      "scenario": "A client purpose the pairing state machine does not know is a validation failure at the member.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/start",
+        "body": "{\"client_purpose\":\"mining\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "start_device_login_purpose_rejected.json"
     },
     {
       "name": "unknown_query_parameter",

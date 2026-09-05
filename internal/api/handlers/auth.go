@@ -269,12 +269,9 @@ func (h *AuthHandler) EndImpersonation(ctx context.Context, claims *auth.Claims)
 }
 
 func (h *AuthHandler) HandleProviders(w http.ResponseWriter, r *http.Request) {
-	providers := h.service.ListProviders()
+	providers := h.ListProviders()
 	response := make([]authProviderResponse, 0, len(providers))
 	for _, provider := range providers {
-		if provider.Mode == "oauth" && !h.oauthRoutesAvailable {
-			continue
-		}
 		response = append(response, authProviderResponse{
 			ID:             provider.ID,
 			DisplayName:    provider.DisplayName,
@@ -308,37 +305,21 @@ func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Username = auth.NormalizeUsername(req.Username)
-	req.Email = auth.NormalizeEmail(req.Email)
-
-	if req.Username == "" || req.Email == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, and password are required")
-		return
-	}
-
-	deviceName := r.UserAgent()
-	ip := clientip.FromContext(r.Context())
-
-	pair, user, err := h.service.SetupInitialUser(
-		r.Context(),
-		req.Username,
-		req.Email,
-		req.Password,
-		req.CreateDefaultProfile,
-		req.DefaultProfileName,
-		deviceName,
-		ip,
-	)
+	view, err := h.SetupInitialUser(r.Context(), RegistrationInput{
+		Username:             req.Username,
+		Email:                req.Email,
+		Password:             req.Password,
+		CreateDefaultProfile: req.CreateDefaultProfile,
+		DefaultProfileName:   req.DefaultProfileName,
+		DeviceName:           r.UserAgent(),
+		IP:                   clientip.FromContext(r.Context()),
+	})
 	if err != nil {
-		if errors.Is(err, auth.ErrSetupAlreadyComplete) {
-			writeError(w, http.StatusUnauthorized, "setup_complete", "Initial setup has already been completed")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+		writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, buildLoginResponse(pair, user, effectiveDownloadAllowed(r.Context(), user, h.accessGroups), nil))
+	writeJSON(w, http.StatusCreated, loginResponseOf(view))
 }
 
 // HandleLogout handles POST /auth/logout. Requires authentication.
@@ -380,22 +361,9 @@ func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.RefreshToken == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Refresh token is required")
-		return
-	}
-
-	pair, err := h.service.Refresh(r.Context(), req.RefreshToken)
+	pair, err := h.Refresh(r.Context(), req.RefreshToken)
 	if err != nil {
-		if errors.Is(err, auth.ErrSessionRevoked) {
-			writeError(w, http.StatusUnauthorized, "session_revoked", "Session has been revoked")
-			return
-		}
-		if errors.Is(err, auth.ErrInvalidToken) || errors.Is(err, auth.ErrExpiredToken) {
-			writeError(w, http.StatusUnauthorized, "invalid_token", "Invalid or expired refresh token")
-			return
-		}
-		writeError(w, http.StatusUnauthorized, "invalid_token", "Invalid or expired refresh token")
+		writeAPIError(w, err)
 		return
 	}
 
@@ -413,11 +381,10 @@ func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	const ttl = 5 * time.Minute
-	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
-	token, err := h.jwt.GeneratePluginAccessToken(claims.UserID, claims.Role, claims.SessionID, profileID, ttl)
+	const ttl = PluginLaunchTTL
+	token, err := h.PluginLaunchToken(claims, apimw.GetProfileID(r.Context()))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare plugin access")
+		writeAPIError(w, err)
 		return
 	}
 
@@ -480,9 +447,9 @@ func (h *AuthHandler) HandleListSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sessions, err := h.service.GetSessions(r.Context(), claims.UserID)
+	sessions, err := h.ListSessions(r.Context(), claims.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+		writeAPIError(w, err)
 		return
 	}
 
@@ -511,19 +478,8 @@ func (h *AuthHandler) HandleDeleteSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sessionID := chi.URLParam(r, "id")
-	if sessionID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Session ID is required")
-		return
-	}
-
-	err = h.service.RevokeSession(r.Context(), sessionID, claims.UserID)
-	if err != nil {
-		if auth.IsSessionNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Session not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	if err := h.RevokeSession(r.Context(), chi.URLParam(r, "id"), claims.UserID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
@@ -532,9 +488,9 @@ func (h *AuthHandler) HandleDeleteSession(w http.ResponseWriter, r *http.Request
 
 // HandleSignupStatus handles GET /auth/signup.
 func (h *AuthHandler) HandleSignupStatus(w http.ResponseWriter, r *http.Request) {
-	enabled, err := h.service.IsSignupEnabled(r.Context())
+	enabled, err := h.SignupEnabled(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+		writeAPIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, signupStatusResponse{Enabled: enabled})
@@ -548,54 +504,22 @@ func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Username = auth.NormalizeUsername(req.Username)
-	req.Email = auth.NormalizeEmail(req.Email)
-
-	if req.Username == "" || req.Email == "" || req.Password == "" || req.InviteCode == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and invite code are required")
-		return
-	}
-
-	deviceName := r.UserAgent()
-	ip := clientip.FromContext(r.Context())
-
-	pair, user, err := h.service.Signup(
-		r.Context(),
-		req.Username,
-		req.Email,
-		req.Password,
-		req.InviteCode,
-		req.CreateDefaultProfile,
-		req.DefaultProfileName,
-		deviceName,
-		ip,
-	)
+	view, err := h.Signup(r.Context(), RegistrationInput{
+		Username:             req.Username,
+		Email:                req.Email,
+		Password:             req.Password,
+		InviteCode:           req.InviteCode,
+		CreateDefaultProfile: req.CreateDefaultProfile,
+		DefaultProfileName:   req.DefaultProfileName,
+		DeviceName:           r.UserAgent(),
+		IP:                   clientip.FromContext(r.Context()),
+	})
 	if err != nil {
-		if errors.Is(err, auth.ErrSignupDisabled) {
-			writeError(w, http.StatusForbidden, "signup_disabled", "Public signups are not currently enabled")
-			return
-		}
-		if errors.Is(err, auth.ErrInviteCodeNotFound) {
-			writeError(w, http.StatusBadRequest, "invalid_code", "Invalid invite code")
-			return
-		}
-		if errors.Is(err, auth.ErrInviteCodeExhausted) {
-			writeError(w, http.StatusBadRequest, "code_exhausted", "This invite code has reached its maximum uses")
-			return
-		}
-		if errors.Is(err, auth.ErrInviteCodeDisabled) {
-			writeError(w, http.StatusBadRequest, "code_disabled", "This invite code is no longer active")
-			return
-		}
-		if auth.IsDuplicate(err) {
-			writeError(w, http.StatusBadRequest, "duplicate", "Username or email already taken")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+		writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, buildLoginResponse(pair, user, effectiveDownloadAllowed(r.Context(), user, h.accessGroups), nil))
+	writeJSON(w, http.StatusCreated, loginResponseOf(view))
 }
 
 // --- Helper functions ---

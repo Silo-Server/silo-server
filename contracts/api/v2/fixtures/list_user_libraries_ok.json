@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "id": "1",
+      "name": "Movies",
+      "type": "movies",
+      "sort_order": 0,
+      "poster_url": "https://s3.example.test/silo/posters/1.jpg"
+    },
+    {
+      "id": "3",
+      "name": "Kids",
+      "type": "series",
+      "sort_order": 2
+    }
+  ]
+}
+

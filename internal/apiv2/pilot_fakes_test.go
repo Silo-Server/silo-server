@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -228,7 +232,10 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
 	deps.Devices = fixtureDevices()
-	deps.Sessions = &fakeSessionService{}
+	deps.Sessions = &fakeSessionService{signupOn: true}
+	deps.Onboarding = fakeOnboarding{}
+	deps.Policy = fakePolicy{ok: true}
+	deps.UserLibraries = fakeUserLibraries{}
 	deps.OAuth = fakeOAuth{codes: map[string]auth.OAuthCompletion{"c0de": {AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600, NextURL: "/me"}}}
 	two, yes := 2, true
 	groupID := int64(2)
@@ -400,9 +407,12 @@ func fixtureDevices() fakeDevices {
 // fakeSessionService stands in for the login-session seam on
 // *handlers.AuthHandler.
 type fakeSessionService struct {
-	// loggedOut and ended record the session ids the calls received.
+	// loggedOut, ended and revoked record the session ids the calls received.
 	loggedOut []string
 	ended     []string
+	revoked   []string
+	setupDone bool
+	signupOn  bool
 	err       error
 }
 
@@ -442,9 +452,108 @@ func (f *fakeSessionService) EndImpersonation(_ context.Context, claims *auth.Cl
 	return nil
 }
 
-// fakeOAuth stands in for *auth.OAuthHandler.Complete: one redeemable code.
+func (f *fakeSessionService) ListProviders() []auth.LoginProviderInfo {
+	return []auth.LoginProviderInfo{
+		{ID: "local", DisplayName: "Silo account", Mode: "credentials", Default: true},
+		{ID: "plugin-3", DisplayName: "Example SSO", Mode: "oauth", IconURL: "https://plugins.example.test/icon.svg", InstallationID: 3},
+	}
+}
+
+func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {
+	switch token {
+	case "ref":
+		return handlers.RefreshedTokensView{AccessToken: "acc2", RefreshToken: "ref2", ExpiresIn: 3600}, nil
+	case "revoked":
+		return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "session_revoked", Message: "Session has been revoked"}
+	}
+	return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "invalid_token", Message: "Invalid or expired refresh token"}
+}
+
+func (f *fakeSessionService) ListSessions(_ context.Context, userID int) ([]*models.AuthSession, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	revoked := fixedTime().Add(time.Hour)
+	return []*models.AuthSession{
+		{ID: "s1", UserID: userID, DeviceName: "Silo/1.0 (tvOS)", IPAddress: "203.0.113.7", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(30 * 24 * time.Hour)},
+		{ID: "s9", UserID: userID, DeviceName: "", IPAddress: "", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(30 * 24 * time.Hour), RevokedAt: &revoked},
+	}, nil
+}
+
+func (f *fakeSessionService) RevokeSession(_ context.Context, sessionID string, _ int) error {
+	if f.err != nil {
+		return f.err
+	}
+	if sessionID != "s1" && sessionID != "s9" {
+		return &handlers.APIError{Status: 404, Code: "not_found", Message: "Session not found"}
+	}
+	f.revoked = append(f.revoked, sessionID)
+	return nil
+}
+
+func (f *fakeSessionService) SetupInitialUser(_ context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error) {
+	if f.err != nil {
+		return handlers.TokenPairView{}, f.err
+	}
+	if f.setupDone {
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 401, Code: "setup_complete", Message: "Initial setup has already been completed"}
+	}
+	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 1, Username: in.Username, Email: in.Email, Role: "admin", Permissions: []string{"marker_edit", "metadata_curation"}, DownloadAllowed: true}}, nil
+}
+
+func (f *fakeSessionService) SignupEnabled(context.Context) (bool, error) { return f.signupOn, f.err }
+
+func (f *fakeSessionService) Signup(_ context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error) {
+	if f.err != nil {
+		return handlers.TokenPairView{}, f.err
+	}
+	if !f.signupOn {
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "signup_disabled", Message: "Public signups are not currently enabled"}
+	}
+	switch in.InviteCode {
+	case "WELCOME-2026":
+	case "USED":
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 400, Code: "code_exhausted", Message: "This invite code has reached its maximum uses", Field: "invite_code"}
+	default:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 400, Code: "invalid_code", Message: "Invalid invite code", Field: "invite_code"}
+	}
+	if in.Username == "laura" {
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 400, Code: "duplicate", Message: "Username or email already taken"}
+	}
+	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 3, Username: in.Username, Email: in.Email, Role: "user", Permissions: []string{}, DownloadAllowed: true}}, nil
+}
+
+func (f *fakeSessionService) PluginLaunchToken(claims *auth.Claims, profileID string) (string, error) {
+	if claims == nil || claims.SessionID == "" {
+		return "", &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Invalid or missing authentication token"}
+	}
+	return "plugin-" + claims.SessionID + "-" + strings.TrimSpace(profileID), nil
+}
+
+// fakeOAuth stands in for *auth.OAuthHandler: one redeemable code and a
+// fixed provider handshake.
 type fakeOAuth struct {
 	codes map[string]auth.OAuthCompletion
+}
+
+func (fakeOAuth) CallbackURL(prefix string, installID int) string {
+	return "https://silo.example.test" + prefix + "/auth/oauth/" + strconv.Itoa(installID) + "/callback"
+}
+
+func (fakeOAuth) Init(_ context.Context, installID int, next, redirectURI string) (string, error) {
+	if installID != 3 {
+		return "", &auth.OAuthHandshakeError{Status: 502, Message: "auth plugin unavailable"}
+	}
+	return "https://sso.example.test/authorize?redirect_uri=" + url.QueryEscape(redirectURI) + "&next=" + url.QueryEscape(next), nil
+}
+
+func (fakeOAuth) Callback(_ context.Context, in auth.OAuthCallbackInput) string {
+	if in.InstallID != 3 || in.State != "st" || in.Code != "pc" {
+		return "/login?error=oauth_failed&reason=state_invalid"
+	}
+	return "https://silo.example.test/login/oauth-complete?code=c0de"
 }
 
 func (f fakeOAuth) Complete(_ context.Context, code string) (auth.OAuthCompletion, error) {
@@ -457,4 +566,80 @@ func (f fakeOAuth) Complete(_ context.Context, code string) (auth.OAuthCompletio
 		return auth.OAuthCompletion{}, auth.ErrOAuthCompletionInvalid
 	}
 	return c, nil
+}
+
+// fakeOnboarding stands in for *handlers.OnboardingHandler.
+type fakeOnboarding struct {
+	err error
+}
+
+func (f fakeOnboarding) Flow(ctx context.Context, _ int, profileID, surface string) (onboarding.Flow, error) {
+	if f.err != nil {
+		return onboarding.Flow{}, f.err
+	}
+	switch surface {
+	case "", onboarding.SurfaceWeb, onboarding.SurfacePhone, onboarding.SurfaceTV:
+	default:
+		return onboarding.Flow{}, &handlers.APIError{Status: 400, Code: "bad_request", Message: "surface must be web, phone, or tv", Field: "surface"}
+	}
+	if surface == "" {
+		surface = onboarding.SurfaceWeb
+	}
+	return onboarding.FlowFor(ctx, onboarding.Gates{}, surface, profileID == "p-child"), nil
+}
+
+func (f fakeOnboarding) State(_ context.Context, _ int, profileID string) (handlers.OnboardingStateView, error) {
+	if f.err != nil {
+		return handlers.OnboardingStateView{}, f.err
+	}
+	view := handlers.OnboardingStateView{TourID: onboarding.TourID}
+	if profileID == "p-owner" {
+		view.LastStep = "playback-quality"
+	}
+	return view, nil
+}
+
+func (f fakeOnboarding) RecordProgress(_ context.Context, _ int, _ string, in handlers.OnboardingProgressInput) error {
+	if f.err != nil {
+		return f.err
+	}
+	if in.TourID != "" && in.TourID != onboarding.TourID {
+		return &handlers.APIError{Status: 409, Code: "tour_mismatch", Message: "This tour is no longer current"}
+	}
+	return nil
+}
+
+// fakePolicy stands in for *handlers.PolicyHandler.
+type fakePolicy struct{ ok bool }
+
+func (f fakePolicy) Capability() (handlers.PolicyCapabilityView, bool) {
+	if !f.ok {
+		return handlers.PolicyCapabilityView{}, false
+	}
+	return handlers.PolicyCapabilityView{Enabled: true, EditorAvailable: true, DecisionTypes: []string{"download", "playback"}, Generation: 3}, true
+}
+
+// fakeUserLibraries stands in for *handlers.LibraryHandler.
+type fakeUserLibraries struct{ err error }
+
+func (f fakeUserLibraries) ListUserLibraries(ctx context.Context) ([]handlers.UserLibraryView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	all := []handlers.UserLibraryView{
+		{ID: 1, Name: "Movies", Type: "movies", SortOrder: 0, PosterURL: "https://s3.example.test/silo/posters/1.jpg"},
+		{ID: 3, Name: "Kids", Type: "series", SortOrder: 2},
+	}
+	if scope, ok := scopeFrom(ctx); ok && scope.LibrariesRestricted {
+		var out []handlers.UserLibraryView
+		for _, l := range all {
+			for _, id := range scope.AllowedLibraryIDs {
+				if id == l.ID {
+					out = append(out, l)
+				}
+			}
+		}
+		return out, nil
+	}
+	return all, nil
 }

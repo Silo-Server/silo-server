@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/conflict",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "No active impersonation session.",
+  "instance": "urn:silo:request:000000000000000000000027"
+}
+

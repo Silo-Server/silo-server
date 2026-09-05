@@ -1,0 +1,14 @@
+{
+  "access_token": "acc",
+  "refresh_token": "ref",
+  "expires_in": 3600,
+  "user": {
+    "id": "3",
+    "username": "alice",
+    "email": "alice@example.test",
+    "role": "user",
+    "permissions": [],
+    "download_allowed": true
+  }
+}
+

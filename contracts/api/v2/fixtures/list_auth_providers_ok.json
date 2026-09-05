@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "id": "local",
+      "display_name": "Silo account",
+      "mode": "credentials",
+      "default": true
+    },
+    {
+      "id": "plugin-3",
+      "display_name": "Example SSO",
+      "mode": "oauth",
+      "default": false,
+      "icon_url": "https://plugins.example.test/icon.svg",
+      "installation_id": "3"
+    }
+  ]
+}
+

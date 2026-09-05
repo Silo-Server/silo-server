@@ -19,6 +19,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -101,8 +103,16 @@ type Dependencies struct {
 	Devices DeviceLoginService
 	// Sessions opens and closes login sessions (*handlers.AuthHandler).
 	Sessions SessionService
-	// OAuth redeems browser OAuth completions (*auth.OAuthHandler).
+	// OAuth redeems browser OAuth completions and drives the browser
+	// handshake (*auth.OAuthHandler).
 	OAuth OAuthService
+	// Onboarding serves the first-run tour (*handlers.OnboardingHandler).
+	Onboarding OnboardingService
+	// Policy describes the policy engine (*handlers.PolicyHandler).
+	Policy PolicyService
+	// UserLibraries lists the libraries the caller may browse
+	// (*handlers.LibraryHandler).
+	UserLibraries UserLibraryService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -147,6 +157,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	reg := &Registry{api: api, deps: deps}
 	registerAll(reg)
+	serveRawHandshakes(reg)
 	if deps.testRegister != nil {
 		deps.testRegister(reg)
 	}
@@ -392,6 +403,9 @@ type LibraryService interface {
 // OAuthService is the slice of *auth.OAuthHandler completeOAuthLogin uses.
 type OAuthService interface {
 	Complete(ctx context.Context, code string) (auth.OAuthCompletion, error)
+	CallbackURL(prefix string, installID int) string
+	Init(ctx context.Context, installID int, next, redirectURI string) (string, error)
+	Callback(ctx context.Context, in auth.OAuthCallbackInput) string
 }
 
 // SessionService is the slice of *handlers.AuthHandler the login-session
@@ -400,6 +414,34 @@ type SessionService interface {
 	Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error)
 	Logout(ctx context.Context, claims *auth.Claims) error
 	EndImpersonation(ctx context.Context, claims *auth.Claims) error
+	ListProviders() []auth.LoginProviderInfo
+	Refresh(ctx context.Context, refreshToken string) (handlers.RefreshedTokensView, error)
+	ListSessions(ctx context.Context, userID int) ([]*models.AuthSession, error)
+	RevokeSession(ctx context.Context, sessionID string, userID int) error
+	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	SignupEnabled(ctx context.Context) (bool, error)
+	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	PluginLaunchToken(claims *auth.Claims, profileID string) (string, error)
+}
+
+// OnboardingService is the slice of *handlers.OnboardingHandler the
+// onboarding operations use.
+type OnboardingService interface {
+	Flow(ctx context.Context, userID int, profileID, surface string) (onboarding.Flow, error)
+	State(ctx context.Context, userID int, profileID string) (handlers.OnboardingStateView, error)
+	RecordProgress(ctx context.Context, userID int, profileID string, in handlers.OnboardingProgressInput) error
+}
+
+// PolicyService is the slice of *handlers.PolicyHandler getPolicyCapability
+// uses.
+type PolicyService interface {
+	Capability() (handlers.PolicyCapabilityView, bool)
+}
+
+// UserLibraryService is the slice of *handlers.LibraryHandler
+// listUserLibraries uses.
+type UserLibraryService interface {
+	ListUserLibraries(ctx context.Context) ([]handlers.UserLibraryView, error)
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing

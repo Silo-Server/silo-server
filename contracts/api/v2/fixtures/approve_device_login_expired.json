@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/device_login_expired",
+  "title": "Device login expired",
+  "status": 410,
+  "detail": "Device login request has expired.",
+  "instance": "urn:silo:request:00000000000000000000001e"
+}
+

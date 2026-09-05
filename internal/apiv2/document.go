@@ -202,10 +202,14 @@ func registerAll(reg *Registry) {
 	registerAccount(reg)
 	registerAdminUsers(reg)
 	registerAuth(reg)
+	registerAuthSessions(reg)
 	registerDeviceLogin(reg)
+	registerOnboarding(reg)
+	registerPolicy(reg)
 	registerProfiles(reg)
 	registerProgress(reg)
 	registerSystem(reg)
+	registerUserLibraries(reg)
 	registerOpenAPIDocument(reg)
 }
 
@@ -219,7 +223,11 @@ func GenerateOpenAPI() ([]byte, error) {
 	api := huma.NewAPI(humaConfig(), noopAdapter{})
 	reg := &Registry{api: api}
 	registerAll(reg)
-	raw, err := api.OpenAPI().MarshalJSON()
+	doc := api.OpenAPI()
+	for _, h := range rawHandshakes {
+		doc.AddOperation(h.operation())
+	}
+	raw, err := doc.MarshalJSON()
 	if err != nil {
 		return nil, err
 	}
