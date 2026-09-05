@@ -504,11 +504,21 @@ func parseExcludeIDs(raw []string) map[string]struct{} {
 	return ids
 }
 
-// Card is the section card the swipe card wraps.
-func (c swipeCardResponse) Card() SectionItemView { return c.sectionItemResponse }
+// Card is the section card the swipe card wraps. The v1 body carries runtime
+// on the swipe card itself, not on the embedded section item, so the card
+// view surfaces that outer member.
+func (c swipeCardResponse) Card() SectionItemView {
+	card := c.sectionItemResponse
+	if c.Runtime != 0 {
+		card.Runtime = c.Runtime
+	}
+	return card
+}
 
-// NewWatchTonightCardView wraps a card with its source and cast; the v2
-// tests build views with it since the embedded card is unexported.
-func NewWatchTonightCardView(card SectionItemView, source string, cast []WatchTonightCastMemberView) WatchTonightCardView {
-	return swipeCardResponse{sectionItemResponse: card, WatchTonightSource: source, Runtime: card.Runtime, Cast: cast}
+// NewWatchTonightCardView wraps a card with its source, runtime, and cast; the
+// v2 tests build views with it since the embedded card is unexported. Runtime
+// is taken separately because production sets it on the swipe card, not on
+// the embedded section item.
+func NewWatchTonightCardView(card SectionItemView, source string, runtime int, cast []WatchTonightCastMemberView) WatchTonightCardView {
+	return swipeCardResponse{sectionItemResponse: card, WatchTonightSource: source, Runtime: runtime, Cast: cast}
 }

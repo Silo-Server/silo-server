@@ -452,7 +452,7 @@ func TestRecommendationWatchTonightCards(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	requireFakeCard(t, body.Items[0])
-	if string(body.Items[0]["cast"]) != `[{"name":"Al Pacino","character":"Lt. Vincent Hanna"}]` || string(body.Items[0]["watch_tonight_source"]) != `"recommendation"` {
+	if string(body.Items[0]["cast"]) != `[{"name":"Al Pacino","character":"Lt. Vincent Hanna"}]` || string(body.Items[0]["watch_tonight_source"]) != `"recommendation"` || string(body.Items[0]["runtime"]) != `170` {
 		t.Fatalf("card = %s", rec.Body.String())
 	}
 	if fake.lastMode != "discover" || strings.Join(fake.lastGenres, ",") != "Crime,Thriller" || len(fake.lastExclude) != 2 || fake.lastLimit != 3 {
@@ -483,5 +483,8 @@ func fakeWatchTonightItem() handlers.WatchTonightItemView {
 func fakeWatchTonightCard() handlers.WatchTonightCardView {
 	card := fakeCard()
 	card.ItemSource = "recommendation"
-	return handlers.NewWatchTonightCardView(card, "recommendation", []handlers.WatchTonightCastMemberView{{Name: "Al Pacino", Character: "Lt. Vincent Hanna"}})
+	// Production leaves runtime off the embedded section item and sets it on
+	// the swipe card; mirror that so the test proves v2 reads the outer member.
+	card.Runtime = 0
+	return handlers.NewWatchTonightCardView(card, "recommendation", 170, []handlers.WatchTonightCastMemberView{{Name: "Al Pacino", Character: "Lt. Vincent Hanna"}})
 }
