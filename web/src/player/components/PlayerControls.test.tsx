@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PlayerControls } from "./PlayerControls";
 
@@ -50,7 +50,39 @@ function renderControls(markerEditAvailable: boolean) {
 }
 
 describe("PlayerControls", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("moves desktop secondary controls into overflow as the player narrows", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1024);
+    let resize = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = () => callback([], {} as ResizeObserver);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+
+    renderControls(true);
+    expect(screen.queryByRole("button", { name: "Edit markers" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More player options" }));
+    expect(screen.getByRole("menuitem", { name: "Edit markers" })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Volume" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    width.mockReturnValue(1920);
+    act(resize);
+    expect(screen.queryByRole("button", { name: "More player options" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit markers" })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Volume" })).toBeInTheDocument();
+  });
 
   it("hides marker editing when unavailable", () => {
     renderControls(false);
