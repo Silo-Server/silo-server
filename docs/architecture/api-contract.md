@@ -423,13 +423,14 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   carries the same enum as `RetrySafety`: `Register` panics when a mutating operation omits it
   or a GET/HEAD declares it, and the document records it as `x-silo-retry-safety`.
   `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
-  classified legacy row or disagrees with it. No generic key store exists, so `Register`
+  classified legacy row or disagrees with it, unless `mutationWithoutLegacyRow` names a
+  v2-only mutation with a reason. No generic key store exists, so `Register`
   refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (157
-  `natural_idempotent`, 31 `unique_constraint`, 12 `domain_identity`, 9 `coalescing`, 9
+  tier-1 ported mutation rows (218 distinct operations) are classified (156
+  `natural_idempotent`, 31 `unique_constraint`, 12 `domain_identity`, 10 `coalescing`, 9
   `non_retryable`, 0 `idempotency_key`, counted per distinct operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
@@ -437,12 +438,12 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   first call never touched (node force-reload, per node and fleet-wide), or a token-issuing
   send with no request identity (invitation create and resend, whose retry supersedes the
   token the first call mailed); each note says what the v2 port needs before clients may
-  retry. Eight rows carry a `DEFECT` note where v1 gates on process-local state, fires an
+  retry. Nine rows carry a `DEFECT` note where v1 gates on process-local state, fires an
   external effect inline, or lacks the dedup its identity implies (task run, collection sync,
-  trailer refresh, person refresh, email-address verification, invite-code redemption during
-  signup, playback route events, mark-watched history); their v2 port must move the gate to
-  shared durable state or add the missing unique constraint before the declared strategy
-  holds.
+  trailer refresh, person refresh, stale-id rematch, email-address verification, invite-code
+  redemption during signup, playback route events, mark-watched history); their v2 port must
+  move the gate to shared durable state or add the missing unique constraint before the
+  declared strategy holds.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
   tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the

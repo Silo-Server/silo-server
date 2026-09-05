@@ -29941,8 +29941,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Deletes the stale-id row and re-queues the match; a retry finds nothing left to delete and converges."
+      "retry_safety": "coalescing",
+      "retry_safety_note": "DEFECT: clears the stale ids, then launches RefreshItem in a goroutine with no shared in-flight claim, so a retry after a lost response starts a second provider pipeline, also across API nodes. The v2 port must return the active refresh from a durable claim."
     },
     {
       "listener": "api",
