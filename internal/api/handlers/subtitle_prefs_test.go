@@ -222,3 +222,82 @@ func TestSetSubtitlePrefRejectsInvalidModeBeforeWriting(t *testing.T) {
 		t.Fatalf("legacy row written despite the rejected value: %+v", pref)
 	}
 }
+
+// TestSetSubtitlePreferenceCanonicalPreservesCanonicalForcedOverride: the v2
+// write keeps the forced override the canonical profile_series row holds —
+// the row PUT /settings/values writes without touching the legacy table — when
+// the body omits show_forced_subtitles, and replaces it when the body carries
+// the member. The legacy row is absent throughout, so the legacy lookup alone
+// would have cleared the override.
+func TestSetSubtitlePreferenceCanonicalPreservesCanonicalForcedOverride(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	ctx := context.Background()
+	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key:       settingskeys.PlaybackShowForcedSubtitles,
+		Scope:     settingscontract.ScopeProfileSeries,
+		ProfileID: "profile-1",
+		SeriesID:  "series-1",
+	}, json.RawMessage(`true`)); err != nil {
+		t.Fatalf("seeding canonical forced row: %v", err)
+	}
+	if legacy, err := store.GetSubtitlePreference(ctx, "profile-1", "series-1"); err != nil || legacy != nil {
+		t.Fatalf("legacy row before the write = %+v, %v; want none", legacy, err)
+	}
+
+	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
+	omitted := userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1",
+		SubtitleLanguage: "ja", SubtitleTrackIndex: 2, SubtitleMode: "always",
+	}
+	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, omitted); err != nil {
+		t.Fatalf("v2 write without show_forced_subtitles: %v", err)
+	}
+	eff := resolveSeriesSubtitleSetting(t, store, settingskeys.PlaybackShowForcedSubtitles, "profile-1", "series-1")
+	if eff.Source != settingscontract.ScopeProfileSeries || string(eff.Value) != `true` {
+		t.Fatalf("canonical forced override after omitted member = %s from %q, want true from profile_series", eff.Value, eff.Source)
+	}
+	legacy, err := store.GetSubtitlePreference(ctx, "profile-1", "series-1")
+	if err != nil || legacy == nil {
+		t.Fatalf("legacy row after the write = %+v, %v; want one", legacy, err)
+	}
+	if !legacy.HasShowForcedSubtitles || !legacy.ShowForcedSubtitles || legacy.SubtitleLanguage != "ja" || legacy.SubtitleTrackIndex != 2 {
+		t.Fatalf("legacy row after the write = %+v; want forced=true carried over and the new track selection", legacy)
+	}
+
+	present := omitted
+	present.ShowForcedSubtitles, present.HasShowForcedSubtitles = false, true
+	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, present); err != nil {
+		t.Fatalf("v2 write with show_forced_subtitles: %v", err)
+	}
+	eff = resolveSeriesSubtitleSetting(t, store, settingskeys.PlaybackShowForcedSubtitles, "profile-1", "series-1")
+	if eff.Source != settingscontract.ScopeProfileSeries || string(eff.Value) != `false` {
+		t.Fatalf("canonical forced override after present member = %s from %q, want false from profile_series", eff.Value, eff.Source)
+	}
+	legacy, err = store.GetSubtitlePreference(ctx, "profile-1", "series-1")
+	if err != nil || legacy == nil || !legacy.HasShowForcedSubtitles || legacy.ShowForcedSubtitles {
+		t.Fatalf("legacy row after the present write = %+v, %v; want forced=false", legacy, err)
+	}
+}
+
+// TestSetSubtitlePreferenceCanonicalWithoutAnyOverrideClearsForced: with no
+// canonical row and no legacy row, an omitted show_forced_subtitles means no
+// override, as on v1.
+func TestSetSubtitlePreferenceCanonicalWithoutAnyOverrideClearsForced(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	ctx := context.Background()
+	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
+	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1",
+		SubtitleLanguage: "en", SubtitleTrackIndex: 1, SubtitleMode: "always",
+	}); err != nil {
+		t.Fatalf("v2 write: %v", err)
+	}
+	eff := resolveSeriesSubtitleSetting(t, store, settingskeys.PlaybackShowForcedSubtitles, "profile-1", "series-1")
+	if eff.Source == settingscontract.ScopeProfileSeries {
+		t.Fatalf("forced override invented: %s from %q", eff.Value, eff.Source)
+	}
+	legacy, err := store.GetSubtitlePreference(ctx, "profile-1", "series-1")
+	if err != nil || legacy == nil || legacy.HasShowForcedSubtitles {
+		t.Fatalf("legacy row = %+v, %v; want one without a forced override", legacy, err)
+	}
+}

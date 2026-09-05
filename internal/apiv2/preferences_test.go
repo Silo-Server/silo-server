@@ -183,7 +183,7 @@ func (f *fakeSubtitlePreferences) GetSubtitlePreference(_ context.Context, _ int
 	return p, nil
 }
 
-func (f *fakeSubtitlePreferences) SetSubtitlePreference(_ context.Context, _ int, pref userstore.SubtitlePreference) error {
+func (f *fakeSubtitlePreferences) SetSubtitlePreferenceCanonical(_ context.Context, _ int, pref userstore.SubtitlePreference) error {
 	if f.err != nil {
 		return f.err
 	}

@@ -480,7 +480,7 @@ func (reg *Registry) updateSubtitlePreference(ctx context.Context, in *SubtitleP
 		pref.ShowForcedSubtitles = *f
 		pref.HasShowForcedSubtitles = true
 	}
-	if err := reg.deps.SubtitlePreferences.SetSubtitlePreference(ctx, claims.UserID, pref); err != nil {
+	if err := reg.deps.SubtitlePreferences.SetSubtitlePreferenceCanonical(ctx, claims.UserID, pref); err != nil {
 		return nil, preferenceProblem(err)
 	}
 	return &struct{}{}, nil

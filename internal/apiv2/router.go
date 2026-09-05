@@ -459,7 +459,7 @@ type AudioPreferenceService interface {
 // subtitle preference operations use.
 type SubtitlePreferenceService interface {
 	GetSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error)
-	SetSubtitlePreference(ctx context.Context, userID int, pref userstore.SubtitlePreference) error
+	SetSubtitlePreferenceCanonical(ctx context.Context, userID int, pref userstore.SubtitlePreference) error
 	DeleteSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) error
 }
 
