@@ -178,6 +178,13 @@ export function PlayerControls({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
+  // Discard compact menus when switching layouts so they cannot reappear
+  // after a resize or fullscreen round trip.
+  if (!compactControls && (overflowOpen || audioOpen || chaptersOpen)) {
+    setOverflowOpen(false);
+    setAudioOpen(false);
+    setChaptersOpen(false);
+  }
   const safeDuration = duration > 0 ? duration : 0;
   const handleSkipBack = () => onSeek(Math.max(0, currentTime - SKIP_BACK_SECONDS));
   const handleSkipForward = () =>
