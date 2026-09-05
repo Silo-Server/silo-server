@@ -244,7 +244,7 @@ func sectionViewer(ctx context.Context, imageSize string) handlers.SectionViewer
 	if err != nil {
 		size = imagesize.Unset
 	}
-	return handlers.SectionViewer{Access: handlers.ViewerAccessFilter(ctx, ""), ImageSize: size}
+	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
@@ -447,7 +447,7 @@ func (reg *Registry) getLibraryCollectionItems(ctx context.Context, cursors *Cur
 	if p != nil {
 		return nil, p
 	}
-	views, hasMore, err := svc.LibraryCollectionItems(ctx, id, in.CollectionID, handlers.ViewerAccessFilter(ctx, ""), handlers.CollectionItemPage{Limit: in.Limit, Offset: offset})
+	views, hasMore, err := svc.LibraryCollectionItems(ctx, id, in.CollectionID, handlers.AccessFilterFromContext(ctx, ""), handlers.CollectionItemPage{Limit: in.Limit, Offset: offset})
 	if err != nil {
 		return nil, collectionItemsProblem(err)
 	}

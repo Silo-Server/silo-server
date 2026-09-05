@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -504,20 +503,15 @@ type LibraryProvidersSetInput struct {
 	Body LibraryProvidersSet
 }
 
-// LibraryPosterUpload documents the multipart form uploadLibraryPoster reads.
-type LibraryPosterUpload struct {
-	Poster string `json:"poster" format:"binary" doc:"The image file: image/jpeg, image/png or image/webp, at most 10 MiB"`
-}
-
-// libraryPosterForm is the form Huma decodes.
-type libraryPosterForm struct {
-	Poster huma.FormFile `form:"poster" contentType:"image/jpeg,image/png,image/webp" required:"true"`
+// LibraryPosterForm is the uploadLibraryPoster multipart form.
+type LibraryPosterForm struct {
+	Poster huma.FormFile `form:"poster" contentType:"image/jpeg,image/png,image/webp" required:"true" doc:"The image file: image/jpeg, image/png or image/webp, at most 10 MiB"`
 }
 
 // LibraryPosterUploadInput is the uploadLibraryPoster request.
 type LibraryPosterUploadInput struct {
 	ID      ID `path:"id" doc:"Library identifier" example:"1"`
-	RawBody huma.MultipartFormFiles[libraryPosterForm]
+	RawBody huma.MultipartFormFiles[LibraryPosterForm]
 }
 
 // offsetPosition is the cursor payload of the administrative listings that
@@ -630,15 +624,6 @@ func registerLibraries(reg *Registry) {
 
 	upload := humaOp(http.MethodPut, Prefix+"/libraries/{id}/poster", "uploadLibraryPoster", "libraries",
 		"Store a poster for the library from a multipart upload (JPEG, PNG or WebP, at most 10 MiB) and answer the library with its new poster URL.")
-	upload.RequestBody = &huma.RequestBody{
-		Required: true,
-		Content: map[string]*huma.MediaType{
-			mediaTypeMultipart: {
-				Schema:   reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeOf(LibraryPosterUpload{}), true, ""),
-				Encoding: map[string]*huma.Encoding{"poster": {ContentType: posterMediaTypeList}},
-			},
-		},
-	}
 	Register(reg, Operation{Operation: upload, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, MaxBodyBytes: maxPosterBytes + posterFormOverhead}, reg.uploadLibraryPoster)
 
 	deletePoster := humaOp(http.MethodDelete, Prefix+"/libraries/{id}/poster", "deleteLibraryPoster", "libraries",
@@ -656,9 +641,6 @@ const (
 	maxPosterBytes     = 10 << 20
 	posterFormOverhead = 4 << 10
 )
-
-// posterMediaTypeList is the comma-joined list of image types a poster may be.
-const posterMediaTypeList = "image/jpeg,image/png,image/webp"
 
 func (reg *Registry) confirmEmptyRootCleanup(ctx context.Context, in *LibraryIDInput) (*EmptyRootCleanupOutput, error) {
 	svc, p := reg.libraryAdmin()

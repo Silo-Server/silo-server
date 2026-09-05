@@ -47,7 +47,10 @@ export default tseslint.config(
       "src/hooks/queries/admin/libraries.ts",
       "src/hooks/queries/libraryCollections.ts",
       "src/components/RecipeGallery/BulkApplyDialog.tsx",
+      "src/lib/profile-management.ts",
       "src/pages/OAuthComplete.tsx",
+      "src/pages/ProfileCustomizeHome.tsx",
+      "src/pages/setup-wizard/steps/ProfileStep.tsx",
     ],
     rules: {
       "no-restricted-syntax": [

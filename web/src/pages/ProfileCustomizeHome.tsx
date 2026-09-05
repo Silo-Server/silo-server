@@ -3,7 +3,8 @@ import PageBack from "@/components/PageBack";
 import ProfileSectionRow from "@/components/ProfileSectionRow";
 import RecipeGalleryModal from "@/components/RecipeGallery/RecipeGalleryModal";
 import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
-import { api } from "@/api/client";
+import type { components } from "@/api/v2/schema";
+import { v2 } from "@/api/v2/request";
 import type { GalleryPreset, RecipeDefinition } from "@/lib/recipes";
 
 interface ProfileSection {
@@ -14,82 +15,58 @@ interface ProfileSection {
   hidden: boolean;
 }
 
-interface SectionsSettingsResponse {
-  sections?: Array<{
-    id: string;
-    is_custom?: boolean;
-    section_type: string;
-    title: string;
-    hidden?: boolean;
-  }>;
-}
+// A stored override as GET /api/v2/profile/sections returns it. We round-trip
+// these through the page state so admin-section customizations (hide/title/etc.)
+// and user-added rows (recipe + config + title) survive every save. The legacy
+// approach of rebuilding the payload from the resolved `sections` view dropped
+// overrides for any section the user hadn't just touched, and lost user_config
+// / item_limit / featured on user-added rows.
+type StoredOverride = components["schemas"]["SectionOverride"];
+type OverrideWrite = components["schemas"]["SectionOverrideWrite"];
 
-interface ProfileSectionsFlagResponse {
-  allow_profile_custom_sections?: boolean;
-}
-
-// RawOverride mirrors the JSON shape returned by GET /profile/sections —
-// userstore.SectionOverride marshalled with no JSON tags, so fields appear in
-// Go-PascalCase. We round-trip these through the page state so admin-section
-// customizations (hide/title/etc.) and user-added rows (recipe + config + title)
-// survive every save. The legacy approach of rebuilding the payload from the
-// resolved `sections` view dropped overrides for any section the user hadn't
-// just touched, and lost user_config / item_limit / featured on user-added rows.
-interface RawOverride {
-  ID: string;
-  SectionID: string;
-  Position: number | null;
-  Hidden: boolean;
-  Removed: boolean;
-  SectionType: string;
-  Title: string;
-  Featured: boolean | null;
-  ItemLimit: number | null;
-  Config: string;
-  IsUserAdded: boolean;
-  UserSectionType: string;
-  UserConfig: string;
-  UserTitle: string;
-}
-
-interface RawOverridesResponse {
-  overrides?: RawOverride[];
-}
-
-function safeParseJSON(s: string): unknown {
-  if (!s) return undefined;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return undefined;
-  }
-}
-
-// rawToWire converts a stored override into the snake_case shape expected by
-// PUT /profile/sections (profileOverrideRequest). config / user_config are
-// json.RawMessage on the server, so they must be sent as parsed JSON values.
-function rawToWire(o: RawOverride) {
+// toWrite narrows a stored override to the members PUT /api/v2/profile/sections
+// accepts; the store timestamps are read-only.
+function toWrite(o: StoredOverride): OverrideWrite {
   return {
-    id: o.ID || undefined,
-    section_id: o.SectionID,
-    position: o.Position ?? undefined,
-    hidden: o.Hidden,
-    removed: o.Removed,
-    section_type: o.SectionType,
-    title: o.Title,
-    featured: o.Featured ?? undefined,
-    item_limit: o.ItemLimit ?? undefined,
-    config: safeParseJSON(o.Config),
-    is_user_added: o.IsUserAdded,
-    user_section_type: o.UserSectionType,
-    user_config: safeParseJSON(o.UserConfig),
-    user_title: o.UserTitle,
+    id: o.id || undefined,
+    section_id: o.section_id,
+    position: o.position,
+    hidden: o.hidden,
+    removed: o.removed,
+    section_type: o.section_type,
+    title: o.title,
+    featured: o.featured,
+    item_limit: o.item_limit,
+    config: o.config,
+    is_user_added: o.is_user_added,
+    user_section_type: o.user_section_type,
+    user_config: o.user_config,
+    user_title: o.user_title,
+  };
+}
+
+function emptyOverride(): StoredOverride {
+  return {
+    id: "",
+    section_id: "",
+    position: null,
+    hidden: false,
+    removed: false,
+    section_type: "",
+    title: "",
+    featured: null,
+    item_limit: null,
+    is_user_added: false,
+    user_section_type: "",
+    user_title: "",
+    created_at: null,
+    updated_at: null,
   };
 }
 
 export default function ProfileCustomizeHome() {
   const [sections, setSections] = useState<ProfileSection[]>([]);
-  const [rawOverrides, setRawOverrides] = useState<RawOverride[]>([]);
+  const [rawOverrides, setRawOverrides] = useState<StoredOverride[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [picked, setPicked] = useState<{ def: RecipeDefinition; preset: GalleryPreset } | null>(
     null,
@@ -100,23 +77,23 @@ export default function ProfileCustomizeHome() {
     // Fetch both:
     //   - /profile/sections/settings → resolved view (admin sections + user-added,
     //     including hidden) for the row list
-    //   - /profile/sections → raw stored overrides, which we round-trip on save
+    //   - /profile/sections → stored overrides, which we round-trip on save
     //     so unrelated overrides aren't dropped by full-replacement PUTs
     try {
       const [data, raw] = await Promise.all([
-        api<SectionsSettingsResponse>("/profile/sections/settings?scope=home"),
-        api<RawOverridesResponse>("/profile/sections?scope=home"),
+        v2("GET /api/v2/profile/sections/settings", { query: { scope: "home" } }),
+        v2("GET /api/v2/profile/sections", { query: { scope: "home" } }),
       ]);
       setSections(
-        (data?.sections ?? []).map((s) => ({
+        data.items.map((s) => ({
           id: s.id,
-          is_custom: !!s.is_custom,
+          is_custom: s.is_custom,
           section_type: s.section_type,
           title: s.title,
-          hidden: !!s.hidden,
+          hidden: s.hidden,
         })),
       );
-      setRawOverrides(raw?.overrides ?? []);
+      setRawOverrides(raw.items);
     } catch (err) {
       console.error("load sections failed:", err);
       setSections([]);
@@ -126,8 +103,8 @@ export default function ProfileCustomizeHome() {
 
   async function loadSetting() {
     try {
-      const j = await api<ProfileSectionsFlagResponse>("/profile/sections/flags");
-      setAllowCustom(!!j.allow_profile_custom_sections);
+      const j = await v2("GET /api/v2/profile/sections/flags");
+      setAllowCustom(j.allow_profile_custom_sections);
     } catch {
       // Setting just defaults to false on failure.
     }
@@ -145,17 +122,17 @@ export default function ProfileCustomizeHome() {
     // Start from the existing stored overrides so unrelated customizations
     // (admin-section hides, user-added recipes' config/title) are preserved,
     // then mutate by id. The resolved section id matches an override's
-    // SectionID for admin customizations and ID for user-added rows.
-    const matches = (o: RawOverride, sectionID: string) =>
-      o.SectionID === sectionID || (o.SectionID === "" && o.ID === sectionID);
+    // section_id for admin customizations and id for user-added rows.
+    const matches = (o: StoredOverride, sectionID: string) =>
+      o.section_id === sectionID || (o.section_id === "" && o.id === sectionID);
 
-    const merged: RawOverride[] = rawOverrides.map((o) => {
+    const merged: StoredOverride[] = rawOverrides.map((o) => {
       const u = updates.find((up) => matches(o, up.id));
       if (!u) return o;
       return {
         ...o,
-        Hidden: u.hidden ?? o.Hidden,
-        Removed: u.removed ?? o.Removed,
+        hidden: u.hidden ?? o.hidden,
+        removed: u.removed ?? o.removed,
       };
     });
 
@@ -166,31 +143,17 @@ export default function ProfileCustomizeHome() {
       const section = sections.find((s) => s.id === u.id);
       if (!section || section.is_custom) continue; // user-added sections always have an override
       merged.push({
-        ID: "",
-        SectionID: u.id,
-        Position: null,
-        Hidden: u.hidden ?? false,
-        Removed: u.removed ?? false,
-        SectionType: "",
-        Title: "",
-        Featured: null,
-        ItemLimit: null,
-        Config: "",
-        IsUserAdded: false,
-        UserSectionType: "",
-        UserConfig: "",
-        UserTitle: "",
+        ...emptyOverride(),
+        section_id: u.id,
+        hidden: u.hidden ?? false,
+        removed: u.removed ?? false,
       });
     }
 
     try {
-      await api("/profile/sections", {
-        method: "PUT",
-        body: JSON.stringify({
-          scope: "home",
-          library_id: "",
-          overrides: merged.map(rawToWire),
-        }),
+      await v2("PUT /api/v2/profile/sections", {
+        query: { scope: "home" },
+        body: { overrides: merged.map(toWrite) },
       });
     } catch (err) {
       console.error("save overrides failed:", err);
@@ -200,7 +163,7 @@ export default function ProfileCustomizeHome() {
 
   async function reset() {
     try {
-      await api("/profile/sections/reset?scope=home", { method: "DELETE" });
+      await v2("DELETE /api/v2/profile/sections", { query: { scope: "home" } });
     } catch (err) {
       console.error("reset overrides failed:", err);
     }
@@ -276,30 +239,19 @@ export default function ProfileCustomizeHome() {
             // Append a new user-added row to the existing override set so admin
             // customizations and prior custom sections aren't dropped by the
             // full-replacement PUT.
-            const newRow: RawOverride = {
-              ID: "",
-              SectionID: "",
-              Position: null,
-              Hidden: false,
-              Removed: false,
-              SectionType: "",
-              Title: "",
-              Featured: payload.featured,
-              ItemLimit: payload.item_limit,
-              Config: "",
-              IsUserAdded: true,
-              UserSectionType: payload.section_type,
-              UserConfig: JSON.stringify(payload.config ?? {}),
-              UserTitle: payload.title ?? "",
+            const newRow: StoredOverride = {
+              ...emptyOverride(),
+              featured: payload.featured,
+              item_limit: payload.item_limit,
+              is_user_added: true,
+              user_section_type: payload.section_type,
+              user_config: payload.config ?? {},
+              user_title: payload.title ?? "",
             };
             try {
-              await api("/profile/sections", {
-                method: "PUT",
-                body: JSON.stringify({
-                  scope: "home",
-                  library_id: "",
-                  overrides: [...rawOverrides, newRow].map(rawToWire),
-                }),
+              await v2("PUT /api/v2/profile/sections", {
+                query: { scope: "home" },
+                body: { overrides: [...rawOverrides, newRow].map(toWrite) },
               });
             } catch (err) {
               console.error("add section failed:", err);

@@ -1851,10 +1851,11 @@
         ],
         "type": "object"
       },
-      "LibraryPosterUpload": {
+      "LibraryPosterForm": {
         "additionalProperties": false,
         "properties": {
           "poster": {
+            "contentEncoding": "binary",
             "contentMediaType": "application/octet-stream",
             "description": "The image file: image/jpeg, image/png or image/webp, at most 10 MiB",
             "format": "binary",
@@ -2561,6 +2562,595 @@
         ],
         "type": "object"
       },
+      "PlaybackSession": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_decision": {
+            "description": "Empty when unknown",
+            "examples": [
+              "copy"
+            ],
+            "type": "string"
+          },
+          "audio_track_index": {
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "client_build": {
+            "description": "Empty when unknown",
+            "examples": [
+              "1400"
+            ],
+            "type": "string"
+          },
+          "client_channel": {
+            "description": "Empty when unknown",
+            "examples": [
+              "release"
+            ],
+            "type": "string"
+          },
+          "client_ip": {
+            "description": "Empty when unknown",
+            "examples": [
+              "192.0.2.10"
+            ],
+            "type": "string"
+          },
+          "client_label": {
+            "description": "Display label derived from the client name and version; empty when unknown",
+            "examples": [
+              "Silo for Apple TV 1.4"
+            ],
+            "type": "string"
+          },
+          "client_label_full": {
+            "description": "Display label with the exact build; empty when unknown",
+            "examples": [
+              "Silo for Apple TV 1.4.0 (1400)"
+            ],
+            "type": "string"
+          },
+          "client_name": {
+            "description": "Empty when unknown",
+            "examples": [
+              "Silo for Apple TV"
+            ],
+            "type": "string"
+          },
+          "client_user_agent": {
+            "description": "Empty when unknown",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "client_version": {
+            "description": "Empty when unknown",
+            "examples": [
+              "1.4.0"
+            ],
+            "type": "string"
+          },
+          "content_id": {
+            "description": "Catalog content id of the playing item; empty when unknown",
+            "examples": [
+              "tt0111161"
+            ],
+            "type": "string"
+          },
+          "effective_play_method": {
+            "description": "Bucketed method: direct, remux, transcode or audio; empty when unknown",
+            "examples": [
+              "direct"
+            ],
+            "type": "string"
+          },
+          "episode_name": {
+            "description": "Empty unless an episode",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "episode_number": {
+            "description": "null unless an episode",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "file_duration": {
+            "description": "Seconds; null when unknown",
+            "examples": [
+              8520
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "has_playback_control": {
+            "description": "Whether the serving node accepts remote control of this session",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The playback session",
+            "examples": [
+              "ps_7f3a"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "is_jellyfin_client": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "is_paused": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "media_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "42"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "media_title": {
+            "examples": [
+              "The Shawshank Redemption"
+            ],
+            "type": "string"
+          },
+          "media_type": {
+            "description": "Catalog item type; empty when unknown",
+            "examples": [
+              "movie"
+            ],
+            "type": "string"
+          },
+          "node_display_name": {
+            "description": "Empty when the node has no display name",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "play_method": {
+            "description": "The negotiated method as the node reported it",
+            "examples": [
+              "direct"
+            ],
+            "type": "string"
+          },
+          "position_seconds": {
+            "examples": [
+              1234.5
+            ],
+            "format": "double",
+            "type": "number"
+          },
+          "poster_url": {
+            "description": "Where to fetch the poster; empty when there is none",
+            "examples": [
+              "/api/v1/images/poster/42"
+            ],
+            "type": "string"
+          },
+          "profile_id": {
+            "description": "The profile playing; null when the session carries none",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile_name": {
+            "description": "Empty when unknown",
+            "examples": [
+              "Laura"
+            ],
+            "type": "string"
+          },
+          "reporting_node": {
+            "description": "Identifier of the node serving the stream",
+            "examples": [
+              "api"
+            ],
+            "type": "string"
+          },
+          "requested_media_file_id": {
+            "description": "The file the client asked for before any version substitution",
+            "examples": [
+              "42"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "requested_video_codec": {
+            "description": "Empty when the client did not ask for one",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "requested_video_resolution": {
+            "description": "Empty when the client did not ask for one",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "routing_egress": {
+            "description": "Empty when routing is unresolved",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "routing_egress_node_id": {
+            "description": "null when routing is unresolved",
+            "examples": [
+              "3"
+            ],
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routing_egress_node_name": {
+            "description": "Empty when routing is unresolved",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "routing_execution": {
+            "description": "Empty when routing is unresolved",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "routing_execution_node_id": {
+            "description": "null when routing is unresolved",
+            "examples": [
+              "3"
+            ],
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routing_execution_node_name": {
+            "description": "Empty when routing is unresolved",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "routing_workload": {
+            "description": "Empty when routing is unresolved",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "season_number": {
+            "description": "null unless an episode",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "series_name": {
+            "description": "Empty unless an episode",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "source_audio_channels": {
+            "description": "null when unknown",
+            "examples": [
+              8
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source_audio_codec": {
+            "description": "Empty when unknown",
+            "examples": [
+              "truehd"
+            ],
+            "type": "string"
+          },
+          "source_audio_language": {
+            "description": "Empty when unknown",
+            "examples": [
+              "eng"
+            ],
+            "type": "string"
+          },
+          "source_audio_layout": {
+            "description": "Empty when unknown",
+            "examples": [
+              "7.1"
+            ],
+            "type": "string"
+          },
+          "source_audio_title": {
+            "description": "Empty when unknown",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "source_bitrate_kbps": {
+            "description": "null when unknown",
+            "examples": [
+              24000
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source_container": {
+            "description": "Empty when unknown",
+            "examples": [
+              "mkv"
+            ],
+            "type": "string"
+          },
+          "source_video_codec": {
+            "description": "Empty when unknown",
+            "examples": [
+              "hevc"
+            ],
+            "type": "string"
+          },
+          "source_video_resolution": {
+            "description": "Empty when unknown",
+            "examples": [
+              "2160p"
+            ],
+            "type": "string"
+          },
+          "started_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "stream_bitrate_kbps": {
+            "description": "null when unknown",
+            "examples": [
+              12000
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "target_audio_channels": {
+            "description": "Channels the transcode encodes; null when the reporting node did not know",
+            "examples": [
+              6
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "target_audio_codec": {
+            "description": "Empty when not transcoding",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "target_bitrate_kbps": {
+            "description": "null when not transcoding",
+            "examples": [
+              8000
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "target_resolution": {
+            "description": "Empty when not transcoding",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "target_video_codec": {
+            "description": "Empty when not transcoding",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "tone_map_mode": {
+            "description": "Confirmed tone-map executor; empty when none",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "transcode_audio": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "transcode_hw_accel": {
+            "description": "Confirmed transcode executor; empty when not transcoding",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "examples": [
+              "laura"
+            ],
+            "type": "string"
+          },
+          "video_decision": {
+            "description": "Empty when unknown",
+            "examples": [
+              "copy"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "username",
+          "profile_id",
+          "profile_name",
+          "media_file_id",
+          "requested_media_file_id",
+          "content_id",
+          "media_title",
+          "media_type",
+          "series_name",
+          "episode_name",
+          "season_number",
+          "episode_number",
+          "poster_url",
+          "play_method",
+          "reporting_node",
+          "node_display_name",
+          "file_duration",
+          "started_at",
+          "updated_at",
+          "position_seconds",
+          "is_paused",
+          "has_playback_control",
+          "client_ip",
+          "client_name",
+          "client_version",
+          "client_build",
+          "client_channel",
+          "client_label",
+          "client_label_full",
+          "client_user_agent",
+          "audio_track_index",
+          "transcode_audio",
+          "stream_bitrate_kbps",
+          "target_resolution",
+          "target_video_codec",
+          "target_audio_codec",
+          "target_audio_channels",
+          "target_bitrate_kbps",
+          "transcode_hw_accel",
+          "tone_map_mode",
+          "source_container",
+          "source_bitrate_kbps",
+          "source_video_codec",
+          "source_video_resolution",
+          "source_audio_codec",
+          "source_audio_channels",
+          "source_audio_language",
+          "source_audio_title",
+          "source_audio_layout",
+          "requested_video_codec",
+          "requested_video_resolution",
+          "video_decision",
+          "audio_decision",
+          "effective_play_method",
+          "is_jellyfin_client",
+          "routing_workload",
+          "routing_execution",
+          "routing_execution_node_id",
+          "routing_execution_node_name",
+          "routing_egress",
+          "routing_egress_node_id",
+          "routing_egress_node_name"
+        ],
+        "type": "object"
+      },
+      "PlaybackSessionCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/PlaybackSession"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "Problem": {
         "additionalProperties": false,
         "properties": {
@@ -2863,6 +3453,337 @@
         ],
         "type": "object"
       },
+      "ProfileAvatarForm": {
+        "additionalProperties": false,
+        "properties": {
+          "avatar": {
+            "contentEncoding": "binary",
+            "contentMediaType": "application/octet-stream",
+            "description": "The image; resized server-side to the avatar variants",
+            "format": "binary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "avatar"
+        ],
+        "type": "object"
+      },
+      "ProfileCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "avatar_upload_enabled": {
+            "description": "Whether this server accepts avatar uploads (an avatar store is configured)",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/Profile"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "avatar_upload_enabled",
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProfileCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_library_ids": {
+            "description": "Unique library identifiers the profile may see when restrictions are enabled",
+            "examples": [
+              [
+                "1",
+                "2"
+              ]
+            ],
+            "items": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "auto_play_next_preview": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "auto_skip_credits": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "auto_skip_intro": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "auto_skip_recap": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "avatar": {
+            "description": "Preset avatar reference",
+            "examples": [
+              "preset:fox"
+            ],
+            "type": "string"
+          },
+          "is_child": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "language": {
+            "description": "Preferred audio language (ISO 639-1)",
+            "examples": [
+              "en"
+            ],
+            "type": "string"
+          },
+          "library_restrictions_enabled": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "max_content_rating": {
+            "description": "Content-rating ceiling",
+            "examples": [
+              "PG-13"
+            ],
+            "type": "string"
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling",
+            "enum": [
+              "1080p",
+              "2160p"
+            ],
+            "examples": [
+              "1080p"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name; leading and trailing spaces are trimmed",
+            "examples": [
+              "Alice"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pin": {
+            "description": "PIN, 1 to 72 bytes",
+            "examples": [
+              "1234"
+            ],
+            "maxLength": 72,
+            "minLength": 1,
+            "type": "string"
+          },
+          "preferred_metadata_language": {
+            "description": "Metadata language (ISO 639-1)",
+            "examples": [
+              "en"
+            ],
+            "type": "string"
+          },
+          "quality_preference": {
+            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k",
+            "examples": [
+              "auto"
+            ],
+            "maxLength": 32,
+            "type": "string"
+          },
+          "show_forced_subtitles": {
+            "description": "Defaults to true when omitted",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "subtitle_language": {
+            "description": "Preferred subtitle language (ISO 639-1)",
+            "examples": [
+              "en"
+            ],
+            "type": "string"
+          },
+          "subtitle_mode": {
+            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, always, off, default, forced_only",
+            "examples": [
+              "auto"
+            ],
+            "maxLength": 32,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ProfilePINCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "pin": {
+            "description": "The PIN to check",
+            "examples": [
+              "1234"
+            ],
+            "maxLength": 72,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "pin"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionFlags": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_profile_custom_sections": {
+            "description": "Whether non-admin profiles may build sections from admin-only recipes",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allow_profile_custom_sections"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "description": "The recipe's effective config; absent when none, {} when explicitly empty",
+            "type": "object",
+            "x-silo-extension-bag": "section-config"
+          },
+          "customized": {
+            "description": "An admin section the profile has changed",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "featured": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "hidden": {
+            "description": "Hidden by the profile",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "id": {
+            "examples": [
+              "s-continue-watching"
+            ],
+            "type": "string"
+          },
+          "is_custom": {
+            "description": "Built by the profile rather than defined by an administrator",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "item_limit": {
+            "examples": [
+              20
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "position": {
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "section_type": {
+            "description": "The recipe; the set is extensible",
+            "examples": [
+              "continue_watching"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Continue Watching"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_type",
+          "title",
+          "featured",
+          "item_limit",
+          "hidden",
+          "is_custom",
+          "customized",
+          "position"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionSettingCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/ProfileSectionSetting"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ProfileUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -3028,6 +3949,43 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ProfileVerification": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "When the token stops being accepted; null when no token was issued or it does not expire",
+            "examples": [
+              "2026-01-02T15:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile_token": {
+            "description": "Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session. Absent when the PIN did not match",
+            "examples": [
+              "pvt_5f3a9c1e7b2d4e8fa0c6"
+            ],
+            "type": "string"
+          },
+          "valid": {
+            "description": "Whether the PIN matched",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "expires_at"
+        ],
         "type": "object"
       },
       "ProgressCollection": {
@@ -3586,6 +4544,315 @@
           "is_custom",
           "customized"
         ],
+        "type": "object"
+      },
+      "SectionOverride": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "description": "Legacy config override; absent when the profile saved none (the section's own config applies), {} when it saved an empty one",
+            "type": "object",
+            "x-silo-extension-bag": "section-config"
+          },
+          "created_at": {
+            "description": "When the row was saved; null when the store did not record it",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "featured": {
+            "description": "Featured override; null keeps the admin value",
+            "examples": [
+              false
+            ],
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "hidden": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The override's identifier; empty when the client saved none",
+            "examples": [
+              "c6b0f2a8-1a3e-4d55-9a6f-0b7e6c1d2f30"
+            ],
+            "type": "string"
+          },
+          "is_user_added": {
+            "description": "A profile-built section rather than a customization of an admin one",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "item_limit": {
+            "description": "Item-limit override; null keeps the admin value",
+            "examples": [
+              20
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "position": {
+            "description": "Position override; null keeps the admin order",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "removed": {
+            "description": "Removed from the page by the profile",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "section_id": {
+            "description": "The admin section this customizes; empty for a profile-built section",
+            "examples": [
+              "s-continue-watching"
+            ],
+            "type": "string"
+          },
+          "section_type": {
+            "description": "Legacy recipe name; empty when unset",
+            "examples": [
+              "recently_added"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Title override; empty keeps the admin title",
+            "examples": [
+              "New this week"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the row was last saved; null when the store did not record it",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_config": {
+            "additionalProperties": true,
+            "description": "Config of a profile-built section; absent when the profile saved none (config applies), {} when it saved an empty one",
+            "type": "object",
+            "x-silo-extension-bag": "section-config"
+          },
+          "user_section_type": {
+            "description": "Recipe of a profile-built section; empty otherwise",
+            "examples": [
+              "hidden_gems"
+            ],
+            "type": "string"
+          },
+          "user_title": {
+            "description": "Title of a profile-built section; empty otherwise",
+            "examples": [
+              "Hidden gems"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_id",
+          "position",
+          "hidden",
+          "removed",
+          "section_type",
+          "title",
+          "featured",
+          "item_limit",
+          "is_user_added",
+          "user_section_type",
+          "user_title",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "SectionOverrideCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/SectionOverride"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "SectionOverrideSet": {
+        "additionalProperties": false,
+        "properties": {
+          "overrides": {
+            "description": "The page's complete override set; replaces what was saved",
+            "items": {
+              "$ref": "#/components/schemas/SectionOverrideWrite"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "overrides"
+        ],
+        "type": "object"
+      },
+      "SectionOverrideWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "description": "Legacy config override; {} saves an explicitly empty one, omitted saves none. Validated by the recipe on a profile-built section",
+            "type": "object",
+            "x-silo-extension-bag": "section-config"
+          },
+          "featured": {
+            "description": "Featured override; null or omitted keeps the admin value",
+            "examples": [
+              false
+            ],
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "hidden": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Client-chosen identifier; a UUID by convention",
+            "examples": [
+              "c6b0f2a8-1a3e-4d55-9a6f-0b7e6c1d2f30"
+            ],
+            "maxLength": 128,
+            "type": "string"
+          },
+          "is_user_added": {
+            "description": "A profile-built section; an empty section_id implies it",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "item_limit": {
+            "description": "Item-limit override; null or omitted keeps the admin value",
+            "examples": [
+              20
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "position": {
+            "description": "Position override; null or omitted keeps the admin order",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "removed": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "section_id": {
+            "description": "The admin section to customize; omitted or empty for a profile-built section",
+            "examples": [
+              "s-continue-watching"
+            ],
+            "maxLength": 128,
+            "type": "string"
+          },
+          "section_type": {
+            "description": "Legacy recipe name; user_section_type is preferred for a profile-built section",
+            "examples": [
+              "recently_added"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
+          "title": {
+            "description": "Title override; empty keeps the admin title",
+            "examples": [
+              "New this week"
+            ],
+            "maxLength": 200,
+            "type": "string"
+          },
+          "user_config": {
+            "additionalProperties": true,
+            "description": "Config of a profile-built section; {} saves an explicitly empty one, omitted saves none. Validated by the recipe",
+            "type": "object",
+            "x-silo-extension-bag": "section-config"
+          },
+          "user_section_type": {
+            "description": "Recipe of a profile-built section; must be registered on this server",
+            "examples": [
+              "hidden_gems"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
+          "user_title": {
+            "examples": [
+              "Hidden gems"
+            ],
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "SeriesMatchQueueEntry": {
@@ -7840,7 +9107,7 @@
                 }
               },
               "schema": {
-                "$ref": "#/components/schemas/LibraryPosterUpload"
+                "$ref": "#/components/schemas/LibraryPosterForm"
               }
             }
           },
@@ -9664,7 +10931,1515 @@
         "x-silo-class": "public"
       }
     },
+    "/api/v2/profile/sections": {
+      "delete": {
+        "operationId": "resetProfileSectionOverrides",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete the acting profile's section overrides for one page, restoring the admin layout.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      },
+      "get": {
+        "operationId": "listProfileSectionOverrides",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SectionOverrideCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the acting profile's saved section overrides for one page.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "replaceProfileSectionOverrides",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SectionOverrideSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the acting profile's section overrides for one page.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profile/sections/flags": {
+      "get": {
+        "operationId": "getProfileSectionFlags",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionFlags"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get what this server lets profiles do to their pages.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profile/sections/settings": {
+      "get": {
+        "operationId": "getProfileSectionSettings",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionSettingCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one page's sections as the acting profile sees them, with its overrides applied.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profiles": {
+      "get": {
+        "operationId": "listProfiles",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the household profiles on the signed-in account.",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      },
+      "post": {
+        "operationId": "createProfile",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "description": "The created profile's resource path",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a household profile.",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profiles/household/sessions": {
+      "get": {
+        "operationId": "listHouseholdSessions",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackSessionCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the live playback sessions on the signed-in account, for a household manager.",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/profiles/{id}": {
+      "delete": {
+        "operationId": "deleteProfile",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The profile",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The profile",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a household profile; the primary profile cannot be deleted.",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      },
       "patch": {
         "operationId": "updateProfile",
         "parameters": [
@@ -9868,6 +12643,552 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profiles/{id}/avatar": {
+      "delete": {
+        "operationId": "deleteProfileAvatar",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The profile",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The profile",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove a profile's uploaded avatar; a preset avatar is left as is.",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "uploadProfileAvatar",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The profile",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The profile",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "avatar": {
+                  "contentType": "image/jpeg,image/png,image/webp"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ProfileAvatarForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB; the whole request, framing included, at most 11 MiB).",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profiles/{id}/verify-pin": {
+      "post": {
+        "operationId": "verifyProfilePIN",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The profile whose PIN is checked",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The profile whose PIN is checked",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilePINCheck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileVerification"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Check a profile's PIN; a match issues the X-Profile-Token that unlocks the profile for this login session.",
+        "tags": [
+          "profiles"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },
