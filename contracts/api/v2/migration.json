@@ -30106,7 +30106,7 @@
         "path": "/api/v2/libraries/{id}/metadata-match-queue",
         "operation_id": "getMetadataMatchQueue"
       },
-      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Offset paging became limit plus an opaque cursor (page.has_more) over the three lists in lockstep; limit/offset members dropped from the body; ids are string IDs, instants UTC ms."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Offset paging became limit plus an opaque cursor (page.has_more) over the three lists in lockstep; limit/offset members dropped from the body; ids are string IDs, instants UTC ms. media_folder_id became library_id on the movie, series and raw backlog entries."
     },
     {
       "listener": "api",
