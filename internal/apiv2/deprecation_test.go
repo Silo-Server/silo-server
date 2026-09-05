@@ -142,6 +142,19 @@ func wantDeprecated(t *testing.T, h http.Header, sunset bool) {
 
 func TestDeprecatedOperationHeaders(t *testing.T) {
 	h := newTestHandler(t, Dependencies{Auth: fakeAuth(nil)})
+	t.Run("500 from a recovered panic", func(t *testing.T) {
+		rec := do(t, h, http.MethodGet, "/api/v2/probe/deprecated-panic", "", nil)
+		requireProblem(t, rec, TypeInternalError)
+		if strings.Contains(rec.Body.String(), "boom") {
+			t.Fatalf("panic detail leaked: %s", rec.Body.String())
+		}
+		// The recovery discards the failed response's headers but keeps
+		// the operation's retirement headers, which describe the operation.
+		wantDeprecated(t, rec.Header(), true)
+		if requestIDHeader(rec) == "" {
+			t.Fatal("recovered 500 lacks X-Request-ID")
+		}
+	})
 	t.Run("200", func(t *testing.T) {
 		rec := do(t, h, http.MethodGet, "/api/v2/probe/deprecated", "", nil)
 		if rec.Code != http.StatusOK {

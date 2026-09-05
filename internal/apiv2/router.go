@@ -332,17 +332,25 @@ func (b *bufferedWriter) Write(p []byte) (int, error) {
 func (b *bufferedWriter) Unwrap() http.ResponseWriter { return b.w }
 
 // discard drops whatever the failed handler produced, headers included,
-// except the request ID.
+// except the request ID and the operation's retirement headers
+// (Deprecation, Link, Sunset): those describe the operation, not the failed
+// response, and the contract sends them on every response of a deprecated
+// operation, a recovered 500 included.
 func (b *bufferedWriter) discard() {
 	b.status = 0
 	b.body.Reset()
 	h := b.w.Header()
-	id := h[RequestIDHeader] //nolint:staticcheck // the contract spells the header X-Request-ID; the map key is set the same way
+	keep := map[string][]string{}
+	for _, name := range []string{RequestIDHeader, DeprecationHeader, LinkHeader, SunsetHeader} {
+		if v := h[name]; len(v) > 0 { //nolint:staticcheck // the contract spells these headers; the map keys are set the same way
+			keep[name] = v
+		}
+	}
 	for k := range h {
 		delete(h, k)
 	}
-	if len(id) > 0 {
-		h[RequestIDHeader] = id
+	for name, v := range keep {
+		h[name] = v
 	}
 }
 

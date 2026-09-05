@@ -179,6 +179,11 @@ func registerProbes(reg *Registry) {
 		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink},
 	}, probeHandler)
 	Register(reg, Operation{
+		Operation:   humaOp(http.MethodGet, Prefix+"/probe/deprecated-panic", "probeDeprecatedPanic", "probe", "deprecated, panics"),
+		Class:       ClassPublic,
+		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink, Sunset: &sunset},
+	}, func(context.Context, *struct{}) (*probeOutput, error) { panic("boom: deprecated") })
+	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/probe/zero", "probeZeroInstant", "probe", "zero"),
 		Class:     ClassPublic,
 	}, func(context.Context, *struct{}) (*probeOutput, error) {
