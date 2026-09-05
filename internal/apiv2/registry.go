@@ -308,9 +308,13 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 				return fmt.Errorf("guarded delete: DefaultStatus must be unset or 204, not %d", op.DefaultStatus)
 			}
 			for status := range op.Responses {
-				// A hand-declared 2xx other than 204 survives into the
-				// document, where the concurrency decoration would add an
-				// ETag the bodyless handler can never send.
+				// A hand-declared 2xx other than 204, including the OpenAPI
+				// range key "2XX", survives into the document, where the
+				// concurrency decoration would add an ETag the bodyless
+				// handler can never send.
+				if strings.EqualFold(status, "2XX") {
+					return fmt.Errorf("guarded delete: Responses declares the 2XX range, but the only success is 204")
+				}
 				if code, err := strconv.Atoi(status); err == nil && code >= 200 && code < 300 && code != http.StatusNoContent {
 					return fmt.Errorf("guarded delete: Responses declares %s, but the only success is 204", status)
 				}

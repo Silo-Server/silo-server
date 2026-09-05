@@ -633,6 +633,13 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		}(), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
 		}, "Responses declares 202"},
+		"guarded DELETE with a declared 2XX range": {func() Operation {
+			op := guarded(http.MethodDelete)
+			op.Responses = map[string]*huma.Response{"2XX": {Description: "any success"}}
+			return op
+		}(), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
+		}, "2XX range"},
 		"conditional with lower-case etag tag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*struct {
 				Status int
