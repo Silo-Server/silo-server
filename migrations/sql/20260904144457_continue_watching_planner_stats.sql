@@ -1,5 +1,3 @@
--- +goose NO TRANSACTION
-
 -- +goose Up
 -- user_id and profile_id are functionally dependent: a profile belongs to
 -- exactly one user, so (user_id = $1 AND profile_id = $2) selects the same rows
