@@ -187,6 +187,7 @@ func registerPreferences(reg *Registry) {
 			"Replace the acting profile's remembered audio track for a series."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
 	}, reg.updateAudioPreference)
 	Register(reg, Operation{
@@ -194,6 +195,7 @@ func registerPreferences(reg *Registry) {
 			"Forget the acting profile's remembered audio track for a series."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
 	}, reg.deleteAudioPreference)
 	Register(reg, Operation{
@@ -207,6 +209,7 @@ func registerPreferences(reg *Registry) {
 			"Replace the acting profile's remembered subtitle choice for a series."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
 	}, reg.updateSubtitlePreference)
 	Register(reg, Operation{
@@ -214,6 +217,7 @@ func registerPreferences(reg *Registry) {
 			"Forget the acting profile's remembered subtitle choice for a series."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
 	}, reg.deleteSubtitlePreference)
 	Register(reg, Operation{
@@ -227,6 +231,7 @@ func registerPreferences(reg *Registry) {
 			"Change the acting profile's playback overrides for a library: omitted members are unchanged, null clears one."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
 	}, reg.updateLibraryPlaybackPreference)
 	Register(reg, Operation{
@@ -234,6 +239,7 @@ func registerPreferences(reg *Registry) {
 			"Remove the acting profile's playback overrides for a library."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
 	}, reg.deleteLibraryPlaybackPreference)
 }
