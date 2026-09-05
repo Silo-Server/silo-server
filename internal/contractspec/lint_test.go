@@ -47,6 +47,40 @@ func TestLintSeededFailures(t *testing.T) {
 		seed func(doc map[string]any)
 		want string
 	}{
+		"deprecated flag without the extension": {
+			seed: func(doc map[string]any) { op(doc, info, "get")["deprecated"] = true },
+			want: "GET /api/v2/system/info: deprecated: true without x-silo-deprecation",
+		},
+		"deprecation extension without the flag": {
+			seed: func(doc map[string]any) {
+				op(doc, info, "get")["x-silo-deprecation"] = map[string]any{"at": "2026-09-01T12:30:45Z", "link": "https://siloserver.org/docs/api/v2/migration/info"}
+			},
+			want: "GET /api/v2/system/info: x-silo-deprecation without deprecated: true",
+		},
+		"deprecation with a bad instant": {
+			seed: func(doc map[string]any) {
+				o := op(doc, info, "get")
+				o["deprecated"] = true
+				o["x-silo-deprecation"] = map[string]any{"at": "@1788265845", "link": "https://siloserver.org/docs/api/v2/migration/info"}
+			},
+			want: "x-silo-deprecation.at is not an RFC 3339 instant",
+		},
+		"deprecation with a foreign link": {
+			seed: func(doc map[string]any) {
+				o := op(doc, info, "get")
+				o["deprecated"] = true
+				o["x-silo-deprecation"] = map[string]any{"at": "2026-09-01T12:30:45Z", "link": "http://siloserver.org/docs/api/v2/migration/info"}
+			},
+			want: "x-silo-deprecation.link \"http://siloserver.org/docs/api/v2/migration/info\" is not an https URL under",
+		},
+		"deprecation sunset before at": {
+			seed: func(doc map[string]any) {
+				o := op(doc, info, "get")
+				o["deprecated"] = true
+				o["x-silo-deprecation"] = map[string]any{"at": "2026-09-01T12:30:45Z", "link": "https://siloserver.org/docs/api/v2/migration/info", "sunset": "2026-09-01T00:00:00Z"}
+			},
+			want: "x-silo-deprecation.sunset precedes at",
+		},
 		"duplicate operation id": {
 			seed: func(doc map[string]any) { op(doc, info, "get")["operationId"] = "getOpenAPIDocument" },
 			want: `operationId "getOpenAPIDocument" duplicates`,

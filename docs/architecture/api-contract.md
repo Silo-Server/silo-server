@@ -488,6 +488,18 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   to shared durable state, add the missing unique constraint or event time, gate the
   dispatch on a reported change, or make the repeat a no-op before the declared strategy
   holds.
+- **Deprecation declarations.** An operation retires by declaring `Operation.Deprecation` at
+  registration: `At` (required), `Link` (required; an absolute https URL under
+  `apiv2.DocsOrigin`, which shares the `ProblemTypeOrigin` host), and an optional `Sunset` that
+  must not precede `At`. `Register` panics on a zero `At`, an empty or non-https `Link`, a
+  `Sunset` before `At`, or the embedded Huma `Deprecated` flag set without a declaration. The
+  document carries `deprecated: true` plus `x-silo-deprecation {at, link, sunset?}` in
+  RFC 3339 UTC, and the spec lint requires the flag and the extension together. The listener
+  sets `Deprecation: @<unix-seconds>`, `Link: <link>; rel="deprecation"` (appended to any
+  existing `Link`), and `Sunset: <IMF-fixdate>` only when a sunset is declared, in the API
+  middleware chain ahead of the class gate, so a gate denial or validation problem carries them
+  as a 200 does. No v1 route and no v2 operation is deprecated yet; the only deprecated
+  operations are test probes, recorded in the `deprecated_ok` and `deprecated_problem` fixtures.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
   tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the

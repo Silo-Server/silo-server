@@ -333,7 +333,7 @@ func checkOperation(op Operation) error {
 	case !isMutatingMethod(op.Method) && op.RetrySafety != "":
 		return fmt.Errorf("retry safety is for POST, PUT, PATCH and DELETE; %s has no durable effect to classify", op.Method)
 	}
-	if op.Operation.Deprecated && op.Deprecation == nil {
+	if op.Deprecated && op.Deprecation == nil {
 		return fmt.Errorf("set apiv2.Operation.Deprecation, not the embedded Huma Deprecated flag: the declaration carries the headers and the document")
 	}
 	if err := op.Deprecation.validate(); err != nil {
