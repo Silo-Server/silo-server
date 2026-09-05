@@ -37233,13 +37233,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/because-watched/{item_id}",
+        "operation_id": "listBecauseWatched"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of the shared card (bounded, no page); score, reason, reason_detail and media_item_id are not carried (no client reads them; the card carries content_id). limit is a declared query param (1..50, default 20); an unknown parameter is 422."
     },
     {
       "listener": "api",
@@ -37314,13 +37314,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/discover",
+        "operation_id": "getDiscover"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {rows:[...]} became {items:[RecommendationRow]}; a row is {type,title,kind,key,items:[CatalogItem]} where title was label and kind/key were section_kind/section_key. Cards are the shared CatalogItem (progress_updated_at is a UTC ms instant). Apple and Android consume this row shape: the four member renames are the only change."
     },
     {
       "listener": "api",
@@ -37375,13 +37375,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/main",
+        "operation_id": "getForYouMain"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {row:ForYouRow|null} became a bare RecommendationRow rendered as cards; a profile without a For You row yet gets the row with items:[] rather than null. limit is a declared query param (1..50, default 20)."
     },
     {
       "listener": "api",
@@ -37436,13 +37436,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/rows",
+        "operation_id": "listForYouRows"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {rows:[ForYouRow]} of scored ids became {items:[RecommendationRow]} of cards; rows with no visible card are dropped; cluster_index is carried as key on a cluster row. limit is a declared query param (1..50, default 20)."
     },
     {
       "listener": "api",
@@ -37497,13 +37497,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/popular",
+        "operation_id": "listPopular"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of the shared card; score and reason are not carried. days (>=1, default 30) and limit (1..50, default 20) are declared query params answered 422 out of range, where v1 silently fell back to the default."
     },
     {
       "listener": "api",
@@ -37558,13 +37558,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/recently-added",
+        "operation_id": "listRecentlyAdded"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of the shared card; score and reason are not carried. days (>=1, default 14) and limit (1..50, default 20) are declared query params answered 422 out of range, where v1 silently fell back to the default."
     },
     {
       "listener": "api",
@@ -37619,13 +37619,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/section/{kind}",
+        "operation_id": "getRecommendationSection"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). kind is a declared path enum (for-you-main, cluster, similar-users, popular, recently-added, top-rated, genre) answered 422; the response is a RecommendationRow ({type,title,kind,key,items:[CatalogItem]}, title was label). limit is 1..60, default 60. An unknown section stays 200 with items:[] as in v1."
     },
     {
       "listener": "api",
@@ -37680,13 +37680,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/section/{kind}",
+        "operation_id": "getRecommendationSection"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). Folded into getRecommendationSection: the key path segment became the ?key query parameter (required for cluster and genre, 422 query.key when absent) so a genre name with a slash or a dot is no longer a path-routing hazard."
     },
     {
       "listener": "api",

@@ -105,6 +105,9 @@ type Dependencies struct {
 	// LibraryCollections answers a library's collections to viewers
 	// (*handlers.LibraryCollectionHandler).
 	LibraryCollections LibraryCollectionService
+	// Recommendations answers the profile-scoped recommendation reads
+	// (*handlers.RecommendationsHandler).
+	Recommendations RecommendationService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -444,6 +447,20 @@ type LibraryCollectionService interface {
 	LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (handlers.LibraryCollectionTabView, error)
 	LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error)
 	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter) ([]handlers.CollectionItemView, error)
+}
+
+// RecommendationService is the slice of *handlers.RecommendationsHandler the
+// viewer-facing recommendation reads use. Every method returns the cards
+// (or rows of cards) the discover page renders and an *handlers.APIError on
+// failure.
+type RecommendationService interface {
+	BecauseWatchedCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error)
+	PopularCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error)
+	RecentlyAddedCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error)
+	ForYouMainCards(ctx context.Context, userID int, profileID string, limit int, filter catalogpkg.AccessFilter) (handlers.DiscoverRowView, error)
+	ForYouRowCards(ctx context.Context, userID int, profileID string, limit int, filter catalogpkg.AccessFilter) ([]handlers.DiscoverRowView, error)
+	Discover(ctx context.Context, userID int, profileID string, filter catalogpkg.AccessFilter) (handlers.DiscoverView, error)
+	Section(ctx context.Context, userID int, profileID, kind, key string, limit int, filter catalogpkg.AccessFilter) (handlers.SectionDetailView, error)
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

@@ -963,6 +963,21 @@ the long-running-work foundation rule; `uploadLibraryPoster` is the first multip
 wrapper, `getLibraryCollectionItems` drops v1's `total`/`has_more` on a bounded list, and
 `getLibraryCollections` has one shape whether or not collection groups are configured.
 
+**Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
+`recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,
+`listPopular`, `listRecentlyAdded`, `getRecommendationSection`. Every recommended item is the
+shared `CatalogItem`, rendered by the same seam the v1 discover page uses
+(`internal/api/handlers/recommendations_service.go`), so the plain lists are a
+`CatalogItemCollection` (bounded, no `page`) and the grouped reads answer `RecommendationRow`
+(`{type, title, kind, key, items}`). Deliberate differences from v1, all recorded on the ledger
+rows: the engine's `score`, `reason`, and bare `media_item_id` lists are not carried (no client
+reads them); `label` is `title` and `section_kind`/`section_key` are `kind`/`key`; `for-you/main`
+answers an empty row rather than `null`; `days` and `limit` are declared parameters answered
+`422` out of range where v1 silently fell back to a default; `section/{kind}/{key}` folds into
+`getRecommendationSection` with `key` as a query parameter, and `kind` is a strict enum. Stage B
+ports the remaining eight rows (`similar`, `similar-users`, `taste-profile`, `taste-seed`,
+`taste-seed/items`, `watch-tonight`, `watch-tonight/cards`).
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;

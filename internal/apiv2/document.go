@@ -205,6 +205,7 @@ func registerAll(reg *Registry) {
 	registerLibraryViews(reg)
 	registerProfiles(reg)
 	registerProgress(reg)
+	registerRecommendations(reg)
 	registerSystem(reg)
 	registerOpenAPIDocument(reg)
 }
