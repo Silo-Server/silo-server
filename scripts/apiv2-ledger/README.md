@@ -32,7 +32,26 @@ will pin rather than pointing the scripts at a working checkout.
   curated field `concurrency` (`if_match`: the row's v2 operation is
   registered Guarded and requires `If-Match`) is preserved on rows that carry
   it and never seeded; `internal/contractledger` restricts it to tier-1 ported
-  mutation rows and reconciles the set against the v2 registry.
+  mutation rows and reconciles the set against the v2 registry. The curated
+  fields `retry_safety` and `retry_safety_note` are preserved the same way.
+  `retry_safety` is required on every tier-1 ported row with a mutating method
+  (POST, PUT, PATCH, DELETE) and forbidden on every other row; it records the
+  strategy from the contract's "Mutation retry safety" section that makes a
+  duplicate submission or a retry after a lost response safe. The v2 registry
+  declares the same value as `x-silo-retry-safety` and
+  `internal/contractledger` reconciles the two. `retry_safety_note` (at most
+  300 characters) explains a non-obvious choice and is required for
+  `idempotency_key` and `non_retryable`.
+
+  | `retry_safety`       | Meaning                                                                        |
+  | -------------------- | ------------------------------------------------------------------------------ |
+  | `natural_idempotent` | PUT or DELETE that converges on one resource state however often it runs.      |
+  | `unique_constraint`  | Natural key or client-supplied id enforced by a database uniqueness constraint. |
+  | `domain_identity`    | Durable domain operation id (playback attempt, upload, job, webhook delivery). |
+  | `coalescing`         | Returns the already-active scan, refresh, sync or similar job.                 |
+  | `durable_dispatch`   | State-gated or transactional-outbox dispatch of an external side effect.       |
+  | `idempotency_key`    | Generic key; the note names the residual group that justified it.              |
+  | `non_retryable`      | Documented exception; clients never auto-retry after an uncertain response.    |
 
 Two call-site annotations refine what the pinned-tree test
 (`TestSiblingCallSitesResolveAgainstPinnedTrees` in `internal/contractledger`)

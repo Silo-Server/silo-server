@@ -539,43 +539,67 @@ type offsetPosition struct {
 }
 
 const (
-	opListLibraryRoots     = "listLibraryRoots"
-	opListUnmatchedItems   = "listUnmatchedItems"
-	opListStaleIDs         = "listStaleIds"
-	opListSkippedRoots     = "listSkippedRoots"
-	tiebreakerContentID    = "content_id"
-	locationBodyLibraryID  = locationBody + ".library_id"
-	locationQueryLibraryID = "query.library_id"
-	detailNotLibraryID     = "not a library identifier"
+	opUpdateLibrary            = "updateLibrary"
+	opRematchStaleId           = "rematchStaleId"
+	opSetLibraryProviders      = "setLibraryProviders"
+	opConfirmEmptyRootCleanup  = "confirmEmptyRootCleanup"
+	opRetryMetadataMatchQueue  = "retryMetadataMatchQueue"
+	opDeleteLibraryPoster      = "deleteLibraryPoster"
+	opDeleteLibrary            = "deleteLibrary"
+	opReorderLibraries         = "reorderLibraries"
+	opSetRootOverride          = "setRootOverride"
+	opDeleteRootOverride       = "deleteRootOverride"
+	opCreateLibrary            = "createLibrary"
+	opCancelMetadataMatchQueue = "cancelMetadataMatchQueue"
+	opCheckLibraryMount        = "checkLibraryMount"
+	opRefreshLibraryMetadata   = "refreshLibraryMetadata"
+	opListLibraryRoots         = "listLibraryRoots"
+	opListUnmatchedItems       = "listUnmatchedItems"
+	opListStaleIDs             = "listStaleIds"
+	opListSkippedRoots         = "listSkippedRoots"
+	tiebreakerContentID        = "content_id"
+	locationBodyLibraryID      = locationBody + ".library_id"
+	locationQueryLibraryID     = "query.library_id"
+	detailNotLibraryID         = "not a library identifier"
 )
 
 func registerLibraries(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	admin := func(op huma.Operation) Operation {
-		return Operation{Operation: op, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true}
+		operation := Operation{Operation: op, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true}
+		switch op.OperationID {
+		case opCreateLibrary, opUpdateLibrary, opRematchStaleId, opSetLibraryProviders,
+			opConfirmEmptyRootCleanup, opRetryMetadataMatchQueue, opCancelMetadataMatchQueue, opDeleteLibraryPoster:
+			operation.RetrySafety = RetrySafetyNonRetryable
+		case opDeleteLibrary, opCheckLibraryMount, opReorderLibraries, opSetRootOverride, opDeleteRootOverride:
+			operation.RetrySafety = RetrySafetyNaturalIdempotent
+		case opRefreshLibraryMetadata:
+			operation.RetrySafety = RetrySafetyCoalescing
+		}
+		return operation
 	}
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries", "listLibraries", "libraries",
 		"List every library in sort order, with its presigned poster URL.")), reg.listLibraries)
 
-	create := humaOp(http.MethodPost, Prefix+"/libraries", "createLibrary", "libraries",
+	create := humaOp(http.MethodPost, Prefix+"/libraries", opCreateLibrary, "libraries",
 		"Create a library, seed its sections and provider chain, and queue its first scan.")
 	create.DefaultStatus = http.StatusCreated
 	create.Errors = []int{http.StatusConflict}
 	Register(reg, admin(create), reg.createLibrary)
 
-	update := humaOp(http.MethodPatch, Prefix+"/libraries/{id}", "updateLibrary", "libraries",
+	update := humaOp(http.MethodPatch, Prefix+"/libraries/{id}", opUpdateLibrary, "libraries",
 		"Update a library; omitted members are unchanged. A changed path set queues a rescan and a changed language a quick metadata refresh.")
 	update.Errors = []int{http.StatusConflict}
 	Register(reg, admin(update), reg.updateLibrary)
 
-	del := humaOp(http.MethodDelete, Prefix+"/libraries/{id}", "deleteLibrary", "libraries",
+	del := humaOp(http.MethodDelete, Prefix+"/libraries/{id}", opDeleteLibrary, "libraries",
 		"Disable a library and queue the job that deletes it and its items; answers 202 with the job.")
 	del.DefaultStatus = http.StatusAccepted
 	del.Errors = []int{http.StatusConflict}
 	Register(reg, admin(del), reg.deleteLibrary)
 
-	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/check-mount", "checkLibraryMount", "libraries",
+	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/check-mount", opCheckLibraryMount, "libraries",
 		"Probe every root of a library; a healthy result clears an outstanding empty-root or dead-root warning.")), reg.checkLibraryMount)
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/metadata-match-queue", "listMetadataMatchQueues", "libraries",
@@ -584,7 +608,7 @@ func registerLibraries(reg *Registry) {
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/provider-defaults", "getLibraryProviderDefaults", "libraries",
 		"The provider chain a new library of a type would be seeded with, per content level.")), reg.getLibraryProviderDefaults)
 
-	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/reorder", "reorderLibraries", "libraries",
+	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/reorder", opReorderLibraries, "libraries",
 		"Assign libraries their sort positions.")), reg.reorderLibraries)
 
 	roots := humaOp(http.MethodGet, Prefix+"/libraries/roots", opListLibraryRoots, "libraries",
@@ -594,12 +618,12 @@ func registerLibraries(reg *Registry) {
 		return reg.listLibraryRoots(ctx, cursors, in)
 	})
 
-	setOverride := humaOp(http.MethodPut, Prefix+"/libraries/roots/override", "setRootOverride", "libraries",
+	setOverride := humaOp(http.MethodPut, Prefix+"/libraries/roots/override", opSetRootOverride, "libraries",
 		"Set the identity override on a scanned root, replacing any existing one.")
 	setOverride.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, admin(setOverride), reg.setRootOverride)
 
-	deleteOverride := humaOp(http.MethodDelete, Prefix+"/libraries/roots/override", "deleteRootOverride", "libraries",
+	deleteOverride := humaOp(http.MethodDelete, Prefix+"/libraries/roots/override", opDeleteRootOverride, "libraries",
 		"Remove the identity override on a scanned root.")
 	deleteOverride.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, admin(deleteOverride), reg.deleteRootOverride)
@@ -614,7 +638,7 @@ func registerLibraries(reg *Registry) {
 		return reg.listStaleIDs(ctx, cursors, in)
 	})
 
-	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/stale-ids/{content_id}/rematch", "rematchStaleId", "libraries",
+	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/stale-ids/{content_id}/rematch", opRematchStaleId, "libraries",
 		"Clear an item's provider identifiers and refresh its metadata in the background.")), reg.rematchStaleID)
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/unmatched-items", opListUnmatchedItems, "libraries",
@@ -622,19 +646,19 @@ func registerLibraries(reg *Registry) {
 		return reg.listUnmatchedItems(ctx, cursors, in)
 	})
 
-	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/confirm-empty-root-cleanup", "confirmEmptyRootCleanup", "libraries",
+	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/confirm-empty-root-cleanup", opConfirmEmptyRootCleanup, "libraries",
 		"Arm the library's next scan to clean up an empty root once instead of treating it as a lost mount.")), reg.confirmEmptyRootCleanup)
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/{id}/metadata-match-queue", opGetMetadataMatchQueue, "libraries",
 		"One library's matcher backlog counts with a page of its queued movies, series roots and raw files.")), func(ctx context.Context, in *MetadataMatchQueueDetailInput) (*MetadataMatchQueueDetailOutput, error) {
 		return reg.getMetadataMatchQueue(ctx, cursors, in)
 	})
-	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/metadata-match-queue/retry", "retryMetadataMatchQueue", "libraries",
+	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/metadata-match-queue/retry", opRetryMetadataMatchQueue, "libraries",
 		"Re-sync and immediately retry every queued matcher entry of the library; answers the counts afterwards.")), reg.retryMetadataMatchQueue)
-	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/metadata-match-queue/cancel", "cancelMetadataMatchQueue", "libraries",
+	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/metadata-match-queue/cancel", opCancelMetadataMatchQueue, "libraries",
 		"Drop every queued matcher entry of the library and suppress its raw backlog; answers what was canceled.")), reg.cancelMetadataMatchQueue)
 
-	refresh := humaOp(http.MethodPost, Prefix+"/libraries/{id}/refresh-metadata", "refreshLibraryMetadata", "libraries",
+	refresh := humaOp(http.MethodPost, Prefix+"/libraries/{id}/refresh-metadata", opRefreshLibraryMetadata, "libraries",
 		"Queue a metadata refresh of the library's items; answers 202 with the job.")
 	refresh.DefaultStatus = http.StatusAccepted
 	refresh.Errors = []int{http.StatusConflict}
@@ -642,16 +666,16 @@ func registerLibraries(reg *Registry) {
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/{id}/providers", "getLibraryProviders", "libraries",
 		"The library's metadata provider chain, per content level. Legacy unlevelled rows (content_level '') that an upgraded database keeps are not exposed; setLibraryProviders preserves them.")), reg.getLibraryProviders)
-	setProviders := humaOp(http.MethodPut, Prefix+"/libraries/{id}/providers", "setLibraryProviders", "libraries",
+	setProviders := humaOp(http.MethodPut, Prefix+"/libraries/{id}/providers", opSetLibraryProviders, "libraries",
 		"Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers.")
 	setProviders.DefaultStatus = http.StatusNoContent
 	Register(reg, admin(setProviders), reg.setLibraryProviders)
 
 	upload := humaOp(http.MethodPut, Prefix+"/libraries/{id}/poster", "uploadLibraryPoster", "libraries",
 		"Store a poster for the library from a multipart upload (JPEG, PNG or WebP, at most 10 MiB) and answer the library with its new poster URL.")
-	Register(reg, Operation{Operation: upload, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, MaxBodyBytes: maxPosterBytes + posterFormOverhead}, reg.uploadLibraryPoster)
+	Register(reg, Operation{Operation: upload, RetrySafety: RetrySafetyNonRetryable, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, MaxBodyBytes: maxPosterBytes + posterFormOverhead}, reg.uploadLibraryPoster)
 
-	deletePoster := humaOp(http.MethodDelete, Prefix+"/libraries/{id}/poster", "deleteLibraryPoster", "libraries",
+	deletePoster := humaOp(http.MethodDelete, Prefix+"/libraries/{id}/poster", opDeleteLibraryPoster, "libraries",
 		"Remove the library's poster; a library without one is left as is.")
 	deletePoster.DefaultStatus = http.StatusNoContent
 	Register(reg, admin(deletePoster), reg.deleteLibraryPoster)
