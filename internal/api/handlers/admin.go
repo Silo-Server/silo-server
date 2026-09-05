@@ -1106,7 +1106,7 @@ func (h *AdminHandler) loadPlaybackSessions(ctx context.Context, r *http.Request
 	if err != nil {
 		return nil, err
 	}
-	return loader.Load(ctx, r, PlaybackSessionsQuery{})
+	return loader.Load(ctx, PlaybackSessionsQuery{})
 }
 
 // HandleListPlaybackHistory handles GET /admin/playback-history.

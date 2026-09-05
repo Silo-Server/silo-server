@@ -640,53 +640,81 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	err := h.DeleteProfile(r.Context(), ProfileDeleteCommand{
+		UserID:          userID,
+		ProfileID:       profileID,
+		ActiveProfileID: activeProfileIDOf(r),
+		VerifyProfile: func(id string) error {
+			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+		},
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-	allowed, err := h.canManageHouseholdProfiles(r, store)
-	if err != nil {
-		writeProfileManagementPermissionError(w, err)
-		return
-	}
-	if !allowed {
-		writeError(w, http.StatusForbidden, "forbidden", "Profile management requires the primary profile or admin access")
-		return
-	}
-	profile, err := store.GetProfile(r.Context(), profileID)
-	if err != nil || profile == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return
-	}
-	if profile.IsPrimary {
-		writeError(
-			w,
-			http.StatusConflict,
-			"primary_profile_protected",
-			"The primary profile cannot be deleted. Delete the user account instead.",
-		)
-		return
-	}
-
-	if err := store.DeleteProfile(r.Context(), profileID); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return
-	}
-	if isUploadedAvatarRef(profile.Avatar) {
-		if cleanupErr := deleteUploadedAvatarObjects(r.Context(), h.AvatarStore, userID, profileID); cleanupErr != nil {
-			slog.WarnContext(r.Context(), "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
+			writeProfileManagementPermissionError(w, apiErr.cause)
+			return
 		}
-	}
-	if h.DeviceLibraryPurger != nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-		defer cancel()
-		if purgeErr := h.DeviceLibraryPurger.PurgeProfileDevices(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.WarnContext(r.Context(), "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
-		}
+		writeAPIError(w, err)
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ProfileDeleteCommand is a profile deletion with its caller already reduced
+// to an identity.
+type ProfileDeleteCommand struct {
+	UserID    int
+	ProfileID string
+	// ActiveProfileID is the profile the caller acts as ("" when none).
+	ActiveProfileID string
+	// VerifyProfile confirms a PIN-locked primary profile is verified for
+	// this request; it returns access.ErrProfileUnverified when it is not.
+	VerifyProfile func(profileID string) error
+}
+
+// DeleteProfile deletes a household profile: the household-manager
+// authorization, the primary-profile guard, the delete, and the best-effort
+// avatar and device-library cleanup. v1 DELETE /profiles/{id} and v2
+// deleteProfile both call it; a failure is an *APIError carrying the v1
+// status, code and message.
+func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCommand) error {
+	userID, profileID := cmd.UserID, cmd.ProfileID
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	allowed, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+	if err != nil {
+		return profileManagementError(err)
+	}
+	if !allowed {
+		return apiError(http.StatusForbidden, "forbidden", "Profile management requires the primary profile or admin access")
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return apiError(http.StatusNotFound, "not_found", "Profile not found")
+	}
+	if profile.IsPrimary {
+		return apiError(http.StatusConflict, "primary_profile_protected", "The primary profile cannot be deleted. Delete the user account instead.")
+	}
+
+	if err := store.DeleteProfile(ctx, profileID); err != nil {
+		return apiError(http.StatusNotFound, "not_found", "Profile not found")
+	}
+	if isUploadedAvatarRef(profile.Avatar) {
+		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
+			slog.WarnContext(ctx, "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
+		}
+	}
+	if h.DeviceLibraryPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.DeviceLibraryPurger.PurgeProfileDevices(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	return nil
 }
 
 // HandleVerifyPIN handles POST /profiles/{id}/verify-pin.
@@ -714,54 +742,83 @@ func (h *ProfileHandler) HandleVerifyPIN(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	valid, err := store.VerifyPIN(r.Context(), profileID, req.PIN)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found or has no PIN")
-		return
-	}
-	if !valid || h.UserRepo == nil || h.ProfileTokens == nil {
-		writeJSON(w, http.StatusOK, verifyPINResponse{Valid: valid})
-		return
-	}
-
 	claims := apimw.GetClaims(r.Context())
 	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
-
-	user, err := h.UserRepo.GetByID(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user policy")
-		return
-	}
-
-	token, expiresAt, err := h.ProfileTokens.Mint(access.ProfileTokenClaims{
-		UserID:         userID,
-		SessionID:      claims.SessionID,
-		ProfileID:      profileID,
-		PolicyRevision: user.AccessPolicyRevision,
+	result, err := h.VerifyPIN(r.Context(), ProfileVerifyPINCommand{
+		UserID: userID, SessionID: claims.SessionID, ProfileID: profileID, PIN: req.PIN,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to issue profile token")
+		writeAPIError(w, err)
 		return
 	}
 
 	resp := verifyPINResponse{
-		Valid:        true,
-		ProfileToken: token,
+		Valid:        result.Valid,
+		ProfileToken: result.ProfileToken,
 	}
-	if !expiresAt.IsZero() {
-		resp.ExpiresAt = expiresAt.UTC().Format(time.RFC3339)
+	if !result.ExpiresAt.IsZero() {
+		resp.ExpiresAt = result.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ProfileVerifyPINCommand is a PIN check with its request already parsed
+// and its caller already reduced to an identity and login session.
+type ProfileVerifyPINCommand struct {
+	UserID    int
+	SessionID string
+	ProfileID string
+	PIN       string
+}
+
+// ProfileVerification is the outcome of a PIN check: whether the PIN
+// matched and, when it did and the server can mint one, the profile token
+// bound to the caller's login session with its expiry (zero when the token
+// does not expire).
+type ProfileVerification struct {
+	Valid        bool
+	ProfileToken string
+	ExpiresAt    time.Time
+}
+
+// VerifyPIN checks a profile's PIN and, on a match, mints the X-Profile-Token
+// the profile gates accept. v1 POST /profiles/{id}/verify-pin and v2
+// verifyProfilePIN both call it; a failure is an *APIError carrying the v1
+// status, code and message.
+func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINCommand) (ProfileVerification, error) {
+	var none ProfileVerification
+	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+
+	valid, err := store.VerifyPIN(ctx, cmd.ProfileID, cmd.PIN)
+	if err != nil {
+		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
+	}
+	if !valid || h.UserRepo == nil || h.ProfileTokens == nil {
+		return ProfileVerification{Valid: valid}, nil
+	}
+
+	user, err := h.UserRepo.GetByID(ctx, cmd.UserID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user policy")
+	}
+
+	token, expiresAt, err := h.ProfileTokens.Mint(access.ProfileTokenClaims{
+		UserID:         cmd.UserID,
+		SessionID:      cmd.SessionID,
+		ProfileID:      cmd.ProfileID,
+		PolicyRevision: user.AccessPolicyRevision,
+	})
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to issue profile token")
+	}
+	return ProfileVerification{Valid: true, ProfileToken: token, ExpiresAt: expiresAt}, nil
 }
 
 // --- Helpers ---
@@ -840,30 +897,64 @@ func (h *ProfileHandler) HandleListHouseholdSessions(w http.ResponseWriter, r *h
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	sessions, err := h.ListHouseholdSessions(r.Context(), HouseholdSessionsQuery{
+		UserID:          userID,
+		ActiveProfileID: activeProfileIDOf(r),
+		VerifyProfile: func(id string) error {
+			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+		},
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-	allowed, err := h.canManageHouseholdProfiles(r, store)
-	if err != nil {
-		writeProfileManagementPermissionError(w, err)
-		return
-	}
-	if !allowed {
-		writeError(w, http.StatusForbidden, "forbidden", "Profile management requires the primary profile or admin access")
-		return
-	}
-	if h.SessionsReader == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Playback sessions are not configured")
-		return
-	}
-
-	sessions, err := h.SessionsReader.Load(r.Context(), r, PlaybackSessionsQuery{UserID: userID})
-	if err != nil {
-		slog.ErrorContext(r.Context(), "failed to list household playback sessions", "component", "api", "user_id", userID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list playback sessions")
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
+			writeProfileManagementPermissionError(w, apiErr.cause)
+			return
+		}
+		writeAPIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, sessions)
+}
+
+// PlaybackSessionView is one live playback session as the session listings
+// serialize it.
+type PlaybackSessionView = playbackSessionRow
+
+// HouseholdSessionsQuery is a household session listing with its caller
+// already reduced to an identity.
+type HouseholdSessionsQuery struct {
+	UserID int
+	// ActiveProfileID is the profile the caller acts as ("" when none).
+	ActiveProfileID string
+	// VerifyProfile confirms a PIN-locked primary profile is verified for
+	// this request; it returns access.ErrProfileUnverified when it is not.
+	VerifyProfile func(profileID string) error
+}
+
+// ListHouseholdSessions lists the account's live playback sessions for a
+// household manager. v1 GET /profiles/household/sessions and v2
+// listHouseholdSessions both call it; a failure is an *APIError carrying
+// the v1 status, code and message.
+func (h *ProfileHandler) ListHouseholdSessions(ctx context.Context, q HouseholdSessionsQuery) ([]PlaybackSessionView, error) {
+	store, err := h.storeProvider.ForUser(ctx, q.UserID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	allowed, err := canManageHouseholdAs(ctx, store, q.ActiveProfileID, q.VerifyProfile)
+	if err != nil {
+		return nil, profileManagementError(err)
+	}
+	if !allowed {
+		return nil, apiError(http.StatusForbidden, "forbidden", "Profile management requires the primary profile or admin access")
+	}
+	if h.SessionsReader == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Playback sessions are not configured")
+	}
+
+	sessions, err := h.SessionsReader.Load(ctx, PlaybackSessionsQuery{UserID: q.UserID})
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to list household playback sessions", "component", "api", "user_id", q.UserID, "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list playback sessions")
+	}
+	return sessions, nil
 }
