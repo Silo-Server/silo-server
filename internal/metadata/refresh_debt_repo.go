@@ -288,6 +288,24 @@ func (r *RefreshDebtRepository) DeleteTargetDebt(ctx context.Context, targetType
 	return nil
 }
 
+// DeleteEpisodeDebts clears refresh debt for the supplied complete episode IDs.
+func (r *RefreshDebtRepository) DeleteEpisodeDebts(ctx context.Context, contentIDs []string) error {
+	if len(contentIDs) == 0 {
+		return nil
+	}
+	if err := r.requireConfigured(); err != nil {
+		return err
+	}
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM metadata_refresh_debt
+		WHERE target_type = 'episode' AND content_id = ANY($1::text[])
+	`, contentIDs)
+	if err != nil {
+		return fmt.Errorf("deleting episode metadata refresh debt: %w", err)
+	}
+	return nil
+}
+
 func (r *RefreshDebtRepository) MarkFailure(
 	ctx context.Context,
 	contentID string,

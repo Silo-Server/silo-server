@@ -114,6 +114,7 @@ type metadataRefreshDebtRepo interface {
 	MarkTargetSuccess(ctx context.Context, targetType, contentID string, priority int, reasonMask int64, nextRefreshAt time.Time) error
 	DeleteDebt(ctx context.Context, contentID string) error
 	DeleteTargetDebt(ctx context.Context, targetType, contentID string) error
+	DeleteEpisodeDebts(ctx context.Context, contentIDs []string) error
 }
 
 // metadataLibraryRepo defines library membership methods used by
@@ -5580,15 +5581,28 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 	}
 
 	incomplete := false
+	var completeEpisodeIDs []string
 	for _, episode := range episodes {
-		if EpisodeHasActionableMetadataDebt(episode, now) {
-			incomplete = true
+		if !EpisodeHasActionableMetadataDebt(episode, now) {
+			if s.refreshDebtRepo != nil && episode != nil {
+				if id := strings.TrimSpace(episode.ContentID); id != "" {
+					completeEpisodeIDs = append(completeEpisodeIDs, id)
+				}
+			}
+			continue
 		}
+		incomplete = true
 		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to sync episode refresh debt", "component", "metadata",
 				"series_id", seriesID,
 				"episode_id", episode.ContentID,
 				"error", err)
+		}
+	}
+	if len(completeEpisodeIDs) > 0 {
+		if err := s.refreshDebtRepo.DeleteEpisodeDebts(ctx, completeEpisodeIDs); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to clear complete episode refresh debt", "component", "metadata",
+				"series_id", seriesID, "episode_count", len(completeEpisodeIDs), "error", err)
 		}
 	}
 

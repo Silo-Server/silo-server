@@ -421,6 +421,15 @@ func (r *fakeRefreshDebtRepo) DeleteDebt(ctx context.Context, contentID string) 
 	return r.DeleteTargetDebt(ctx, RefreshTargetItem, contentID)
 }
 
+func (r *fakeRefreshDebtRepo) DeleteEpisodeDebts(ctx context.Context, contentIDs []string) error {
+	for _, id := range contentIDs {
+		if err := r.DeleteTargetDebt(ctx, RefreshTargetEpisode, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *fakeRefreshDebtRepo) DeleteTargetDebt(_ context.Context, targetType, contentID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
