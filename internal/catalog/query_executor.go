@@ -140,15 +140,16 @@ type previewPagePlan struct {
 	fromClausePaged string
 	// fromClauseCount is the FROM clause for exact totals. It includes filter
 	// joins, but intentionally excludes sort-only joins.
-	fromClauseCount string
-	whereClause     string
-	args            []any
-	orderBy         string
-	sortArgs        []any
-	limit           int
-	offset          int
-	maxResults      int
-	limitArgIdx     int
+	fromClauseCount       string
+	whereClause           string
+	args                  []any
+	orderBy               string
+	sortArgs              []any
+	limit                 int
+	offset                int
+	maxResults            int
+	limitArgIdx           int
+	deferEpisodeHydration bool
 }
 
 // countSQL renders a count-only query that returns the total number of rows
@@ -209,6 +210,21 @@ func (p previewPagePlan) pagedSQL(includeTotal bool) (string, []any) {
 	withClause := ""
 	if len(p.ctes) > 0 {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
+	}
+	// Source-specific builders can add CTEs after the base plan is built.
+	// Keep those plans on the original renderer with their complete bindings.
+	if p.deferEpisodeHydration && len(p.ctes) == 0 {
+		// The episode base has one row per content ID. Selecting those IDs
+		// first lets PostgreSQL prune metadata/season joins from the skipped
+		// prefix. Hydrate and sort only the selected page in the same statement
+		// snapshot; the original title order includes the content-ID tie-break.
+		sql := fmt.Sprintf(`WITH page_ids AS MATERIALIZED (
+			SELECT mi.content_id %s %s %s LIMIT $%d%s
+		) SELECT %s %s
+		JOIN page_ids ON page_ids.content_id = mi.content_id
+		%s`, p.fromClausePaged, p.whereClause, p.orderBy, p.limitArgIdx, offsetClause,
+			selectList, p.fromClausePaged, p.orderBy)
+		return sql, args
 	}
 	sql := fmt.Sprintf(
 		`%sSELECT %s %s %s %s LIMIT $%d%s`,
@@ -413,6 +429,11 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		offset:          offset,
 		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
+		// Keep non-episode relations, sort joins and history CTEs on their existing
+		// paths. Only the built-in episode relation guarantees the unique IDs
+		// and simple, deterministic title sort required by deferred hydration.
+		deferEpisodeHydration: isEpisodeCatalogScope(effectiveScope) && offset > 0 &&
+			NormalizeQuerySort(def.Sort).Field == "title" && len(sortPlan.Joins) == 0 && len(ctes) == 0,
 	}, nil
 }
 
