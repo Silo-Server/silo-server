@@ -3,6 +3,7 @@ package apiv2
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -458,8 +459,22 @@ func TestListEffectiveSettings(t *testing.T) {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective?library_ids=x", "", settingsOwner()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.library_ids" {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationQueryLibraryIDs {
 		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// Each list passes its own maxItems, but the seam bounds their sum; that
+	// refusal lands on a declared parameter, not the seam's single-id name.
+	var many strings.Builder
+	many.WriteString("/api/v2/settings/values/effective?keys=ui.theme")
+	for i := 1; i <= 101; i++ {
+		fmt.Fprintf(&many, "&library_ids=%d", i)
+	}
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&many, "&series_ids=tv:%d", i)
+	}
+	p = requireProblem(t, do(t, h, http.MethodGet, many.String(), "", settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationQueryLibraryIDs {
+		t.Fatalf("combined bound errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective", "", bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective", "", bearer(expiredToken)), TypeSessionExpired)

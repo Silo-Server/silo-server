@@ -788,12 +788,20 @@ func (f *fakeSettingValuesSeam) ResolveEffectiveSettings(_ context.Context, _ in
 	if f.err != nil {
 		return nil, f.err
 	}
+	// The seam bounds the combined ids at 200 and names its single-id field.
+	if len(q.LibraryIDs)+len(q.SeriesIDs) > fakeMaxEffectiveContentIDs {
+		return nil, settingAPIError(400, "bad_request", "library_id", "Too many library_ids/series_ids in one request; resolve in smaller batches")
+	}
 	views, apiErr := f.effective(q, q.Keys, "keys")
 	if apiErr != nil {
 		return nil, apiErr
 	}
 	return views, nil
 }
+
+// fakeMaxEffectiveContentIDs mirrors the seam's maxEffectiveContentIDs: the
+// content ids one effective request may carry, shared by both resolve routes.
+const fakeMaxEffectiveContentIDs = 200
 
 func (f *fakeSettingValuesSeam) ResolveEffectiveSettingContexts(_ context.Context, _ int, q handlers.EffectiveSettingsQuery, contexts []handlers.EffectiveContextRequest) ([]handlers.EffectiveSettingContextView, error) {
 	if f.err != nil {

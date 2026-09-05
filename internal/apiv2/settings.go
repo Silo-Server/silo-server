@@ -840,7 +840,7 @@ func (q EffectiveSettingsQuery) query(ctx context.Context, keys []string) (handl
 		n, err := intOfID(id)
 		if err != nil || n <= 0 {
 			return handlers.EffectiveSettingsQuery{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "query.library_ids", Code: codeInvalid, Detail: "library_ids must name libraries by id"})
+				WithErrors(ProblemError{Location: locationQueryLibraryIDs, Code: codeInvalid, Detail: "library_ids must name libraries by id"})
 		}
 		libraries = append(libraries, n)
 	}
@@ -963,15 +963,17 @@ const (
 	fieldKeys   = "keys"
 	fieldValues = "values"
 
-	locationPathKey        = "path.key"
-	locationQueryKeys      = "query.keys"
-	locationQueryScope     = "query.scope"
-	locationQueryLibraryID = "query.library_id"
-	locationBodyValue      = "body.value"
-	locationBodyValues     = "body.values"
-	locationBodyKeys       = "body.keys"
-	locationBodyItem       = "body.item"
-	locationBodyContexts   = "body.contexts"
+	locationPathKey         = "path.key"
+	locationQueryKeys       = "query.keys"
+	locationQueryScope      = "query.scope"
+	locationQueryLibraryID  = "query.library_id"
+	locationQueryLibraryIDs = "query.library_ids"
+	locationQuerySeriesIDs  = "query.series_ids"
+	locationBodyValue       = "body.value"
+	locationBodyValues      = "body.values"
+	locationBodyKeys        = "body.keys"
+	locationBodyItem        = "body.item"
+	locationBodyContexts    = "body.contexts"
 )
 
 // settingFieldLocations maps the seam's rejected-field names onto the
@@ -1096,7 +1098,11 @@ func (reg *Registry) listEffectiveSettings(ctx context.Context, in *EffectiveSet
 	}
 	views, err := reg.deps.SettingValues.ResolveEffectiveSettings(ctx, userID, q)
 	if err != nil {
-		return nil, settingValueProblem(err, nil)
+		// The seam names the combined library_ids/series_ids bound after
+		// its single-id field; this operation declares the lists.
+		return nil, settingValueProblem(err, map[string]string{
+			"library_id": locationQueryLibraryIDs, "series_id": locationQuerySeriesIDs,
+		})
 	}
 	return &EffectiveSettingCollectionOutput{Body: EffectiveSettingCollection{
 		Collection: NewCollection(effectiveSettingValuesOf(views)), Revision: reg.deps.SettingValues.ContractRevision(),
