@@ -10,6 +10,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
+// Leaf item types whose progress is per item rather than aggregated.
+const (
+	itemTypeMovie     = "movie"
+	itemTypeEpisode   = "episode"
+	itemTypeEbook     = "ebook"
+	itemTypeAudiobook = "audiobook"
+)
+
 // WatchedStateView is what marking an item watched or unwatched answers:
 // the target, the kind it resolved to, and how many leaf items changed.
 type WatchedStateView = watchedStateResponse
@@ -32,7 +40,7 @@ func (h *ItemsHandler) WatchDetail(ctx context.Context, userID int, profileID, c
 		}
 	}
 
-	if detail.Type == "movie" || detail.Type == "episode" || detail.Type == "ebook" || detail.Type == "audiobook" {
+	if detail.Type == itemTypeMovie || detail.Type == itemTypeEpisode || detail.Type == itemTypeEbook || detail.Type == itemTypeAudiobook {
 		detail.UserData = h.leafUserData(ctx, userID, profileID, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
 	}
@@ -53,7 +61,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 	}
 
 	switch {
-	case targetType == "ebook":
+	case targetType == itemTypeEbook:
 		// Ebook read state lives in ebook_reader_progress, not in
 		// user_watch_progress/user_watch_history; watch providers do not sync
 		// books, so no local watch event is dispatched.

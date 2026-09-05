@@ -1851,7 +1851,7 @@ func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string, itemTy
 // leafUserData is getLeafUserData without the request: the viewer's progress
 // on one leaf item, nil when there is none or the store cannot be reached.
 func (h *ItemsHandler) leafUserData(ctx context.Context, userID int, profileID, contentID, itemType string) *catalog.SeasonUserData {
-	if itemType == "ebook" {
+	if itemType == itemTypeEbook {
 		return h.ebookLeafUserData(ctx, userID, profileID, contentID)
 	}
 

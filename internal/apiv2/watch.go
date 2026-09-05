@@ -234,6 +234,11 @@ type WatchSubtitleSignature struct {
 	HearingImpaired bool   `json:"hearing_impaired"`
 }
 
+const (
+	locationPathID    = "path.id"
+	locationQueryFile = "query.file_id"
+)
+
 // WatchedInput names the item to mark.
 type WatchedInput struct {
 	ID ID `path:"id" doc:"A movie, ebook, episode, season or series; a season or series expands to its episodes" example:"movie:heat-1995"`
@@ -281,7 +286,7 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 		n, err := intOfID(in.FileID)
 		if err != nil || n <= 0 {
 			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "query.file_id", Code: codeInvalid, Detail: "file_id must name a file."})
+				WithErrors(ProblemError{Location: locationQueryFile, Code: codeInvalid, Detail: "file_id must name a file."})
 		}
 		opts.SelectedFileID = n
 	}
@@ -289,7 +294,7 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 		n, err := intOfID(in.LibraryID)
 		if err != nil || n <= 0 {
 			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "query.library_id", Code: codeInvalid, Detail: "library_id must name a library."})
+				WithErrors(ProblemError{Location: locationQueryLibraryID, Code: codeInvalid, Detail: "library_id must name a library."})
 		}
 		opts.PresentationLibraryID = &n
 	}
@@ -305,7 +310,7 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 		var apiErr *handlers.APIError
 		if errors.As(err, &apiErr) && apiErr.Code == "invalid_watch_target" {
 			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "path.id", Code: codeInvalid, Detail: apiErr.Message})
+				WithErrors(ProblemError{Location: locationPathID, Code: codeInvalid, Detail: apiErr.Message})
 		}
 		return nil, serviceProblem(err)
 	}
