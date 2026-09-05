@@ -47,7 +47,6 @@ export default tseslint.config(
       "src/hooks/queries/profiles.ts",
       "src/hooks/queries/policy.ts",
       "src/hooks/queries/admin/users.ts",
-      "src/lib/buildPluginHref.ts",
       "src/pages/ActivateDevice.tsx",
       "src/pages/Login.tsx",
       "src/pages/OAuthComplete.tsx",

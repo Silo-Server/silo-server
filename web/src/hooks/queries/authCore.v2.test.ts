@@ -27,6 +27,7 @@ import { sessionFromTokenPair } from "@/api/v2/account";
 import { v2 } from "@/api/v2/request";
 import { v2Fixture } from "@/api/v2/testing";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
+import { pluginRouteHref } from "@/lib/pluginRouteHref";
 import { useOnboardingFlow, useOnboardingProgress, useOnboardingState } from "./onboarding";
 import { userLibraryFromV2 } from "./libraries";
 import { usePolicyCapability } from "./policy";
@@ -173,18 +174,27 @@ describe("signup status", () => {
 });
 
 describe("plugin launch", () => {
-  it("prepares the launch cookie through launchPlugin before navigating", async () => {
+  it("prepares the launch cookie on the API prefix the plugin page is served from", async () => {
+    // Plugin SPAs live under /api/v1/plugins and the launch cookie is scoped
+    // to the issuing endpoint's API prefix, so the launch call and the
+    // navigated href must share that prefix or the browser never sends the
+    // cookie. v2 launchPlugin (Path=/api/v2/plugins) cannot be used until
+    // the plugin proxy moves with it.
     const fetchMock = vi.fn<typeof fetch>(async () => json(launchPluginOk));
     vi.stubGlobal("fetch", fetchMock);
     const location = { href: "" };
     vi.stubGlobal("location", location);
 
-    await navigateToPluginRoute("/api/v1/plugins/3/");
+    const href = pluginRouteHref(3, "/");
+    await navigateToPluginRoute(href);
 
     const [call] = calls(fetchMock);
-    expect(call?.url).toBe("/api/v2/auth/plugin-launch");
+    expect(call?.url).toBe("/api/v1/auth/plugin-launch");
     expect(call?.init.method).toBe("POST");
     expect(location.href).toContain("/api/v1/plugins/3/");
+    const cookiePath = (call?.url ?? "").replace(/\/auth\/plugin-launch$/, "");
+    expect(cookiePath).toBe("/api/v1");
+    expect(location.href.startsWith(`${cookiePath}/plugins/`)).toBe(true);
   });
 });
 
