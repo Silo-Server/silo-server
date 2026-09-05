@@ -10,14 +10,6 @@ export interface LoginResponse {
   user: User;
 }
 
-export interface AccountPasswordCapability {
-  schema_version: number;
-  change_password: boolean;
-  requires_current_password: boolean;
-  minimum_password_length: number;
-  maximum_password_bytes: number;
-}
-
 export interface ImpersonationInfo {
   active: boolean;
   impersonator_user_id: number;
