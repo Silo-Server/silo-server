@@ -222,6 +222,7 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		"POST " + Prefix + "/auth/oauth/{install_id}/init", "GET " + Prefix + "/auth/oauth/{install_id}/callback",
 		"GET " + Prefix + "/onboarding/flow", "GET " + Prefix + "/onboarding/state", "POST " + Prefix + "/onboarding/progress",
 		"GET " + Prefix + "/policy/capability", "GET " + Prefix + "/user/libraries",
+		"GET " + Prefix + "/account/password/capability", "POST " + Prefix + "/account/password",
 	}
 	registry := RawHandshakes()
 

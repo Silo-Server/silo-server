@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -38,6 +39,60 @@ func (f fakeAccounts) CurrentUser(_ context.Context, claims *auth.Claims) (handl
 		return handlers.UserView{}, &handlers.APIError{Status: 500, Code: TypeInternalError.ID, Message: "An unexpected error occurred"}
 	}
 	return view, nil
+}
+
+// passwordChangeAllowed mirrors the v1 rule: a plain login session on the
+// primary profile, or an admin with no profile declared. parityDeps' primary
+// checker knows p-primary only for the admin account (user 2).
+func passwordChangeAllowed(claims *auth.Claims, profileID string) bool {
+	if claims == nil || claims.TokenType != auth.TokenTypeAccess || claims.SessionID == "" || claims.ImpersonatorUserID != nil {
+		return false
+	}
+	switch profileID {
+	case "":
+		return claims.Role == "admin"
+	case "p-primary", "p-primary-locked":
+		return claims.UserID == 2
+	}
+	return false
+}
+
+func (f fakeAccounts) AccountPasswordCapability(_ context.Context, claims *auth.Claims, profileID string) (handlers.AccountPasswordCapabilityView, error) {
+	if f.err != nil {
+		return handlers.AccountPasswordCapabilityView{}, f.err
+	}
+	return handlers.AccountPasswordCapabilityView{
+		Configured: true, ChangePassword: passwordChangeAllowed(claims, profileID) && f.users[claims.UserID].Username != "off",
+		RequiresCurrentPassword: true, MinimumPasswordLength: auth.MinimumPasswordLength, MaximumPasswordBytes: auth.MaximumPasswordBytes,
+	}, nil
+}
+
+func (f fakeAccounts) AuthorizePasswordChange(_ context.Context, claims *auth.Claims, profileID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if !passwordChangeAllowed(claims, profileID) {
+		return &handlers.APIError{Status: 403, Code: "password_change_forbidden", Message: "Changing the account password requires the account's primary profile"}
+	}
+	return nil
+}
+
+// ChangePassword answers the way the real seam does: "pw" is every account's
+// current password (as in Login), the limits are the auth package's.
+func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current, next string) error {
+	switch {
+	case f.err != nil:
+		return f.err
+	case current != "pw":
+		return &handlers.APIError{Status: 400, Code: "invalid_current_password", Message: "Current password is incorrect", Field: "current_password"}
+	case utf8.RuneCountInString(next) < auth.MinimumPasswordLength:
+		return &handlers.APIError{Status: 400, Code: "weak_password", Message: "Password must be at least 8 characters", Field: "new_password"}
+	case len(next) > auth.MaximumPasswordBytes:
+		return &handlers.APIError{Status: 400, Code: "password_too_long", Message: "Password must be at most 72 bytes", Field: "new_password"}
+	case next == "oauth-only":
+		return &handlers.APIError{Status: 409, Code: "password_login_disabled", Message: "This account does not use local password sign-in"}
+	}
+	return nil
 }
 
 // fakeProgressQuery is one ListProgressPage call as the handler made it.

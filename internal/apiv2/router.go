@@ -381,6 +381,9 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 type AccountService interface {
 	NeedsSetup(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
+	AccountPasswordCapability(ctx context.Context, claims *auth.Claims, profileID string) (handlers.AccountPasswordCapabilityView, error)
+	AuthorizePasswordChange(ctx context.Context, claims *auth.Claims, profileID string) error
+	ChangePassword(ctx context.Context, claims *auth.Claims, currentPassword, newPassword string) error
 }
 
 // ProgressService is the slice of *handlers.ProgressHandler listProgress uses.
