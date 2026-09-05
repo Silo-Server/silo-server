@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+/* Tailwind v4 wraps every `hover:` and `group-hover:` utility in
+   `@media (hover: hover)`. That feature is false on Windows machines whose
+   Chromium under-reports pointer capability — the same devices the card
+   controls gate works around — so every hover style in the app is silently
+   inert there, not just the card controls.
+
+   Gate on the observed-pointer attribute instead (see lib/pointerCapability.ts,
+   which seeds it from the equivalent media query at boot). Behaviour is
+   unchanged wherever the media query was already right; touch devices still
+   get no hover styling, because a touch press clears the attribute.
+
+   The gate MUST stay inside :where(). Tailwind orders its state variants by
+   specificity, so an unwrapped `:root[data-fine-pointer="true"]` prefix would
+   make every hover: utility 0-4-0 against 0-2-0 for disabled:, active: and
+   focus-visible: — hover would then beat them on every device, not just the
+   ones this works around. :where() contributes nothing, leaving the compiled
+   selectors at exactly the specificity Tailwind intends. */
+@custom-variant hover (:where(:root[data-fine-pointer="true"]) &:hover);
+
 /* ================================================================
    § 1  THEME BRIDGE — Tailwind ↔ CSS Custom Properties
    ================================================================
@@ -1617,15 +1636,25 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .group\/media:focus-within .media-card-hover-dim {
     opacity: 1;
   }
-  @media (any-hover: hover) and (any-pointer: fine) {
-    .group\/media:hover .media-card-hover-dim {
-      opacity: 1;
-    }
-    .group\/card:hover .media-card-action-trigger,
-    .group\/media:hover .media-card-play-trigger {
-      opacity: 1;
-      pointer-events: auto;
-    }
+  /* Gated on an attribute set from observed pointer events
+     (lib/pointerCapability.ts), not on a media query. Chromium on some Windows
+     hybrid machines reports `any-hover: none` and `any-pointer: coarse` even
+     while a mouse is actively hovering the card, so this block never matched
+     and the controls stayed at `opacity: 0` permanently. The attribute is
+     seeded from that same media query at boot, so behaviour is unchanged
+     wherever it was already right.
+
+     Deliberately no `[data-fine-pointer="false"]` counterpart forcing opacity
+     back to 0: at this specificity it would out-weigh the `[data-state="open"]`
+     and `:focus-visible` rules above and hide the trigger while its own menu is
+     open on a touch device. Rest state is the base rule's job. */
+  :where(:root[data-fine-pointer="true"]) .group\/media:hover .media-card-hover-dim {
+    opacity: 1;
+  }
+  :where(:root[data-fine-pointer="true"]) .group\/card:hover .media-card-action-trigger,
+  :where(:root[data-fine-pointer="true"]) .group\/media:hover .media-card-play-trigger {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   /* A long press on a card opens the action sheet, so the browser's own image

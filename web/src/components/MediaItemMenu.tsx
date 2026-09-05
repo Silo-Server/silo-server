@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useLocation } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { useFinePointer } from "@/hooks/useFinePointer";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -58,7 +59,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useLongPress } from "@/hooks/useLongPress";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -78,12 +78,13 @@ import {
 
 type MediaItemType = ItemDetail["type"];
 
-const FINE_POINTER_QUERY = "(any-hover: hover) and (any-pointer: fine)";
-
 function useHasFinePointer() {
-  // Preserve the established quick actions in SSR, tests, and older browsers
-  // without matchMedia. Touch-capable modern browsers report this accurately.
-  return useMediaQuery(FINE_POINTER_QUERY, true);
+  // Reads the observed pointer, not the media query: Chromium on some Windows
+  // machines with a touchscreen reports no fine pointer while a mouse is in
+  // use, which withheld these shortcuts from the very devices this gate is
+  // meant to serve. The `true` fallback preserves the established quick
+  // actions in SSR, tests, and browsers where init has not run.
+  return useFinePointer(true);
 }
 
 type MediaItemMenuEntry =
