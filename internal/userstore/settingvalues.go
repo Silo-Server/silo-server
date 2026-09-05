@@ -48,6 +48,20 @@ type SettingIdentity struct {
 	SeriesID     string
 }
 
+// ValidateScopeListing reports whether (profileID, scope) names a
+// profile-anchored set of rows ListSettingValuesByScope can list: a canonical
+// (trimmed, non-empty) profile id at a remote scope other than account, the
+// one scope no profile anchors.
+func ValidateScopeListing(profileID string, scope settingscontract.Scope) error {
+	if !scope.IsRemote() || scope == settingscontract.ScopeAccount {
+		return fmt.Errorf("%w: %q is not a profile-anchored scope", ErrInvalidSettingIdentity, scope)
+	}
+	if profileID == "" || profileID != strings.TrimSpace(profileID) {
+		return fmt.Errorf("%w: profile id %q is required in canonical form", ErrInvalidSettingIdentity, profileID)
+	}
+	return nil
+}
+
 // Validate reports whether the identity is addressable. It mirrors the scope
 // CHECK constraint on user_setting_values so an invalid identity is rejected
 // before it reaches either backend rather than surfacing as a driver error whose

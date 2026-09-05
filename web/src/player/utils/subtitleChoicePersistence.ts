@@ -3,14 +3,45 @@ import {
   seriesSubtitleSettingPath,
   seriesSubtitleSettingValues,
 } from "@/lib/seriesSubtitleSettings";
+import type { PlayerConfig } from "../context/PlayerConfigContext";
+import { playerFetch } from "../player-fetch";
+import { playerV2, type PlayerV2Body } from "../player-v2";
 import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature } from "../types";
 import { derivePersistedSubtitleMode } from "./subtitleMode";
 
 /** One PUT the player issues to persist a subtitle choice. */
-export interface SubtitleChoiceRequest {
-  path: string;
-  body: unknown;
+export type SubtitleChoiceRequest =
+  | {
+      /** A canonical settings row, written on the v1 settings-values route. */
+      kind: "setting";
+      path: string;
+      body: { value: unknown };
+    }
+  | {
+      /** The per-series track preference, written on the v2 route. */
+      kind: "subtitle_preference";
+      seriesId: string;
+      body: PlayerV2Body<"PUT /api/v2/subtitle-prefs/{series_id}">;
+    };
+
+/** Issues one request from {@link buildSubtitleChoiceRequests} with the player's credentials. */
+export function sendSubtitleChoiceRequest(
+  config: PlayerConfig,
+  request: SubtitleChoiceRequest,
+): Promise<unknown> {
+  switch (request.kind) {
+    case "setting":
+      return playerFetch<void>(config, request.path, {
+        method: "PUT",
+        body: JSON.stringify(request.body),
+      });
+    case "subtitle_preference":
+      return playerV2(config, "PUT /api/v2/subtitle-prefs/{series_id}", {
+        path: { series_id: request.seriesId },
+        body: request.body,
+      });
+  }
 }
 
 /**
@@ -97,17 +128,21 @@ export function buildSubtitleChoiceRequests({
   const chosen = seriesSubtitleSettingValues({ language: track?.language ?? null, mode });
 
   const requests: SubtitleChoiceRequest[] = SERIES_SUBTITLE_SETTING_KEYS.map((key) => ({
+    kind: "setting",
     path: seriesSubtitleSettingPath(key, seriesId),
     body: { value: chosen[key] },
   }));
 
   requests.push({
-    path: `/subtitle-prefs/${seriesId}`,
+    kind: "subtitle_preference",
+    seriesId,
     body: {
       subtitle_language: track?.language ?? "",
+      // -1 is the "no track" sentinel the v2 contract admits for "off".
       subtitle_track_index: index ?? -1,
       subtitle_mode: mode,
-      track_signature: trackSignature,
+      // The contract spells "no signature" as an absent member, not null.
+      track_signature: trackSignature ?? undefined,
       show_forced_subtitles: showForcedSubtitles,
     },
   });

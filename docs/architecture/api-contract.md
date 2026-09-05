@@ -413,11 +413,96 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `concurrency: if_match` field names the rows that will register `Guarded`; the gate limits
   it to tier-1 ported mutation rows and reconciles every guarded registration against it. No
   production resource is guarded yet; the first section that guards one adds its row version.
+- **Mutation retry safety is encoded.** The ledger's curated `retry_safety` field classifies
+  every tier-1 ported mutation row (POST, PUT, PATCH, DELETE) by one of the seven strategies
+  above, spelled `natural_idempotent`, `unique_constraint`, `domain_identity`, `coalescing`,
+  `durable_dispatch`, `idempotency_key`, `non_retryable`; an optional `retry_safety_note` (at
+  most 300 characters) explains a non-obvious choice and is required for `idempotency_key` and
+  `non_retryable`. `migration.schema.json` forbids both fields on any other row and
+  `internal/contractledger` requires the value on every such row. `apiv2.Operation`
+  carries the same enum as `RetrySafety`: `Register` panics when a mutating operation omits it
+  or a GET/HEAD declares it, and the document records it as `x-silo-retry-safety`.
+  `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
+  classified legacy row or disagrees with it, unless `mutationWithoutLegacyRow` names a
+  v2-only mutation with a reason, and when a classified row names a v2 operation the
+  registry does not declare as a mutation; it compares only rows eligible for the
+  classification, so a redesigned or replaced row that names a v2 mutation is not caught
+  between the schema and the gate. No generic key store exists, so `Register`
+  refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
+  `Idempotency-Key` header under any other strategy: the strategy, its required header, and
+  the durable replay store land together with the first operation the inventory proves
+  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
+  tier-1 ported mutation rows (219 distinct operations) are classified (108
+  `natural_idempotent`, 26 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 10
+  `durable_dispatch`, 51 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  one-shot display or a secret shown once (invite-code top-up, admin session message,
+  webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
+  first call never touched (node force-reload, per node and fleet-wide), a token-issuing
+  send with no request identity (invitation create and resend, whose retry supersedes the
+  token the first call mailed), a blanket command over whatever currently matches rather
+  than a named target (library scan cancel, metadata-match-queue cancel, task cancel by key,
+  notifications read-all), a playback command minted fresh on every call (admin session
+  pause and resume, whose delayed retry reverts the newer state), a fresh server-side cutoff a retry would move (history remove,
+  mark-unwatched), a shared-key artwork replacement a stale retry would clobber (library
+  poster upload), an external call made before any durable claim (provider device-auth
+  start and API-key exchange), a one-shot token-bearing or secret-bearing response that cannot be replayed
+  (device-pairing poll, OAuth completion, invitation acceptance, initial setup, API-key and
+  webhook creation), a shared-key or identity-keyed replacement a stale retry would clobber
+  (profile avatar upload, provider disconnect), a profile update whose account-wide
+  access-policy revision bump is not change-gated, an unconditional
+  repoint of
+  cluster-wide state (policy version activation and document enable/disable, whose stale
+  retry restores an obsolete policy), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
+  confirmation), a
+  command that re-runs its side effect on every call (watch-together selection and
+  suggestion promotion, which reset playback and clear member sessions each time;
+  metadata-match-queue retry, which schedules another run once the first is leased; node
+  capability reprobe, which holds the GPU gate through a multi-minute cold build), or a
+  delete or replace that converges only while nothing intervenes: a delayed retry after a
+  lost response destroys a resource re-created after the first success (email-address
+  clear, push-device unregister, library and collection poster delete, profile avatar
+  delete, Discord unlink, collection item add and remove, profile section overrides
+  replace and reset, device forget and device-settings reset), so each stays `non_retryable`
+  until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
+  (email-address verification; favorites, watchlist, and rating add and remove; taste seed;
+  account and node deletion) name the durable dispatch or cleanup the v2 port must add before
+  their retry is safe. The existing v2 profile creation and deletion operations remain
+  `non_retryable` until their durable identity and cleanup defects are fixed. Forty rows
+  carry a `DEFECT` note where v1 gates on
+  process-local state, fires an external effect inline, lacks the dedup or ordering its
+  identity implies, or re-runs a side effect a retry should not repeat (task run, collection
+  sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
+  invite-code redemption during signup, playback route events, mark-watched history,
+  watch-together selection and promotion, metadata-match-queue retry, playback session
+  progress, sync progress, download status, ebook reader progress, and onboarding progress,
+  whose last-write-wins update lets a delayed retry rewind a newer report, favorites,
+  watchlist, and rating add and remove, the taste seed, subtitle download and upload,
+  whose unique key resolves a retry but whose losing insert deletes the winner's S3
+  object, transcode start, which replaces a live session under the same id, and media
+  request creation, whose partial unique index stops covering a request once it reaches a
+  terminal state, node creation, whose cross-replica pool reload runs after the insert
+  without a transaction, push device registration (Apple and FCM), whose update overwrites
+  a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
+  field presence rather than on an effective change, the provider device-auth poll, whose
+  completion check is a plain read ahead of the plugin call, admin user update, whose
+  password branch re-hashes and revokes every session on each attempt, profile creation,
+  whose name and limit checks run in application code with no unique index on the
+  account-scoped name, account deletion, whose impersonation-session revocation follows
+  the commit, node deletion, whose pool invalidation follows the commit, and profile
+  deletion, whose object and device cleanup cannot resume after the row disappears,
+  library creation,
+  whose seeding and initial scan run after the insert without a transaction, and the
+  library provider chain, whose matcher wake fires unconditionally after the save); their
+  v2 port must move the gate
+  to shared durable state, add the missing unique constraint or event time, gate the
+  dispatch on a reported change, or make the repeat a no-op before the declared strategy
+  holds.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
-  tracked on #882: per-operation mutation retry / idempotency classification; the durable
-  `202` job acceptance and its monitor/cancel shape; the atomic-versus-per-item bulk contract;
-  and the RFC 9745 / RFC 8594 deprecation, link, and sunset headers.
+  tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the
+  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
+  sunset headers.
 
 ### Problem Details
 
@@ -697,6 +782,12 @@ documents its semantics. Silo never advertises or validates the field while sile
 Adding supported idempotency to an operation later is additive. Before foundation implementation,
 the v1 inventory classifies every durable-effect operation by the strategies above and identifies
 any residual group that can justify one shared implementation.
+
+An absolute assignment can remain `natural_idempotent` without a concurrency guard: repeated
+identical invite-code updates converge and do not increment usage or dispatch another effect.
+That classification does not protect a later administrator edit from an older request. Whether
+admission-control edits require version guarding belongs to the admin-invitations section;
+retry classification and protection against concurrent edits are separate decisions.
 
 ### Optimistic concurrency
 
@@ -1026,6 +1117,56 @@ server without an upload store answers `503`; section overrides drop the `/reset
 (`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
 method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
 casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+
+The first Phase 4 section, **settings-prefs** (`internal/apiv2/preferences.go`, tag
+`preferences`), ports the nine `profile_scoped` preference rows: `getAudioPreference`,
+`updateAudioPreference`, `deleteAudioPreference`, `getSubtitlePreference`,
+`updateSubtitlePreference`, `deleteSubtitlePreference` (per series, `series_id` a content id),
+and `listLibraryPlaybackPreferences`, `updateLibraryPlaybackPreference`,
+`deleteLibraryPlaybackPreference` (per library). Each v2 handler calls a seam extracted from the
+v1 handler (`GetAudioPreference`, `SetSubtitlePreference`, …), so the canonical-settings sync
+and the `user_settings.changed` events stay in one place and v1 is byte-identical. Deliberate
+v1 differences: the per-series `PUT`s keep v1's whole-replacement and `204` but require a
+zero-based `*_track_index` (`minimum: -1`, where `-1` is the "no track" / "subtitles off" sentinel
+v1 clients store; v1 accepted any negative) and refuse unknown members; the
+`AudioTrackSignature` and `SubtitleTrackSignature` schemas keep the store's member names with
+every member optional and are shared by the read and write bodies; the library list is the
+standard `{items: [...]}` collection without pagination instead of v1's `{preferences: [...]}`,
+with `library_id` as a string `ID`; the library `PUT` became a `PATCH` (omitted unchanged, `null`
+or `""` on a string member clears the override so it is absent from the list, clearing every
+override removes the row). The `PATCH` goes through its own seam entry point,
+`PatchLibraryPlaybackPreference`, which merges the present members onto the canonical
+`profile_library` setting rows — not the legacy composite row, which `PUT /settings/values` and
+the web library editor do not mirror into — inside one store transaction behind the per-user
+advisory lock, so an omitted member keeps a newer canonical write and concurrent patches of
+different members both land; v1 `PUT` keeps its whole-row replacement path unchanged. For the
+same reason the v2 list reads through its own seam entry point,
+`ListLibraryPlaybackPreferencesCanonical`, which assembles one entry per library from the
+canonical `profile_library` rows (the four keys the patch writes; `updated_at` is the newest of
+them) rather than the legacy table v1 `GET` still lists, so the list matches what playback
+resolves. A library whose overrides exist only in the legacy row is not listed: canonical is
+the source of truth, and every v1 `PUT` since the sync existed mirrors into canonical rows, so a
+legacy-only row is data written before the sync. The per-series `GET`s read through their
+own seam entry points too, `GetAudioPreferenceCanonical` and `GetSubtitlePreferenceCanonical`:
+the legacy row is the resource — it holds the track identity (index, external path, signature)
+nothing else stores, and a profile without one is `404` exactly as on v1 even when canonical
+rows exist — and the members playback resolves canonically (`audio_language`;
+`subtitle_language`, `subtitle_mode`, `show_forced_subtitles`) are overlaid from the
+`profile_series` rows: a present row replaces the legacy member, an absent row means the member
+is unset (empty string, or absent for `show_forced_subtitles`), and `updated_at` is the newest
+of the rows read. Older SQLite track preferences can have no recorded timestamp; when none
+of the rows supplies one, v2 emits `1970-01-01T00:00:00.000Z` as an unknown-time sentinel.
+A nonempty malformed output timestamp still fails validation; v1 reads remain unchanged.
+The library patch normalizes present values once and mirrors those same values into the
+legacy composite row, including clearing whitespace-only language overrides. This is the same rule the v2 subtitle `PUT` already applies to the forced
+override: `PUT`/`DELETE /settings/values` change the canonical rows without mirroring into the
+legacy row, so a v2 read of the legacy copy would contradict playback. And
+a member the seam rejects
+(`audio_language` on audio, any of the four on the library patch, a non-integer `library_id`)
+is a `422` naming it where v1 answered `400`. None of the nine registers `Guarded`, `Conditional` or `CreateOnly`: a
+per-profile playback preference is in the plan's "progress, playback" carve-out that keeps
+domain behavior rather than a row version, so the `PUT`s and `PATCH` are unconditional
+last-write-wins replacements, the reads carry no `ETag`, and the ledger rows say `Not if_match`.
 
 ## v1 lifecycle and release sequence
 

@@ -63,6 +63,69 @@
       "body_file": "create_profile_name_required.json"
     },
     {
+      "name": "delete_audio_preference_profile_verification_required",
+      "operation_id": "deleteAudioPreference",
+      "scenario": "A profile-scoped delete for a PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/audio-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_audio_preference_profile_verification_required.json"
+    },
+    {
+      "name": "delete_library_playback_preference_invalid_library_id",
+      "operation_id": "deleteLibraryPlaybackPreference",
+      "scenario": "A path identifier no library can carry fails validation at path.library_id rather than reaching the store.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/library-playback-prefs/not-a-library",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_library_playback_preference_invalid_library_id.json"
+    },
+    {
+      "name": "delete_library_playback_preference_profile_verification_required",
+      "operation_id": "deleteLibraryPlaybackPreference",
+      "scenario": "A profile-scoped delete for a PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/library-playback-prefs/1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_library_playback_preference_profile_verification_required.json"
+    },
+    {
       "name": "delete_profile_avatar_authentication_required",
       "operation_id": "deleteProfileAvatar",
       "scenario": "An avatar removal needs a signed-in account.",
@@ -142,6 +205,90 @@
       "body_file": "delete_profile_verification_required.json"
     },
     {
+      "name": "delete_subtitle_preference_profile_verification_required",
+      "operation_id": "deleteSubtitlePreference",
+      "scenario": "A profile-scoped delete for a PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/subtitle-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_subtitle_preference_profile_verification_required.json"
+    },
+    {
+      "name": "get_audio_preference_not_found",
+      "operation_id": "getAudioPreference",
+      "scenario": "A series the acting profile has no remembered audio track for.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/audio-prefs/series-none",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_audio_preference_not_found.json"
+    },
+    {
+      "name": "get_audio_preference_ok",
+      "operation_id": "getAudioPreference",
+      "scenario": "The acting profile's remembered audio track for a series, with the signature playback matches the track by.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/audio-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AudioPreference",
+      "body_file": "get_audio_preference_ok.json"
+    },
+    {
+      "name": "get_audio_preference_profile_verification_required",
+      "operation_id": "getAudioPreference",
+      "scenario": "A profile-scoped read for a PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/audio-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_audio_preference_profile_verification_required.json"
+    },
+    {
       "name": "get_current_user_ok",
       "operation_id": "getCurrentUser",
       "scenario": "The signed-in account with no profile selected; impersonation is absent outside an admin impersonation session.",
@@ -219,6 +366,69 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/SetupStatus",
       "body_file": "get_setup_status_ok.json"
+    },
+    {
+      "name": "get_subtitle_preference_not_found",
+      "operation_id": "getSubtitlePreference",
+      "scenario": "A series the acting profile has no remembered subtitle choice for.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/subtitle-prefs/series-none",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_subtitle_preference_not_found.json"
+    },
+    {
+      "name": "get_subtitle_preference_ok",
+      "operation_id": "getSubtitlePreference",
+      "scenario": "The acting profile's remembered subtitle choice for a series: language, mode, the forced override and the track signature.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/subtitle-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SubtitlePreference",
+      "body_file": "get_subtitle_preference_ok.json"
+    },
+    {
+      "name": "get_subtitle_preference_profile_verification_required",
+      "operation_id": "getSubtitlePreference",
+      "scenario": "A profile-scoped read for a PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/subtitle-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_subtitle_preference_profile_verification_required.json"
     },
     {
       "name": "get_system_info_ok",
@@ -378,6 +588,48 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_household_sessions_verification_required.json"
+    },
+    {
+      "name": "list_library_playback_preferences_ok",
+      "operation_id": "listLibraryPlaybackPreferences",
+      "scenario": "The acting profile's per-library overrides as an unpaginated items collection; an override the profile has not set is absent, library ids are strings.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library-playback-prefs",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryPlaybackPreferenceCollection",
+      "body_file": "list_library_playback_preferences_ok.json"
+    },
+    {
+      "name": "list_library_playback_preferences_profile_verification_required",
+      "operation_id": "listLibraryPlaybackPreferences",
+      "scenario": "A profile-scoped read for a PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library-playback-prefs",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_library_playback_preferences_profile_verification_required.json"
     },
     {
       "name": "list_profile_section_overrides_library_id_required",
@@ -745,6 +997,94 @@
       "body_file": "unsupported_media_type.json"
     },
     {
+      "name": "update_audio_preference_profile_verification_required",
+      "operation_id": "updateAudioPreference",
+      "scenario": "A profile-scoped mutation for a PIN-locked profile without X-Profile-Token; the body is never read.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/audio-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        },
+        "body": "{\"audio_track_index\":1}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_audio_preference_profile_verification_required.json"
+    },
+    {
+      "name": "update_audio_preference_validation_failed",
+      "operation_id": "updateAudioPreference",
+      "scenario": "A track index below the -1 sentinel and an unknown signature member: one errors[] entry per failure; v1 accepted both silently.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/audio-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"audio_track_index\":-2,\"track_signature\":{\"bitrate\":640}}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_audio_preference_validation_failed.json"
+    },
+    {
+      "name": "update_library_playback_preference_profile_verification_required",
+      "operation_id": "updateLibraryPlaybackPreference",
+      "scenario": "A profile-scoped mutation for a PIN-locked profile without X-Profile-Token; the body is never read.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/library-playback-prefs/1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        },
+        "body": "{\"audio_language\":\"en\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_library_playback_preference_profile_verification_required.json"
+    },
+    {
+      "name": "update_library_playback_preference_validation_failed",
+      "operation_id": "updateLibraryPlaybackPreference",
+      "scenario": "A PATCH with a wrongly typed flag and an unknown member: one errors[] entry per failure; omitted members would have stayed unchanged.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/library-playback-prefs/1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"show_forced_subtitles\":\"yes\",\"library_id\":\"1\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_library_playback_preference_validation_failed.json"
+    },
+    {
       "name": "update_profile_null_not_clearable",
       "operation_id": "updateProfile",
       "scenario": "Explicit null on a member that does not admit clearing is a validation failure; omit it to leave it unchanged.",
@@ -787,6 +1127,50 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Profile",
       "body_file": "update_profile_ok.json"
+    },
+    {
+      "name": "update_subtitle_preference_profile_verification_required",
+      "operation_id": "updateSubtitlePreference",
+      "scenario": "A profile-scoped mutation for a PIN-locked profile without X-Profile-Token; the body is never read.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/subtitle-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        },
+        "body": "{\"subtitle_track_index\":0}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_subtitle_preference_profile_verification_required.json"
+    },
+    {
+      "name": "update_subtitle_preference_validation_failed",
+      "operation_id": "updateSubtitlePreference",
+      "scenario": "A missing required track index and a wrongly typed signature flag: one errors[] entry per failure.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/subtitle-prefs/series-8f2c1a",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"subtitle_language\":\"eng\",\"track_signature\":{\"forced\":\"yes\"}}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_subtitle_preference_validation_failed.json"
     },
     {
       "name": "upload_profile_avatar_ok",

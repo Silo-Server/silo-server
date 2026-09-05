@@ -17,6 +17,7 @@ import (
 // millisecond precision, Z suffix. A zero Instant is not a value: it is
 // rejected on input and refused on output, so an unset time is either omitted
 // (a pointer with omitempty) or an explicit null where the schema allows it.
+// Individual legacy endpoints may document a nonzero sentinel for unknown times.
 type Instant struct {
 	time.Time
 }

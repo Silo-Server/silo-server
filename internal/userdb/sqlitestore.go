@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -483,6 +484,10 @@ func (s *SQLiteUserStore) ListSettingValuesForResolution(_ context.Context, quer
 
 func (s *SQLiteUserStore) ListAllSettingValues(_ context.Context) ([]userstore.SettingValue, error) {
 	return ListAllSettingValues(s.db)
+}
+
+func (s *SQLiteUserStore) ListSettingValuesByScope(_ context.Context, profileID string, scope settingscontract.Scope, keys []string) ([]userstore.SettingValue, error) {
+	return ListSettingValuesByScope(s.db, profileID, scope, keys)
 }
 
 func (s *SQLiteUserStore) UpsertSettingValue(_ context.Context, id userstore.SettingIdentity, value json.RawMessage) (*userstore.SettingValue, error) {

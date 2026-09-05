@@ -17,6 +17,11 @@ func SetSubtitlePreference(db *sql.DB, pref SubtitlePreference) error {
 }
 
 func setSubtitlePreference(exec preferenceSettingsExecutor, pref SubtitlePreference) error {
+	// Same default pgstore applies: an empty UpdatedAt is "now", never an
+	// empty string a later read cannot parse.
+	if pref.UpdatedAt == "" {
+		pref.UpdatedAt = nowUTC()
+	}
 	if pref.ShowForcedSubtitles {
 		pref.HasShowForcedSubtitles = true
 	}

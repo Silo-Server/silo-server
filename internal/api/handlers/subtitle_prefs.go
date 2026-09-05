@@ -74,24 +74,79 @@ func (h *SubtitlePrefHandler) HandleGetSubtitlePref(w http.ResponseWriter, r *ht
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	pref, err := h.GetSubtitlePreference(r.Context(), userID, profileID, seriesID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
 
-	pref, err := store.GetSubtitlePreference(r.Context(), profileID, seriesID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
-		return
-	}
+	writeJSON(w, http.StatusOK, toSubtitlePrefResponse(pref))
+}
 
+// GetSubtitlePreference reads the legacy preference used by v1. A missing
+// series preference returns a 404 APIError.
+func (h *SubtitlePrefHandler) GetSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
+	var none userstore.SubtitlePreference
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	pref, err := store.GetSubtitlePreference(ctx, profileID, seriesID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
 	if pref == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Subtitle preference not found")
-		return
+		return none, apiError(http.StatusNotFound, "not_found", "Subtitle preference not found")
 	}
+	return *pref, nil
+}
 
-	writeJSON(w, http.StatusOK, toSubtitlePrefResponse(*pref))
+// GetSubtitlePreferenceCanonical keeps the legacy track identity and overlays
+// canonical series language, mode, and forced-subtitle settings for v2. Absent
+// canonical rows clear those overrides; a missing legacy track row remains a 404.
+// v1 keeps its legacy-only read.
+func (h *SubtitlePrefHandler) GetSubtitlePreferenceCanonical(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
+	var none userstore.SubtitlePreference
+	pref, err := h.GetSubtitlePreference(ctx, userID, profileID, seriesID)
+	if err != nil {
+		return none, err
+	}
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	base := userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
+	}
+	var (
+		language, mode *string
+		forced         *bool
+	)
+	languageAt, err := canonicalMemberAt(ctx, store, base, settingskeys.PlaybackSubtitleLanguage, &language)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
+	modeAt, err := canonicalMemberAt(ctx, store, base, settingskeys.PlaybackSubtitleMode, &mode)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
+	forcedAt, err := canonicalMemberAt(ctx, store, base, settingskeys.PlaybackShowForcedSubtitles, &forced)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
+	pref.SubtitleLanguage, pref.SubtitleMode = "", ""
+	if language != nil {
+		pref.SubtitleLanguage = *language
+	}
+	if mode != nil {
+		pref.SubtitleMode = *mode
+	}
+	pref.HasShowForcedSubtitles = forced != nil
+	pref.ShowForcedSubtitles = forced != nil && *forced
+	for _, at := range []string{languageAt, modeAt, forcedAt} {
+		pref.UpdatedAt = newestUpdatedAt(pref.UpdatedAt, at)
+	}
+	return pref, nil
 }
 
 // HandleSetSubtitlePref handles PUT /subtitle-prefs/{series_id}.
@@ -111,12 +166,6 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
 	pref := userstore.SubtitlePreference{
 		ProfileID:            profileID,
 		SeriesID:             seriesID,
@@ -129,14 +178,55 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 	if req.ShowForcedSubtitles != nil {
 		pref.ShowForcedSubtitles = *req.ShowForcedSubtitles
 		pref.HasShowForcedSubtitles = true
-	} else {
-		// This endpoint replaces the combined subtitle-preference row. Preserve
-		// an existing forced-subtitle override when clients update only the track
-		// selection; otherwise an omitted optional field silently resets it.
-		existing, getErr := store.GetSubtitlePreference(r.Context(), profileID, seriesID)
+	}
+
+	if err := h.SetSubtitlePreference(r.Context(), userID, pref); err != nil {
+		writeAPIError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetSubtitlePreference is the write behind v1 PUT /subtitle-prefs/{series_id}:
+// the legacy row and the canonical profile_series rows commit together, and
+// a user_settings.changed event follows each canonical row that moved. The
+// row is replaced whole, except that a preference without a forced-subtitle
+// override (!HasShowForcedSubtitles) keeps the override the legacy row
+// already stores, so a client updating only the track selection does not
+// silently reset it. A failure is an *APIError; a value the canonical
+// contract refuses is a 400 bad_request.
+func (h *SubtitlePrefHandler) SetSubtitlePreference(ctx context.Context, userID int, pref userstore.SubtitlePreference) error {
+	return h.setSubtitlePreference(ctx, userID, pref, false)
+}
+
+// SetSubtitlePreferenceCanonical is the write behind v2
+// updateSubtitlePreference: SetSubtitlePreference, except that the forced
+// override an omitted show_forced_subtitles keeps is read from the canonical
+// profile_series row alone — inside the store transaction, after the Postgres
+// per-user advisory lock. The legacy row is never consulted: PUT and DELETE
+// /settings/values change the canonical row without mirroring it into the
+// legacy row, so a stale legacy flag would resurrect an override a client
+// already cleared. An absent canonical row is "no override", and the merged
+// legacy row and the canonical write then carry no forced flag. v1 keeps its
+// legacy-row lookup unchanged.
+func (h *SubtitlePrefHandler) SetSubtitlePreferenceCanonical(ctx context.Context, userID int, pref userstore.SubtitlePreference) error {
+	return h.setSubtitlePreference(ctx, userID, pref, true)
+}
+
+func (h *SubtitlePrefHandler) setSubtitlePreference(ctx context.Context, userID int, pref userstore.SubtitlePreference, mergeCanonical bool) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+
+	// v1 keeps the override the legacy row stores; the canonical path reads
+	// the canonical row inside the transaction below and consults nothing else.
+	bodyHasForced := pref.HasShowForcedSubtitles
+	if !bodyHasForced && !mergeCanonical {
+		existing, getErr := store.GetSubtitlePreference(ctx, pref.ProfileID, pref.SeriesID)
 		if getErr != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to preserve subtitle preference")
-			return
+			return apiError(http.StatusInternalServerError, "internal_error", "Failed to preserve subtitle preference")
 		}
 		if existing != nil && existing.HasShowForcedSubtitles {
 			pref.ShowForcedSubtitles = existing.ShowForcedSubtitles
@@ -149,19 +239,48 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 	// legacy row and the canonical rows disagreeing.
 	sync, err := planSeriesSubtitleSync(pref)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
-	if err := h.applySeriesSubtitleSync(r.Context(), store, userID, profileID, seriesID, sync,
-		func(tx userstore.PreferenceSettingsWriter) error {
-			return tx.SetSubtitlePreference(r.Context(), pref)
-		}); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store subtitle preference")
-		return
+	if !mergeCanonical || bodyHasForced {
+		if err := h.applySeriesSubtitleSync(ctx, store, userID, pref.ProfileID, pref.SeriesID, sync,
+			func(tx userstore.PreferenceSettingsWriter) error {
+				return tx.SetSubtitlePreference(ctx, pref)
+			}); err != nil {
+			return apiError(http.StatusInternalServerError, "internal_error", "Failed to store subtitle preference")
+		}
+		return nil
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	// The canonical row is read inside the transaction so no writer can slip
+	// between the read and the rewrite; the forced flag is a bool, so the
+	// re-plan cannot fail on a value the plan above accepted. An absent row
+	// is no override: the legacy row is not consulted, so a flag it still
+	// holds after DELETE /settings/values cleared the canonical row cannot
+	// come back.
+	base := userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfileSeries, ProfileID: pref.ProfileID, SeriesID: pref.SeriesID,
+	}
+	err = applyPlannedLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, base,
+		func(tx userstore.PreferenceSettingsWriter) ([]profileSettingSync, error) {
+			var forced *bool
+			if err := canonicalMember(ctx, tx, base, settingskeys.PlaybackShowForcedSubtitles, &forced); err != nil {
+				return nil, err
+			}
+			pref.HasShowForcedSubtitles = forced != nil
+			if forced != nil {
+				pref.ShowForcedSubtitles = *forced
+			}
+			writes, err := planSeriesSubtitleSync(pref)
+			if err != nil {
+				return nil, err
+			}
+			return writes, tx.SetSubtitlePreference(ctx, pref)
+		})
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to store subtitle preference")
+	}
+	return nil
 }
 
 // HandleDeleteSubtitlePref handles DELETE /subtitle-prefs/{series_id}.
@@ -175,27 +294,36 @@ func (h *SubtitlePrefHandler) HandleDeleteSubtitlePref(w http.ResponseWriter, r 
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.DeleteSubtitlePreference(r.Context(), userID, profileID, seriesID); err != nil {
+		writeAPIError(w, err)
 		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteSubtitlePreference is the delete v1 DELETE /subtitle-prefs/{series_id}
+// and v2 deleteSubtitlePreference share. Deleting a preference that does not
+// exist succeeds. A failure is an *APIError.
+func (h *SubtitlePrefHandler) DeleteSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
 	// Deleting the legacy row means "no per-series preference", spelled
 	// canonically as the absence of the profile_series rows.
-	if err := h.applySeriesSubtitleSync(r.Context(), store, userID, profileID, seriesID,
+	if err := h.applySeriesSubtitleSync(ctx, store, userID, profileID, seriesID,
 		[]profileSettingSync{
 			{key: settingskeys.PlaybackSubtitleLanguage},
 			{key: settingskeys.PlaybackSubtitleMode},
 			{key: settingskeys.PlaybackShowForcedSubtitles},
 		}, func(tx userstore.PreferenceSettingsWriter) error {
-			return tx.DeleteSubtitlePreference(r.Context(), profileID, seriesID)
+			return tx.DeleteSubtitlePreference(ctx, profileID, seriesID)
 		}); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete subtitle preference")
-		return
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete subtitle preference")
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // --- Canonical sync ---
