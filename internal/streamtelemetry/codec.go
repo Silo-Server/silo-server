@@ -108,14 +108,18 @@ type wireSession struct {
 }
 
 type wireTransfer struct {
-	V                  int                                `json:"v"`
-	ID                 string                             `json:"id"`
-	Subject            wireSubject                        `json:"sub"`
-	ProfileID          string                             `json:"pid"`
-	MediaFileID        int                                `json:"mfid"`
-	Method             string                             `json:"m"`
-	Pattern            string                             `json:"p"`
-	Role               Role                               `json:"r"`
+	V           int         `json:"v"`
+	ID          string      `json:"id"`
+	Subject     wireSubject `json:"sub"`
+	ProfileID   string      `json:"pid"`
+	MediaFileID int         `json:"mfid"`
+	Method      string      `json:"m"`
+	Pattern     string      `json:"p"`
+	Role        Role        `json:"r"`
+	// Class is additive at codec v1 like Overflowed below: a record from an
+	// un-upgraded publisher decodes with an empty class, which a consumer treats
+	// as an ordinary transfer.
+	Class              Class                              `json:"c,omitempty"`
 	BytesAccepted      int64                              `json:"ba"`
 	LastByteAccepted   int64                              `json:"lb"`
 	LastObservationEnd int64                              `json:"le"`
@@ -305,7 +309,7 @@ func validateSessionWire(w wireSession) error {
 
 func encodeTransfer(value TransferView) ([]byte, error) {
 	w := wireTransfer{V: codecVersion, ID: value.ID, Subject: wireSubject{Kind: value.Subject.Kind, ID: value.Subject.ID}, ProfileID: value.ProfileID, MediaFileID: value.MediaFileID,
-		Method: value.Method, Pattern: value.Pattern, Role: value.Role, BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
+		Method: value.Method, Pattern: value.Pattern, Role: value.Role, Class: value.Class, BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
 		OpenObservations: value.OpenObservations, RequestCount: value.RequestCount, ViewerIP: value.ViewerIP, DeviceID: value.DeviceID,
 		Client: wireClientVariant(value.Client), UserAgent: value.UserAgent, Outcomes: value.Outcomes,
 		Overflowed: value.Overflowed}
@@ -331,7 +335,7 @@ func decodeTransfer(data []byte) (TransferView, error) {
 			return TransferView{}, errors.New("negative outcome counter")
 		}
 	}
-	return TransferView{ID: w.ID, Subject: Subject{Kind: w.Subject.Kind, ID: w.Subject.ID}, ProfileID: w.ProfileID, MediaFileID: w.MediaFileID, Method: w.Method, Pattern: w.Pattern, Role: w.Role,
+	return TransferView{ID: w.ID, Subject: Subject{Kind: w.Subject.Kind, ID: w.Subject.ID}, ProfileID: w.ProfileID, MediaFileID: w.MediaFileID, Method: w.Method, Pattern: w.Pattern, Role: w.Role, Class: w.Class,
 		BytesAccepted: w.BytesAccepted, LastByteAccepted: timeFromUnixNano(w.LastByteAccepted), LastObservationEnd: timeFromUnixNano(w.LastObservationEnd), OpenObservations: w.OpenObservations,
 		RequestCount: w.RequestCount, ViewerIP: w.ViewerIP, DeviceID: w.DeviceID, Client: ClientVariant(w.Client), UserAgent: w.UserAgent, Outcomes: w.Outcomes,
 		Overflowed: w.Overflowed}, nil

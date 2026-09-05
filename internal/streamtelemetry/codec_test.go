@@ -88,7 +88,7 @@ func TestSessionCodecRejectsPrunedMeasurementWithOpenState(t *testing.T) {
 
 func TestTransferCodecRoundTrip(t *testing.T) {
 	want := TransferView{ID: "transfer", Subject: Subject{Kind: SubjectIP, ID: "203.0.113.4"}, ProfileID: "p", MediaFileID: 5,
-		Method: "GET", Pattern: "/download", Role: RoleViewerEgress, BytesAccepted: 12, LastByteAccepted: time.Unix(10, 11),
+		Method: "GET", Pattern: "/download", Role: RoleViewerEgress, Class: ClassProbe, BytesAccepted: 12, LastByteAccepted: time.Unix(10, 11),
 		OpenObservations: 1, RequestCount: 2, ViewerIP: "203.0.113.4", DeviceID: "d", Client: ClientVariant{Name: "c"}, UserAgent: "ua",
 		Outcomes: map[httpstream.StreamOutcome]int64{httpstream.OutcomeCompleted: 1}, Overflowed: true}
 	encoded, err := encodeTransfer(want)
@@ -234,5 +234,8 @@ func TestCodecDecodesTransferBlindnessFromAnOlderPublisher(t *testing.T) {
 	}
 	if transfer.Overflowed {
 		t.Fatal("a record with no ovf field decoded as a fold row")
+	}
+	if transfer.Class != "" {
+		t.Fatalf("a record with no c field decoded with class %q", transfer.Class)
 	}
 }

@@ -67,9 +67,9 @@ type Registry struct {
 	// holds, so one client's device-id churn cannot mint an unbounded share of
 	// the shared table. It is guarded by transfersMu, the lock that already
 	// guards the map it counts, so no new lock and no new ordering enter the
-	// attach path. The per-subject catch-all row is deliberately NOT counted
-	// here (see attach), so a subject holds at most MaxTransfersPerSubject + 1
-	// records.
+	// attach path. The per-subject catch-all rows are deliberately NOT counted
+	// here (see attach): a subject holds at most MaxTransfersPerSubject ordinary
+	// records plus one fold row per (role, class) pair it has overflowed on.
 	transfersBySubject map[string]int64
 
 	sessionReservations     atomic.Int64
@@ -225,12 +225,18 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 		if t == nil && r.cfg.MaxTransfersPerSubject > 0 &&
 			r.transfersBySubject[budget] >= r.cfg.MaxTransfersPerSubject {
 			// This principal has minted its allowance of distinct transfer
-			// identities. Fold the rest into ONE catch-all record for the subject
+			// identities. Fold the rest into a catch-all record for the subject
 			// rather than dropping the observation: the bytes are real and belong
 			// to this principal, and dropping is exactly what let one client's
 			// device-id churn starve everybody else's attribution.
+			//
+			// One fold row per (role, class), not one per subject. Role decides
+			// whether the bytes are viewer egress at all, and class decides whether
+			// they are media or probe filler; both are read by consumers that sum
+			// transfer bytes (dashmetrics), and a fold row that lost them silently
+			// removed every folded byte from the egress series.
 			overflow = true
-			key = overflowTransferKey(attachment.Subject)
+			key = overflowTransferKey(attachment.Subject, obs.route.Role, obs.route.Class)
 			t = r.transfers[key]
 		}
 		if t == nil {
@@ -250,10 +256,11 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 				// but the subject would be the first arrival's, asserted over bytes
 				// that belong to many files, routes, addresses and devices — a
 				// plausible wrong answer, which is worse for an operator than an
-				// absent one. Only Subject, the byte totals, RequestCount and
-				// Outcomes mean anything here.
+				// absent one. Only Subject, Role, Class, the byte totals,
+				// RequestCount and Outcomes mean anything here; Role and Class are
+				// part of the fold key, so they are the same for every pour folded.
 				record.profileID, record.mediaFileID = "", 0
-				record.route = MediaRoute{}
+				record.route = MediaRoute{Role: obs.route.Role, Class: obs.route.Class}
 				record.capture = CaptureSet{}
 			}
 			r.transfers[key] = record
@@ -579,13 +586,15 @@ func transferKey(a Attachment, capture CaptureSet) string {
 // so it stays readable rather than hashed.
 func subjectBudgetKey(s Subject) string { return string(s.Kind) + "\x00" + s.ID }
 
-// overflowTransferKey is the id of a principal's catch-all transfer record. The
-// "overflow" domain prefix cannot collide with transferKey, which joins a fixed
-// eight-element tuple. It is hashed for the same reason transferKey is: it
-// becomes a Redis hash field name, and key names surface in SCAN, MONITOR,
-// slowlog and RDB dumps.
-func overflowTransferKey(s Subject) string {
-	digest := digest128([]byte("overflow\x00" + string(s.Kind) + "\x00" + s.ID))
+// overflowTransferKey is the id of a principal's catch-all transfer record for
+// one (role, class) pair. The "overflow" domain prefix cannot collide with
+// transferKey, which joins a fixed eight-element tuple. It is hashed for the
+// same reason transferKey is: it becomes a Redis hash field name, and key names
+// surface in SCAN, MONITOR, slowlog and RDB dumps.
+func overflowTransferKey(s Subject, role Role, class Class) string {
+	digest := digest128([]byte(strings.Join([]string{
+		"overflow", string(s.Kind), s.ID, string(role), string(class),
+	}, "\x00")))
 	return hex.EncodeToString(digest[:])
 }
 

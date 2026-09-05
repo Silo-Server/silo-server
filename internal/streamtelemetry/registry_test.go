@@ -932,15 +932,21 @@ func TestTransferKeyIsStableAndViewerDistinct(t *testing.T) {
 	// be just as deterministic, just as opaque, and unable to collide with any
 	// ordinary identity for the same principal.
 	subject, otherSubject := attachment.Subject, UserSubject(8)
-	fold, foldAgain := overflowTransferKey(subject), overflowTransferKey(subject)
-	if fold != foldAgain {
+	fold := overflowTransferKey(subject, RoleViewerEgress, ClassTransfer)
+	if foldAgain := overflowTransferKey(subject, RoleViewerEgress, ClassTransfer); fold != foldAgain {
 		t.Fatalf("overflow transfer key is not deterministic: %q then %q", fold, foldAgain)
 	}
 	if len(fold) != 32 {
 		t.Fatalf("overflow transfer key = %q, want 32 hex characters", fold)
 	}
-	if fold == overflowTransferKey(otherSubject) {
+	if fold == overflowTransferKey(otherSubject, RoleViewerEgress, ClassTransfer) {
 		t.Fatalf("two subjects share one overflow transfer key: %q", fold)
+	}
+	// Role and class are part of the fold identity: a relay's fold row and a
+	// probe's fold row must not share the viewer-egress transfer row.
+	if fold == overflowTransferKey(subject, RoleInternalRelay, ClassTransfer) ||
+		fold == overflowTransferKey(subject, RoleViewerEgress, ClassProbe) {
+		t.Fatalf("overflow transfer key ignores role or class: %q", fold)
 	}
 	for _, capture := range []CaptureSet{base, other, {}, {Method: http.MethodHead}} {
 		if ordinary := transferKey(attachment, capture); ordinary == fold {
@@ -1192,8 +1198,13 @@ func TestPerSubjectOverflowFoldsInsteadOfLosingBytes(t *testing.T) {
 		t.Fatalf("fold row lost the one identity it may keep: %+v", fold.Subject)
 	}
 	if fold.ViewerIP != "" || fold.DeviceID != "" || fold.Client != (ClientVariant{}) || fold.UserAgent != "" ||
-		fold.ProfileID != "" || fold.MediaFileID != 0 || fold.Method != "" || fold.Pattern != "" || fold.Role != "" {
+		fold.ProfileID != "" || fold.MediaFileID != 0 || fold.Method != "" || fold.Pattern != "" {
 		t.Fatalf("fold row asserts an identity it cannot know: %+v", fold)
+	}
+	// Role and class are the two fields a byte-summing consumer keys on, and
+	// they are part of the fold identity, so the row keeps them.
+	if fold.Role != RoleViewerEgress || fold.Class != ClassTransfer {
+		t.Fatalf("fold row lost its role or class: %+v", fold)
 	}
 	if fold.RequestCount != devices-1 {
 		t.Fatalf("fold row request count = %d, want %d", fold.RequestCount, devices-1)
@@ -1279,6 +1290,55 @@ func TestTransferBudgetIsReleasedOnPrune(t *testing.T) {
 			t.Fatalf("the released allowance was not reusable: %+v", after.Transfers)
 		}
 	})
+}
+
+// A fold row keeps the two fields consumers sum on. dashmetrics only counts a
+// transfer as egress when its Role is viewer_egress, and only counts it as media
+// when its Class is not probe; a fold row that zeroed both silently removed every
+// folded byte from the egress series while claiming the bytes were retained.
+func TestOverflowTransferRowKeepsRoleAndClass(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxTransfersPerSubject = 1
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	transfers := registry.Observe(testTransferRoute())(transferAttachHandler("chunk"))
+	probeRoute := testTransferRoute()
+	probeRoute.Class = ClassProbe
+	probeRoute.Pattern = "/probe"
+	probes := registry.Observe(probeRoute)(transferAttachHandler("zeroes"))
+
+	serveTransferAs(transfers, testAttachment(""), "192.0.2.1", "device-1") // ordinary
+	serveTransferAs(transfers, testAttachment(""), "192.0.2.1", "device-2") // folds
+	serveTransferAs(probes, testAttachment(""), "192.0.2.1", "device-3")    // folds separately
+
+	snapshot := registry.Sweep()
+	var ordinary, transferFold, probeFold int
+	for _, transfer := range snapshot.Transfers {
+		switch {
+		case !transfer.Overflowed:
+			ordinary++
+			if transfer.Role != RoleViewerEgress || transfer.Class != ClassTransfer {
+				t.Fatalf("ordinary record lost role or class: %+v", transfer)
+			}
+		case transfer.Class == ClassProbe:
+			probeFold++
+			if transfer.Role != RoleViewerEgress || transfer.BytesAccepted != int64(len("zeroes")) {
+				t.Fatalf("probe fold row = %+v", transfer)
+			}
+		default:
+			transferFold++
+			if transfer.Role != RoleViewerEgress || transfer.Class != ClassTransfer ||
+				transfer.BytesAccepted != int64(len("chunk")) {
+				t.Fatalf("transfer fold row = %+v", transfer)
+			}
+			if transfer.Pattern != "" || transfer.DeviceID != "" || transfer.ViewerIP != "" {
+				t.Fatalf("fold row asserted an identity it cannot know: %+v", transfer)
+			}
+		}
+	}
+	if ordinary != 1 || transferFold != 1 || probeFold != 1 {
+		t.Fatalf("records = %d ordinary, %d transfer folds, %d probe folds: %+v",
+			ordinary, transferFold, probeFold, snapshot.Transfers)
+	}
 }
 
 // The per-subject budget is a sub-allocation of the shared table. An operator who

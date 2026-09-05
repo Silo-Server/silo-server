@@ -116,13 +116,18 @@ func tombstoneViewOf(s *logicalSession) (SessionView, bool) {
 }
 
 type TransferView struct {
-	ID                 string
-	Subject            Subject
-	ProfileID          string
-	MediaFileID        int
-	Method             string
-	Pattern            string
-	Role               Role
+	ID          string
+	Subject     Subject
+	ProfileID   string
+	MediaFileID int
+	Method      string
+	Pattern     string
+	Role        Role
+	// Class says what the bytes were: a real transfer, or ClassProbe filler that
+	// belongs to no media file. §4.2 keeps the probe observed and cap-exempt, and
+	// a consumer totalling delivered bytes must exclude it — which it can only do
+	// if the class travels with the record.
+	Class              Class
 	BytesAccepted      int64
 	LastByteAccepted   time.Time
 	LastObservationEnd time.Time
@@ -135,8 +140,9 @@ type TransferView struct {
 	Outcomes           map[httpstream.StreamOutcome]int64
 	// Overflowed marks a per-subject catch-all row: one principal exceeded
 	// MaxTransfersPerSubject and its further transfer identities fold here. Only
-	// Subject, BytesAccepted, RequestCount, Outcomes and the timestamps mean
-	// anything on such a row; every other identity field is deliberately zero.
+	// Subject, Role, Class, BytesAccepted, RequestCount, Outcomes and the
+	// timestamps mean anything on such a row; every other identity field is
+	// deliberately zero.
 	Overflowed bool
 }
 
@@ -264,7 +270,7 @@ func sessionViewOf(s *logicalSession) SessionView {
 
 func transferViewOf(t *transfer) TransferView {
 	return TransferView{ID: t.id, Subject: t.subject, ProfileID: t.profileID, MediaFileID: t.mediaFileID,
-		Method: t.capture.Method, Pattern: t.capture.Pattern, Role: t.route.Role,
+		Method: t.capture.Method, Pattern: t.capture.Pattern, Role: t.route.Role, Class: t.route.Class,
 		BytesAccepted: t.lastSweptBytes, LastByteAccepted: t.lastByteAccepted,
 		LastObservationEnd: t.lastObservationEnd, OpenObservations: t.openObservations,
 		RequestCount: t.requestCount, ViewerIP: t.capture.ViewerIP, DeviceID: t.capture.DeviceID,
