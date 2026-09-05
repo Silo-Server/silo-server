@@ -14,9 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"reflect"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -45,6 +47,23 @@ const (
 	// row's v2 operation requires If-Match (apiv2.Operation.Guarded). It may
 	// appear only on a tier-1 ported row with a mutating method.
 	ConcurrencyIfMatch = "if_match"
+
+	// RetrySafety values (migration.schema.json entry.retry_safety), one per
+	// bullet of the contract's "Mutation retry safety" section. The value is
+	// required on every tier-1 ported row with a mutating method and
+	// forbidden on every other row; internal/apiv2 declares the same set as
+	// apiv2.RetrySafety and the reconcile test compares them.
+	RetrySafetyNaturalIdempotent = "natural_idempotent"
+	RetrySafetyUniqueConstraint  = "unique_constraint"
+	RetrySafetyDomainIdentity    = "domain_identity"
+	RetrySafetyCoalescing        = "coalescing"
+	RetrySafetyDurableDispatch   = "durable_dispatch"
+	RetrySafetyIdempotencyKey    = "idempotency_key"
+	RetrySafetyNonRetryable      = "non_retryable"
+
+	// retrySafetyNoteMaxLen mirrors the schema's maxLength so the Go rule and
+	// the schema refuse the same note.
+	retrySafetyNoteMaxLen = 300
 
 	// removedTier is the only tier a removed row may hold: there is no v2
 	// behavior to baseline, so it never sits in tier 1.
@@ -172,6 +191,28 @@ type Entry struct {
 	// Concurrency is the optional curated optimistic-concurrency marking:
 	// ConcurrencyIfMatch on a row whose v2 operation is registered Guarded.
 	Concurrency string `json:"concurrency,omitempty"`
+	// RetrySafety is the curated mutation retry-safety strategy (one of the
+	// RetrySafety* constants); RetrySafetyNote explains a non-obvious choice
+	// and is required for idempotency_key and non_retryable.
+	RetrySafety     string `json:"retry_safety,omitempty"`
+	RetrySafetyNote string `json:"retry_safety_note,omitempty"`
+}
+
+// retrySafetyValues is the closed set a row may carry.
+var retrySafetyValues = map[string]bool{
+	RetrySafetyNaturalIdempotent: true,
+	RetrySafetyUniqueConstraint:  true,
+	RetrySafetyDomainIdentity:    true,
+	RetrySafetyCoalescing:        true,
+	RetrySafetyDurableDispatch:   true,
+	RetrySafetyIdempotencyKey:    true,
+	RetrySafetyNonRetryable:      true,
+}
+
+// requiresRetrySafety reports whether a row must carry retry_safety: a
+// tier-1 ported row with a mutating method.
+func requiresRetrySafety(e Entry) bool {
+	return e.Tier == 1 && e.Disposition == DispositionPorted && isMutatingMethod(e.Method)
 }
 
 // V2Target is the v2 operation an entry maps to. All three are nil until the
@@ -456,6 +497,34 @@ func reviewRules(k Key, e Entry, r inventoryRoute) []string {
 			out = append(out, fmt.Sprintf("concurrency %s is only for a method a Guarded v2 operation may use (PUT, PATCH, DELETE), not %s: %s", e.Concurrency, e.Method, k))
 		}
 	}
+	out = append(out, retrySafetyRules(k, e)...)
+	return out
+}
+
+// retrySafetyRules enforces the classification's placement: required on a
+// tier-1 ported mutation row, forbidden elsewhere, a known value, and a note
+// where the value needs one.
+func retrySafetyRules(k Key, e Entry) []string {
+	var out []string
+	switch {
+	case e.RetrySafety == "" && requiresRetrySafety(e):
+		out = append(out, fmt.Sprintf("tier-1 ported mutation row has no retry_safety: %s", k))
+	case e.RetrySafety == "":
+		if e.RetrySafetyNote != "" {
+			out = append(out, fmt.Sprintf("retry_safety_note without retry_safety: %s", k))
+		}
+	case !retrySafetyValues[e.RetrySafety]:
+		out = append(out, fmt.Sprintf("unknown retry_safety %q: %s", e.RetrySafety, k))
+	case !requiresRetrySafety(e):
+		out = append(out, fmt.Sprintf("retry_safety %s is only for tier-1 ported rows with a mutating method; row is tier %d %s %s: %s", e.RetrySafety, e.Tier, e.Disposition, e.Method, k))
+	case (e.RetrySafety == RetrySafetyIdempotencyKey || e.RetrySafety == RetrySafetyNonRetryable) && e.RetrySafetyNote == "":
+		out = append(out, fmt.Sprintf("retry_safety %s requires a retry_safety_note: %s", e.RetrySafety, k))
+	}
+	// Count code points, as JSON Schema's maxLength does, so the two
+	// validators agree on a non-ASCII note.
+	if utf8.RuneCountInString(e.RetrySafetyNote) > retrySafetyNoteMaxLen {
+		out = append(out, fmt.Sprintf("retry_safety_note longer than %d characters: %s", retrySafetyNoteMaxLen, k))
+	}
 	return out
 }
 
@@ -472,7 +541,17 @@ func eligibleForConcurrency(e Entry) bool {
 // may be registered Guarded, so only their rows may be marked if_match.
 func isGuardableMethod(method string) bool {
 	switch method {
-	case "PUT", "PATCH", "DELETE":
+	case http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// isMutatingMethod is the retry_safety placement rule: every tier-1 ported
+// row with one of these methods carries a classification.
+func isMutatingMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		return true
 	}
 	return false

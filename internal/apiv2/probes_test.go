@@ -72,9 +72,12 @@ type probeListOutput struct {
 func registerProbes(reg *Registry) {
 	for _, class := range []Class{ClassPublic, ClassAuthenticated, ClassProfileScoped, ClassActingAdmin, ClassPermissionGated} {
 		class := class
+		// The probe echoes its body and stores nothing, so a duplicate
+		// submission converges on the same (absent) state.
 		op := Operation{
-			Operation: humaOp(http.MethodPost, Prefix+"/probe/"+string(class), "probe"+string(class)+"Op", "probe", "probe"),
-			Class:     class,
+			Operation:   humaOp(http.MethodPost, Prefix+"/probe/"+string(class), "probe"+string(class)+"Op", "probe", "probe"),
+			Class:       class,
+			RetrySafety: RetrySafetyNaturalIdempotent,
 		}
 		op.OperationID = "probe" + lowerCamelFrom(string(class))
 		if class == ClassPermissionGated {
@@ -118,6 +121,7 @@ func registerProbes(reg *Registry) {
 		Operation:    humaOp(http.MethodPost, Prefix+"/probe/smallbody", "createProbeSmallBody", "probe", "small body"),
 		Class:        ClassPublic,
 		MaxBodyBytes: ProbeSmallBodyLimit,
+		RetrySafety:  RetrySafetyNaturalIdempotent,
 	}, probeHandler)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/probe/panic", "probePanic", "probe", "panic"),
@@ -355,9 +359,10 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			return out, nil
 		})
 		Register(reg, Operation{
-			Operation: humaOp(http.MethodPut, Prefix+"/probe/guarded/{id}", "putGuardedProbe", "probe", "guarded replace"),
-			Class:     ClassPublic,
-			Guarded:   true,
+			Operation:   humaOp(http.MethodPut, Prefix+"/probe/guarded/{id}", "putGuardedProbe", "probe", "guarded replace"),
+			Class:       ClassPublic,
+			Guarded:     true,
+			RetrySafety: RetrySafetyNaturalIdempotent,
 		}, func(_ context.Context, in *guardedProbeWriteInput) (*guardedProbeWriteOutput, error) {
 			// Every attempt runs the whole sequence against the row it
 			// loaded: 404 before any precondition, then both preconditions
@@ -397,9 +402,10 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			}
 		})
 		Register(reg, Operation{
-			Operation: humaOp(http.MethodDelete, Prefix+"/probe/guarded/{id}", "deleteGuardedProbe", "probe", "guarded delete"),
-			Class:     ClassPublic,
-			Guarded:   true,
+			Operation:   humaOp(http.MethodDelete, Prefix+"/probe/guarded/{id}", "deleteGuardedProbe", "probe", "guarded delete"),
+			Class:       ClassPublic,
+			Guarded:     true,
+			RetrySafety: RetrySafetyNaturalIdempotent,
 		}, func(_ context.Context, in *guardedProbeDeleteInput) (*guardedProbeDeleteOutput, error) {
 			// The same shape as the guarded PUT: every attempt loads the
 			// row and runs the whole sequence, so a wildcard retry judges
@@ -432,9 +438,10 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 		// overwrite. It shares the store so a created row is then readable
 		// and guardable through the other probes.
 		Register(reg, Operation{
-			Operation:  humaOp(http.MethodPut, Prefix+"/probe/created/{id}", "putCreatedProbe", "probe", "create-only put"),
-			Class:      ClassPublic,
-			CreateOnly: true,
+			Operation:   humaOp(http.MethodPut, Prefix+"/probe/created/{id}", "putCreatedProbe", "probe", "create-only put"),
+			Class:       ClassPublic,
+			CreateOnly:  true,
+			RetrySafety: RetrySafetyUniqueConstraint, // client-selected id; the store refuses a second create
 		}, func(_ context.Context, in *createOnlyProbeInput) (*guardedProbeWriteOutput, error) {
 			var existing *EntityTag
 			row, ok := store.Get(in.ID)

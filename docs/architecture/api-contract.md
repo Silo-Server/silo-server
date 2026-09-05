@@ -413,11 +413,100 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `concurrency: if_match` field names the rows that will register `Guarded`; the gate limits
   it to tier-1 ported mutation rows and reconciles every guarded registration against it. No
   production resource is guarded yet; the first section that guards one adds its row version.
+- **Mutation retry safety is encoded.** The ledger's curated `retry_safety` field classifies
+  every tier-1 ported mutation row (POST, PUT, PATCH, DELETE) by one of the seven strategies
+  above, spelled `natural_idempotent`, `unique_constraint`, `domain_identity`, `coalescing`,
+  `durable_dispatch`, `idempotency_key`, `non_retryable`; an optional `retry_safety_note` (at
+  most 300 characters) explains a non-obvious choice and is required for `idempotency_key` and
+  `non_retryable`. `migration.schema.json` forbids both fields on any other row and
+  `internal/contractledger` requires the value on every such row. `apiv2.Operation`
+  carries the same enum as `RetrySafety`: `Register` panics when a mutating operation omits it
+  or a GET/HEAD declares it, and the document records it as `x-silo-retry-safety`.
+  `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
+  classified legacy row or disagrees with it, unless `mutationWithoutLegacyRow` names a
+  v2-only mutation with a reason, and when a classified row names a v2 operation the
+  registry does not declare as a mutation; it compares only rows eligible for the
+  classification, so a redesigned or replaced row that names a v2 mutation is not caught
+  between the schema and the gate. No generic key store exists, so `Register`
+  refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
+  `Idempotency-Key` header under any other strategy: the strategy, its required header, and
+  the durable replay store land together with the first operation the inventory proves
+  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
+  tier-1 ported mutation rows (219 distinct operations) are classified (98
+  `natural_idempotent`, 25 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 10
+  `durable_dispatch`, 62 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  one-shot display or a secret shown once (invite-code top-up, admin session message,
+  webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
+  first call never touched (node force-reload, per node and fleet-wide), a token-issuing
+  send with no request identity (invitation create and resend, whose retry supersedes the
+  token the first call mailed), a blanket command over whatever currently matches rather
+  than a named target (library scan cancel, metadata-match-queue cancel, task cancel by key,
+  notifications read-all), a playback command minted fresh on every call (admin session
+  pause and resume, whose delayed retry reverts the newer state), a fresh server-side cutoff a retry would move (history remove,
+  mark-unwatched), a shared-key artwork replacement a stale retry would clobber (library
+  poster upload), an external call made before any durable claim (provider device-auth
+  start and API-key exchange), a one-shot token-bearing or secret-bearing response that cannot be replayed
+  (device-pairing poll, OAuth completion, invitation acceptance, initial setup, API-key and
+  webhook creation), a shared-key or identity-keyed replacement a stale retry would clobber
+  (profile avatar upload, provider disconnect), a profile update whose account-wide
+  access-policy revision bump is not change-gated, an unconditional
+  repoint of
+  cluster-wide state (policy version activation and document enable/disable, whose stale
+  retry restores an obsolete policy), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
+  confirmation), a
+  command that re-runs its side effect on every call (watch-together selection and
+  suggestion promotion, which reset playback and clear member sessions each time;
+  metadata-match-queue retry, which schedules another run once the first is leased; node
+  capability reprobe, which holds the GPU gate through a multi-minute cold build), or a
+  delete or replace that converges only while nothing intervenes: a delayed retry after a
+  lost response destroys a resource re-created after the first success (email-address
+  clear, push-device unregister, library and collection poster delete, profile avatar
+  delete, Discord unlink, collection item add and remove, profile section overrides
+  replace and reset, device forget and device-settings reset, dashboard-layout reset, web-push
+  unsubscribe by endpoint, and root-override deletion whose path can resolve to a different content group), so each stays `non_retryable`
+  until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
+  (email-address verification; favorites, watchlist, and rating add and remove; taste seed;
+  account and node deletion) name the durable dispatch or cleanup the v2 port must add before
+  their retry is safe. The existing v2 profile creation and deletion operations remain
+  `non_retryable` until their durable identity and cleanup defects are fixed. Subtitle and
+  personal-collection deletion also remain `non_retryable` until object cleanup is durable
+  and resumable after the database row is removed. Forty-four rows (43 distinct operations)
+  carry a `DEFECT` note where v1 gates on
+  process-local state, fires an external effect inline, lacks the dedup or ordering its
+  identity implies, or re-runs a side effect a retry should not repeat (task run, collection
+  sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
+  invite-code redemption during signup, playback route events, mark-watched history,
+  watch-together selection and promotion, metadata-match-queue retry, playback session
+  progress, sync progress, download status, ebook reader progress, and onboarding progress,
+  whose last-write-wins update lets a delayed retry rewind a newer report, favorites,
+  watchlist, and rating add and remove, the taste seed, subtitle download and upload,
+  whose unique key resolves a retry but whose losing insert deletes the winner's S3
+  object, transcode start, which replaces a live session under the same id, and media
+  request creation, whose partial unique index stops covering a request once it reaches a
+  terminal state, node creation, whose cross-replica pool reload runs after the insert
+  without a transaction, push device registration (Apple and FCM), whose update overwrites
+  a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
+  field presence rather than on an effective change, the provider device-auth poll, whose
+  completion check is a plain read ahead of the plugin call, admin user update, whose
+  password branch re-hashes and revokes every session on each attempt, profile creation,
+  whose name and limit checks run in application code with no unique index on the
+  account-scoped name, account deletion, whose impersonation-session revocation follows
+  the commit, node deletion, whose pool invalidation follows the commit, subtitle deletion,
+  whose S3 key is lost before cleanup, collection deletion, which never removes uploaded
+  poster variants, and profile deletion, whose object and device cleanup cannot resume after the row disappears,
+  library creation,
+  whose seeding and initial scan run after the insert without a transaction, and the
+  library provider chain, whose matcher wake fires unconditionally after the save); their
+  v2 port must move the gate
+  to shared durable state, add the missing unique constraint or event time, gate the
+  dispatch on a reported change, or make the repeat a no-op before the declared strategy
+  holds.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
-  tracked on #882: per-operation mutation retry / idempotency classification; the durable
-  `202` job acceptance and its monitor/cancel shape; the atomic-versus-per-item bulk contract;
-  and the RFC 9745 / RFC 8594 deprecation, link, and sunset headers.
+  tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the
+  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
+  sunset headers.
 
 ### Problem Details
 
@@ -672,7 +761,9 @@ V2 does not impose a global mandatory `Idempotency-Key` mechanism. Every durable
 records its duplicate-submission and connection-loss behavior in the endpoint ledger and selects
 the smallest mechanism that supplies a real guarantee:
 
-- naturally idempotent `PUT` or `DELETE` semantics that converge on one resource state;
+- naturally idempotent semantics: repeating the same request converges on one resource state
+  without duplicating durable state or side effects, regardless of HTTP method (including
+  absolute-assignment `PATCH` and read-only `POST`);
 - a natural key or client-supplied resource identity enforced by a database uniqueness constraint;
 - a durable domain operation identity such as a playback attempt, upload, job, or webhook delivery
   ID;
@@ -697,6 +788,15 @@ documents its semantics. Silo never advertises or validates the field while sile
 Adding supported idempotency to an operation later is additive. Before foundation implementation,
 the v1 inventory classifies every durable-effect operation by the strategies above and identifies
 any residual group that can justify one shared implementation.
+
+An absolute assignment can remain `natural_idempotent` without a concurrency guard: repeated
+identical invite-code updates converge and do not increment usage or dispatch another effect.
+That classification does not protect a later administrator edit from an older request. Whether
+admission-control edits require version guarding belongs to the admin-invitations section;
+retry classification and protection against concurrent edits are separate decisions. The
+watch-together vote pair follows the same distinction: membership and tally change in one
+transaction, and duplicates stop before broadcasting. A newer opposite vote is a concurrent
+membership edit; preserving its order requires a separate sequencing policy.
 
 ### Optimistic concurrency
 
