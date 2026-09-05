@@ -57,6 +57,7 @@ const (
 	metaConditional     = "silo.conditional"
 	metaCreateOnly      = "silo.create_only"
 	metaRetrySafety     = "silo.retry_safety"
+	metaDeprecation     = "silo.deprecation"
 )
 
 // RetrySafety is the mutation retry-safety strategy an operation declares
@@ -174,6 +175,9 @@ type Operation struct {
 	// submission or a retry after a lost response safe. Documented as
 	// x-silo-retry-safety.
 	RetrySafety RetrySafety
+	// Deprecation retires the operation through the RFC 9745 / RFC 8594
+	// header flow (see Deprecation). Nil means not deprecated.
+	Deprecation *Deprecation
 }
 
 // Registry is the deterministic registration surface. Domain files call
@@ -242,6 +246,9 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaConditional] = op.Conditional
 	op.Metadata[metaCreateOnly] = op.CreateOnly
 	op.Metadata[metaRetrySafety] = string(op.RetrySafety)
+	if op.Deprecation != nil {
+		op.Metadata[metaDeprecation] = op.Deprecation
+	}
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {
@@ -325,6 +332,12 @@ func checkOperation(op Operation) error {
 		return fmt.Errorf("retry safety %s is not implementable yet: no durable replay store exists, so the declaration would advertise a guarantee the server cannot keep", RetrySafetyIdempotencyKey)
 	case !isMutatingMethod(op.Method) && op.RetrySafety != "":
 		return fmt.Errorf("retry safety is for POST, PUT, PATCH and DELETE; %s has no durable effect to classify", op.Method)
+	}
+	if op.Operation.Deprecated && op.Deprecation == nil {
+		return fmt.Errorf("set apiv2.Operation.Deprecation, not the embedded Huma Deprecated flag: the declaration carries the headers and the document")
+	}
+	if err := op.Deprecation.validate(); err != nil {
+		return err
 	}
 	return nil
 }

@@ -133,7 +133,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
-	api.UseMiddleware(observeOperation, defaultHeaders, classGate(deps), observeIdentity, normalizeAccept, mediaTypeGuard, queryGuard)
+	api.UseMiddleware(observeOperation, defaultHeaders, deprecationHeaders, classGate(deps), observeIdentity, normalizeAccept, mediaTypeGuard, queryGuard)
 
 	reg := &Registry{api: api, deps: deps}
 	registerAll(reg)
