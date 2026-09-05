@@ -145,6 +145,8 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 				if info, ok := ops[*f.OperationID]; !ok || !info.statuses[fmt.Sprint(f.ExpectedStatus)] {
 					fail("%s: openapi.json does not document status %d on %s", where, f.ExpectedStatus, *f.OperationID)
 				}
+			} else if !strings.HasPrefix(f.Request.Path, "/api/v2/probe/") {
+				fail("%s: a bodyless fixture without an operation must target a probe path", where)
 			}
 			continue
 		}

@@ -261,6 +261,16 @@ func TestGuardedProbeIfNoneMatchAfterIfMatch(t *testing.T) {
 	if strings.Contains(p.Detail, "If-None-Match") {
 		t.Fatalf("If-Match should be evaluated first: %q", p.Detail)
 	}
+	// The same order holds on a guarded DELETE: a matching If-None-Match
+	// (or "*") after a current If-Match is 412 and the resource survives.
+	h, store = guardedHandler(t)
+	for _, none := range []string{current, "*"} {
+		rec = do(t, h, http.MethodDelete, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": current, "If-None-Match": none})
+		requireProblem(t, rec, TypePreconditionFailed)
+		if _, exists := store.Get("a"); !exists {
+			t.Fatalf("If-None-Match %q: resource deleted despite the second precondition", none)
+		}
+	}
 	// Malformed If-None-Match after a passing If-Match is 400.
 	rec = do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"gamma"}`, map[string]string{"If-Match": "*", "If-None-Match": "not-a-tag"})
 	requireProblem(t, rec, TypeMalformedRequest)

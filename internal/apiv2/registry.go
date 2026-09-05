@@ -277,10 +277,13 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 		if !declaresHeaderString(in, ifMatchField) {
 			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"`", ifMatchField)
 		}
-		if declaresHeader(in, ifNoneMatchField) && !declaresHeaderString(in, ifNoneMatchField) {
-			// The optional second precondition is an entity-tag list the
-			// RFC parser reads; a typed binding would reject or mangle it.
-			return fmt.Errorf("guarded: an input that binds `header:\"%s\"` must bind it as a string", ifNoneMatchField)
+		if !declaresHeaderString(in, ifNoneMatchField) {
+			// RFC 9110 13.2.2 evaluates If-None-Match after If-Match on a
+			// mutation; an input that does not bind it would let Huma drop
+			// the field and the handler apply a write the client forbade.
+			// It is an entity-tag list the RFC parser reads, so a typed
+			// binding is refused too.
+			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"` so the second precondition is evaluated after If-Match", ifNoneMatchField)
 		}
 		if op.Method == http.MethodDelete {
 			// The deleted representation has no validator: a guarded DELETE
@@ -288,7 +291,7 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 			// declare no ETag, no body, and no Status that could turn it
 			// into a representation-bearing success the document would
 			// decorate with a header the handler cannot send.
-			if declaresHeaderString(out, etagField) {
+			if declaresHeader(out, etagField) {
 				return fmt.Errorf("guarded delete: output must not declare `header:\"%s\"`; a 204 has no representation to validate", etagField)
 			}
 			if declaresBody(out) {

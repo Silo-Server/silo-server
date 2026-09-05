@@ -77,7 +77,7 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.Conditional {
 		op.Extensions[extConditional] = true
 	}
-	if op.Guarded && declaresHeaderString(input, ifNoneMatchField) {
+	if op.Guarded {
 		op.Parameters = append(op.Parameters, ifNoneMatchGuardedParam())
 	}
 	if op.CreateOnly {

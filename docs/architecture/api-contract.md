@@ -353,9 +353,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
   DELETE only), `Conditional` (GET, HEAD only) or `CreateOnly` (PUT only, exclusive with
   `Guarded`); `Register` panics when a guarded input does not bind a string
-  `header:"If-Match"` or its output a string `header:"ETag"` (a guarded DELETE answers a
-  bodyless `204` and nothing else: its output declares no `ETag`, no body, and no
-  `Status`), when a conditional input does not bind
+  `header:"If-Match"` and a string `header:"If-None-Match"` (the second precondition RFC
+  9110 13.2.2 evaluates after the first; an input that did not bind it would let the field
+  be dropped and a forbidden write applied) or its output a string `header:"ETag"` (a
+  guarded DELETE answers a bodyless `204` and nothing else: its output declares no `ETag`
+  of any type, no body, and no `Status`), when a conditional input does not bind
   `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
   create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
   output. Header fields and the conditional `Status` count only as direct exported struct
@@ -371,7 +373,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   reconciles both directions and refuses a guarded operation that maps to no legacy row
   unless `guardedWithoutLegacyRow` names it with a reason. A
   guarded operation documents `412` and `428`, a required `If-Match` parameter, an optional
-  `If-None-Match` parameter when its input binds one, and the `ETag` header on every `2xx`
+  `If-None-Match` parameter, and the `ETag` header on every `2xx`
   (except a guarded DELETE's `204`, which carries none) and on the `412`; a conditional read
   documents `304` with `ETag`; a create-only PUT documents `412` with `ETag`, an optional
   `If-None-Match` parameter and `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /

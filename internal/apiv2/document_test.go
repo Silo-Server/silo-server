@@ -321,10 +321,11 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		Class:     ClassPublic,
 		Guarded:   true,
 	}, func(_ context.Context, in *struct {
-		ID      string `path:"id"`
-		IfMatch string `header:"If-Match"`
+		ID          string `path:"id"`
+		IfMatch     string `header:"If-Match"`
+		IfNoneMatch string `header:"If-None-Match"`
 	}) (*struct{}, error) {
-		if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+		if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
 			return nil, p
 		}
 		return &struct{}{}, nil
@@ -588,7 +589,21 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 			}) (*okOut, error) {
 				return nil, nil
 			})
-		}, "must bind it as a string"},
+		}, "If-None-Match"},
+		"guarded without If-None-Match": {guarded(http.MethodPatch), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *struct {
+				IfMatch string `header:"If-Match"`
+			}) (*okOut, error) {
+				return nil, nil
+			})
+		}, "If-None-Match"},
+		"guarded DELETE with typed ETag": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*struct {
+				ETag int `header:"ETag"`
+			}, error) {
+				return nil, nil
+			})
+		}, "must not declare"},
 		"guarded with unexported If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *unexportedIn) (*okOut, error) { return nil, nil })
 		}, "If-Match"},
