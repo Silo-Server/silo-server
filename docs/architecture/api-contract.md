@@ -432,9 +432,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (111
+  tier-1 ported mutation rows (219 distinct operations) are classified (108
   `natural_idempotent`, 26 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 10
-  `durable_dispatch`, 48 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 51 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
@@ -463,8 +463,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   lost response destroys a resource re-created after the first success (email-address
   clear, push-device unregister, library and collection poster delete, profile avatar
   delete, Discord unlink, collection item add and remove, profile section overrides
-  replace), so each stays `non_retryable` until its owning section guards the resource
-  with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
+  replace and reset, device forget and device-settings reset), so each stays `non_retryable`
+  until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
   (email-address verification; favorites, watchlist, and rating add and remove; taste seed;
   account and node deletion) name the durable dispatch or cleanup the v2 port must add before
   their retry is safe. The existing v2 profile creation and deletion operations remain
@@ -782,6 +782,12 @@ documents its semantics. Silo never advertises or validates the field while sile
 Adding supported idempotency to an operation later is additive. Before foundation implementation,
 the v1 inventory classifies every durable-effect operation by the strategies above and identifies
 any residual group that can justify one shared implementation.
+
+An absolute assignment can remain `natural_idempotent` without a concurrency guard: repeated
+identical invite-code updates converge and do not increment usage or dispatch another effect.
+That classification does not protect a later administrator edit from an older request. Whether
+admission-control edits require version guarding belongs to the admin-invitations section;
+retry classification and protection against concurrent edits are separate decisions.
 
 ### Optimistic concurrency
 

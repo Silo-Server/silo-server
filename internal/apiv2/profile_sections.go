@@ -190,7 +190,7 @@ func registerProfileSections(reg *Registry) {
 			"Delete the acting profile's section overrides for one page, restoring the admin layout."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
-		RetrySafety:    RetrySafetyNaturalIdempotent,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.resetProfileSectionOverrides)
 

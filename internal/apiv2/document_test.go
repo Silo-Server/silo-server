@@ -913,3 +913,16 @@ func TestIdempotencyKeyHeaderNeedsTheDeclaration(t *testing.T) {
 		register(RetrySafetyIdempotencyKey)
 	})
 }
+
+// Reset and replacement both operate on the current override set. Neither may
+// invite automatic replay after a lost response: a newer layout could exist.
+func TestProfileSectionMutationsDoNotAdvertiseAutomaticRetry(t *testing.T) {
+	doc := generatedDocument(t)
+	path := doc["paths"].(map[string]any)[Prefix+"/profile/sections"].(map[string]any)
+	for _, method := range []string{"put", "delete"} {
+		op := path[method].(map[string]any)
+		if got := op[extRetrySafety]; got != string(RetrySafetyNonRetryable) {
+			t.Errorf("%s retry safety = %v, want non_retryable", method, got)
+		}
+	}
+}
