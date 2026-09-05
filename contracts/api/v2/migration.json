@@ -41789,7 +41789,7 @@
         "path": "/api/v2/subtitle-prefs/{series_id}",
         "operation_id": "updateSubtitlePreference"
       },
-      "notes": "Section settings-prefs. Whole-preference PUT answering 204 as v1, including keeping a stored show_forced_subtitles override when the body omits it; subtitle_track_index is required and minimum -1, the subtitles-off sentinel v1 clients store (v1 accepted any negative), and unknown members are refused; a value the canonical settings contract rejects stays a 400 (malformed_request)."
+      "notes": "Section settings-prefs. Whole-preference PUT answering 204 as v1, including keeping a stored show_forced_subtitles override when the body omits it; subtitle_track_index is required and minimum -1, the subtitles-off sentinel v1 clients store (v1 accepted any negative), and unknown members are refused; a value the canonical settings contract rejects stays a 400 (malformed_request). subtitle_track_index admits -1 as the 'no track' sentinel every first-party client sends; both web call sites (hook and player) are on v2."
     },
     {
       "listener": "api",
