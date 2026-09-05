@@ -948,8 +948,15 @@ bodiless `PUT` add (ratings take `{rating}`) answering `204`, and a naturally id
 answering `204` whether or not the entry existed. The mutations are demo-guarded. `has_more` is
 decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
 see never hides the rows behind it. The v1 handlers call the same seams
-(`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite`,
-`RatingsHandler.ListRatings`/`DeleteRating`), so both surfaces read and write one store.
+(`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their
+watchlist twins, `RatingsHandler.ListRatings`/`GetRating`/`SetRating`/`DeleteRating`), so both
+surfaces read and write one store. Operation ids: `listFavorites`, `getFavorite`, `addFavorite`,
+`deleteFavorite`, `listRatings`, `getRating`, `setRating`, `deleteRating`, `listWatchlist`,
+`getWatchlistEntry`, `addToWatchlist`, `deleteWatchlistEntry`. Deliberate v1 differences: the
+membership reads answer a body instead of a bare `204`; `setRating` answers `422` (typed
+`out_of_range`) where v1 answered `400`; the list responses carry `page` instead of `has_more`;
+the watchlist list still hides fully-watched series as v1 does; and the v2 access filter carries
+no device id because the v2 listener reads no device header.
 
 **Section catalog-libraries (Phase 4).** Thirty operations under the `libraries` tag: the
 acting-admin, demo-guarded management surface `listLibraries`, `createLibrary`, `updateLibrary`,
