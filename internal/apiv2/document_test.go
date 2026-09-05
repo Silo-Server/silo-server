@@ -239,7 +239,7 @@ func TestImpliedStatusesForConcurrency(t *testing.T) {
 		t.Fatalf("guarded = %v", guarded)
 	}
 	conditional := ImpliedStatuses(ClassPublic, false, false, false, true, false, true, false)
-	if !has(conditional, http.StatusNotModified) || has(conditional, http.StatusPreconditionFailed) {
+	if !has(conditional, http.StatusNotModified) || !has(conditional, http.StatusPreconditionFailed) || has(conditional, http.StatusPreconditionRequired) {
 		t.Fatalf("conditional = %v", conditional)
 	}
 	createOnly := ImpliedStatuses(ClassPublic, false, false, true, true, false, false, true)
@@ -298,10 +298,11 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		Conditional: true,
 	}, func(_ context.Context, in *struct {
 		ID          string `path:"id"`
+		IfMatch     string `header:"If-Match"`
 		IfNoneMatch string `header:"If-None-Match"`
 	}) (*conditionalDocOutput, error) {
 		out := &conditionalDocOutput{ETag: current.String(), Body: probeEcho{Name: in.ID, Tags: []string{}, Labels: map[string]int{}}}
-		if matched, p := EvaluateIfNoneMatch(in.IfNoneMatch, current); p != nil {
+		if matched, p := EvaluateReadPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
 			return nil, p
 		} else if matched {
 			return NotModified(out, current), nil
@@ -349,10 +350,11 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		CreateOnly: true,
 	}, func(_ context.Context, in *struct {
 		ID          string `path:"id"`
+		IfMatch     string `header:"If-Match"`
 		IfNoneMatch string `header:"If-None-Match"`
 		Body        probeBody
 	}) (*guardedDocOutput, error) {
-		if p := EvaluateCreateOnly(in.IfNoneMatch, &current); p != nil {
+		if p := EvaluateCreateOnlyPreconditions(in.IfMatch, in.IfNoneMatch, &current); p != nil {
 			return nil, p
 		}
 		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
@@ -457,8 +459,20 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	if h := get.Responses["304"].Headers["ETag"].(map[string]any); h["schema"].(map[string]any)["type"] != "string" || h["description"] != "declared by the registration" {
 		t.Fatalf("merged ETag must carry the contract's string schema and the declared description: %+v", h)
 	}
-	if _, ok := get.Responses["412"]; ok {
-		t.Fatal("a conditional read must not document 412")
+	if r, ok := get.Responses["412"]; !ok || r.Headers["ETag"] == nil {
+		t.Fatalf("a conditional read documents 412 with ETag for a stale If-Match: %+v", get.Responses["412"])
+	}
+	ifMatchOnGet := false
+	for _, p := range get.Parameters {
+		if p.Name == "If-Match" && p.In == "header" {
+			ifMatchOnGet = true
+			if p.Required {
+				t.Fatal("If-Match on a conditional read must be optional")
+			}
+		}
+	}
+	if !ifMatchOnGet {
+		t.Fatalf("a conditional read must document the optional If-Match: %+v", get.Parameters)
 	}
 	del := doc.Paths[Prefix+"/docprobe/{id}"]["delete"]
 	if del.Responses["204"].Headers["ETag"] != nil {
@@ -733,6 +747,20 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"conditional with embedded ETag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*embeddedConditionalDocOutput, error) { return nil, nil })
 		}, "ETag"},
+		"create-only without If-Match": {createOnly(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *struct {
+				IfNoneMatch string `header:"If-None-Match"`
+			}) (*okOut, error) {
+				return nil, nil
+			})
+		}, "If-Match"},
+		"conditional without If-Match": {conditional(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *struct {
+				IfNoneMatch string `header:"If-None-Match"`
+			}) (*okOut, error) {
+				return nil, nil
+			})
+		}, "If-Match"},
 		"create-only without If-None-Match": {createOnly(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *noHeaders) (*okOut, error) { return nil, nil })
 		}, "If-None-Match"},

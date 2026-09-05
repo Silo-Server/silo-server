@@ -359,9 +359,12 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   guarded DELETE answers a bodyless `204` and nothing else: its output declares no `ETag`
   of any type, no body, and no `Status`, its `DefaultStatus` is unset or `204`, and its
   `Responses` declares no other `2xx`), when a conditional input does not bind
-  `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
-  create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
-  output. Header fields and the conditional `Status` count only as direct exported struct
+  `header:"If-None-Match"` and `header:"If-Match"` with a string `ETag` and an int `Status`
+  on the output, and when a create-only input does not bind `header:"If-None-Match"` and
+  `header:"If-Match"` with a string `ETag` on the output. On a read or a create-only write
+  the `If-Match` is optional but, when present, is evaluated first (RFC 9110 13.2.2): a tag
+  not matching the current representation, or any tag against a missing resource, is
+  `412`, so a stale precondition can never fall through to a `200`, `304`, or create. Header fields and the conditional `Status` count only as direct exported struct
   fields spelled canonically (`If-Match`, `If-None-Match`, `ETag`) with no Huma binding or
   validation tag (a `default` would turn an absent `If-Match` into an overwrite instead of
   `428`, a `required` would answer a framework `422` in its place), and exactly one field
@@ -383,8 +386,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   guarded operation documents `412` and `428`, a required `If-Match` parameter, an optional
   `If-None-Match` parameter, and the `ETag` header on every `2xx`
   (except a guarded DELETE's `204`, which carries none) and on the `412`; a conditional read
-  documents `304` with `ETag`; a create-only PUT documents `412` with `ETag`, an optional
-  `If-None-Match` parameter and `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
+  documents `304` with `ETag`, `412` with `ETag`, and an optional `If-Match` parameter; a
+  create-only PUT documents `412` with `ETag`, optional `If-Match` and `If-None-Match`
+  parameters and `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
   `x-silo-create-only` so a reader can enumerate them. The router joins repeated `If-Match`
   and `If-None-Match` lines into one comma-separated list before the input is bound (RFC
   9110 5.3), so a tag on a second line is evaluated, and rewrites a present but empty field
@@ -399,7 +403,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `StrongMatch` / `WeakMatch`, `EvaluateIfMatch` (nil, `428`, `412` with the current `ETag`, or
   `400 malformed_request` without echoing the value), `EvaluateGuardedPreconditions` (the RFC
   9110 13.2.2 order for a mutation that binds both fields: `If-Match` first, then an
-  `If-None-Match` whose match or `*` is `412`), `EvaluateIfNoneMatch` and `NotModified`
+  `If-None-Match` whose match or `*` is `412`), `EvaluateReadPreconditions` and
+  `EvaluateCreateOnlyPreconditions` (the same order for a read and a create-only write, with
+  an optional `If-Match`), `EvaluateIfNoneMatch` and `NotModified`
   for `304`, `EvaluateCreateOnly` for `If-None-Match: *`, and the `ErrStaleVersion` sentinel a
   storage compare-and-update returns, mapped by `StaleVersionProblem`. The handler loads
   first (`404` before any precondition), evaluates, then writes. The ledger's optional

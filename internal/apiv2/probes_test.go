@@ -283,6 +283,7 @@ func (s *guardedProbeStore) Delete(id string, expected int64) error {
 
 type guardedProbeReadInput struct {
 	ID          string `path:"id" doc:"Probe resource id"`
+	IfMatch     string `header:"If-Match" doc:"Optional first precondition, evaluated before If-None-Match"`
 	IfNoneMatch string `header:"If-None-Match" doc:"Entity tags the client already holds"`
 }
 
@@ -297,6 +298,7 @@ type guardedProbeWriteInput struct {
 
 type createOnlyProbeInput struct {
 	ID          string `path:"id" doc:"Client-selected probe resource id"`
+	IfMatch     string `header:"If-Match" doc:"Optional first precondition, evaluated before If-None-Match"`
 	IfNoneMatch string `header:"If-None-Match" doc:"\"*\" to refuse overwriting an existing resource"`
 	Body        struct {
 		Name string `json:"name" minLength:"1"`
@@ -343,7 +345,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			}
 			current := RenderETag(guardedProbeScope, in.ID, row.Version)
 			out := &guardedProbeReadOutput{ETag: current.String(), Body: guardedProbeBody{ID: in.ID, Name: row.Name, Version: row.Version}}
-			matched, p := EvaluateIfNoneMatch(in.IfNoneMatch, current)
+			matched, p := EvaluateReadPreconditions(in.IfMatch, in.IfNoneMatch, current)
 			if p != nil {
 				return nil, p
 			}
@@ -440,7 +442,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				tag := RenderETag(guardedProbeScope, in.ID, row.Version)
 				existing = &tag
 			}
-			if p := EvaluateCreateOnly(in.IfNoneMatch, existing); p != nil {
+			if p := EvaluateCreateOnlyPreconditions(in.IfMatch, in.IfNoneMatch, existing); p != nil {
 				return nil, p
 			}
 			var updated guardedProbeRow
@@ -470,7 +472,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 						tag := RenderETag(guardedProbeScope, in.ID, row.Version)
 						existing = &tag
 					}
-					if p := EvaluateCreateOnly(in.IfNoneMatch, existing); p != nil {
+					if p := EvaluateCreateOnlyPreconditions(in.IfMatch, in.IfNoneMatch, existing); p != nil {
 						return nil, p
 					}
 				}

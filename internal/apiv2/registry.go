@@ -270,6 +270,12 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 		if !declaresHeaderString(in, ifNoneMatchField) {
 			return fmt.Errorf("create-only: input must declare a string field with `header:\"%s\"`", ifNoneMatchField)
 		}
+		if !declaresHeaderString(in, ifMatchField) {
+			// RFC 9110 13.2.2 evaluates If-Match first; an input that does
+			// not bind it would let Huma drop a stale tag and the write
+			// proceed instead of answering 412.
+			return fmt.Errorf("create-only: input must declare a string field with `header:\"%s\"` so it is evaluated before If-None-Match", ifMatchField)
+		}
 		if !declaresHeaderString(out, etagField) {
 			return fmt.Errorf("create-only: output must declare a string field with `header:\"%s\"`", etagField)
 		}
@@ -346,6 +352,12 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 	if op.Conditional {
 		if !declaresHeaderString(in, ifNoneMatchField) {
 			return fmt.Errorf("conditional: input must declare a string field with `header:\"%s\"`", ifNoneMatchField)
+		}
+		if !declaresHeaderString(in, ifMatchField) {
+			// A stale If-Match on a read is 412 before If-None-Match is
+			// looked at; an input that does not bind it would answer 200
+			// or 304 instead.
+			return fmt.Errorf("conditional: input must declare a string field with `header:\"%s\"` so it is evaluated before If-None-Match", ifMatchField)
 		}
 		if !declaresHeaderString(out, etagField) {
 			return fmt.Errorf("conditional: output must declare a string field with `header:\"%s\"`", etagField)

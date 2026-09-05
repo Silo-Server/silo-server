@@ -77,13 +77,14 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	}
 	if op.Conditional {
 		op.Extensions[extConditional] = true
+		op.Parameters = append(op.Parameters, ifMatchOptionalParam())
 	}
 	if op.Guarded {
 		op.Parameters = append(op.Parameters, ifNoneMatchGuardedParam())
 	}
 	if op.CreateOnly {
 		op.Extensions[extCreateOnly] = true
-		op.Parameters = append(op.Parameters, ifNoneMatchCreateParam())
+		op.Parameters = append(op.Parameters, ifMatchOptionalParam(), ifNoneMatchCreateParam())
 	}
 	hasBody := declaresBody(input)
 	hasPath := strings.Contains(op.Path, "{")
@@ -175,6 +176,20 @@ func ifNoneMatchGuardedParam() *huma.Param {
 	}
 }
 
+// ifMatchOptionalParam documents the optional first precondition on a
+// conditional read or a create-only write: evaluated before If-None-Match,
+// per RFC 9110 13.2.2; a tag that does not match the current representation
+// (or any tag against a missing resource) is 412.
+func ifMatchOptionalParam() *huma.Param {
+	return &huma.Param{
+		Name:        ifMatchField,
+		In:          "header",
+		Required:    false,
+		Description: "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+		Schema:      &huma.Schema{Type: "string"},
+	}
+}
+
 func ifNoneMatchCreateParam() *huma.Param {
 	return &huma.Param{
 		Name:        ifNoneMatchField,
@@ -253,7 +268,7 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 		case code >= 200 && code < 300:
 			// Every other success, including a bodyless 204 from a PUT or
 			// PATCH output that carries only ETag, sends the header.
-		case code == http.StatusPreconditionFailed && (op.Guarded || op.CreateOnly):
+		case code == http.StatusPreconditionFailed && (op.Guarded || op.CreateOnly || op.Conditional):
 			// A stale If-Match, a refused create-only If-None-Match, and a
 			// lost compare-and-update race all answer 412 with the current
 			// validator when the caller may see it (EvaluateIfMatch,
@@ -336,6 +351,7 @@ func ImpliedStatuses(class Class, demoRestricted, serviceBacked, hasBody, hasPat
 	}
 	if conditional {
 		set[http.StatusNotModified] = true
+		set[http.StatusPreconditionFailed] = true
 	}
 	if createOnly {
 		set[http.StatusPreconditionFailed] = true

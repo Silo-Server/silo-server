@@ -323,6 +323,61 @@ func TestGuardedProbeWildcardDeleteRetryRechecksIfNoneMatch(t *testing.T) {
 	}
 }
 
+// TestConditionalReadEvaluatesIfMatchFirst: a stale If-Match on a read is 412
+// with the current ETag before If-None-Match is looked at; a current one lets
+// If-None-Match decide; a malformed one is 400.
+func TestConditionalReadEvaluatesIfMatchFirst(t *testing.T) {
+	h, _ := guardedHandler(t)
+	current := RenderETag(guardedProbeScope, "a", 1).String()
+	stale := RenderETag(guardedProbeScope, "a", 0).String()
+	rec := do(t, h, http.MethodGet, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": stale, "If-None-Match": current})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got := rec.Header().Get("ETag"); got != current {
+		t.Fatalf("412 ETag = %q", got)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": current, "If-None-Match": current})
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("current If-Match then matching If-None-Match: %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": "*"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("If-Match: * on a read: %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": "not-a-tag"})
+	requireProblem(t, rec, TypeMalformedRequest)
+}
+
+// TestCreateOnlyEvaluatesIfMatchFirst: on a create-only PUT, If-Match against
+// a missing id is 412 with no ETag (even "*"), a stale If-Match against an
+// existing id is 412 with its ETag and no overwrite, and a current one lets
+// If-None-Match decide.
+func TestCreateOnlyEvaluatesIfMatchFirst(t *testing.T) {
+	h, store := guardedHandler(t)
+	for _, field := range []string{"*", RenderETag(guardedProbeScope, "new", 1).String()} {
+		rec := do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"x"}`, map[string]string{"If-Match": field})
+		requireProblem(t, rec, TypePreconditionFailed)
+		if rec.Header().Get("ETag") != "" {
+			t.Fatalf("If-Match %q on a missing id: 412 must carry no ETag", field)
+		}
+		if _, exists := store.Get("new"); exists {
+			t.Fatalf("If-Match %q on a missing id created the resource", field)
+		}
+	}
+	stale := RenderETag(guardedProbeScope, "a", 0).String()
+	rec := do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"clobber"}`, map[string]string{"If-Match": stale})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got := rec.Header().Get("ETag"); got != RenderETag(guardedProbeScope, "a", 1).String() {
+		t.Fatalf("412 ETag = %q", got)
+	}
+	if row, _ := store.Get("a"); row.Name != "alpha" {
+		t.Fatalf("stale If-Match overwrote: %+v", row)
+	}
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"replaced"}`, map[string]string{"If-Match": RenderETag(guardedProbeScope, "a", 1).String()})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("current If-Match then replace: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestGuardedProbeWildcardSurvivesLostRace: "*" is a deliberate overwrite,
 // so a writer that lands between the load and the compare-and-update does
 // not turn it into a 412 while the resource still exists.

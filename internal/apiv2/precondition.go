@@ -307,6 +307,41 @@ func EvaluateGuardedPreconditions(ifMatch, ifNoneMatch string, current EntityTag
 	return nil
 }
 
+// EvaluateReadPreconditions evaluates a conditional read's preconditions in
+// RFC 9110 13.2.2 order: an optional If-Match first (an absent field passes;
+// no tag matching the current representation is 412 with the current ETag;
+// a malformed field is 400), then If-None-Match, whose weak match reports
+// notModified. A handler binds both fields and calls this instead of
+// EvaluateIfNoneMatch alone.
+func EvaluateReadPreconditions(ifMatch, ifNoneMatch string, current EntityTag) (notModified bool, p *Problem) {
+	if ifMatch != "" {
+		if p := EvaluateIfMatch(ifMatch, current); p != nil {
+			return false, p
+		}
+	}
+	return EvaluateIfNoneMatch(ifNoneMatch, current)
+}
+
+// EvaluateCreateOnlyPreconditions evaluates a create-only write's
+// preconditions in RFC 9110 13.2.2 order: an optional If-Match first (an
+// absent field passes; against a missing resource any If-Match, even "*",
+// is 412 with no ETag; against an existing one a non-matching tag is 412
+// with its ETag), then the create-only If-None-Match.
+func EvaluateCreateOnlyPreconditions(ifMatch, ifNoneMatch string, existing *EntityTag) *Problem {
+	if ifMatch != "" {
+		if existing == nil {
+			if _, _, err := ParseETagList(ifMatch); err != nil {
+				return malformedETagList(ifMatchField)
+			}
+			return NewProblem(TypePreconditionFailed, "If-Match names a resource, but none exists at this identifier.")
+		}
+		if p := EvaluateIfMatch(ifMatch, *existing); p != nil {
+			return p
+		}
+	}
+	return EvaluateCreateOnly(ifNoneMatch, existing)
+}
+
 // IsOverwrite reports whether an If-Match field is the wildcard: the caller
 // asked for a deliberate overwrite, so a compare-and-update that loses a race
 // to a writer who left the resource in place is re-applied against the
