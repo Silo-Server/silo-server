@@ -214,7 +214,7 @@ func (f *fakeProfiles) DeleteProfile(_ context.Context, cmd handlers.ProfileDele
 		return &handlers.APIError{Status: http.StatusConflict, Code: "primary_profile_protected", Message: "The primary profile cannot be deleted. Delete the user account instead."}
 	}
 	if cmd.ProfileID != f.view.ID {
-		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+		return &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found"}
 	}
 	return nil
 }
@@ -233,7 +233,7 @@ func (f *fakeProfiles) VerifyPIN(_ context.Context, cmd handlers.ProfileVerifyPI
 		return handlers.ProfileVerification{}, f.err
 	}
 	if cmd.ProfileID != f.view.ID {
-		return handlers.ProfileVerification{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found or has no PIN"}
+		return handlers.ProfileVerification{}, &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found or has no PIN"}
 	}
 	if cmd.PIN != "1234" {
 		return handlers.ProfileVerification{Valid: false}, nil
@@ -251,7 +251,7 @@ func (f *fakeProfiles) UploadAvatar(_ context.Context, up handlers.ProfileAvatar
 		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Avatar upload storage is not configured"}
 	}
 	if up.ProfileID != f.view.ID {
-		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found"}
 	}
 	if len(data) > 10<<20 {
 		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: "Avatar must be under 10 MB"}
@@ -270,7 +270,7 @@ func (f *fakeProfiles) DeleteAvatar(_ context.Context, _ int, profileID string) 
 		return handlers.ProfileView{}, f.err
 	}
 	if profileID != f.view.ID {
-		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found"}
 	}
 	return f.view, nil
 }

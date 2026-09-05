@@ -204,7 +204,7 @@ func TestReplaceProfileSectionOverridesDecisions(t *testing.T) {
 		{&handlers.APIError{Status: http.StatusBadRequest, Code: "invalid_config", Message: "library_ids: at least one"}, TypeValidationFailed, locationOverrides},
 		// An admin-only recipe on a server that does not allow custom sections.
 		{&handlers.APIError{Status: http.StatusForbidden, Code: "custom_disabled", Message: "this server does not allow profiles to build custom sections"}, TypePermissionDenied, ""},
-		{&handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to save overrides"}, TypeInternalError, ""},
+		{&handlers.APIError{Status: http.StatusInternalServerError, Code: TypeInternalError.ID, Message: "Failed to save overrides"}, TypeInternalError, ""},
 	} {
 		h := newTestHandler(t, sectionDeps(&fakeProfileSections{err: tc.err}))
 		p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profile/sections", body, auth), tc.want)

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -52,6 +53,13 @@ const (
 	metaDemoRestricted  = "silo.demo_restricted"
 	metaProfileOptional = "silo.profile_optional"
 	metaMaxBodyBytes    = "silo.max_body_bytes"
+	metaGuarded         = "silo.guarded"
+	metaConditional     = "silo.conditional"
+	metaCreateOnly      = "silo.create_only"
+	// metaIdentityOnly marks an operation whose output declares an ETag: its
+	// responses are served identity-encoded (IdentityEncoded), so a request
+	// that forbids identity is refused up front (encodingGuard).
+	metaIdentityOnly = "silo.identity_only"
 	// metaFormSchema names the multipart form type of an operation whose
 	// RawBody is a huma.MultipartFormFiles[T]; the document hook registers
 	// the form under that name so the request schema is not anonymous.
@@ -97,6 +105,27 @@ type Operation struct {
 	// The document and discovery operations answer from the build alone
 	// and leave it unset.
 	ServiceBacked bool
+	// Guarded marks a PUT, PATCH or DELETE protected by optimistic
+	// concurrency (docs/architecture/api-contract.md, "Optimistic
+	// concurrency"): the input binds `header:"If-Match"` as a string, the
+	// output carries `header:"ETag"`, and the handler evaluates the
+	// precondition with EvaluateIfMatch after loading the resource. The
+	// document gains 412 and 428, a required If-Match parameter, and the
+	// ETag header on every success response.
+	Guarded bool
+	// Conditional marks a GET or HEAD that honors If-None-Match: the input
+	// binds `header:"If-None-Match"`, the output carries `header:"ETag"` and
+	// an int Status so the handler can answer 304 through NotModified.
+	Conditional bool
+	// CreateOnly marks a PUT with a client-selected resource ID that honors
+	// `If-None-Match: *` as a create-only request: the input binds
+	// `header:"If-None-Match"` as a string, the output carries
+	// `header:"ETag"`, and the handler evaluates EvaluateCreateOnly against
+	// the stored representation (nil when none). The document gains 412, an
+	// optional If-None-Match parameter, and the ETag header on every success
+	// response. Exclusive with Guarded: a guarded PUT already requires
+	// If-Match and has no create path.
+	CreateOnly bool
 }
 
 // Registry is the deterministic registration surface. Domain files call
@@ -116,6 +145,9 @@ type Declared struct {
 	Path        string
 	OperationID string
 	Class       Class
+	Guarded     bool
+	Conditional bool
+	CreateOnly  bool
 }
 
 // Declared lists every registered operation, sorted by method then path.
@@ -147,6 +179,9 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	if err := checkEnums(reflect.TypeOf(out)); err != nil {
 		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
 	}
+	if err := checkConcurrencyShape(op, reflect.TypeOf(in), reflect.TypeOf(out)); err != nil {
+		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	}
 	if op.Metadata == nil {
 		op.Metadata = map[string]any{}
 	}
@@ -154,6 +189,10 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaPermission] = op.Permission
 	op.Metadata[metaDemoRestricted] = op.DemoRestricted
 	op.Metadata[metaProfileOptional] = op.ProfileOptional
+	op.Metadata[metaGuarded] = op.Guarded
+	op.Metadata[metaConditional] = op.Conditional
+	op.Metadata[metaCreateOnly] = op.CreateOnly
+	op.Metadata[metaIdentityOnly] = declaresHeader(reflect.TypeOf(out), etagField)
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {
@@ -174,9 +213,11 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 		}
 	}
 	reg.mu.Lock()
-	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class})
+	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
+		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly})
 	reg.mu.Unlock()
 	huma.Register(reg.api, op.Operation, handler)
+	documentConcurrencyResponses(reg.api.OpenAPI(), op)
 }
 
 // multipartFormName returns the form type name of an input whose RawBody is
@@ -234,7 +275,202 @@ func checkOperation(op Operation) error {
 	if op.Operation.MaxBodyBytes != 0 {
 		return fmt.Errorf("set apiv2.Operation.MaxBodyBytes, not the embedded Huma field: Register owns the limit translation")
 	}
+	if op.Guarded && op.Method != http.MethodPut && op.Method != http.MethodPatch && op.Method != http.MethodDelete {
+		return fmt.Errorf("guarded is for PUT, PATCH and DELETE; %s has no If-Match precondition to guard", op.Method)
+	}
+	if op.Conditional && op.Method != http.MethodGet && op.Method != http.MethodHead {
+		return fmt.Errorf("conditional is for GET and HEAD; %s has no If-None-Match read to answer 304", op.Method)
+	}
+	if op.CreateOnly && op.Method != http.MethodPut {
+		return fmt.Errorf("create-only is for PUT with a client-selected id; %s has no If-None-Match: * create to refuse", op.Method)
+	}
+	if op.CreateOnly && op.Guarded {
+		return fmt.Errorf("create-only and guarded are exclusive: a guarded PUT requires If-Match and has no create path")
+	}
 	return nil
+}
+
+// checkConcurrencyShape requires the transport fields a guarded,
+// conditional or create-only declaration relies on: the precondition header
+// as a string on the input, ETag as a string on the output, and for a
+// conditional read an int Status so the handler can answer 304.
+func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
+	if op.CreateOnly {
+		if !declaresHeaderString(in, ifNoneMatchField) {
+			return fmt.Errorf("create-only: input must declare a string field with `header:\"%s\"`", ifNoneMatchField)
+		}
+		if !declaresHeaderString(in, ifMatchField) {
+			// RFC 9110 13.2.2 evaluates If-Match first; an input that does
+			// not bind it would let Huma drop a stale tag and the write
+			// proceed instead of answering 412.
+			return fmt.Errorf("create-only: input must declare a string field with `header:\"%s\"` so it is evaluated before If-None-Match", ifMatchField)
+		}
+		if !declaresHeaderString(out, etagField) {
+			return fmt.Errorf("create-only: output must declare a string field with `header:\"%s\"`", etagField)
+		}
+	}
+	if op.Guarded {
+		if !declaresHeaderString(in, ifMatchField) {
+			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"`", ifMatchField)
+		}
+		if !declaresHeaderString(in, ifNoneMatchField) {
+			// RFC 9110 13.2.2 evaluates If-None-Match after If-Match on a
+			// mutation; an input that does not bind it would let Huma drop
+			// the field and the handler apply a write the client forbade.
+			// It is an entity-tag list the RFC parser reads, so a typed
+			// binding is refused too.
+			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"` so the second precondition is evaluated after If-Match", ifNoneMatchField)
+		}
+		if op.Method == http.MethodDelete {
+			// The deleted representation has no validator: a guarded DELETE
+			// answers a bodyless 204 and nothing else, so the output must
+			// declare no ETag, no body, and no Status that could turn it
+			// into a representation-bearing success the document would
+			// decorate with a header the handler cannot send.
+			if declaresHeader(out, etagField) {
+				return fmt.Errorf("guarded delete: output must not declare `header:\"%s\"`; a 204 has no representation to validate", etagField)
+			}
+			if declaresBody(out) {
+				return fmt.Errorf("guarded delete: output must be bodyless; the deleted representation is not returned")
+			}
+			if _, ok := out.FieldByName("Status"); ok {
+				return fmt.Errorf("guarded delete: output must not declare Status; the only success is 204")
+			}
+			if op.DefaultStatus != 0 && op.DefaultStatus != http.StatusNoContent {
+				// Huma derives the success status from DefaultStatus when
+				// the output has no Status field; anything but 204 would be
+				// a representation-bearing success without a validator.
+				return fmt.Errorf("guarded delete: DefaultStatus must be unset or 204, not %d", op.DefaultStatus)
+			}
+			for status := range op.Responses {
+				// A hand-declared 2xx other than 204, including the OpenAPI
+				// range key "2XX", survives into the document, where the
+				// concurrency decoration would add an ETag the bodyless
+				// handler can never send.
+				if strings.EqualFold(status, "2XX") {
+					return fmt.Errorf("guarded delete: Responses declares the 2XX range, but the only success is 204")
+				}
+				code, err := strconv.Atoi(status)
+				if err != nil {
+					continue
+				}
+				if code >= 200 && code < 300 && code != http.StatusNoContent {
+					return fmt.Errorf("guarded delete: Responses declares %s, but the only success is 204", status)
+				}
+				if code == http.StatusNoContent {
+					// A hand-declared 204 may add a description, but no
+					// representation and no validator: the runtime sends
+					// neither.
+					resp := op.Responses[status]
+					if resp != nil && len(resp.Content) > 0 {
+						return fmt.Errorf("guarded delete: Responses[\"204\"] declares content, but the 204 is bodyless")
+					}
+					if resp != nil {
+						for name := range resp.Headers {
+							if strings.EqualFold(name, etagField) {
+								return fmt.Errorf("guarded delete: Responses[\"204\"] declares an ETag header, but a deleted representation has no validator")
+							}
+						}
+					}
+				}
+			}
+		} else if !declaresHeaderString(out, etagField) {
+			return fmt.Errorf("guarded: output must declare a string field with `header:\"%s\"`", etagField)
+		}
+	}
+	if op.Conditional {
+		if !declaresHeaderString(in, ifNoneMatchField) {
+			return fmt.Errorf("conditional: input must declare a string field with `header:\"%s\"`", ifNoneMatchField)
+		}
+		if !declaresHeaderString(in, ifMatchField) {
+			// A stale If-Match on a read is 412 before If-None-Match is
+			// looked at; an input that does not bind it would answer 200
+			// or 304 instead.
+			return fmt.Errorf("conditional: input must declare a string field with `header:\"%s\"` so it is evaluated before If-None-Match", ifMatchField)
+		}
+		if !declaresHeaderString(out, etagField) {
+			return fmt.Errorf("conditional: output must declare a string field with `header:\"%s\"`", etagField)
+		}
+		if f, ok := out.FieldByName("Status"); !ok || !f.IsExported() || f.Type.Kind() != reflect.Int || len(f.Index) != 1 {
+			return fmt.Errorf("conditional: output must declare a direct, exported int Status field so the handler can answer 304")
+		}
+	}
+	return nil
+}
+
+// declaresHeader reports whether struct type t has a direct, exported field
+// bound to the named header, of any type.
+func declaresHeader(t reflect.Type, name string) bool {
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous || !f.IsExported() {
+			continue
+		}
+		if strings.EqualFold(f.Tag.Get("header"), name) {
+			// Any spelling counts here: this is the "must not declare" and
+			// "binds but not as a string" side, which wants to catch every
+			// variant.
+			return true
+		}
+	}
+	return false
+}
+
+// declaresHeaderString reports whether struct type t has a direct, exported
+// string field bound to the named header, compared case-insensitively as
+// HTTP header names are. Only direct exported fields count: Huma ignores
+// embedded structs and cannot bind or write an unexported field, so a header
+// declared either way never reaches the wire.
+func declaresHeaderString(t reflect.Type, name string) bool {
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	// Exactly one direct exported field may bind the header, it must be a
+	// string, and its tag must be spelled canonically: a second binding of
+	// another type would satisfy a "some string field" check while
+	// NotModified's SetString panics on it and Huma writes whichever it
+	// visits last; a case-variant spelling would survive into the response
+	// header map under that spelling, so the document's exact-key merge
+	// would add a second, case-equivalent OpenAPI header.
+	matches := 0
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous || !f.IsExported() || !strings.EqualFold(f.Tag.Get("header"), name) {
+			continue
+		}
+		if f.Type.Kind() != reflect.String || f.Tag.Get("header") != name {
+			return false
+		}
+		if bindsBeforeHandler(f) {
+			// A Huma binding tag would decide the field before the handler
+			// runs: default:"*" turns an absent If-Match into an overwrite
+			// instead of the documented 428, required:"true" answers a
+			// framework 422 in place of it, and a validation tag could
+			// reject a well-formed entity-tag list. The handler is the only
+			// source of 428/412.
+			return false
+		}
+		matches++
+	}
+	return matches == 1
+}
+
+// preconditionBindingTags are the Huma binding and validation tags that act
+// on a header value before the handler sees it.
+var preconditionBindingTags = []string{"default", codeRequired, "enum", "pattern", "minLength", "maxLength", "format"}
+
+// bindsBeforeHandler reports whether a header field carries one of
+// preconditionBindingTags.
+func bindsBeforeHandler(f reflect.StructField) bool {
+	for _, tag := range preconditionBindingTags {
+		if _, ok := f.Tag.Lookup(tag); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // declaresPathParam reports whether a route path declares {name} as one whole
