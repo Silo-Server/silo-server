@@ -51,7 +51,6 @@ import { isTasteSeedDismissed } from "@/lib/tasteSeed";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import { useOnboardingState } from "@/hooks/queries/onboarding";
 import SettingsLayout from "@/pages/SettingsLayout";
-import PlaybackSettings from "@/pages/settings/PlaybackSettings";
 import {
   WatchPlaybackBar,
   WatchPlaybackHost,
@@ -91,6 +90,7 @@ const Collections = lazy(importCollections);
 const CollectionEditor = lazy(() => import("@/pages/CollectionEditor"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const DeviceSettings = lazy(() => import("@/pages/settings/DeviceSettings"));
+const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"));
 const NotificationsSettings = lazy(() => import("@/pages/settings/NotificationsSettings"));
 const Requests = lazy(() => import("@/pages/Requests"));
 const RequestBrowse = lazy(() => import("@/pages/RequestBrowse"));

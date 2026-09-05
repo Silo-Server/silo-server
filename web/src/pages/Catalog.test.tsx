@@ -338,17 +338,18 @@ describe("Catalog page", () => {
     expect(latestNavigateTo).toBeNull();
   });
 
-  it("renders user settings inside the main app layout", () => {
+  it("renders user settings inside the main app layout", async () => {
     appInitialEntries = ["/settings/playback"];
 
-    const markup = renderToStaticMarkup(
+    render(
       <QueryClientProvider client={new QueryClient()}>
         <App />
       </QueryClientProvider>,
     );
 
-    expect(markup).toContain('data-kind="app-layout"');
-    expect(markup).toContain("Settings");
+    const settings = await screen.findByText("Playback settings");
+    expect(settings.closest('[data-kind="app-layout"]')).not.toBeNull();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
   it("lets an administrator without an active profile open account settings", async () => {
