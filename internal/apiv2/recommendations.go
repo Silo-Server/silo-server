@@ -114,7 +114,7 @@ type TasteSeedItemsInput struct {
 // TasteSeedSubmission is the createTasteSeed body: the items the profile
 // picked in the taste-seeding picker.
 type TasteSeedSubmission struct {
-	ItemIDs []string `json:"item_ids" minItems:"1" maxItems:"200" doc:"Picked catalog identifiers; each is recorded as a favourite" example:"[\"movie:heat-1995\"]"`
+	ItemIDs []string `json:"item_ids" minItems:"1" maxItems:"200" doc:"Picked catalog identifiers; each is recorded as a favorite" example:"[\"movie:heat-1995\"]"`
 }
 
 // TasteSeedSubmitInput is the createTasteSeed request.
@@ -124,7 +124,7 @@ type TasteSeedSubmitInput struct {
 
 // TasteSeedResult reports a taste-seed submission.
 type TasteSeedResult struct {
-	Added int `json:"added" doc:"Picks recorded as favourites by this submission" example:"3"`
+	Added int `json:"added" doc:"Picks recorded as favorites by this submission" example:"3"`
 }
 
 // TasteSeedResultOutput is the createTasteSeed response.
@@ -222,14 +222,14 @@ func registerRecommendations(reg *Registry) {
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/recommendations/taste-profile", "getTasteProfile", "recommendations",
 		"The acting profile's taste summary; empty members until the engine has computed one.")), reg.getTasteProfile)
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/recommendations/taste-seed/items", opListTasteSeedItems, "recommendations",
-		"A page of cards for the taste-seeding picker, most recognisable first.")), func(ctx context.Context, in *TasteSeedItemsInput) (*CatalogItemCollectionOutput, error) {
+		"A page of cards for the taste-seeding picker, most recognizable first.")), func(ctx context.Context, in *TasteSeedItemsInput) (*CatalogItemCollectionOutput, error) {
 		return reg.listTasteSeedItems(ctx, cursors, in)
 	})
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPost, Prefix+"/recommendations/taste-seed", "createTasteSeed", "recommendations",
-			"Record the picked items as the acting profile's favourites and queue a taste-profile refresh."),
-		// Naturally idempotent: a favourite is a set membership, so a
-		// retried submission converges on the same favourite set and
+			"Record the picked items as the acting profile's favorites and queue a taste-profile refresh."),
+		// Naturally idempotent: a favorite is a set membership, so a
+		// retried submission converges on the same favorite set and
 		// reports 0 added.
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,

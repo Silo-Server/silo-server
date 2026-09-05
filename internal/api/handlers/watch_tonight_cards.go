@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,15 +52,9 @@ type WatchTonightCardView = swipeCardResponse
 // WatchTonightCastMemberView is one cast member on a swipe card.
 type WatchTonightCastMemberView = swipeCardCastMember
 
-// KnownWatchTonightGenres is the validated genre set of the cards read, in
-// declaration order, for callers that declare it as an enum.
-var KnownWatchTonightGenres = []string{
-	"Action", "Adventure", "Animation", "Comedy",
-	"Crime", "Documentary", "Drama", "Family",
-	"Fantasy", "History", "Horror", "Music",
-	"Mystery", "Romance", "Science Fiction", "Thriller",
-	"War", "Western",
-}
+// KnownWatchTonightGenres is the validated genre set of the cards read,
+// sorted, for callers that validate against it.
+var KnownWatchTonightGenres = slices.Sorted(maps.Keys(knownGenres))
 
 const (
 	swipeDefaultLimit   = 12

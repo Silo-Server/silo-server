@@ -693,7 +693,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Record the picked items as the acting profile's favourites and queue a taste-profile refresh. */
+    /** Record the picked items as the acting profile's favorites and queue a taste-profile refresh. */
     post: operations["createTasteSeed"];
     delete?: never;
     options?: never;
@@ -708,7 +708,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** A page of cards for the taste-seeding picker, most recognisable first. */
+    /** A page of cards for the taste-seeding picker, most recognizable first. */
     get: operations["listTasteSeedItems"];
     put?: never;
     post?: never;
@@ -2604,14 +2604,14 @@ export interface components {
     TasteSeedResult: {
       /**
        * Format: int64
-       * @description Picks recorded as favourites by this submission
+       * @description Picks recorded as favorites by this submission
        * @example 3
        */
       added: number;
     };
     TasteSeedSubmission: {
       /**
-       * @description Picked catalog identifiers; each is recorded as a favourite
+       * @description Picked catalog identifiers; each is recorded as a favorite
        * @example [
        *       "movie:heat-1995"
        *     ]

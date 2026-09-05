@@ -55,7 +55,7 @@ func (h *RecommendationsHandler) HandleTasteSeedItems(w http.ResponseWriter, r *
 // HandleTasteSeed handles POST /recommendations/taste-seed.
 //
 // Accepts a list of item IDs the user picked in the taste-seeding UI and
-// records each as a favourite for the active profile, then queues a
+// records each as a favorite for the active profile, then queues a
 // taste-profile refresh.
 func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.Request) {
 	var req tasteSeedSubmitRequest

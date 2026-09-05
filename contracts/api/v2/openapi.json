@@ -4091,7 +4091,7 @@
         "additionalProperties": false,
         "properties": {
           "added": {
-            "description": "Picks recorded as favourites by this submission",
+            "description": "Picks recorded as favorites by this submission",
             "examples": [
               3
             ],
@@ -4108,7 +4108,7 @@
         "additionalProperties": false,
         "properties": {
           "item_ids": {
-            "description": "Picked catalog identifiers; each is recorded as a favourite",
+            "description": "Picked catalog identifiers; each is recorded as a favorite",
             "examples": [
               [
                 "movie:heat-1995"
@@ -12614,7 +12614,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Record the picked items as the acting profile's favourites and queue a taste-profile refresh.",
+        "summary": "Record the picked items as the acting profile's favorites and queue a taste-profile refresh.",
         "tags": [
           "recommendations"
         ],
@@ -12788,7 +12788,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "A page of cards for the taste-seeding picker, most recognisable first.",
+        "summary": "A page of cards for the taste-seeding picker, most recognizable first.",
         "tags": [
           "recommendations"
         ],

@@ -400,11 +400,11 @@ func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int,
 	return items, len(candidateIDs), nil
 }
 
-// SubmitTasteSeed favourites every picked item for the profile and, when
+// SubmitTasteSeed favorites every picked item for the profile and, when
 // any was added, queues a taste-profile refresh. It answers how many picks
 // were recorded; an item that fails to record is skipped, not fatal.
 // Favouriting is idempotent, so a retried submission converges on the same
-// favourite set and reports 0 added.
+// favorite set and reports 0 added.
 func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string) (int, error) {
 	if h.storeProvider == nil {
 		return 0, apiError(http.StatusServiceUnavailable, "unavailable", "User store unavailable")

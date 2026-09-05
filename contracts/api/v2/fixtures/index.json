@@ -184,7 +184,7 @@
     {
       "name": "create_taste_seed_ok",
       "operation_id": "createTasteSeed",
-      "scenario": "Two picks recorded as favourites; a retry converges on the same set.",
+      "scenario": "Two picks recorded as favorites; a retry converges on the same set.",
       "request": {
         "method": "POST",
         "path": "/api/v2/recommendations/taste-seed",

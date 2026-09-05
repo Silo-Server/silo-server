@@ -464,7 +464,7 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/recommendations/taste-seed/items?offset=30", headers: viewer,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "create_taste_seed_ok", operationID: "createTasteSeed",
-			scenario: "Two picks recorded as favourites; a retry converges on the same set.",
+			scenario: "Two picks recorded as favorites; a retry converges on the same set.",
 			method:   http.MethodPost, path: "/api/v2/recommendations/taste-seed", headers: viewer, body: `{"item_ids":["movie:heat-1995","movie:collateral-2004"]}`,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/TasteSeedResult"},
 		{name: "create_taste_seed_profile_header_required", operationID: "createTasteSeed",
