@@ -105,6 +105,10 @@ func setDeprecationHeaders(h http.Header, d *Deprecation) {
 	}
 }
 
+// retirementHeadersKey carries a private snapshot from operation middleware to
+// the outer response buffer; handlers only receive the separate response headers.
+type retirementHeadersKey struct{}
+
 // deprecationHeaders is the API middleware that emits a deprecated
 // operation's headers. It runs after defaultHeaders and before classGate, so
 // the headers are on the response before any gate, guard, or handler writes
@@ -114,6 +118,9 @@ func deprecationHeaders(ctx huma.Context, next func(huma.Context)) {
 	if d, ok := ctx.Operation().Metadata[metaDeprecation].(*Deprecation); ok && d != nil {
 		_, w := humachi.Unwrap(ctx)
 		setDeprecationHeaders(w.Header(), d)
+		if declared, ok := ctx.Context().Value(retirementHeadersKey{}).(http.Header); ok {
+			setDeprecationHeaders(declared, d)
+		}
 	}
 	next(ctx)
 }

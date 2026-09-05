@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 )
 
 var (
@@ -183,6 +184,48 @@ func TestDeprecatedOperationHeaders(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestPanicRestoresOnlyDeclaredRetirementHeaders(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		deprecation *Deprecation
+	}{
+		{name: "with sunset", deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink, Sunset: &probeDeprecatedSunset}},
+		{name: "without sunset", deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink}},
+		{name: "not deprecated"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHandler(Dependencies{testRegister: func(reg *Registry) {
+				reg.api.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
+					_, w := humachi.Unwrap(ctx)
+					for _, name := range []string{DeprecationHeader, LinkHeader, SunsetHeader} {
+						w.Header().Set(name, "failed response replacement")
+					}
+					panic("boom after replacing retirement headers")
+				})
+				Register(reg, Operation{
+					Operation:   humaOp(http.MethodGet, Prefix+"/probe/retirement-panic", "retirementPanic", "probe", "panic"),
+					Class:       ClassPublic,
+					Deprecation: tc.deprecation,
+				}, func(context.Context, *struct{}) (*probeOutput, error) { return nil, nil })
+			}})
+			rec := do(t, h, http.MethodGet, Prefix+"/probe/retirement-panic", "", nil)
+			requireProblem(t, rec, TypeInternalError)
+			if tc.deprecation != nil {
+				wantDeprecated(t, rec.Header(), tc.deprecation.Sunset != nil)
+				if got, want := rec.Header().Get(LinkHeader), `<`+probeDeprecatedLink+`>; rel="deprecation"`; got != want {
+					t.Fatalf("Link = %q, want only declaration %q", got, want)
+				}
+			} else {
+				for _, name := range []string{DeprecationHeader, LinkHeader, SunsetHeader} {
+					if got := rec.Header().Get(name); got != "" {
+						t.Fatalf("%s = %q without a declaration", name, got)
+					}
+				}
+			}
+		})
+	}
 }
 
 // A Link value set by an earlier handler in the chain survives: the

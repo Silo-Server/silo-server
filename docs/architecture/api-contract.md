@@ -431,8 +431,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
-  needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (122
+  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
+  tier-1 ported mutation rows (219 distinct operations) are classified (123
   `natural_idempotent`, 27 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 8
   `durable_dispatch`, 37 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
@@ -503,9 +503,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   operations are test probes, recorded in the `deprecated_ok` and `deprecated_problem` fixtures.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
-  tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the
-  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
-  sunset headers.
+  tracked on #882: the durable `202` job acceptance and its monitor/cancel shape, and the
+  atomic-versus-per-item bulk contract.
 
 ### Problem Details
 

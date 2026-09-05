@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/textproto"
 	"runtime/debug"
@@ -284,7 +285,8 @@ func dropDelegationPattern(next http.Handler) http.Handler {
 // cheap; raw media and streams are not served through Huma.
 func bufferResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bw := &bufferedWriter{w: w, ctx: r.Context()}
+		bw := &bufferedWriter{w: w, ctx: r.Context(), retirement: make(http.Header)}
+		r = r.WithContext(context.WithValue(r.Context(), retirementHeadersKey{}, bw.retirement))
 		defer func() {
 			if rec := recover(); rec != nil {
 				if rec == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
@@ -305,11 +307,12 @@ func bufferResponse(next http.Handler) http.Handler {
 }
 
 type bufferedWriter struct {
-	w       http.ResponseWriter
-	ctx     context.Context
-	status  int
-	body    bytes.Buffer
-	flushed bool
+	w          http.ResponseWriter
+	ctx        context.Context
+	status     int
+	body       bytes.Buffer
+	flushed    bool
+	retirement http.Header
 }
 
 func (b *bufferedWriter) Header() http.Header { return b.w.Header() }
@@ -331,27 +334,18 @@ func (b *bufferedWriter) Write(p []byte) (int, error) {
 // connection.
 func (b *bufferedWriter) Unwrap() http.ResponseWriter { return b.w }
 
-// discard drops whatever the failed handler produced, headers included,
-// except the request ID and the operation's retirement headers
-// (Deprecation, Link, Sunset): those describe the operation, not the failed
-// response, and the contract sends them on every response of a deprecated
-// operation, a recovered 500 included.
+// discard drops the failed response and restores only the operation's declared
+// retirement values, captured before downstream middleware can replace them.
 func (b *bufferedWriter) discard() {
 	b.status = 0
 	b.body.Reset()
 	h := b.w.Header()
-	keep := map[string][]string{}
-	for _, name := range []string{RequestIDHeader, DeprecationHeader, LinkHeader, SunsetHeader} {
-		if v := h[name]; len(v) > 0 { //nolint:staticcheck // the contract spells these headers; the map keys are set the same way
-			keep[name] = v
-		}
+	requestID := h[RequestIDHeader] //nolint:staticcheck // exact contract spelling
+	clear(h)
+	if len(requestID) > 0 {
+		h[RequestIDHeader] = requestID //nolint:staticcheck // exact contract spelling
 	}
-	for k := range h {
-		delete(h, k)
-	}
-	for name, v := range keep {
-		h[name] = v
-	}
+	maps.Copy(h, b.retirement)
 }
 
 func (b *bufferedWriter) flush() {
