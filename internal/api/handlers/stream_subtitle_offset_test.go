@@ -2,13 +2,16 @@ package handlers
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -91,4 +94,42 @@ func subtitleOffsetFixture(t *testing.T) (*StreamHandler, string) {
 		t.Fatal(err)
 	}
 	return NewStreamHandler(manager, testPlaybackFileResolver{file: file}), session.ID
+}
+
+func TestSubtitleTimestampOffsetOutlivesServerWriteTimeout(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "ffmpeg")
+	// Cross the listener deadline between the header and the complete cue.
+	// The HTTP body must retain both the transformation and a clean EOF.
+	script := "#!/bin/sh\nprintf 'WEBVTT\\n\\n'\nsleep 0.1\nprintf '00:10:01.000 --> 00:10:02.000\\nSelected cue\\n\\n'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 42, FilePath: "/synthetic/movie.mkv", SubtitleTracks: []models.SubtitleTrack{{Index: 3, Codec: "subrip"}}}
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: bin} }
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorized := playbackTestRequest(r.Method, r.URL.String(), nil,
+			map[string]string{"session_id": session.ID, "track": "0.vtt"})
+		handler.HandleSubtitle(w, authorized)
+	}))
+	server.Config.WriteTimeout = 25 * time.Millisecond
+	server.Start()
+	defer server.Close()
+	response, err := server.Client().Get(server.URL + "/subtitles/0.vtt?timestamp_offset=-600")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("shifted subtitle stream ended before completion: %v; body=%q", err, body)
+	}
+	if response.StatusCode != http.StatusOK || string(body) != "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nSelected cue\n\n" {
+		t.Fatalf("response = %d %q", response.StatusCode, body)
+	}
 }

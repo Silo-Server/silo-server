@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 // SubtitleCache stores complete SUP, VTT, and ASS subtitle extracts on disk
@@ -30,9 +32,8 @@ import (
 // progressively to its client while teeing bytes into a temp file that is
 // atomically renamed into the cache on clean ffmpeg exit (and discarded on
 // any error, so a partial entry is never served). Concurrent requesters for
-// the same text track wait for the completed entry, retrying after a failed
-// fill. PGS requests retain progressive independent extraction while a fill
-// is active, so bitmap renderers don't wait on a whole-track background warm.
+// the same track stream independently while a fill is active, so their
+// subtitle startup never depends on another viewer's connection.
 type SubtitleCache struct {
 	// transcodeDir returns the current transcode directory; the cache lives
 	// in a subtitle-cache subdirectory beneath it, created lazily. An empty
@@ -42,7 +43,7 @@ type SubtitleCache struct {
 	maxBytes int64
 
 	mu       sync.Mutex
-	inflight map[string]chan struct{}
+	inflight map[string]struct{}
 
 	// warmSem bounds concurrent background warms server-wide (each warm
 	// demuxes an entire source file — heavy sequential IO). Acquisition is
@@ -88,7 +89,7 @@ func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 	return &SubtitleCache{
 		transcodeDir: transcodeDir,
 		maxBytes:     defaultSubtitleCacheMaxBytes,
-		inflight:     make(map[string]chan struct{}),
+		inflight:     make(map[string]struct{}),
 		warmSem:      make(chan struct{}, subtitleCacheWarmSlots),
 	}
 }
@@ -96,8 +97,15 @@ func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 // ServeExtract serves an embedded subtitle using the cache for complete
 // tracks. Explicit text windows stream without caching; SUP retains its
 // progressive window and background-warming behavior in ServeSUPExtract.
-// Concurrent complete text requests share one fill within this server.
+// Only one request fills the cache; other viewers stream independently.
 func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
+	if err := r.Context().Err(); err != nil {
+		return err
+	}
+	// Full demuxes can outlive the API listener's absolute write timeout.
+	// Reuse the media-stream deadline so progress continues while stalled
+	// connections still have a bounded write lifetime.
+	w = httpstream.NewRollingDeadlineWriter(w)
 	_, format := streamExtractOutput(opts.SourceCodec, opts.TargetFormat)
 	if format == subtitleFormatSUP {
 		return c.ServeSUPExtract(w, r, opts, extract)
@@ -111,34 +119,17 @@ func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opt
 	}
 	var fill *SubtitleCacheFill
 	if opts.SeekSeconds == 0 && opts.DurationSeconds == 0 {
-		for {
-			if err := r.Context().Err(); err != nil {
-				return err
-			}
-			if c.serveCached(w, r, opts, format) {
-				return nil
-			}
-			var done <-chan struct{}
-			fill, done = c.beginFill(opts.InputPath, opts.TrackIndex, format)
-			if fill != nil {
-				// A previous fill may have committed between our lookup and
-				// reservation. Recheck while holding this track's fill slot.
-				if c.serveCached(w, r, opts, format) {
-					fill.Discard()
-					return nil
-				}
-				break
-			}
-			if done == nil {
-				break // Cache disabled or unavailable: serve normally.
-			}
-			select {
-			case <-done:
-			case <-r.Context().Done():
-				return r.Context().Err()
-			}
+		if c.serveCached(w, r, opts, format) {
+			return nil
+		}
+		fill = c.beginFill(opts.InputPath, opts.TrackIndex, format)
+		if fill != nil && c.serveCached(w, r, opts, format) {
+			// A previous owner may have committed between lookup and reservation.
+			fill.Discard()
+			return nil
 		}
 	}
+
 	w.Header().Set("Cache-Control", "no-store")
 	var writer io.Writer = w
 	if fill != nil {
@@ -415,38 +406,37 @@ type SubtitleCacheFill struct {
 // cache directory can't be created, or another fill for the same track is
 // already in flight.
 func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCacheFill {
-	fill, _ := c.beginFill(inputPath, trackIndex, subtitleFormatSUP)
-	return fill
+	return c.beginFill(inputPath, trackIndex, subtitleFormatSUP)
 }
 
-func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format string) (*SubtitleCacheFill, <-chan struct{}) {
+func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format string) *SubtitleCacheFill {
 	dir := c.dir()
 	if dir == "" {
-		return nil, nil
+		return nil
 	}
 	src, err := os.Stat(inputPath)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		slog.Warn("subtitle cache dir create failed", "dir", dir, "error", err)
-		return nil, nil
+		return nil
 	}
 	key := subtitleCacheFormatKey(inputPath, trackIndex, src.ModTime(), src.Size(), format)
 
 	c.mu.Lock()
-	if done, busy := c.inflight[key]; busy {
+	if _, busy := c.inflight[key]; busy {
 		c.mu.Unlock()
-		return nil, done
+		return nil
 	}
-	c.inflight[key] = make(chan struct{})
+	c.inflight[key] = struct{}{}
 	c.mu.Unlock()
 
 	tmp, err := os.CreateTemp(dir, key+".part-*")
 	if err != nil {
 		c.release(key)
 		slog.Warn("subtitle cache temp create failed", "dir", dir, "error", err)
-		return nil, nil
+		return nil
 	}
 	return &SubtitleCacheFill{
 		c:          c,
@@ -456,15 +446,12 @@ func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format strin
 		srcMtime:   src.ModTime(),
 		srcSize:    src.Size(),
 		tmp:        tmp,
-	}, nil
+	}
 }
 
 func (c *SubtitleCache) release(key string) {
 	c.mu.Lock()
-	if done, ok := c.inflight[key]; ok {
-		delete(c.inflight, key)
-		close(done)
-	}
+	delete(c.inflight, key)
 	c.mu.Unlock()
 }
 

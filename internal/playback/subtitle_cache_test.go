@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -67,71 +66,65 @@ func TestServeExtractTextWindowDoesNotPoisonFullTrack(t *testing.T) {
 	}
 }
 
-type subtitleWaitContext struct {
-	context.Context
-	waiting chan struct{}
-	once    sync.Once
-}
-
-func (c *subtitleWaitContext) Done() <-chan struct{} {
-	c.once.Do(func() { close(c.waiting) })
-	return c.Context.Done()
-}
-
-func TestServeExtractTextConcurrentFill(t *testing.T) {
+func TestServeExtractTextConcurrentViewerDoesNotWaitForFill(t *testing.T) {
 	c, source := newTestCache(t)
 	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}
-	started, finish := make(chan struct{}), make(chan struct{})
-	var calls atomic.Int32
-	extract := func(_ context.Context, opts StreamExtractOpts) error {
-		if calls.Add(1) == 1 {
-			close(started)
-		}
-		<-finish
-		_, err := io.WriteString(opts.Writer, "WEBVTT\n\ncomplete track")
-		return err
-	}
-	first, second := httptest.NewRecorder(), httptest.NewRecorder()
-	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	started, release := make(chan struct{}), make(chan struct{})
+	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- c.ServeExtract(first, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, extract)
+		firstDone <- c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/subtitle", nil), opts, func(ctx context.Context, opts StreamExtractOpts) error {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			_, err := io.WriteString(opts.Writer, "complete owner track")
+			return err
+		})
 	}()
 	<-started
-	waitCtx := &subtitleWaitContext{Context: t.Context(), waiting: make(chan struct{})}
-	go func() {
-		secondDone <- c.ServeExtract(second, httptest.NewRequestWithContext(waitCtx, http.MethodGet, "/subtitle", nil), opts, extract)
-	}()
-	<-waitCtx.waiting
-	close(finish)
-	for _, done := range []chan error{firstDone, secondDone} {
-		if err := <-done; err != nil {
-			t.Fatal(err)
+	defer func() {
+		close(release)
+		if err := <-firstDone; err != nil {
+			t.Error(err)
 		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	err := c.ServeExtract(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
+		_, err := io.WriteString(opts.Writer, "independent viewer track")
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if calls.Load() != 1 || first.Body.String() != second.Body.String() {
-		t.Fatalf("requests did not share complete extract: calls=%d first=%q second=%q", calls.Load(), first.Body.String(), second.Body.String())
+	if rec.Body.String() != "independent viewer track" {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+	// The second viewer must not publish or discard the first viewer's fill.
+	if f, _, ok := c.lookup(source, 0, "vtt"); ok {
+		_ = f.Close()
+		t.Fatal("concurrent viewer published another viewer's fill")
 	}
 }
 
-func TestServeExtractTextCancelledWaiterDoesNotDiscardFill(t *testing.T) {
+func TestServeExtractTextCancelledViewerDoesNotDiscardFill(t *testing.T) {
 	c, source := newTestCache(t)
-	fill, _ := c.beginFill(source, 0, "vtt")
+	fill := c.beginFill(source, 0, "vtt")
 	if fill == nil {
 		t.Fatal("failed to reserve fill")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	waitCtx := &subtitleWaitContext{Context: ctx, waiting: make(chan struct{})}
-	done := make(chan error, 1)
-	go func() {
-		done <- c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(waitCtx, http.MethodGet, "/subtitle", nil),
-			StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}, func(context.Context, StreamExtractOpts) error {
-				return errors.New("waiter must not extract")
-			})
-	}()
-	<-waitCtx.waiting
 	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("wait error = %v, want cancellation", err)
+	err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil),
+		StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}, func(context.Context, StreamExtractOpts) error {
+			t.Error("canceled request must not extract")
+			return nil
+		})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want cancellation", err)
 	}
 	if _, err := fill.Tee(io.Discard).Write([]byte("complete track")); err != nil {
 		t.Fatal(err)
@@ -141,9 +134,52 @@ func TestServeExtractTextCancelledWaiterDoesNotDiscardFill(t *testing.T) {
 	}
 	f, _, ok := c.lookup(source, 0, "vtt")
 	if !ok {
-		t.Fatal("canceled waiter discarded the active fill")
+		t.Fatal("canceled viewer discarded the active fill")
 	}
 	_ = f.Close()
+}
+
+func TestServeExtractOutlivesServerWriteTimeout(t *testing.T) {
+	for _, codec := range []string{"subrip", "ass", "hdmv_pgs_subtitle"} {
+		t.Run(codec, func(t *testing.T) {
+			c, source := newTestCache(t)
+			const timeout = 25 * time.Millisecond
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				err := c.ServeExtract(w, r, StreamExtractOpts{InputPath: source, SourceCodec: codec}, func(ctx context.Context, opts StreamExtractOpts) error {
+					// Explicitly cross the listener's absolute deadline before producing cues.
+					timer := time.NewTimer(3 * timeout)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+					_, err := io.WriteString(opts.Writer, "complete subtitle track")
+					return err
+				})
+				if err != nil {
+					t.Errorf("extract: %v", err)
+				}
+			}))
+			server.Config.WriteTimeout = timeout
+			server.Start()
+			defer server.Close()
+			resp, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil || string(body) != "complete subtitle track" {
+				t.Fatalf("body=%q error=%v", body, err)
+			}
+			f, _, ok := c.lookup(source, 0, map[string]string{"subrip": "vtt", "ass": "ass", "hdmv_pgs_subtitle": "sup"}[codec])
+			if !ok {
+				t.Fatal("completed extraction not cached")
+			}
+			_ = f.Close()
+		})
+	}
 }
 
 func TestServeExtractTextFailedFillRetries(t *testing.T) {

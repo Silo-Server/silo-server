@@ -60,6 +60,11 @@ type subtitleOffsetResponseWriter struct {
 	err       error
 }
 
+// Unwrap lets the rolling stream deadline reach the underlying connection.
+func (w *subtitleOffsetResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func (w *subtitleOffsetResponseWriter) WriteHeader(status int) {
 	if w.status != 0 {
 		return
