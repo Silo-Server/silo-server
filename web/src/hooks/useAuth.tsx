@@ -21,7 +21,7 @@ import type {
   User,
   VerifyPinResponse,
 } from "@/api/types";
-import { v2 } from "@/api/v2/request";
+import { v2, V2ProblemError } from "@/api/v2/request";
 import { restoreUserSession, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -65,6 +65,12 @@ export function getBootstrapProfile(profiles: Profile[]): Profile | null {
 }
 
 function isRecoverableImpersonationAuthError(error: unknown): boolean {
+  // The current-user fetch runs over v2 and fails with a Problem; ending an
+  // impersonation still runs over v1 and fails with an ApiClientError.
+  if (error instanceof V2ProblemError) {
+    return error.status === 401;
+  }
+
   if (!(error instanceof ApiClientError)) {
     return false;
   }
