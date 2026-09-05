@@ -1,0 +1,15 @@
+{
+  "status": "queued",
+  "library_id": "1",
+  "raw_file_retried": 1,
+  "queue": {
+    "library_id": "1",
+    "movie_count": 2,
+    "series_count": 1,
+    "raw_file_count": 1,
+    "total_count": 4,
+    "pending_count": 3,
+    "parked_count": 1
+  }
+}
+

@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/permission_denied",
+  "title": "Permission denied",
+  "status": 403,
+  "detail": "Admin access required",
+  "instance": "urn:silo:request:000000000000000000000016"
+}
+

@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "content_id": "movie:heat-1995",
+      "type": "movie",
+      "title": "Heat",
+      "year": 1995,
+      "genres": [
+        "Crime"
+      ],
+      "keywords": [],
+      "status": "matched",
+      "added_at": "2026-01-02T03:04:05.678Z",
+      "work_formats": [
+        {
+          "type": "ebook",
+          "content_id": "ebook:heat",
+          "library_id": "2"
+        }
+      ]
+    }
+  ]
+}
+

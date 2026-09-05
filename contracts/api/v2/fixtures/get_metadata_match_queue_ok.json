@@ -1,0 +1,56 @@
+{
+  "library_id": "1",
+  "movie_count": 2,
+  "series_count": 1,
+  "raw_file_count": 1,
+  "total_count": 4,
+  "pending_count": 3,
+  "parked_count": 1,
+  "movies": [
+    {
+      "media_file_id": "120",
+      "library_id": "1",
+      "file_path": "/media/movies/Heat (1995)/Heat.mkv",
+      "first_queued_at": "2026-01-02T03:04:05.678Z",
+      "available_at": "2026-01-02T03:04:05.678Z",
+      "attempt_count": 1,
+      "state": "parked",
+      "failure_kind": "no_match",
+      "failure_detail": {
+        "candidates": 0
+      },
+      "deterministic_attempt_count": 0,
+      "matcher_revision": 3,
+      "parked_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "series": [
+    {
+      "library_id": "1",
+      "observed_root_path": "/media/tv/Severance",
+      "first_queued_at": "2026-01-02T03:04:05.678Z",
+      "available_at": "2026-01-02T03:04:05.678Z",
+      "attempt_count": 0,
+      "state": "pending",
+      "deterministic_attempt_count": 0,
+      "matcher_revision": 0,
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "raw_files": [
+    {
+      "media_file_id": "121",
+      "library_id": "1",
+      "file_path": "/media/movies/unknown.mkv",
+      "base_title": "unknown",
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7Im8iOjF9fQ.KXGQVKTqvc9VQsX2mGc5FiL0shSh71NLO5eei7OgWwE",
+    "has_more": true
+  }
+}
+

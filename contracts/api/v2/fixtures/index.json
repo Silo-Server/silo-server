@@ -19,6 +19,249 @@
       "body_file": "authentication_required.json"
     },
     {
+      "name": "cancel_metadata_match_queue_ok",
+      "operation_id": "cancelMetadataMatchQueue",
+      "scenario": "Every queued entry dropped; what was canceled and the counts afterwards.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/metadata-match-queue/cancel",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/MetadataMatchQueueAction",
+      "body_file": "cancel_metadata_match_queue_ok.json"
+    },
+    {
+      "name": "cancel_metadata_match_queue_permission_denied",
+      "operation_id": "cancelMetadataMatchQueue",
+      "scenario": "Canceling from a member account.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/metadata-match-queue/cancel",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "cancel_metadata_match_queue_permission_denied.json"
+    },
+    {
+      "name": "check_library_mount_not_found",
+      "operation_id": "checkLibraryMount",
+      "scenario": "A library identifier that names no library.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/9/check-mount",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "check_library_mount_not_found.json"
+    },
+    {
+      "name": "check_library_mount_ok",
+      "operation_id": "checkLibraryMount",
+      "scenario": "Every root of the library probed; the result names each root.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/check-mount",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryMountCheck",
+      "body_file": "check_library_mount_ok.json"
+    },
+    {
+      "name": "confirm_empty_root_cleanup_ok",
+      "operation_id": "confirmEmptyRootCleanup",
+      "scenario": "The next scan of the library may clean up an empty root once.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/confirm-empty-root-cleanup",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/EmptyRootCleanup",
+      "body_file": "confirm_empty_root_cleanup_ok.json"
+    },
+    {
+      "name": "confirm_empty_root_cleanup_permission_denied",
+      "operation_id": "confirmEmptyRootCleanup",
+      "scenario": "Arming a cleanup from a member account.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/confirm-empty-root-cleanup",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "confirm_empty_root_cleanup_permission_denied.json"
+    },
+    {
+      "name": "create_library_ok",
+      "operation_id": "createLibrary",
+      "scenario": "A new movie library: 201 with the library and its Location.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"paths\":[\"/media/movies\"],\"type\":\"movies\",\"name\":\"Movies\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json",
+        "Location": "/api/v2/libraries/3"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Library",
+      "body_file": "create_library_ok.json"
+    },
+    {
+      "name": "create_library_validation_failed",
+      "operation_id": "createLibrary",
+      "scenario": "A create without any path or name: one errors[] entry per missing member.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"type\":\"movies\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "create_library_validation_failed.json"
+    },
+    {
+      "name": "delete_library_accepted",
+      "operation_id": "deleteLibrary",
+      "scenario": "Deletion is queued as an admin job: 202 with the job.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/libraries/1",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 202,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminJob",
+      "body_file": "delete_library_accepted.json"
+    },
+    {
+      "name": "delete_library_conflict",
+      "operation_id": "deleteLibrary",
+      "scenario": "A deletion already queued or running for the library.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/libraries/2",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_library_conflict.json"
+    },
+    {
+      "name": "delete_library_poster_not_found",
+      "operation_id": "deleteLibraryPoster",
+      "scenario": "A library identifier that names no library; success answers 204 with no body.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/libraries/9/poster",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_library_poster_not_found.json"
+    },
+    {
+      "name": "delete_root_override_validation_failed",
+      "operation_id": "deleteRootOverride",
+      "scenario": "The root is named in the query, not a body; without it the delete is a validation failure. Success answers 204 with no body.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/libraries/roots/override?library_id=1",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_root_override_validation_failed.json"
+    },
+    {
       "name": "get_current_user_ok",
       "operation_id": "getCurrentUser",
       "scenario": "The signed-in account with no profile selected; impersonation is absent outside an admin impersonation session.",
@@ -37,6 +280,273 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Account",
       "body_file": "get_current_user_ok.json"
+    },
+    {
+      "name": "get_library_collection_items_ok",
+      "operation_id": "getLibraryCollectionItems",
+      "scenario": "Every card of one collection in its curated order; a bounded collection without a cursor.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/collections/c1/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollection",
+      "body_file": "get_library_collection_items_ok.json"
+    },
+    {
+      "name": "get_library_collection_items_query_invalid",
+      "operation_id": "getLibraryCollectionItems",
+      "scenario": "A smart collection whose stored query the executor refuses: a validation failure naming the collection.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/collections/broken/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_library_collection_items_query_invalid.json"
+    },
+    {
+      "name": "get_library_collections_locked_profile",
+      "operation_id": "getLibraryCollections",
+      "scenario": "A PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/collections",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_library_collections_locked_profile.json"
+    },
+    {
+      "name": "get_library_collections_ok",
+      "operation_id": "getLibraryCollections",
+      "scenario": "The library's Collections tab: curated collections in full, their groups, and the viewer's opted-in personal collections.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/collections",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryCollectionTab",
+      "body_file": "get_library_collections_ok.json"
+    },
+    {
+      "name": "get_library_layout_ok",
+      "operation_id": "getLibraryLayout",
+      "scenario": "The library's section layout for the acting profile, without items.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/layout",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SectionLayout",
+      "body_file": "get_library_layout_ok.json"
+    },
+    {
+      "name": "get_library_layout_profile_header_required",
+      "operation_id": "getLibraryLayout",
+      "scenario": "A profile-scoped library read without X-Profile-Id: a validation failure naming the header.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/layout",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_library_layout_profile_header_required.json"
+    },
+    {
+      "name": "get_library_provider_defaults_ok",
+      "operation_id": "getLibraryProviderDefaults",
+      "scenario": "The chain a new movie library would be seeded with, per content level.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/provider-defaults?library_type=movies",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryProviderDefaults",
+      "body_file": "get_library_provider_defaults_ok.json"
+    },
+    {
+      "name": "get_library_provider_defaults_type_required",
+      "operation_id": "getLibraryProviderDefaults",
+      "scenario": "The library type is required; v1 answered an empty map without it.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/provider-defaults",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_library_provider_defaults_type_required.json"
+    },
+    {
+      "name": "get_library_providers_ok",
+      "operation_id": "getLibraryProviders",
+      "scenario": "The library's provider chain per content level.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/1/providers",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryProviders",
+      "body_file": "get_library_providers_ok.json"
+    },
+    {
+      "name": "get_library_section_items_not_found",
+      "operation_id": "getLibrarySectionItems",
+      "scenario": "A section identifier the layout does not contain.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/sections/nope/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_library_section_items_not_found.json"
+    },
+    {
+      "name": "get_library_section_items_ok",
+      "operation_id": "getLibrarySectionItems",
+      "scenario": "One section of the library with its cards.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/sections/continue_watching/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Section",
+      "body_file": "get_library_section_items_ok.json"
+    },
+    {
+      "name": "get_metadata_match_queue_offset_rejected",
+      "operation_id": "getMetadataMatchQueue",
+      "scenario": "The v1 offset parameter is not part of v2 pagination; the queue refuses it as unknown.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/1/metadata-match-queue?offset=10",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_metadata_match_queue_offset_rejected.json"
+    },
+    {
+      "name": "get_metadata_match_queue_ok",
+      "operation_id": "getMetadataMatchQueue",
+      "scenario": "One library's backlog counts with a page of queued movies, series roots and raw files, and a cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/1/metadata-match-queue?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/MetadataMatchQueueDetail",
+      "body_file": "get_metadata_match_queue_ok.json"
     },
     {
       "name": "get_setup_status_ok",
@@ -137,6 +647,186 @@
       "body_file": "list_admin_users_permission_denied.json"
     },
     {
+      "name": "list_libraries_ok",
+      "operation_id": "listLibraries",
+      "scenario": "Every library in sort order with its presigned poster URL and scan warning.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryCollection",
+      "body_file": "list_libraries_ok.json"
+    },
+    {
+      "name": "list_libraries_permission_denied",
+      "operation_id": "listLibraries",
+      "scenario": "A library-management operation called by a member account.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_libraries_permission_denied.json"
+    },
+    {
+      "name": "list_library_roots_offset_rejected",
+      "operation_id": "listLibraryRoots",
+      "scenario": "The v1 offset parameter is not part of v2 pagination; the roots listing refuses it as unknown.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/roots?library_id=1&offset=50",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_library_roots_offset_rejected.json"
+    },
+    {
+      "name": "list_library_roots_ok",
+      "operation_id": "listLibraryRoots",
+      "scenario": "The first page of one library's scanned roots with an opaque cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/roots?library_id=1&limit=2",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryRootCollection",
+      "body_file": "list_library_roots_ok.json"
+    },
+    {
+      "name": "list_library_sections_invalid_image_size",
+      "operation_id": "listLibrarySections",
+      "scenario": "An image size outside the enum is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/sections?image_size=huge",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_library_sections_invalid_image_size.json"
+    },
+    {
+      "name": "list_library_sections_ok",
+      "operation_id": "listLibrarySections",
+      "scenario": "The library's sections with their catalog cards, artwork presigned at the requested size.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/sections?image_size=medium",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SectionCollection",
+      "body_file": "list_library_sections_ok.json"
+    },
+    {
+      "name": "list_library_user_collections_authentication_required",
+      "operation_id": "listLibraryUserCollections",
+      "scenario": "A profile-scoped library read without a credential.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/user-collections"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_library_user_collections_authentication_required.json"
+    },
+    {
+      "name": "list_library_user_collections_ok",
+      "operation_id": "listLibraryUserCollections",
+      "scenario": "The viewer's own personal collections opted into this library's tab.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/user-collections",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/UserCollectionCollection",
+      "body_file": "list_library_user_collections_ok.json"
+    },
+    {
+      "name": "list_metadata_match_queues_ok",
+      "operation_id": "listMetadataMatchQueues",
+      "scenario": "The matcher backlog counts of every library.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/metadata-match-queue",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/MetadataMatchQueueStatusCollection",
+      "body_file": "list_metadata_match_queues_ok.json"
+    },
+    {
       "name": "list_progress_offset_rejected",
       "operation_id": "listProgress",
       "scenario": "The v1 offset parameter is not part of v2 pagination; cursor-paginated operations refuse it as unknown.",
@@ -197,6 +887,66 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_progress_profile_header_required.json"
+    },
+    {
+      "name": "list_skipped_roots_ok",
+      "operation_id": "listSkippedRoots",
+      "scenario": "Every root the scanner skipped, across libraries.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/skipped-roots",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SkippedRootCollection",
+      "body_file": "list_skipped_roots_ok.json"
+    },
+    {
+      "name": "list_stale_ids_ok",
+      "operation_id": "listStaleIds",
+      "scenario": "Provider identifiers that no longer resolve, with the items carrying them.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/stale-ids",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/StaleMediaIDCollection",
+      "body_file": "list_stale_ids_ok.json"
+    },
+    {
+      "name": "list_unmatched_items_ok",
+      "operation_id": "listUnmatchedItems",
+      "scenario": "The first page of items awaiting a metadata match, filtered by a search term.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/unmatched-items?q=a&limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/UnmatchedItemCollection",
+      "body_file": "list_unmatched_items_ok.json"
     },
     {
       "name": "not_acceptable",
@@ -298,6 +1048,151 @@
       "body_file": "rate_limited.json"
     },
     {
+      "name": "refresh_library_metadata_accepted",
+      "operation_id": "refreshLibraryMetadata",
+      "scenario": "A full refresh queued as an admin job: 202 with the job.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/refresh-metadata",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"mode\":\"full\"}"
+      },
+      "expected_status": 202,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminJob",
+      "body_file": "refresh_library_metadata_accepted.json"
+    },
+    {
+      "name": "refresh_library_metadata_invalid_mode",
+      "operation_id": "refreshLibraryMetadata",
+      "scenario": "A refresh mode outside the enum is a validation failure naming body.mode.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/refresh-metadata",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"mode\":\"deep\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "refresh_library_metadata_invalid_mode.json"
+    },
+    {
+      "name": "rematch_stale_id_permission_denied",
+      "operation_id": "rematchStaleId",
+      "scenario": "A rematch requested by a member account; success answers 204 with no body.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/stale-ids/movie:heat-1995/rematch",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "rematch_stale_id_permission_denied.json"
+    },
+    {
+      "name": "reorder_libraries_validation_failed",
+      "operation_id": "reorderLibraries",
+      "scenario": "A negative position is out of range; a successful reorder answers 204 with no body.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/reorder",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"entries\":[{\"id\":\"1\",\"position\":-1}]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "reorder_libraries_validation_failed.json"
+    },
+    {
+      "name": "retry_metadata_match_queue_ok",
+      "operation_id": "retryMetadataMatchQueue",
+      "scenario": "Every queued entry retried; the counts afterwards.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/libraries/1/metadata-match-queue/retry",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/MetadataMatchQueueAction",
+      "body_file": "retry_metadata_match_queue_ok.json"
+    },
+    {
+      "name": "set_library_providers_duplicate_level",
+      "operation_id": "setLibraryProviders",
+      "scenario": "A content level listed twice is a validation failure naming the second; success answers 204 with no body.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/libraries/1/providers",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"levels\":[{\"content_level\":\"movie\",\"entries\":[]},{\"content_level\":\"movie\",\"entries\":[]}]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "set_library_providers_duplicate_level.json"
+    },
+    {
+      "name": "set_root_override_validation_failed",
+      "operation_id": "setRootOverride",
+      "scenario": "An override without the root it applies to; a successful set answers 204 with no body.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/libraries/roots/override",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"library_id\":\"1\",\"forced_title\":\"Heat\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "set_root_override_validation_failed.json"
+    },
+    {
       "name": "unknown_query_parameter",
       "operation_id": "getSystemInfo",
       "scenario": "A query parameter the operation does not declare is a validation failure naming the parameter.",
@@ -334,6 +1229,48 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "unsupported_media_type.json"
+    },
+    {
+      "name": "update_library_ok",
+      "operation_id": "updateLibrary",
+      "scenario": "A partial PATCH renaming a library; omitted members are unchanged.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/libraries/1",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"name\":\"Films\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Library",
+      "body_file": "update_library_ok.json"
+    },
+    {
+      "name": "update_library_unknown_member",
+      "operation_id": "updateLibrary",
+      "scenario": "A member the schema does not declare is a validation failure naming it.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/libraries/1",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"name\":\"Films\",\"hue\":\"red\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "update_library_unknown_member.json"
     },
     {
       "name": "update_profile_null_not_clearable",
@@ -378,6 +1315,71 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Profile",
       "body_file": "update_profile_ok.json"
+    },
+    {
+      "name": "upload_library_poster_ok",
+      "operation_id": "uploadLibraryPoster",
+      "scenario": "A multipart poster upload; the library is answered with its new presigned poster URL.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/libraries/1/poster",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "Content-Type": "multipart/form-data; boundary=silo-fixture"
+        },
+        "body": "--silo-fixture\r\nContent-Disposition: form-data; name=\"poster\"; filename=\"poster.png\"\r\nContent-Type: image/png\r\n\r\n\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\r\n--silo-fixture--\r\n"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Library",
+      "body_file": "upload_library_poster_ok.json"
+    },
+    {
+      "name": "upload_library_poster_unsupported_image",
+      "operation_id": "uploadLibraryPoster",
+      "scenario": "A part whose media type is not JPEG, PNG or WebP is a validation failure naming body.poster.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/libraries/1/poster",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "Content-Type": "multipart/form-data; boundary=silo-fixture"
+        },
+        "body": "--silo-fixture\r\nContent-Disposition: form-data; name=\"poster\"; filename=\"poster.png\"\r\nContent-Type: image/gif\r\n\r\n\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\r\n--silo-fixture--\r\n"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "upload_library_poster_unsupported_image.json"
+    },
+    {
+      "name": "upload_library_poster_unsupported_media_type",
+      "operation_id": "uploadLibraryPoster",
+      "scenario": "A JSON body on the multipart upload operation.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/libraries/1/poster",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{}"
+      },
+      "expected_status": 415,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "upload_library_poster_unsupported_media_type.json"
     },
     {
       "name": "validation_failed_body",
