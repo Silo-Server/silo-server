@@ -1121,8 +1121,11 @@ func TestDeclaredRetrySafetyMatchesTheLedger(t *testing.T) {
 func TestRetrySafetyMismatchesFire(t *testing.T) {
 	opID := func(s string) *string { return &s }
 	entries := []Entry{
-		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, RetrySafety: "natural_idempotent", V2: V2Target{OperationID: opID("updateThing")}},
-		{copied: copied{Method: http.MethodPost, Path: "/api/v1/things"}, RetrySafety: "unique_constraint", V2: V2Target{OperationID: opID("createThing")}},
+		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, Tier: 1, Disposition: DispositionPorted, RetrySafety: "natural_idempotent", V2: V2Target{OperationID: opID("updateThing")}},
+		{copied: copied{Method: http.MethodPost, Path: "/api/v1/things"}, Tier: 1, Disposition: DispositionPorted, RetrySafety: "unique_constraint", V2: V2Target{OperationID: opID("createThing")}},
+		// A redesigned row may name a v2 mutation; the schema keeps
+		// retry_safety off it, so the reconcile must not compare it.
+		{copied: copied{Method: http.MethodPost, Path: "/api/v1/old-things/launch"}, Tier: 1, Disposition: DispositionRedesigned, V2: V2Target{OperationID: opID("launchThing")}},
 	}
 	update := apiv2registry.Declared{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "natural_idempotent"}
 	create := apiv2registry.Declared{Method: http.MethodPost, OperationID: "createThing", RetrySafety: "unique_constraint"}
@@ -1144,6 +1147,7 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 		{"disagrees", []apiv2registry.Declared{update, {Method: http.MethodPost, OperationID: "createThing", RetrySafety: "domain_identity"}}, nil, `ledger retry_safety "unique_constraint", registry declares "domain_identity"`},
 		{"row names an undeclared operation", []apiv2registry.Declared{update}, nil, "which the registry does not declare"},
 		{"row names a read", []apiv2registry.Declared{update, {Method: http.MethodGet, OperationID: "createThing"}}, nil, "carries no retry classification"},
+		{"redesigned row mapped to a mutation needs no classification", with(apiv2registry.Declared{Method: http.MethodPost, OperationID: "launchThing", RetrySafety: "domain_identity"}), nil, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1219,6 +1223,13 @@ func retrySafetyMismatches(entries []Entry, declared []apiv2registry.Declared, e
 			problems = append(problems, fmt.Sprintf("mutating operation %s maps to no legacy row; a ported mutation records its v2 operation and retry_safety in the ledger, and a v2-only mutation names itself in mutationWithoutLegacyRow with a reason", op.OperationID))
 		}
 		for _, e := range rows {
+			// Only a row eligible for the classification (tier-1 ported
+			// mutation) is compared: a redesigned or replaced row may name
+			// a v2 mutation while the schema keeps retry_safety off it, and
+			// the two rules must not contradict each other.
+			if !requiresRetrySafety(e) {
+				continue
+			}
 			if e.RetrySafety != string(op.RetrySafety) {
 				problems = append(problems, fmt.Sprintf("%s: ledger retry_safety %q, registry declares %q for %s", e.key(), e.RetrySafety, op.RetrySafety, op.OperationID))
 			}

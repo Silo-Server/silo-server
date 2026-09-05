@@ -30570,8 +30570,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: artwork upload/removal, not library configuration; the library PUT/DELETE is guarded.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Deterministic S3 key per library; a retry overwrites the same object."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "The poster lives at one key per library and the handler deletes the current object, writes the request bytes, and sets the path unconditionally, so a delayed retry of an older upload replaces a newer poster the admin chose in between. The v2 port must guard the artwork with If-Match on the library."
     },
     {
       "listener": "api",

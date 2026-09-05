@@ -425,14 +425,16 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
   classified legacy row or disagrees with it, unless `mutationWithoutLegacyRow` names a
   v2-only mutation with a reason, and when a classified row names a v2 operation the
-  registry does not declare as a mutation. No generic key store exists, so `Register`
+  registry does not declare as a mutation; it compares only rows eligible for the
+  classification, so a redesigned or replaced row that names a v2 mutation is not caught
+  between the schema and the gate. No generic key store exists, so `Register`
   refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (126
+  tier-1 ported mutation rows (218 distinct operations) are classified (125
   `natural_idempotent`, 28 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 8
-  `durable_dispatch`, 32 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 33 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
@@ -443,7 +445,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   than a named target (library scan cancel, metadata-match-queue cancel, task cancel by key,
   notifications read-all), a playback command minted fresh on every call (admin session
   pause and resume, whose delayed retry reverts the newer state), a fresh server-side cutoff a retry would move (history remove,
-  mark-unwatched), an external call made before any durable claim (provider device-auth
+  mark-unwatched), a shared-key artwork replacement a stale retry would clobber (library
+  poster upload), an external call made before any durable claim (provider device-auth
   start and API-key exchange), a one-shot token-bearing or secret-bearing response that cannot be replayed
   (device-pairing poll, OAuth completion, invitation acceptance, API-key and webhook
   creation), an unconditional
