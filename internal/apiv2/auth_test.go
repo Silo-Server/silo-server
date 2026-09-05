@@ -46,7 +46,7 @@ func TestLogin(t *testing.T) {
 func TestLoginRateLimited(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	var bucket string
-	deps.PublicRateLimit = func(b string) func(http.Handler) http.Handler {
+	deps.BucketRateLimit = func(b string) func(http.Handler) http.Handler {
 		return func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				bucket = b

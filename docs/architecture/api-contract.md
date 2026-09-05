@@ -954,7 +954,10 @@ the manual registry: each is served on the listener's own chi router outside Hum
 statuses only, and reconciled in both directions like a Huma operation. Deliberate v1
 differences, all recorded on the ledger rows: every credential response is
 `Cache-Control: no-store`; a doubly registered v1 route (plain and rate limited) is one v2
-operation whose public rate-limit bucket is the class gate's; missing or blank members are `422`
+operation whose public rate-limit bucket is the class gate's, and a gated operation may name a
+bucket too (`changePassword` spends v1's `password_change` budget in place of the generic
+authenticated limiter, so a session holder cannot brute-force the current password); missing or
+blank members are `422`
 at the member where v1 answered a bare `400`; wrong credentials and a bad refresh token are `401`
 `invalid_token`, a revoked session is `401` `session_expired`; setup already completed,
 duplicate signup, a stale onboarding tour, and ending impersonation when not impersonating are

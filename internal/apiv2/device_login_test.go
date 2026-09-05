@@ -56,7 +56,7 @@ func TestStartDeviceLogin(t *testing.T) {
 func TestStartDeviceLoginRateLimited(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	var buckets []string
-	deps.PublicRateLimit = func(bucket string) func(http.Handler) http.Handler {
+	deps.BucketRateLimit = func(bucket string) func(http.Handler) http.Handler {
 		return func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				buckets = append(buckets, bucket)

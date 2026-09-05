@@ -146,3 +146,65 @@ func TestChangePassword(t *testing.T) {
 	deps.Accounts = fakeAccounts{err: errStore}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, path, body, primary), TypeInternalError)
 }
+
+// TestChangePasswordRateLimitBucket pins that changePassword spends v1's
+// dedicated password_change budget in place of the generic authenticated
+// limiter: a bucket limiter that refuses answers 429 rate_limited with the
+// limiter's Retry-After, the generic limiter is not also charged, and the
+// other authenticated operations keep running the generic limiter only.
+func TestChangePasswordRateLimitBucket(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	var buckets []string
+	deps.BucketRateLimit = func(bucket string) func(http.Handler) http.Handler {
+		return func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				buckets = append(buckets, bucket)
+				w.Header().Set("Retry-After", "12")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"rate_limit_exceeded","message":"Too many requests.","retry_after":12}`))
+			})
+		}
+	}
+	generic := 0
+	deps.RateLimit = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			generic++
+			next.ServeHTTP(w, r)
+		})
+	}
+	h := newTestHandler(t, deps)
+	primary := with(bearer(adminToken), "X-Profile-Id", "p-primary")
+	body := `{"current_password":"pw","new_password":"margin fossil quench"}`
+	rec := do(t, h, http.MethodPost, "/api/v2/account/password", body, primary)
+	requireProblem(t, rec, TypeRateLimited)
+	if rec.Header().Get("Retry-After") != "12" {
+		t.Fatalf("Retry-After = %q", rec.Header().Get("Retry-After"))
+	}
+	if len(buckets) != 1 || buckets[0] != "password_change" {
+		t.Fatalf("buckets = %v", buckets)
+	}
+	if generic != 0 {
+		t.Fatalf("generic limiter charged %d times alongside the bucket", generic)
+	}
+	// The sibling authenticated operations are unaffected: generic limiter
+	// only, no bucket.
+	for _, path := range []string{"/api/v2/account/me", "/api/v2/account/password/capability"} {
+		if rec := do(t, h, http.MethodGet, path, "", primary); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if generic != 2 || len(buckets) != 1 {
+		t.Fatalf("generic = %d, buckets = %v", generic, buckets)
+	}
+	// Without a wired bucket limiter the operation falls back to the generic
+	// limiter rather than running unlimited.
+	deps.BucketRateLimit = nil
+	generic = 0
+	if rec := do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/account/password", body, primary); rec.Code != http.StatusNoContent {
+		t.Fatalf("fallback: %d %s", rec.Code, rec.Body.String())
+	}
+	if generic != 1 {
+		t.Fatalf("fallback generic = %d", generic)
+	}
+}

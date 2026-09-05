@@ -60,6 +60,10 @@ type ChangePasswordInput struct {
 	}
 }
 
+// bucketPasswordChange is the v1 rate-limit budget POST /auth/account/password
+// spends (ratelimit.auth.password_change.*).
+const bucketPasswordChange = "password_change"
+
 func registerAccount(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/account/me", "getCurrentUser", "account",
@@ -79,9 +83,14 @@ func registerAccount(reg *Registry) {
 	// conflict; a wrong current password or a rejected new one is 422 at the
 	// member.
 	change.Errors = []int{http.StatusForbidden, http.StatusConflict}
+	// The current-password check is a credential check, so the operation
+	// spends v1's dedicated password_change budget (10/min, burst 5, per
+	// client IP) rather than the generic authenticated limiter: a caller
+	// holding a session but not the password cannot brute-force it.
 	Register(reg, Operation{
 		Operation: change,
 		Class:     ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
+		RateLimitBucket: bucketPasswordChange,
 	}, reg.changePassword)
 }
 

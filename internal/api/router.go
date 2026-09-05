@@ -4093,7 +4093,7 @@ func v2Dependencies(
 	}
 	if deps.RateLimitMW != nil {
 		out.RateLimit = deps.RateLimitMW.Handler
-		out.PublicRateLimit = deps.RateLimitMW.AuthEndpointHandler
+		out.BucketRateLimit = deps.RateLimitMW.AuthEndpointHandler
 	}
 	if deps.Config != nil {
 		out.CursorSecret = []byte(deps.Config.Auth.JWTSecret)

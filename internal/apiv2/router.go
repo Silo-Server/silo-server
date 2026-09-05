@@ -74,10 +74,11 @@ type Dependencies struct {
 	DemoSettings apimw.DemoSettingsReader
 	// RateLimit is the generic authenticated-route limiter.
 	RateLimit func(http.Handler) http.Handler
-	// PublicRateLimit builds the per-endpoint limiter a public operation
-	// with a RateLimitBucket runs (v1's AuthEndpointHandler); nil leaves
-	// those operations unlimited.
-	PublicRateLimit func(bucket string) func(http.Handler) http.Handler
+	// BucketRateLimit builds the per-endpoint limiter an operation with a
+	// RateLimitBucket runs (v1's AuthEndpointHandler). It replaces RateLimit
+	// on that operation; nil leaves a public operation unlimited and a gated
+	// one on RateLimit.
+	BucketRateLimit func(bucket string) func(http.Handler) http.Handler
 	// CursorSecret keys pagination cursors. It must be shared by every replica
 	// (the JWT secret is); empty means a per-process random key.
 	CursorSecret []byte

@@ -91,11 +91,13 @@ type Operation struct {
 	// operation: Register applies the framework's off-by-one convention and
 	// records the declared limit so the 413 names it.
 	MaxBodyBytes int64
-	// RateLimitBucket names the per-endpoint public rate-limit budget a
-	// ClassPublic operation spends (the v1 AuthEndpointHandler bucket, for
-	// example "login"); empty means no limiter runs, as on v1's unlimited
-	// public routes. Gated classes always run the generic authenticated
-	// limiter and must leave it empty.
+	// RateLimitBucket names the per-endpoint rate-limit budget the operation
+	// spends (the v1 AuthEndpointHandler bucket, for example "login" or
+	// "password_change"); it must match the ratelimit.auth.<bucket>.* settings
+	// key. Empty on ClassPublic means no limiter runs, as on v1's unlimited
+	// public routes; empty on a gated class means the generic authenticated
+	// limiter. A gated class naming a bucket runs that budget in the
+	// limiter's slot instead (gates.go, rateLimiter).
 	RateLimitBucket string
 	// ServiceBacked marks a handler that depends on a wired service and so
 	// answers 503 dependency_unavailable when the wiring lacks it. Every
@@ -235,9 +237,6 @@ func checkOperation(op Operation) error {
 	}
 	if op.ProfileOptional && op.Class != ClassProfileScoped {
 		return fmt.Errorf("profile optional is only meaningful on class %s", ClassProfileScoped)
-	}
-	if op.RateLimitBucket != "" && op.Class != ClassPublic {
-		return fmt.Errorf("rate limit bucket %q is only meaningful on class %s: gated classes run the generic limiter", op.RateLimitBucket, ClassPublic)
 	}
 	if op.MaxBodyBytes < 0 {
 		return fmt.Errorf("max body bytes %d must not be negative", op.MaxBodyBytes)
