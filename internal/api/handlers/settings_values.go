@@ -271,7 +271,7 @@ func (h *SettingValuesHandler) HandleGetContract(w http.ResponseWriter, r *http.
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "no-cache")
 
-	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
+	if match := r.Header.Get("If-None-Match"); match != "" && ETagMatches(match, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -286,20 +286,35 @@ func (h *SettingValuesHandler) HandleGetContract(w http.ResponseWriter, r *http.
 	_, _ = w.Write(body)
 }
 
-// HandleGetCapabilities reports what this server supports, for feature
-// detection rather than version sniffing.
-func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *http.Request) {
+// SettingsCapabilitiesView is the settings capability document. Field order
+// is alphabetical on purpose: v1 encoded a map, whose keys sort, and the v1
+// bytes must not change.
+type SettingsCapabilitiesView struct {
+	APIVersion               int      `json:"api_version"`
+	ClientFamilies           []string `json:"client_families"`
+	ContractETag             string   `json:"contract_etag"`
+	DefinitionCount          int      `json:"definition_count"`
+	Revision                 int      `json:"revision"`
+	Scopes                   []string `json:"scopes"`
+	SupportsAtomicShortcuts  bool     `json:"supports_atomic_shortcuts"`
+	SupportsBatchedEffective bool     `json:"supports_batched_effective"`
+	SupportsIdempotentWrites bool     `json:"supports_idempotent_writes"`
+}
+
+// SettingsCapabilities builds the capability document for a manifest. v1
+// GET /settings/contract/capabilities and v2 getSettingsContractCapabilities
+// both answer from it.
+func SettingsCapabilities(contract *settingscontract.Manifest) (SettingsCapabilitiesView, error) {
 	etag, err := settingscontract.PublicETag()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read the settings contract")
-		return
+		return SettingsCapabilitiesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to read the settings contract")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"api_version":      h.contract.APIVersion,
-		fieldRevision:      h.contract.Revision,
-		"contract_etag":    etag,
-		"definition_count": len(h.contract.Definitions),
-		"scopes": []string{
+	return SettingsCapabilitiesView{
+		APIVersion:      contract.APIVersion,
+		Revision:        contract.Revision,
+		ContractETag:    etag,
+		DefinitionCount: len(contract.Definitions),
+		Scopes: []string{
 			string(settingscontract.ScopeAccount),
 			string(settingscontract.ScopeProfile),
 			string(settingscontract.ScopeProfileClient),
@@ -307,17 +322,28 @@ func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *h
 			string(settingscontract.ScopeProfileLibrary),
 			string(settingscontract.ScopeProfileSeries),
 		},
-		"client_families": []string{
+		ClientFamilies: []string{
 			string(settingscontract.ClientFamilyTV),
 			string(settingscontract.ClientFamilyMobile),
 			string(settingscontract.ClientFamilyTablet),
 			string(settingscontract.ClientFamilyDesktop),
 			string(settingscontract.ClientFamilyWeb),
 		},
-		"supports_batched_effective": true,
-		"supports_idempotent_writes": true,
-		"supports_atomic_shortcuts":  true,
-	})
+		SupportsBatchedEffective: true,
+		SupportsIdempotentWrites: true,
+		SupportsAtomicShortcuts:  true,
+	}, nil
+}
+
+// HandleGetCapabilities reports what this server supports, for feature
+// detection rather than version sniffing.
+func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *http.Request) {
+	view, err := SettingsCapabilities(h.contract)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 // HandleGetValue returns the explicit value at one scope, or 404 when the user
@@ -2020,8 +2046,8 @@ func writeRawJSON(w http.ResponseWriter, status int, body []byte) {
 	_, _ = w.Write(body)
 }
 
-// etagMatches handles the comma-separated If-None-Match list, including "*".
-func etagMatches(header, etag string) bool {
+// ETagMatches handles the comma-separated If-None-Match list, including "*".
+func ETagMatches(header, etag string) bool {
 	header = strings.TrimSpace(header)
 	if header == "*" {
 		return true
@@ -2057,4 +2083,10 @@ func parseIntCSV(raw string) []int {
 		}
 	}
 	return out
+}
+
+// Capabilities is the settings capability document for this server's
+// manifest; v2 getSettingsContractCapabilities calls it.
+func (h *SettingValuesHandler) Capabilities(context.Context) (SettingsCapabilitiesView, error) {
+	return SettingsCapabilities(h.contract)
 }

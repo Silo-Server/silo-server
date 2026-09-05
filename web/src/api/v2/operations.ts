@@ -5,11 +5,19 @@
 
 /** Operation ids keyed by `METHOD /path`, as the committed v2 OpenAPI document lists them. */
 export const v2Operations = {
+  "DELETE /api/v2/settings/device/subtitle-appearance": "deleteSubtitleAppearanceDeviceOverride",
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/admin/users": "listAdminUsers",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
   "GET /api/v2/progress": "listProgress",
+  "GET /api/v2/settings/contract": "getSettingsContract",
+  "GET /api/v2/settings/contract/capabilities": "getSettingsContractCapabilities",
+  "GET /api/v2/settings/overlay-config": "getOverlayConfig",
+  "GET /api/v2/settings/plugins": "listPluginSettings",
+  "GET /api/v2/settings/plugins/{installation_id}": "getPluginSettings",
+  "GET /api/v2/settings/subtitle-appearance/effective": "getEffectiveSubtitleAppearance",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
   "PATCH /api/v2/profiles/{id}": "updateProfile",
+  "PUT /api/v2/settings/device/subtitle-appearance": "updateSubtitleAppearanceDeviceOverride",
 } as const;

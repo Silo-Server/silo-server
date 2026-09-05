@@ -92,6 +92,15 @@ type Dependencies struct {
 	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
+	// SettingsContract answers the settings capability document
+	// (*handlers.SettingValuesHandler).
+	SettingsContract SettingsContractService
+	// Settings answers overlay defaults and device-scoped settings
+	// (*handlers.SettingsHandler).
+	Settings SettingsService
+	// PluginSettings answers per-installation user plugin settings
+	// (*handlers.PluginHandler).
+	PluginSettings PluginSettingsService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -380,6 +389,29 @@ type LibraryService interface {
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.
 type AdminUserService interface {
 	ListAdminUsersPage(ctx context.Context, afterID, limit int) ([]handlers.AdminUserView, bool, error)
+}
+
+// SettingsContractService is the slice of *handlers.SettingValuesHandler
+// getSettingsContractCapabilities uses.
+type SettingsContractService interface {
+	Capabilities(ctx context.Context) (handlers.SettingsCapabilitiesView, error)
+}
+
+// SettingsService is the slice of *handlers.SettingsHandler the overlay and
+// subtitle-appearance operations use.
+type SettingsService interface {
+	OverlayConfig(ctx context.Context) handlers.OverlayConfigView
+	EffectiveSubtitleAppearance(ctx context.Context, userID int, profileID string, device handlers.DeviceMetadata) (handlers.EffectiveSubtitleAppearanceView, error)
+	SetDeviceSetting(ctx context.Context, cmd handlers.DeviceSettingCommand, value string) error
+	DeleteDeviceSetting(ctx context.Context, cmd handlers.DeviceSettingCommand) error
+}
+
+// PluginSettingsService is the slice of *handlers.PluginHandler the plugin
+// settings operations use.
+type PluginSettingsService interface {
+	ListUserPluginSettings(ctx context.Context) ([]handlers.PluginUserSettingsView, error)
+	GetUserPluginSettings(ctx context.Context, userID, installationID int) (handlers.PluginUserSettingsDetailView, error)
+	SetUserPluginSettings(ctx context.Context, userID, installationID int, values map[string]string) error
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

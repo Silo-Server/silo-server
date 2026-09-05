@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -238,5 +239,140 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 			EffectivePolicy: handlers.EffectivePolicyView{Permissions: []string{"marker_edit", "metadata_curation"}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
+	deps.SettingsContract, deps.Settings, deps.PluginSettings = settingsFakes()
 	return deps
+}
+
+// The settings fakes stand in for the extracted settings seams.
+
+type fakeSettingsContract struct {
+	view handlers.SettingsCapabilitiesView
+	err  error
+}
+
+func (f fakeSettingsContract) Capabilities(context.Context) (handlers.SettingsCapabilitiesView, error) {
+	return f.view, f.err
+}
+
+// fakeSettingsSeam keeps device overrides in memory keyed by profile and
+// device, the way the store does, and answers the resolution the real seam
+// performs: the device override when present, else the profile-wide value.
+type fakeSettingsSeam struct {
+	overlay   handlers.OverlayConfigView
+	global    map[string]string
+	overrides map[string]handlers.EffectiveSubtitleAppearanceView
+	err       error
+}
+
+func overrideKey(profileID, deviceID string) string { return profileID + "\x00" + deviceID }
+
+func (f *fakeSettingsSeam) OverlayConfig(context.Context) handlers.OverlayConfigView {
+	return f.overlay
+}
+
+func (f *fakeSettingsSeam) EffectiveSubtitleAppearance(_ context.Context, _ int, profileID string, device handlers.DeviceMetadata) (handlers.EffectiveSubtitleAppearanceView, error) {
+	if f.err != nil {
+		return handlers.EffectiveSubtitleAppearanceView{}, f.err
+	}
+	view := handlers.EffectiveSubtitleAppearanceView{Key: handlers.SubtitleAppearanceSettingKey, ProfileID: profileID, GlobalValue: f.global[profileID], EffectiveValue: f.global[profileID]}
+	if o, ok := f.overrides[overrideKey(profileID, device.DeviceID)]; ok {
+		view.DeviceValue, view.EffectiveValue, view.HasDeviceOverride = o.DeviceValue, o.DeviceValue, true
+		view.DeviceID, view.DeviceName, view.DevicePlatform, view.UpdatedAt = o.DeviceID, o.DeviceName, o.DevicePlatform, o.UpdatedAt
+	}
+	return view, nil
+}
+
+func (f *fakeSettingsSeam) SetDeviceSetting(_ context.Context, cmd handlers.DeviceSettingCommand, value string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if cmd.Device.DeviceID == "" {
+		return &handlers.APIError{Status: 400, Code: "bad_request", Message: "Device id is required", Field: "device_id"}
+	}
+	if !json.Valid([]byte(value)) {
+		return &handlers.APIError{Status: 400, Code: "bad_request", Message: "subtitle_appearance must be valid JSON", Field: "value"}
+	}
+	if f.overrides == nil {
+		f.overrides = map[string]handlers.EffectiveSubtitleAppearanceView{}
+	}
+	f.overrides[overrideKey(cmd.ProfileID, cmd.Device.DeviceID)] = handlers.EffectiveSubtitleAppearanceView{
+		DeviceValue: value, DeviceID: cmd.Device.DeviceID, DeviceName: cmd.Device.DeviceName, DevicePlatform: cmd.Device.DevicePlatform,
+		UpdatedAt: "2026-01-02 03:04:05.678+00",
+	}
+	return nil
+}
+
+func (f *fakeSettingsSeam) DeleteDeviceSetting(_ context.Context, cmd handlers.DeviceSettingCommand) error {
+	if f.err != nil {
+		return f.err
+	}
+	delete(f.overrides, overrideKey(cmd.ProfileID, cmd.Device.DeviceID))
+	return nil
+}
+
+type fakePluginSettingsSeam struct {
+	installations []handlers.PluginUserSettingsView
+	values        map[int]map[string]string
+	err           error
+}
+
+func (f *fakePluginSettingsSeam) find(id int) (handlers.PluginUserSettingsView, error) {
+	for _, v := range f.installations {
+		if v.ID == id {
+			return v, nil
+		}
+	}
+	return handlers.PluginUserSettingsView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Plugin installation not found"}
+}
+
+func (f *fakePluginSettingsSeam) ListUserPluginSettings(context.Context) ([]handlers.PluginUserSettingsView, error) {
+	return f.installations, f.err
+}
+
+func (f *fakePluginSettingsSeam) GetUserPluginSettings(_ context.Context, _ int, id int) (handlers.PluginUserSettingsDetailView, error) {
+	if f.err != nil {
+		return handlers.PluginUserSettingsDetailView{}, f.err
+	}
+	v, err := f.find(id)
+	if err != nil {
+		return handlers.PluginUserSettingsDetailView{}, err
+	}
+	return handlers.PluginUserSettingsDetailView{Installation: v, Values: f.values[id]}, nil
+}
+
+func (f *fakePluginSettingsSeam) SetUserPluginSettings(_ context.Context, _ int, id int, values map[string]string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if _, err := f.find(id); err != nil {
+		return err
+	}
+	if f.values == nil {
+		f.values = map[int]map[string]string{}
+	}
+	f.values[id] = values
+	return nil
+}
+
+func settingsFakes() (fakeSettingsContract, *fakeSettingsSeam, *fakePluginSettingsSeam) {
+	contract := fakeSettingsContract{view: handlers.SettingsCapabilitiesView{
+		APIVersion: 1, Revision: 12, ContractETag: `"etag-12"`, DefinitionCount: 40,
+		Scopes: []string{"account", "profile"}, ClientFamilies: []string{"tv", "web"},
+		SupportsBatchedEffective: true, SupportsIdempotentWrites: true, SupportsAtomicShortcuts: true,
+	}}
+	settings := &fakeSettingsSeam{
+		overlay: handlers.OverlayConfigView{Enabled: true, QuickActionsDefault: "both"},
+		global:  map[string]string{"p-owner": `{"fontSize":"large"}`},
+	}
+	plugins := &fakePluginSettingsSeam{
+		installations: []handlers.PluginUserSettingsView{{
+			ID: 3, PluginID: "org.example.subtitles", Version: "1.2.0",
+			UserConfigSchema: []handlers.PluginConfigSchemaView{{Key: "region", Title: "Region", JSONSchema: `{"type":"string"}`}},
+			Routes:           []handlers.PluginRouteView{{ID: "dashboard", Method: "GET", Path: "/dashboard", Access: "user", Navigable: true, NavigationLabel: "Dashboard", NavigationKind: "user"}},
+			Assets:           []handlers.PluginAssetView{},
+			Category:         "Tools",
+		}},
+		values: map[int]map[string]string{3: {"region": "us"}},
+	}
+	return contract, settings, plugins
 }

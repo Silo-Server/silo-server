@@ -878,6 +878,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var collectionHandler *handlers.CollectionHandler
 	var settingsHandler *handlers.SettingsHandler
 	var settingValuesHandler *handlers.SettingValuesHandler
+	// userPluginSettingsHandler is the plugin handler the user-scoped
+	// /settings/plugins routes are registered on; v2 shares it.
+	var userPluginSettingsHandler *handlers.PluginHandler
 	var deviceHandler *handlers.DeviceHandler
 	var homeDismissalHandler *handlers.HomeDismissalHandler
 	var subtitlePrefHandler *handlers.SubtitlePrefHandler
@@ -1898,6 +1901,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if adminHandler != nil {
 		v2deps.AdminUsers = adminHandler
 	}
+	if settingValuesHandler != nil {
+		v2deps.SettingsContract = settingValuesHandler
+	}
+	if settingsHandler != nil {
+		v2deps.Settings = settingsHandler
+	}
+	if userPluginSettingsHandler != nil {
+		v2deps.PluginSettings = userPluginSettingsHandler
+	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -2632,6 +2644,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 								deps.PluginImageResolver,
 								restartStatus,
 							)
+							userPluginSettingsHandler = pluginHandler
 							r.Get("/plugins", pluginHandler.HandleListUserPluginSettings)
 							r.Get("/plugins/{installation_id}", pluginHandler.HandleGetUserPluginSettings)
 							r.Put("/plugins/{installation_id}", pluginHandler.HandlePutUserPluginSettings)

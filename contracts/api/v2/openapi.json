@@ -441,6 +441,93 @@
         ],
         "type": "object"
       },
+      "EffectiveSubtitleAppearance": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "description": "The device the override belongs to; absent when there is none",
+            "examples": [
+              "iphone-1"
+            ],
+            "type": "string"
+          },
+          "device_name": {
+            "description": "The name the device registered with; absent when unknown",
+            "examples": [
+              "Living room"
+            ],
+            "type": "string"
+          },
+          "device_platform": {
+            "description": "The platform the device registered with; absent when unknown",
+            "examples": [
+              "iOS"
+            ],
+            "type": "string"
+          },
+          "device_value": {
+            "description": "The device override as a JSON document; absent when the device has none",
+            "examples": [
+              "{\"fontSize\":\"xxlarge\"}"
+            ],
+            "type": "string"
+          },
+          "effective_value": {
+            "description": "The value that applies on this device; empty when nothing is set",
+            "examples": [
+              "{\"fontSize\":\"xxlarge\"}"
+            ],
+            "type": "string"
+          },
+          "global_value": {
+            "description": "The profile-wide value as a JSON document; empty when unset",
+            "examples": [
+              "{\"fontSize\":\"large\"}"
+            ],
+            "type": "string"
+          },
+          "has_device_override": {
+            "description": "Whether device_value is what applies",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "key": {
+            "description": "Always subtitle_appearance",
+            "examples": [
+              "subtitle_appearance"
+            ],
+            "type": "string"
+          },
+          "profile_id": {
+            "description": "The acting profile",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the device override was last written; absent when there is none",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "profile_id",
+          "global_value",
+          "effective_value",
+          "has_device_override"
+        ],
+        "type": "object"
+      },
       "Impersonation": {
         "additionalProperties": false,
         "properties": {
@@ -474,6 +561,45 @@
         ],
         "type": "object"
       },
+      "OverlayConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "defaults": {
+            "description": "Administrator-chosen overlay defaults document; absent when none is set",
+            "examples": [
+              "{\"badges\":true}"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether card overlays are enabled server-wide",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "quick_actions_default": {
+            "description": "Default quick-action mode; one of the ui.card_quick_actions values in the settings contract",
+            "examples": [
+              "both"
+            ],
+            "type": "string"
+          },
+          "quick_actions_enabled": {
+            "description": "Default for profiles that have not chosen whether cards show quick actions",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "quick_actions_enabled",
+          "quick_actions_default"
+        ],
+        "type": "object"
+      },
       "PageInfo": {
         "additionalProperties": false,
         "properties": {
@@ -494,6 +620,264 @@
         },
         "required": [
           "has_more"
+        ],
+        "type": "object"
+      },
+      "PluginAsset": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "description": "Media type",
+            "examples": [
+              "text/javascript"
+            ],
+            "type": "string"
+          },
+          "integrity": {
+            "description": "Subresource integrity digest",
+            "examples": [
+              "sha256-..."
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Asset path under the plugin's proxy prefix",
+            "examples": [
+              "/app.js"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content_type",
+          "integrity"
+        ],
+        "type": "object"
+      },
+      "PluginRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "description": "Who may call it, as the plugin declared",
+            "examples": [
+              "user"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Route identifier within the plugin",
+            "examples": [
+              "dashboard"
+            ],
+            "type": "string"
+          },
+          "method": {
+            "description": "HTTP method",
+            "examples": [
+              "GET"
+            ],
+            "type": "string"
+          },
+          "navigable": {
+            "description": "Whether clients list it in navigation",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "navigation_kind": {
+            "description": "Navigation surface: user or admin",
+            "examples": [
+              "user"
+            ],
+            "type": "string"
+          },
+          "navigation_label": {
+            "description": "Label for navigation; empty when not navigable",
+            "examples": [
+              "Dashboard"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Path under the plugin's proxy prefix",
+            "examples": [
+              "/dashboard"
+            ],
+            "type": "string"
+          },
+          "static_asset": {
+            "description": "Whether the route serves a packaged asset",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "method",
+          "path",
+          "access",
+          "navigable",
+          "navigation_label",
+          "navigation_kind",
+          "static_asset"
+        ],
+        "type": "object"
+      },
+      "PluginSettingSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Help text; empty when the plugin gives none",
+            "examples": [
+              "Two-letter country code"
+            ],
+            "type": "string"
+          },
+          "json_schema": {
+            "description": "JSON Schema for the value, as the plugin wrote it; empty when unconstrained",
+            "examples": [
+              "{\"type\":\"string\"}"
+            ],
+            "type": "string"
+          },
+          "key": {
+            "description": "The value's key in the installation's settings map",
+            "examples": [
+              "region"
+            ],
+            "type": "string"
+          },
+          "required": {
+            "description": "Whether the plugin needs a value",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "title": {
+            "description": "Display title; empty when the plugin gives none",
+            "examples": [
+              "Region"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "description",
+          "json_schema",
+          "required"
+        ],
+        "type": "object"
+      },
+      "PluginSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "installation": {
+            "$ref": "#/components/schemas/PluginSettingsInstallation",
+            "description": "The installation and what it asks for"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The account's stored values; empty, never null",
+            "type": "object",
+            "x-silo-extension-bag": "plugin-setting-values"
+          }
+        },
+        "required": [
+          "installation",
+          "values"
+        ],
+        "type": "object"
+      },
+      "PluginSettingsInstallation": {
+        "additionalProperties": false,
+        "properties": {
+          "assets": {
+            "description": "Packaged assets; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/PluginAsset"
+            },
+            "type": "array"
+          },
+          "category": {
+            "description": "Slash-delimited grouping for the Apps navigation; absent when the manifest declares none",
+            "examples": [
+              "Tools/Utilities"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Installation identifier",
+            "examples": [
+              "3"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "plugin_id": {
+            "description": "The plugin's stable identifier",
+            "examples": [
+              "org.example.subtitles"
+            ],
+            "type": "string"
+          },
+          "routes": {
+            "description": "Routes the plugin exposes; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/PluginRoute"
+            },
+            "type": "array"
+          },
+          "user_config_schema": {
+            "description": "Settings the plugin asks each account for; empty when it only exposes navigable routes",
+            "items": {
+              "$ref": "#/components/schemas/PluginSettingSchema"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Installed version",
+            "examples": [
+              "1.2.0"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "plugin_id",
+          "version",
+          "user_config_schema",
+          "routes",
+          "assets"
+        ],
+        "type": "object"
+      },
+      "PluginSettingsInstallationCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/PluginSettingsInstallation"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -1040,6 +1424,101 @@
         ],
         "type": "object"
       },
+      "SettingsContractCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "api_version": {
+            "description": "Settings protocol version; changes only for a change no revision rule can express",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "client_families": {
+            "description": "Client families a profile_client scope may name",
+            "examples": [
+              [
+                "tv",
+                "mobile"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "contract_etag": {
+            "description": "Entity tag of the public manifest getSettingsContract serves",
+            "examples": [
+              "\"a1b2c3\""
+            ],
+            "type": "string"
+          },
+          "definition_count": {
+            "description": "Number of setting definitions in the manifest",
+            "examples": [
+              40
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "revision": {
+            "description": "Manifest revision clients filter definitions against",
+            "examples": [
+              12
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "scopes": {
+            "description": "Setting scopes this server resolves",
+            "examples": [
+              [
+                "account",
+                "profile"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "supports_atomic_shortcuts": {
+            "description": "Whether navigation shortcut list mutations are atomic",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "supports_batched_effective": {
+            "description": "Whether the effective resolver accepts a batch of keys",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "supports_idempotent_writes": {
+            "description": "Whether repeating a value write converges on the same state",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "api_version",
+          "revision",
+          "contract_etag",
+          "definition_count",
+          "scopes",
+          "client_families",
+          "supports_batched_effective",
+          "supports_idempotent_writes",
+          "supports_atomic_shortcuts"
+        ],
+        "type": "object"
+      },
       "SetupStatus": {
         "additionalProperties": false,
         "properties": {
@@ -1053,6 +1532,22 @@
         },
         "required": [
           "needs_setup"
+        ],
+        "type": "object"
+      },
+      "SubtitleAppearanceDeviceOverride": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "description": "The subtitle appearance as a JSON document; the server validates only that it is JSON",
+            "examples": [
+              "{\"fontSize\":\"xxlarge\"}"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
         ],
         "type": "object"
       },
@@ -1892,6 +2387,1337 @@
         "summary": "List the acting profile's watch progress, newest change first.",
         "tags": [
           "progress"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/settings/contract": {
+      "get": {
+        "operationId": "getSettingsContract",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "description": "A settings manifest. Its members are fixed by the settings contract (contracts/settings/v1), not by this document.",
+                  "type": "object",
+                  "x-silo-extension-bag": "settings-manifest"
+                }
+              }
+            },
+            "description": "The public settings manifest, exactly the canonical bytes of contracts/settings/v1 with maintainer-only fields removed; the same document v1 /settings/manifest serves.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the public settings manifest this server was built with.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "profile_scoped"
+      }
+    },
+    "/api/v2/settings/contract/capabilities": {
+      "get": {
+        "operationId": "getSettingsContractCapabilities",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsContractCapabilities"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get what this server's settings API supports.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/settings/device/subtitle-appearance": {
+      "delete": {
+        "operationId": "deleteSubtitleAppearanceDeviceOverride",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "required": true,
+            "schema": {
+              "description": "The client's stable device identifier",
+              "examples": [
+                "iphone-1"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional display name recorded on the device registry",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional display name recorded on the device registry",
+              "examples": [
+                "Living room"
+              ],
+              "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the device registry",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the device registry",
+              "examples": [
+                "iOS"
+              ],
+              "maxLength": 40,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove this device's subtitle appearance override for the acting profile.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "updateSubtitleAppearanceDeviceOverride",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "required": true,
+            "schema": {
+              "description": "The client's stable device identifier",
+              "examples": [
+                "iphone-1"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional display name recorded on the device registry",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional display name recorded on the device registry",
+              "examples": [
+                "Living room"
+              ],
+              "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the device registry",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the device registry",
+              "examples": [
+                "iOS"
+              ],
+              "maxLength": 40,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubtitleAppearanceDeviceOverride"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveSubtitleAppearance"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace this device's subtitle appearance override for the acting profile.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/settings/overlay-config": {
+      "get": {
+        "operationId": "getOverlayConfig",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverlayConfig"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the server-wide card overlay defaults.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/settings/plugins": {
+      "get": {
+        "operationId": "listPluginSettings",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSettingsInstallationCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the enabled plugins that expose user settings or navigable routes.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/settings/plugins/{installation_id}": {
+      "get": {
+        "operationId": "getPluginSettings",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The plugin installation",
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "description": "The plugin installation",
+              "examples": [
+                "3"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSettings"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a plugin installation's user settings and the account's values for them.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/settings/subtitle-appearance/effective": {
+      "get": {
+        "operationId": "getEffectiveSubtitleAppearance",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier; absent resolves the profile-wide value",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; absent resolves the profile-wide value",
+              "examples": [
+                "iphone-1"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional display name recorded on the device registry",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional display name recorded on the device registry",
+              "examples": [
+                "Living room"
+              ],
+              "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the device registry",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the device registry",
+              "examples": [
+                "iOS"
+              ],
+              "maxLength": 40,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveSubtitleAppearance"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the subtitle appearance that applies to the acting profile on this device.",
+        "tags": [
+          "settings"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true

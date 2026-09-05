@@ -39543,13 +39543,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/contract/capabilities",
+        "operation_id": "getSettingsContractCapabilities"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional). Alias of /settings/contract/capabilities: one v2 operation serves both v1 paths. Same nine members as v1 with a typed schema instead of a map; the v1 map's key-sorted order is not part of the v2 shape. Reads the manifest revision and public ETag; scopes and client_families are never null."
     },
     {
       "listener": "api",
@@ -39594,13 +39594,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/contract",
+        "operation_id": "getSettingsContract"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional). Serves the same canonical public manifest bytes (contracts/settings/v1, notes stripped) and the same ETag v1 sends, so the vendored SettingsConformanceTests copies compare equal; Cache-Control is private, no-cache. The v1 If-None-Match/304 handling is not carried yet: conditional requests land with the foundation caching rules (#882), not this section."
     },
     {
       "listener": "api",
@@ -39675,13 +39675,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/contract/capabilities",
+        "operation_id": "getSettingsContractCapabilities"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional). Same nine members as v1 with a typed schema instead of a map; the v1 map's key-sorted order is not part of the v2 shape. Reads the manifest revision and public ETag; scopes and client_families are never null."
     },
     {
       "listener": "api",
@@ -39726,13 +39726,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/settings/device/subtitle-appearance",
+        "operation_id": "deleteSubtitleAppearanceDeviceOverride"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; settingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, demo-restricted). The device comes from the same X-Silo-Device-Id/-Name/-Platform headers v1 reads, declared as parameters with the v1 clamps (128/120/40); a missing device id is a 422 at header.X-Silo-Device-Id where v1 answered 400. 204 on success, including when no override existed (as v1). Path segment uses a hyphen (subtitle-appearance)."
     },
     {
       "listener": "api",
@@ -39777,13 +39777,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/settings/device/subtitle-appearance",
+        "operation_id": "updateSubtitleAppearanceDeviceOverride"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; settingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, demo-restricted). Same {value} body (a JSON document as a string; only JSON validity is checked, as v1) and the same device headers as v1, declared with the v1 clamps; a missing device id is a 422 at header.X-Silo-Device-Id and a non-JSON value a 422 at body.value where v1 answered 400. Answers 200 with the resolved EffectiveSubtitleAppearance (the canonical representation after the write) where v1 answered 204. Path segment uses a hyphen (subtitle-appearance)."
     },
     {
       "listener": "api",
@@ -40108,13 +40108,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/contract",
+        "operation_id": "getSettingsContract"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional). Alias of /settings/contract: one v2 operation serves both v1 paths with the same canonical public manifest bytes and ETag. The v1 If-None-Match/304 handling is not carried yet: conditional requests land with the foundation caching rules (#882), not this section."
     },
     {
       "listener": "api",
@@ -40188,13 +40188,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/overlay-config",
+        "operation_id": "getOverlayConfig"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional). Same four members and the same private, no-cache policy as v1; defaults stays omitted when unset. quick_actions_default is documented against the ui.card_quick_actions vocabulary but not declared as an enum, since the server reads it from the settings contract."
     },
     {
       "listener": "api",
@@ -40249,13 +40249,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/plugins",
+        "operation_id": "listPluginSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil; deps.PluginUserConfig != nil && deps.PluginService != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional). The v1 {installations:[...]} envelope becomes the collection envelope {items:[...]}, unpaginated (bounded by the installed plugins). Installation id is a string ID. user_config_schema carries key/title/description/json_schema/required only: the v1 admin_form member is an administrator-form descriptor no user-settings client renders (the web user page maps json_schema; admin_form is consumed only by the admin plugin config pages) and is not carried. routes and assets are never null; category stays omitted when the manifest declares none."
     },
     {
       "listener": "api",
@@ -40310,13 +40310,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/plugins/{installation_id}",
+        "operation_id": "getPluginSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil; deps.PluginUserConfig != nil && deps.PluginService != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional). Same {installation, values} shape; installation as in listPluginSettings (no admin_form), values is a declared extension bag (additionalProperties: string) because the plugin defines the keys, and is {} rather than null when the account has none. An installation id that is not a number is the same 404 as an unknown one (identifiers are opaque) where v1 answered 400."
     },
     {
       "listener": "api",

@@ -135,8 +135,19 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"listProgress":       {http.StatusNotFound: true},
 		"listAdminUsers":     {http.StatusNotFound: true},
 		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
+		// The settings section: every operation resolves a profile (404 for
+		// an unknown one); the contract itself is served from the build and
+		// so is not service-backed.
+		"getSettingsContract":                    {http.StatusNotFound: true, http.StatusServiceUnavailable: true},
+		"getPluginSettings":                      {http.StatusNotFound: true},
+		"updateSubtitleAppearanceDeviceOverride": {http.StatusNotFound: true, http.StatusRequestTimeout: true},
 	}
-	profileToken := map[string]bool{"listProgress": true, "listAdminUsers": true, "updateProfile": true}
+	profileToken := map[string]bool{
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true,
+		"getSettingsContract": true, "getSettingsContractCapabilities": true, "getOverlayConfig": true,
+		"getEffectiveSubtitleAppearance": true, "updateSubtitleAppearanceDeviceOverride": true, "deleteSubtitleAppearanceDeviceOverride": true,
+		"listPluginSettings": true, "getPluginSettings": true,
+	}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
 		for method, raw := range item.(map[string]any) {

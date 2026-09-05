@@ -203,6 +203,7 @@ func registerAll(reg *Registry) {
 	registerAdminUsers(reg)
 	registerProfiles(reg)
 	registerProgress(reg)
+	registerSettings(reg)
 	registerSystem(reg)
 	registerOpenAPIDocument(reg)
 }
