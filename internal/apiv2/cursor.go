@@ -35,16 +35,26 @@ func (s CursorScope) key() string {
 }
 
 // viewerScopeDigest is a stable digest of the visibility-affecting fields of
-// the request's effective access policy (policy revision, allowed and
-// disabled library IDs, content-rating ceiling). It goes into
-// CursorScope.Security for access-filtered collections. "none" stands for a
-// request that resolved no viewer scope.
+// the request's effective access policy (policy revision, whether library
+// access is restricted at all, allowed and disabled library IDs,
+// content-rating ceiling). It goes into CursorScope.Security for
+// access-filtered collections. "none" stands for a request that resolved no
+// viewer scope.
+//
+// A nil id list and an empty one are different policies (an unrestricted
+// profile versus one restricted to nothing), so they serialize differently:
+// not every store bumps PolicyRevision when only that distinction changes,
+// and a cursor minted under the narrower policy must not survive the wider
+// one.
 func viewerScopeDigest(ctx context.Context) string {
 	scope, ok := scopeFrom(ctx)
 	if !ok {
 		return labelNone
 	}
 	ids := func(in []int) string {
+		if in == nil {
+			return "-"
+		}
 		sorted := slices.Clone(in)
 		slices.Sort(sorted)
 		parts := make([]string, len(sorted))
@@ -53,8 +63,13 @@ func viewerScopeDigest(ctx context.Context) string {
 		}
 		return strings.Join(parts, ",")
 	}
+	restricted := "0"
+	if scope.LibrariesRestricted {
+		restricted = "1"
+	}
 	canonical := strings.Join([]string{
 		strconv.FormatInt(scope.PolicyRevision, 10),
+		restricted,
 		ids(scope.AllowedLibraryIDs),
 		ids(scope.DisabledLibraryIDs),
 		scope.MaxContentRating,

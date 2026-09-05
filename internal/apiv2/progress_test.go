@@ -227,6 +227,7 @@ func (r policyResolver) Resolve(ctx context.Context, in access.ResolveInput) (ac
 		return scope, err
 	}
 	scope.AllowedLibraryIDs = r.scope.AllowedLibraryIDs
+	scope.LibrariesRestricted = r.scope.LibrariesRestricted
 	scope.DisabledLibraryIDs = r.scope.DisabledLibraryIDs
 	scope.MaxContentRating = r.scope.MaxContentRating
 	scope.PolicyRevision = r.scope.PolicyRevision
@@ -272,6 +273,42 @@ func TestListProgressCursorBoundToViewerPolicy(t *testing.T) {
 		if rec := do(t, h, http.MethodGet, "/api/v2/progress?limit=1&cursor="+url.QueryEscape(page.Page.NextCursor), "", owner); rec.Code != 200 {
 			t.Fatalf("%s: reissued cursor: %d %s", name, rec.Code, rec.Body.String())
 		}
+	}
+
+	// Widening from "restricted to nothing" to "unrestricted" is a policy
+	// change even when the store keeps the PolicyRevision: an empty
+	// allowlist and a nil one are different policies, as is the restriction
+	// flag on its own.
+	for name, tc := range map[string]struct{ before, after access.Scope }{
+		"restricted-empty to unrestricted": {
+			before: access.Scope{AllowedLibraryIDs: []int{}, LibrariesRestricted: true},
+			after:  access.Scope{AllowedLibraryIDs: nil, LibrariesRestricted: false},
+		},
+		"empty versus nil allowlist": {
+			before: access.Scope{AllowedLibraryIDs: []int{}},
+			after:  access.Scope{AllowedLibraryIDs: nil},
+		},
+		"restriction flag alone": {
+			before: access.Scope{AllowedLibraryIDs: []int{1}, LibrariesRestricted: true},
+			after:  access.Scope{AllowedLibraryIDs: []int{1}, LibrariesRestricted: false},
+		},
+	} {
+		apply := func(s access.Scope) {
+			policy.AllowedLibraryIDs, policy.LibrariesRestricted = s.AllowedLibraryIDs, s.LibrariesRestricted
+			policy.DisabledLibraryIDs, policy.MaxContentRating, policy.PolicyRevision = nil, "PG-13", 7
+		}
+		apply(tc.before)
+		rec := do(t, h, http.MethodGet, "/api/v2/progress?limit=1", "", owner)
+		page := decodeProgress(t, rec.Body)
+		if rec.Code != 200 || page.Page.NextCursor == "" {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		next := "/api/v2/progress?limit=1&cursor=" + url.QueryEscape(page.Page.NextCursor)
+		if rec := do(t, h, http.MethodGet, next, "", owner); rec.Code != 200 {
+			t.Fatalf("%s: same policy: %d %s", name, rec.Code, rec.Body.String())
+		}
+		apply(tc.after)
+		requireProblem(t, do(t, h, http.MethodGet, next, "", owner), TypeInvalidCursor)
 	}
 }
 
