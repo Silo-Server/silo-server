@@ -291,7 +291,7 @@
       },
       "allOf": [
         {
-          "$comment": "retry_safety is a mutation-only classification of a ported tier-1 row. The required direction (every such row carries one) is enforced by internal/contractledger, which owns the temporary unclassified allow-list.",
+          "$comment": "retry_safety is a mutation-only classification of a ported tier-1 row. The required direction (every such row carries one) is enforced by internal/contractledger.",
           "if": {
             "not": {
               "properties": {

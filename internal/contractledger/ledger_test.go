@@ -1107,35 +1107,80 @@ func TestDeclaredRetrySafetyMatchesTheLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byOperation := map[string][]Entry{}
-	for _, e := range ledger.Entries {
-		if e.V2.OperationID != nil {
-			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
-		}
-	}
 	declared := apiv2registry.DeclaredOperations()
 	if len(declared) == 0 {
 		t.Fatal("the v2 registry declares nothing")
 	}
+	for _, problem := range retrySafetyMismatches(ledger.Entries, declared) {
+		t.Error(problem)
+	}
+}
+
+// TestRetrySafetyMismatchesFire proves the reconcile branches with a synthetic
+// registry and ledger, since the live registry declares no mutation yet.
+func TestRetrySafetyMismatchesFire(t *testing.T) {
+	opID := func(s string) *string { return &s }
+	entries := []Entry{
+		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, RetrySafety: "natural_idempotent", V2: V2Target{OperationID: opID("updateThing")}},
+		{copied: copied{Method: http.MethodPost, Path: "/api/v1/things"}, RetrySafety: "unique_constraint", V2: V2Target{OperationID: opID("createThing")}},
+	}
+	cases := []struct {
+		name     string
+		declared []apiv2registry.Declared
+		want     string
+	}{
+		{"agree", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "natural_idempotent"}}, ""},
+		{"read declares", []apiv2registry.Declared{{Method: http.MethodGet, OperationID: "getThing", RetrySafety: "natural_idempotent"}}, "read operation getThing declares retry safety"},
+		{"unknown value", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "bogus"}}, "not one of the ledger's values"},
+		{"no legacy row", []apiv2registry.Declared{{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}}, "maps to no legacy row"},
+		{"disagrees", []apiv2registry.Declared{{Method: http.MethodPost, OperationID: "createThing", RetrySafety: "domain_identity"}}, `ledger retry_safety "unique_constraint", registry declares "domain_identity"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := retrySafetyMismatches(entries, tc.declared)
+			if tc.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("unexpected problems: %v", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+				t.Fatalf("want one problem containing %q, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+// retrySafetyMismatches compares every operation the v2 registry declares
+// against the legacy rows mapped to it through v2.operation_id.
+func retrySafetyMismatches(entries []Entry, declared []apiv2registry.Declared) []string {
+	byOperation := map[string][]Entry{}
+	for _, e := range entries {
+		if e.V2.OperationID != nil {
+			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
+		}
+	}
+	var problems []string
 	for _, op := range declared {
-		mutating := isMutatingMethod(op.Method)
-		if !mutating {
+		if !isMutatingMethod(op.Method) {
 			if op.RetrySafety != "" {
-				t.Errorf("read operation %s declares retry safety %q", op.OperationID, op.RetrySafety)
+				problems = append(problems, fmt.Sprintf("read operation %s declares retry safety %q", op.OperationID, op.RetrySafety))
 			}
 			continue
 		}
 		if !retrySafetyValues[string(op.RetrySafety)] {
-			t.Errorf("mutating operation %s declares retry safety %q, not one of the ledger's values", op.OperationID, op.RetrySafety)
+			problems = append(problems, fmt.Sprintf("mutating operation %s declares retry safety %q, not one of the ledger's values", op.OperationID, op.RetrySafety))
+			continue
 		}
 		rows := byOperation[op.OperationID]
 		if len(rows) == 0 {
-			t.Errorf("mutating operation %s maps to no legacy row; a ported mutation records its v2 operation and retry_safety in the ledger", op.OperationID)
+			problems = append(problems, fmt.Sprintf("mutating operation %s maps to no legacy row; a ported mutation records its v2 operation and retry_safety in the ledger", op.OperationID))
 		}
 		for _, e := range rows {
 			if e.RetrySafety != string(op.RetrySafety) {
-				t.Errorf("%s: ledger retry_safety %q, registry declares %q for %s", e.key(), e.RetrySafety, op.RetrySafety, op.OperationID)
+				problems = append(problems, fmt.Sprintf("%s: ledger retry_safety %q, registry declares %q for %s", e.key(), e.RetrySafety, op.RetrySafety, op.OperationID))
 			}
 		}
 	}
+	return problems
 }
