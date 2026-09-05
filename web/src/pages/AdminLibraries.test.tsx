@@ -67,6 +67,8 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useCancelLibraryScans: (...args: unknown[]) => mocks.useCancelLibraryScans(...args),
   useCancelAdminJob: (...args: unknown[]) => mocks.useCancelAdminJob(...args),
   useLibraryRoots: (...args: unknown[]) => mocks.useLibraryRoots(...args),
+  flattenLibraryRoots: (data?: { pages: { roots: unknown[] }[] }) =>
+    data?.pages.flatMap((page) => page.roots) ?? [],
   useUpsertLibraryRootOverride: (...args: unknown[]) => mocks.useUpsertLibraryRootOverride(...args),
   useDeleteLibraryRootOverride: (...args: unknown[]) => mocks.useDeleteLibraryRootOverride(...args),
   UNMATCHED_PAGE_SIZE: 10,
@@ -173,7 +175,13 @@ describe("AdminLibraries", () => {
     });
     mocks.useCancelLibraryScans.mockReturnValue(queryState);
     mocks.useCancelAdminJob.mockReturnValue(queryState);
-    mocks.useLibraryRoots.mockReturnValue({ data: [], isLoading: false });
+    mocks.useLibraryRoots.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    });
     mocks.useUpsertLibraryRootOverride.mockReturnValue(queryState);
     mocks.useDeleteLibraryRootOverride.mockReturnValue(queryState);
     mocks.useActiveScans.mockReturnValue({ data: [], isLoading: false });
@@ -218,23 +226,35 @@ describe("AdminLibraries", () => {
 
   it("renders the collapsed Ambiguous Roots section with a populated count", () => {
     mocks.useLibraryRoots.mockReturnValue({
-      data: [
-        {
-          library_id: 1,
-          library_name: "Movies",
-          root_path: "/media/movies/Inception (2010)",
-          state: "ambiguous",
-          inferred_type: "movie",
-          type_confidence: "low",
-          title: "Inception",
-          year: 2010,
-          observed_file_count: 1,
-          sample_file_path: "/media/movies/Inception (2010)/Inception (2010).mkv",
-          first_seen_at: "2026-03-23T20:00:00Z",
-          last_seen_at: "2026-03-23T21:00:00Z",
-        },
-      ],
+      data: {
+        pageParams: [undefined],
+        pages: [
+          {
+            total: 1,
+            nextCursor: undefined,
+            roots: [
+              {
+                library_id: 1,
+                library_name: "Movies",
+                root_path: "/media/movies/Inception (2010)",
+                state: "ambiguous",
+                inferred_type: "movie",
+                type_confidence: "low",
+                title: "Inception",
+                year: 2010,
+                observed_file_count: 1,
+                sample_file_path: "/media/movies/Inception (2010)/Inception (2010).mkv",
+                first_seen_at: "2026-03-23T20:00:00Z",
+                last_seen_at: "2026-03-23T21:00:00Z",
+              },
+            ],
+          },
+        ],
+      },
       isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
     });
 
     const markup = renderPage();
@@ -309,8 +329,9 @@ describe("AdminLibraries", () => {
   });
 
   it("renders the collapsed Ambiguous Roots section when no roots exist", () => {
-    // Default useLibraryRoots mock returns { data: [], isLoading: false }. The
-    // section itself still renders because it is gated on libraries.length.
+    // The roots query is disabled while the section is collapsed, so the
+    // default mock has no data. The section itself still renders because it
+    // is gated on libraries.length.
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");

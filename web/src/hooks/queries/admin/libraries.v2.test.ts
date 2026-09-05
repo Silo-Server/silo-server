@@ -25,7 +25,6 @@ import { V2ProblemError } from "@/api/v2/request";
 
 import {
   fetchAdminLibraries,
-  fetchAllLibraryRoots,
   fetchLibraryMetadataMatchQueuePage,
   fetchUnmatchedLibraryItemsPage,
   useCheckLibraryMount,
@@ -33,6 +32,9 @@ import {
   useDeleteLibrary,
   useLibraryMetadataMatchQueues,
   useLibraryProviders,
+  useLibraryRoots,
+  flattenLibraryRoots,
+  LIBRARY_ROOTS_PAGE_LIMIT,
   useRefreshLibraryMetadata,
   useSetLibraryProviders,
   useStaleMediaIDs,
@@ -184,10 +186,11 @@ describe("library admin hooks on the v2 contract", () => {
     expect(check.roots.map((r) => r.path)).toEqual(checkLibraryMountOk.roots.map((r) => r.path));
   });
 
-  it("walks every page of the library roots listing", async () => {
+  it("pages the library roots listing on demand", async () => {
     const fetchMock = stubFetch((url) => {
       expect(url.pathname).toBe("/api/v2/libraries/roots");
       expect(url.searchParams.get("library_id")).toBe("1");
+      expect(url.searchParams.get("limit")).toBe(String(LIBRARY_ROOTS_PAGE_LIMIT));
       if (url.searchParams.get("cursor") === null) return jsonResponse(listLibraryRootsOk);
       expect(url.searchParams.get("cursor")).toBe(listLibraryRootsOk.page.next_cursor);
       return jsonResponse({
@@ -197,16 +200,47 @@ describe("library admin hooks on the v2 contract", () => {
       });
     });
 
-    const roots = await fetchAllLibraryRoots(1, "ambiguous");
+    const { result } = renderHook(() => useLibraryRoots(1, "ambiguous"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    // Only the first page loads up front.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("state")).toBe("ambiguous");
+    expect(result.current.hasNextPage).toBe(true);
+    expect(result.current.data?.pages[0]?.total).toBe(3);
+    expect(flattenLibraryRoots(result.current.data).map((r) => r.root_path)).toEqual([
+      "/media/movies/Alien",
+      "/media/movies/Blade Runner",
+    ]);
+    expect(flattenLibraryRoots(result.current.data)[0]?.library_id).toBe(1);
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("state")).toBe("ambiguous");
-    expect(roots.map((r) => r.root_path)).toEqual([
+    expect(flattenLibraryRoots(result.current.data).map((r) => r.root_path)).toEqual([
       "/media/movies/Alien",
       "/media/movies/Blade Runner",
       "/media/movies/Heat",
     ]);
-    expect(roots[0]?.library_id).toBe(1);
+  });
+
+  it("does not load library roots until the caller enables the query", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(listLibraryRootsOk));
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useLibraryRoots(1, "ambiguous", { enabled }),
+      { wrapper: createWrapper(), initialProps: { enabled: false } },
+    );
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("resolves a numeric unmatched-items page by following cursors", async () => {

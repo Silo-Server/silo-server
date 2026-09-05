@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getAccessToken } from "@/api/client";
 import type {
   AdminJob,
@@ -237,47 +237,70 @@ export function useSkippedLibraryRoots() {
   });
 }
 
-/** Page size for the library root walk: the v2 maximum. */
-const LIBRARY_ROOTS_PAGE_LIMIT = 200;
+/** Page size of the library roots listing. */
+export const LIBRARY_ROOTS_PAGE_LIMIT = 50;
 
-/**
- * Fetches every observed root of one library by walking the cursor-paginated
- * v2 listing. The admin screen pages the rows client-side, so the walk runs
- * to completion.
- */
-export async function fetchAllLibraryRoots(
-  libraryId: number,
-  state?: string,
-  signal?: AbortSignal,
-): Promise<LibraryRoot[]> {
-  const roots: LibraryRoot[] = [];
-  let cursor: string | undefined;
-  for (;;) {
-    const page = await v2("GET /api/v2/libraries/roots", {
-      query: {
-        library_id: String(libraryId),
-        limit: LIBRARY_ROOTS_PAGE_LIMIT,
-        ...(state ? { state } : {}),
-        ...(cursor === undefined ? {} : { cursor }),
-      },
-      signal,
-    });
-    roots.push(...page.items.map(libraryRootFromV2));
-    if (!page.page?.has_more || !page.page.next_cursor) return roots;
-    cursor = page.page.next_cursor;
-  }
+export interface LibraryRootsPage {
+  roots: LibraryRoot[];
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
+  /** Roots matching the filter across every page, for the section header. */
+  total: number;
 }
 
-export function useLibraryRoots(libraryId?: number, state?: string) {
-  return useQuery({
-    queryKey: adminKeys.libraryRoots(libraryId, state),
-    queryFn: ({ signal }) => {
-      if (!libraryId) return Promise.resolve([] as LibraryRoot[]);
-      return fetchAllLibraryRoots(libraryId, state, signal);
+/**
+ * Fetches one page of a library's observed roots. Every page makes the server
+ * reload the library's overrides and item-group claims, so callers page on
+ * demand rather than walking the whole listing up front.
+ */
+export async function fetchLibraryRootsPage(
+  libraryId: number,
+  state?: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<LibraryRootsPage> {
+  const page = await v2("GET /api/v2/libraries/roots", {
+    query: {
+      library_id: String(libraryId),
+      limit: LIBRARY_ROOTS_PAGE_LIMIT,
+      ...(state ? { state } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
     },
-    enabled: !!libraryId,
+    signal,
+  });
+  return {
+    roots: page.items.map(libraryRootFromV2),
+    nextCursor: page.page?.has_more && page.page.next_cursor ? page.page.next_cursor : undefined,
+    total: page.total,
+  };
+}
+
+/**
+ * Pages a library's observed roots by cursor. The first page loads only while
+ * `enabled` holds (the diagnostics section that shows the rows is collapsed
+ * by default); further pages load through `fetchNextPage`.
+ */
+export function useLibraryRoots(
+  libraryId?: number,
+  state?: string,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: adminKeys.libraryRoots(libraryId, state),
+    queryFn: ({ pageParam, signal }) =>
+      fetchLibraryRootsPage(libraryId ?? 0, state, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled: enabled && !!libraryId,
     staleTime: ADMIN_STALE_TIME,
   });
+}
+
+/** Flattens the loaded pages of useLibraryRoots into one list. */
+export function flattenLibraryRoots(
+  data: { pages: LibraryRootsPage[] } | undefined,
+): LibraryRoot[] {
+  return data?.pages.flatMap((page) => page.roots) ?? [];
 }
 
 export function useUpsertLibraryRootOverride() {

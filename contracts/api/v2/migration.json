@@ -29441,7 +29441,7 @@
         "path": "/api/v2/libraries/roots",
         "operation_id": "listLibraryRoots"
       },
-      "notes": "Section catalog-libraries (acting_admin, demo-guarded). limit+offset became limit+opaque cursor (page.next_cursor, page.has_more); library_id is a string ID query; total kept for the admin UI; instants UTC ms."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). limit+offset became limit+opaque cursor (page.next_cursor, page.has_more); library_id is a string ID query; total kept for the admin UI; instants UTC ms. The web admin pages on demand (50 per page, first page when the Ambiguous Roots section opens). Follow-up: the handler reloads every root override and media_item_groups claim of the library on each page; scope those loads to the page's roots server-side."
     },
     {
       "listener": "api",
