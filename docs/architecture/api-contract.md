@@ -429,8 +429,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (144
-  `natural_idempotent`, 31 `unique_constraint`, 10 `domain_identity`, 10 `coalescing`, 1
+  tier-1 ported mutation rows (218 distinct operations) are classified (142
+  `natural_idempotent`, 31 `unique_constraint`, 12 `domain_identity`, 10 `coalescing`, 1
   `durable_dispatch`, 22 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
@@ -450,14 +450,16 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   metadata-match-queue retry, which schedules another run once the first is leased); each
   note says what the v2 port needs before clients may retry. The one
   `durable_dispatch` row (email-address verification) names the outbox the v2 port must add
-  before its retry is safe. Twelve rows carry a `DEFECT` note where v1 gates on
-  process-local state, fires an external effect inline, lacks the dedup its identity
-  implies, or re-runs a side effect a retry should not repeat (task run, collection sync,
-  trailer refresh, person refresh, stale-id rematch, email-address verification, invite-code
-  redemption during signup, playback route events, mark-watched history, watch-together
-  selection and promotion, metadata-match-queue retry); their v2 port must move the gate to
-  shared durable state, add the missing unique constraint, or make the repeat a no-op before
-  the declared strategy holds.
+  before its retry is safe. Fourteen rows carry a `DEFECT` note where v1 gates on
+  process-local state, fires an external effect inline, lacks the dedup or ordering its
+  identity implies, or re-runs a side effect a retry should not repeat (task run, collection
+  sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
+  invite-code redemption during signup, playback route events, mark-watched history,
+  watch-together selection and promotion, metadata-match-queue retry, playback session
+  progress and sync progress, whose last-write-wins update lets a delayed retry rewind a
+  newer report); their v2 port must move the gate to shared durable state, add the missing
+  unique constraint or event time, or make the repeat a no-op before the declared strategy
+  holds.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
   tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the

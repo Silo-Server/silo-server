@@ -35125,8 +35125,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Last-write position update on the session; converges."
+      "retry_safety": "domain_identity",
+      "retry_safety_note": "DEFECT: keyed by the playback session, but UpdateProgress replaces position and pause state unconditionally and persists last-write-wins, so a delayed retry of an older report rewinds past a newer heartbeat and repeats the scrobble. The v2 port must carry an event time and apply only if newer."
     },
     {
       "listener": "api",
@@ -43269,8 +43269,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; progressHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "SetProgressIfNewer keyed by profile and item; replays converge by event time."
+      "retry_safety": "domain_identity",
+      "retry_safety_note": "DEFECT: with updated_at the store applies SetProgressIfNewer, but without it (the web caller sends force_overwrite and no updated_at) the handler overwrites with a fresh server time, so a retried older payload replaces newer progress. The v2 port must require an event time on every item."
     },
     {
       "listener": "api",
