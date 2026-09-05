@@ -1,0 +1,12 @@
+{
+  "key": "subtitle_appearance",
+  "profile_id": "p-owner",
+  "global_value": "{\"fontSize\":\"large\"}",
+  "device_value": "{\"fontSize\":\"xxlarge\"}",
+  "effective_value": "{\"fontSize\":\"xxlarge\"}",
+  "has_device_override": true,
+  "device_id": "iphone-1",
+  "device_name": "Living room",
+  "updated_at": "2026-01-02T03:04:05.678Z"
+}
+
