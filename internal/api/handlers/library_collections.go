@@ -3241,10 +3241,19 @@ func requestCanAccessLibrary(r *http.Request, libraryID int) bool {
 // viewerCanAccessLibrary reports whether the viewer scope on the context
 // admits the library; a context without a scope or allowlist admits every
 // library.
+// viewerCanAccessLibrary reports whether the viewer scope on the context
+// admits the library. A restricted profile carries an allowlist (the
+// resolver has already subtracted its hidden libraries from it); an
+// unrestricted profile carries no allowlist and its hidden libraries in
+// DisabledLibraryIDs instead, so a nil allowlist alone must not admit
+// everything.
 func viewerCanAccessLibrary(ctx context.Context, libraryID int) bool {
 	scope, ok := access.GetScope(ctx)
-	if !ok || scope.AllowedLibraryIDs == nil {
+	if !ok {
 		return true
+	}
+	if scope.AllowedLibraryIDs == nil {
+		return !slices.Contains(scope.DisabledLibraryIDs, libraryID)
 	}
 	return slices.Contains(scope.AllowedLibraryIDs, libraryID)
 }

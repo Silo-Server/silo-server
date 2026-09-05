@@ -125,3 +125,30 @@ func TestLibraryViewsRefuseUnknownLibraryDB(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
 	}
 }
+
+// TestLibraryViewsRefuseHiddenLibrary: an unrestricted profile (no library
+// allowlist) that has hidden a library carries it in DisabledLibraryIDs, and
+// every profile-scoped library read refuses it as not_found while a library
+// the profile has not hidden still answers. The seams are built on nil
+// repositories, so the refusal must come from the scope check alone.
+func TestLibraryViewsRefuseHiddenLibrary(t *testing.T) {
+	policy := &access.Scope{DisabledLibraryIDs: []int{1}}
+	h := newTestHandler(t, scopedViewerDeps(t, policy, handlers.NewSectionHandler(nil, nil), handlers.NewLibraryCollectionHandler(nil, nil, nil, 0, nil, nil)))
+	for _, path := range []string{
+		"/api/v2/library/1/layout",
+		"/api/v2/library/1/sections",
+		"/api/v2/library/1/sections/continue_watching/items",
+		"/api/v2/library/1/collections/c1/items",
+		"/api/v2/library/1/user-collections",
+	} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
+	}
+	// The allowed neighbor is answered by the fakes, proving the refusal
+	// above was the hidden id and not a blanket one.
+	h = newTestHandler(t, scopedViewerDeps(t, policy, &fakeLibraryViews{}, &fakeLibraryViews{}))
+	for _, path := range []string{"/api/v2/library/2/layout", "/api/v2/library/2/sections", "/api/v2/library/2/collections/c1/items"} {
+		if rec := do(t, h, http.MethodGet, path, "", viewerHeaders()); rec.Code != 200 {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
