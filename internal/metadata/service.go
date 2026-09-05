@@ -114,7 +114,8 @@ type metadataRefreshDebtRepo interface {
 	MarkTargetSuccess(ctx context.Context, targetType, contentID string, priority int, reasonMask int64, nextRefreshAt time.Time) error
 	DeleteDebt(ctx context.Context, contentID string) error
 	DeleteTargetDebt(ctx context.Context, targetType, contentID string) error
-	DeleteEpisodeDebts(ctx context.Context, contentIDs []string) error
+	SnapshotEpisodeDebts(ctx context.Context, seriesID string) (map[string]string, error)
+	DeleteEpisodeDebts(ctx context.Context, contentIDs []string, versions map[string]string) error
 }
 
 // metadataLibraryRepo defines library membership methods used by
@@ -5573,6 +5574,19 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		return
 	}
 
+	// Observe debt versions before reading completeness so a concurrent refresh's
+	// new or updated debt cannot be cleared using a stale episode snapshot.
+	var debtVersions map[string]string
+	if s.refreshDebtRepo != nil {
+		var err error
+		debtVersions, err = s.refreshDebtRepo.SnapshotEpisodeDebts(ctx, seriesID)
+		if err != nil {
+			slog.WarnContext(ctx, "metadata: failed to snapshot episode refresh debt", "component", "metadata",
+				"series_id", seriesID, "error", err)
+			return
+		}
+	}
+
 	episodes, err := s.episodeRepo.ListBySeries(ctx, seriesID)
 	if err != nil {
 		slog.WarnContext(ctx, "metadata: failed to list series episodes for completeness check", "component", "metadata",
@@ -5593,10 +5607,8 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		}
 		actionableEpisodes = append(actionableEpisodes, episode)
 	}
-	// Clear the snapshot's complete episodes before other episode debt writes
-	// can delay cleanup and expose newer retries to the stale snapshot.
 	if len(completeEpisodeIDs) > 0 {
-		if err := s.refreshDebtRepo.DeleteEpisodeDebts(ctx, completeEpisodeIDs); err != nil {
+		if err := s.refreshDebtRepo.DeleteEpisodeDebts(ctx, completeEpisodeIDs, debtVersions); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to clear complete episode refresh debt", "component", "metadata",
 				"series_id", seriesID, "episode_count", len(completeEpisodeIDs), "error", err)
 		}
