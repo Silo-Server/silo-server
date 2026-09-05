@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -89,6 +90,7 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 	const batch = 100
 	afterID := 0
 	submitted, skipped, failed := 0, 0, 0
+	var lastErr error
 
 	for {
 		ids, err := t.candidates.CandidateLocalIntroFiles(ctx, minConfidence, afterID, batch)
@@ -115,6 +117,9 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 			outcomes, err := t.service.ContributeFile(ctx, file, markers.ContributeOptions{Auto: true})
 			if err != nil {
 				failed++
+				lastErr = err
+				slog.WarnContext(ctx, "contribute markers: resolve failed", "component", "taskmanager",
+					"file_id", id, "error", err)
 				continue
 			}
 			for _, o := range outcomes {
@@ -128,6 +133,7 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 					return nil
 				case markers.OutcomeStatusError:
 					failed++
+					lastErr = fmt.Errorf("provider %s: %s", o.Provider, o.Reason)
 				default:
 					submitted++
 				}
@@ -140,6 +146,12 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 
 	writeContributionTaskResult(progress, submitted, skipped, failed, 0)
 	progress.Report(100, fmt.Sprintf("Contributed %d, skipped %d, failed %d", submitted, skipped, failed))
+	if submitted == 0 && failed > 0 {
+		if lastErr != nil {
+			return fmt.Errorf("all %d contribution attempts failed, e.g. %w", failed, lastErr)
+		}
+		return fmt.Errorf("all %d contribution attempts failed", failed)
+	}
 	return nil
 }
 

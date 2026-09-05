@@ -257,6 +257,9 @@ func (s *ContributionService) contributeSegment(
 		} else {
 			row.Status = OutcomeStatusError
 		}
+		if row.Status != OutcomeStatusConflict {
+			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", err)
+		}
 		s.recordContribution(ctx, row)
 		if row.Status == OutcomeStatusConflict {
 			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusConflict, Reason: msg}, true
