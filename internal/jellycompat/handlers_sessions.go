@@ -97,9 +97,12 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 					method = compatSessionTranscode
 				}
 				dto.PlayState = &sessionPlayStateDTO{PositionTicks: secondsToTicks(native.Position), IsPaused: native.IsPaused, PlayMethod: method}
-				if len(play.MediaSources) > 0 {
-					dto.PlayState.AudioStreamIndex = play.MediaSources[0].SelectedAudioStreamIndex
-					dto.PlayState.SubtitleStreamIndex = play.MediaSources[0].SelectedSubtitleStreamIndex
+				for _, source := range play.MediaSources {
+					if source.FileID == native.MediaFileID {
+						dto.PlayState.AudioStreamIndex = source.SelectedAudioStreamIndex
+						dto.PlayState.SubtitleStreamIndex = source.SelectedSubtitleStreamIndex
+						break
+					}
 				}
 			}
 		}

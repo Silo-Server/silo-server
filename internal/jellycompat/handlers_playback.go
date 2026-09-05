@@ -3437,7 +3437,7 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 			external = external || strings.EqualFold(sub.Method, "External")
 		}
 		text := !playback.NeedsBurnIn(track.Codec)
-		if !embed && (!external || !text) {
+		if (track.External && !external) || (!embed && (!external || !text)) {
 			source.SupportsDirectPlay = false
 		}
 		if !text || !external || alwaysBurn {

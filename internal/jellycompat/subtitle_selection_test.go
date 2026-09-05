@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -513,6 +514,63 @@ func TestDownloadedSubtitleAlwaysBurnTransportConstraints(t *testing.T) {
 			index, found := defaultSubtitleStreamFromResponse(t, response)
 			if !found || index != 5 {
 				t.Fatalf("selection %d %v", index, found)
+			}
+		})
+	}
+}
+
+func TestPlaybackInfoSidecarRequiresExternalSubtitleDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		index    int
+		profiles string
+		status   int
+	}{
+		{"sidecar cannot be embedded in original", 3, `[{"Format":"srt","Method":"Embed"}]`, 400},
+		{"sidecar delivered externally", 3, `[{"Format":"srt","Method":"External"}]`, 200},
+		{"sidecar client accepts both", 3, `[{"Format":"srt","Method":"Embed"},{"Format":"srt","Method":"External"}]`, 200},
+		{"embedded original retains embed support", 2, `[{"Format":"srt","Method":"Embed"}]`, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, item := newSubtitleSelectionHandler(t)
+			body := fmt.Sprintf(`{"SubtitleStreamIndex":%d,"DeviceProfile":{"SubtitleProfiles":%s}}`, tc.index, tc.profiles)
+			req := httptest.NewRequest("POST", "/Items/"+item+"/PlaybackInfo", strings.NewReader(body))
+			route := chi.NewRouteContext()
+			route.URLParams.Add("id", item)
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, route)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"})
+			rr := httptest.NewRecorder()
+			h.HandlePlaybackInfo(rr, req.WithContext(ctx))
+			if rr.Code != tc.status {
+				t.Fatalf("status %d want %d: %s", rr.Code, tc.status, rr.Body.String())
+			}
+			if tc.status == 400 {
+				if !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
+					t.Fatalf("error: %s", rr.Body.String())
+				}
+				if _, _, ok := h.playbackStore.FindByRoute("token-1", item); ok {
+					t.Fatal("persisted unusable subtitle negotiation")
+				}
+				return
+			}
+			var response playbackInfoResponseDTO
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			source := response.MediaSources[0]
+			if !source.SupportsDirectPlay || source.DirectStreamURL == "" {
+				t.Fatalf("valid direct playback lost: %+v", source)
+			}
+			index, found := defaultSubtitleStreamFromResponse(t, response)
+			if !found || index != tc.index {
+				t.Fatalf("selection %d %v", index, found)
+			}
+			if tc.index == 3 {
+				for _, stream := range source.MediaStreams {
+					if stream.Type == "Subtitle" && stream.Index == 3 && (stream.DeliveryURL == "" || stream.DeliveryMethod != "External") {
+						t.Fatalf("sidecar delivery: %+v", stream)
+					}
+				}
 			}
 		})
 	}

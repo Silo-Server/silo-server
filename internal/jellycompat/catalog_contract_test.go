@@ -80,12 +80,16 @@ func TestEpisodePageFiltersNumericSeasonBeforeHydration(t *testing.T) {
 
 type upcomingContractRepo struct {
 	fakeSeasonEpisodeRepo
-	since         time.Time
-	filter        catalog.AccessFilter
-	offset, limit int
+	since              time.Time
+	filter             catalog.AccessFilter
+	offset, limit      int
+	seriesID, seasonID string
+	libraryID, calls   int
 }
 
-func (r *upcomingContractRepo) ListUpcoming(_ context.Context, since time.Time, _, _ string, _ int, limit, offset int, filter catalog.AccessFilter) ([]*models.Episode, int, error) {
+func (r *upcomingContractRepo) ListUpcoming(_ context.Context, since time.Time, seriesID, seasonID string, libraryID int, limit, offset int, filter catalog.AccessFilter) ([]*models.Episode, int, error) {
+	r.calls++
+	r.seriesID, r.seasonID, r.libraryID = seriesID, seasonID, libraryID
 	r.since = since
 	r.filter = filter
 	r.offset = offset
@@ -115,6 +119,48 @@ func TestUpcomingUsesPremiereWindowAndProfileScope(t *testing.T) {
 	}
 	if result.TotalRecordCount != 5 || len(result.Items) != 1 || result.Items[0].UserData != nil {
 		t.Fatalf("upcoming page: %+v", result)
+	}
+}
+
+func TestUpcomingSeriesScope(t *testing.T) {
+	codec := NewResourceIDCodec()
+	series := codec.EncodeStringID(EncodedIDItem, "series")
+	season := codec.EncodeStringID(EncodedIDSeason, "season")
+	library := codec.EncodeIntID(EncodedIDLibrary, 3)
+	for _, tt := range []struct {
+		name, query, wantSeries, wantSeason string
+		wantLibrary, wantStatus             int
+	}{
+		{"series", "SeriesId=" + series, "series", "", 0, 200},
+		{"case insensitive", "seriesid=" + series, "series", "", 0, 200},
+		{"parent series", "ParentId=" + series, "series", "", 0, 200},
+		{"matching parent", "SeriesId=" + series + "&ParentId=" + series, "series", "", 0, 200},
+		{"library intersection", "SeriesId=" + series + "&ParentId=" + library, "series", "", 3, 200},
+		{"season intersection", "SeriesId=" + series + "&ParentId=" + season, "series", "season", 0, 200},
+		{"malformed series", "SeriesId=invalid", "", "", 0, 404},
+		{"wrong kind", "SeriesId=" + season, "", "", 0, 404},
+		{"conflicting parent", "SeriesId=" + series + "&ParentId=" + codec.EncodeStringID(EncodedIDItem, "other"), "", "", 0, 404},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &upcomingContractRepo{}
+			h := &ItemsHandler{episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}}
+			req := httptest.NewRequest("GET", "/Shows/Upcoming?"+tt.query+"&StartIndex=2&Limit=1", nil)
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+			rec := httptest.NewRecorder()
+			h.HandleUpcoming(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantStatus != 200 {
+				if repo.calls != 0 {
+					t.Fatal("invalid scope reached catalog")
+				}
+				return
+			}
+			if repo.calls != 1 || repo.seriesID != tt.wantSeries || repo.seasonID != tt.wantSeason || repo.libraryID != tt.wantLibrary || repo.offset != 2 || repo.limit != 1 {
+				t.Fatalf("upcoming query scope lost: %+v", repo)
+			}
+		})
 	}
 }
 

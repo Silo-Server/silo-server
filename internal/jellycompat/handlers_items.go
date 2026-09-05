@@ -2139,6 +2139,14 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "NotFound", "Parent not found")
 		return
 	}
+	if raw := newCaseInsensitiveQuery(r.URL.Query()).Get("SeriesId"); raw != "" {
+		seriesID, err := decodeItemID(h.codec, strings.TrimSpace(raw))
+		if err != nil || seriesID == "" || (query.parentItemID != "" && query.parentItemID != seriesID) {
+			writeError(w, 404, "NotFound", "Series not found")
+			return
+		}
+		query.parentItemID = seriesID
+	}
 	since := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
 	episodes, total, err := repo.ListUpcoming(r.Context(), since, query.parentItemID, query.parentSeasonID, query.parentLibraryID, query.limit, query.startIndex, h.resolveAccessFilter(r.Context(), session))
 	if err != nil {

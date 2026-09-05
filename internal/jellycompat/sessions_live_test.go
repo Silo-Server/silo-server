@@ -131,3 +131,47 @@ func TestDurableSessionListingReadsOtherProcess(t *testing.T) {
 		t.Fatalf("deleted session remained visible %+v %v", sessions, err)
 	}
 }
+
+func TestSessionsStreamIndicesFollowActiveNativeFile(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		fileID                  int
+		wantAudio, wantSubtitle *int
+	}{
+		{"second version", 22, new(3), new(-1)},
+		{"first version", 11, new(1), new(2)},
+		{"unknown version", 33, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{ID: "own", CompatToken: "caller", UpstreamSessionID: "native",
+				MediaSources: []PlaybackMediaSource{
+					{FileID: 11, SelectedAudioStreamIndex: new(1), SelectedSubtitleStreamIndex: new(2)},
+					{FileID: 22, SelectedAudioStreamIndex: new(3), SelectedSubtitleStreamIndex: new(-1)},
+				}})
+			native := &playback.Session{ID: "native", UserID: 1, ProfileID: "profile", MediaFileID: tc.fileID}
+			h := &PlaybackHandler{playbackStore: store, sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{"native": native}}}
+			rec := httptest.NewRecorder()
+			h.HandleSessions(rec, viewerRequest("GET", "/", "", "", "", &Session{Token: "caller", StreamAppUserID: 1, ProfileID: "profile"}))
+			var result []sessionInfoDTO
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusOK || len(result) != 1 || result[0].PlayState == nil {
+				t.Fatalf("session response: %d %s", rec.Code, rec.Body.String())
+			}
+			state := result[0].PlayState
+			for _, field := range []struct {
+				name      string
+				got, want *int
+			}{
+				{"audio", state.AudioStreamIndex, tc.wantAudio},
+				{"subtitle", state.SubtitleStreamIndex, tc.wantSubtitle},
+			} {
+				if (field.got == nil) != (field.want == nil) || field.got != nil && *field.got != *field.want {
+					t.Fatalf("%s selection does not match active file: %s", field.name, rec.Body.String())
+				}
+			}
+		})
+	}
+}
