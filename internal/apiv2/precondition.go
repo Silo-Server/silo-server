@@ -1,0 +1,395 @@
+package apiv2
+
+import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"errors"
+	"net/http"
+	"reflect"
+	"strconv"
+	"strings"
+)
+
+// Optimistic concurrency on the wire (docs/architecture/api-contract.md,
+// "Optimistic concurrency"): RFC 9110 entity tags, the If-Match /
+// If-None-Match list grammar, strong and weak comparison, and the mapping of
+// each precondition outcome onto the problem catalog. Silo renders only
+// strong tags; the parser accepts weak ones because clients may send them.
+//
+// A guarded handler loads the resource first (a missing or hidden resource is
+// 404 before any precondition), evaluates If-Match with EvaluateIfMatch, then
+// performs the storage compare-and-update; a version mismatch there surfaces
+// as ErrStaleVersion and maps to the same 412 through StaleVersionProblem.
+
+// EntityTag is a parsed RFC 9110 entity-tag: the opaque text between the
+// quotes and whether the W/ weakness prefix was present.
+type EntityTag struct {
+	Opaque string
+	Weak   bool
+}
+
+// IsZero reports whether the tag is the zero value (no tag at all). An empty
+// opaque-tag ("") is a valid, non-zero tag only when it was parsed; Silo never
+// renders one.
+func (t EntityTag) IsZero() bool { return t.Opaque == "" && !t.Weak }
+
+// String renders the tag in wire form: `"opaque"` or `W/"opaque"`.
+func (t EntityTag) String() string {
+	if t.Weak {
+		return `W/"` + t.Opaque + `"`
+	}
+	return `"` + t.Opaque + `"`
+}
+
+// RenderETag produces the strong, quoted validator for one row version of one
+// resource in one representation scope. The scope keeps differently redacted
+// editor representations of the same row from sharing a validator; the
+// resource id keeps two resources at the same version from sharing one, so a
+// tag copied from one resource never authorizes a mutation of another. The
+// (scope, id) binding is a SHA-256 over a length-prefixed encoding: resource
+// ids may be client-selected, so a client must not be able to search for two
+// ids that share a binding the way a 64-bit non-cryptographic hash would
+// allow. The text is opaque to clients: a stable encoding, not the decimal
+// version.
+func RenderETag(scope, id string, version int64) EntityTag {
+	h := sha256.New()
+	var n [8]byte
+	binary.BigEndian.PutUint64(n[:], uint64(len(scope)))
+	_, _ = h.Write(n[:])
+	_, _ = h.Write([]byte(scope))
+	binary.BigEndian.PutUint64(n[:], uint64(len(id)))
+	_, _ = h.Write(n[:])
+	_, _ = h.Write([]byte(id))
+	digest := h.Sum(nil)
+	// 96 bits of the digest name the resource; XOR of the version with a
+	// further 64 bits is a bijection in version for a fixed resource, so two
+	// versions of one resource never collide and the text is not the
+	// version in plain decimal.
+	binding := hex.EncodeToString(digest[:12])
+	mask := binary.BigEndian.Uint64(digest[12:20])
+	return EntityTag{Opaque: binding + "." + strconv.FormatUint(uint64(version)^mask, 36)}
+}
+
+// ErrMalformedEntityTag is the parse failure ParseEntityTag and ParseETagList
+// return; callers map it to 400 malformed_request without echoing the value.
+var ErrMalformedEntityTag = errors.New("apiv2: malformed entity-tag")
+
+// ParseEntityTag parses one entity-tag (RFC 9110 8.8.3):
+//
+//	entity-tag = [ weak ] opaque-tag
+//	weak       = %s"W/"
+//	opaque-tag = DQUOTE *etagc DQUOTE
+//	etagc      = %x21 / %x23-7E / obs-text
+//
+// It accepts no surrounding whitespace; the list parser strips OWS.
+func ParseEntityTag(s string) (EntityTag, error) {
+	var t EntityTag
+	if strings.HasPrefix(s, "W/") {
+		t.Weak = true
+		s = s[2:]
+	}
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return EntityTag{}, ErrMalformedEntityTag
+	}
+	inner := s[1 : len(s)-1]
+	for i := 0; i < len(inner); i++ {
+		if !isETagChar(inner[i]) {
+			return EntityTag{}, ErrMalformedEntityTag
+		}
+	}
+	t.Opaque = inner
+	return t, nil
+}
+
+// isETagChar reports whether b is etagc: 0x21, 0x23-0x7E, or obs-text
+// (0x80-0xFF). It excludes DQUOTE, controls, SP and HTAB. The comma is etagc,
+// so a list cannot be split on commas; ParseETagList scans quoted elements.
+func isETagChar(b byte) bool {
+	return b == 0x21 || (b >= 0x23 && b <= 0x7E) || b >= 0x80
+}
+
+// ParseETagList parses an If-Match or If-None-Match field value:
+//
+//	If-Match = "*" / #entity-tag
+//
+// following the #-list rule of RFC 9110 5.6.1: elements separated by commas
+// with optional whitespace, empty elements tolerated. It returns star=true
+// for the bare wildcard; "*" among other elements is malformed. A field
+// whose elements are all empty yields an empty list and no error. Multiple
+// header lines must already be joined with commas: net/http keeps them as
+// separate values and Huma binds the input from Header.Get (first line
+// only), so the v2 router's joinPreconditionFields middleware folds repeated
+// If-Match / If-None-Match lines into one value before the input is bound.
+func ParseETagList(field string) (tags []EntityTag, star bool, err error) {
+	if strings.Trim(field, " \t") == "*" {
+		return nil, true, nil
+	}
+	i := 0
+	for i < len(field) {
+		// OWS, then either a separator (an empty element) or an entity-tag.
+		for i < len(field) && (field[i] == ' ' || field[i] == '\t') {
+			i++
+		}
+		if i == len(field) {
+			break
+		}
+		if field[i] == ',' {
+			i++
+			continue
+		}
+		start := i
+		if strings.HasPrefix(field[i:], "W/") {
+			i += 2
+		}
+		if i == len(field) || field[i] != '"' {
+			return nil, false, ErrMalformedEntityTag
+		}
+		i++
+		for i < len(field) && field[i] != '"' {
+			i++
+		}
+		if i == len(field) {
+			return nil, false, ErrMalformedEntityTag
+		}
+		i++ // closing DQUOTE
+		t, perr := ParseEntityTag(field[start:i])
+		if perr != nil {
+			return nil, false, perr
+		}
+		tags = append(tags, t)
+		// After an element: OWS, then a comma or the end of the field.
+		for i < len(field) && (field[i] == ' ' || field[i] == '\t') {
+			i++
+		}
+		if i < len(field) {
+			if field[i] != ',' {
+				return nil, false, ErrMalformedEntityTag
+			}
+			i++
+		}
+	}
+	return tags, false, nil
+}
+
+// StrongMatch is RFC 9110 8.8.3.2 strong comparison: both tags are strong
+// and their opaque text is byte-equal.
+func StrongMatch(a, b EntityTag) bool {
+	return !a.Weak && !b.Weak && a.Opaque == b.Opaque
+}
+
+// WeakMatch is RFC 9110 8.8.3.2 weak comparison: the opaque text is
+// byte-equal regardless of weakness.
+func WeakMatch(a, b EntityTag) bool {
+	return a.Opaque == b.Opaque
+}
+
+const (
+	ifMatchField     = "If-Match"
+	ifNoneMatchField = "If-None-Match"
+	// emptyETagList is the spelling joinPreconditionFields gives a present
+	// but empty precondition field: one empty list element, which the
+	// RFC 9110 5.6.1 #-rule tolerates and ParseETagList reads as no tags.
+	emptyETagList = ","
+	etagField     = "ETag"
+)
+
+// EvaluateIfMatch decides a guarded mutation's precondition once the resource
+// is known to exist. It returns nil when the field is "*" or lists a strong
+// tag equal to current; 428 precondition_required when the field is absent;
+// 412 precondition_failed carrying the current ETag when no tag matches (a
+// weak tag never matches); 400 malformed_request when the field does not
+// parse. The rejected value is never echoed.
+func EvaluateIfMatch(ifMatch string, current EntityTag) *Problem {
+	if ifMatch == "" {
+		return NewProblem(TypePreconditionRequired,
+			"This operation requires the If-Match header field carrying the resource's current ETag.")
+	}
+	tags, star, err := ParseETagList(ifMatch)
+	if err != nil {
+		return malformedETagList(ifMatchField)
+	}
+	if star {
+		return nil
+	}
+	for _, t := range tags {
+		if StrongMatch(t, current) {
+			return nil
+		}
+	}
+	return StaleVersionProblem(current)
+}
+
+// EvaluateIfNoneMatch evaluates a conditional read. It reports matched=true
+// when the field is "*" or any listed tag weakly matches current, in which
+// case the handler answers 304 (see NotModified). A field that does not
+// parse is 400 malformed_request; an absent field matches nothing.
+func EvaluateIfNoneMatch(ifNoneMatch string, current EntityTag) (matched bool, p *Problem) {
+	if ifNoneMatch == "" {
+		return false, nil
+	}
+	tags, star, err := ParseETagList(ifNoneMatch)
+	if err != nil {
+		return false, malformedETagList(ifNoneMatchField)
+	}
+	if star {
+		return true, nil
+	}
+	for _, t := range tags {
+		if WeakMatch(t, current) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// EvaluateCreateOnly evaluates If-None-Match on a write with a
+// client-selected resource ID. existing is nil when no resource is stored at
+// that ID. "*" against an existing resource, or any weak match against it,
+// is 412 precondition_failed with the existing ETag; an absent field is nil;
+// a field that does not parse is 400 malformed_request.
+func EvaluateCreateOnly(ifNoneMatch string, existing *EntityTag) *Problem {
+	if ifNoneMatch == "" {
+		return nil
+	}
+	tags, star, err := ParseETagList(ifNoneMatch)
+	if err != nil {
+		return malformedETagList(ifNoneMatchField)
+	}
+	if existing == nil {
+		return nil
+	}
+	if star {
+		return NewProblem(TypePreconditionFailed, "A resource already exists at this identifier.").
+			WithHeader(etagField, existing.String())
+	}
+	for _, t := range tags {
+		if WeakMatch(t, *existing) {
+			return NewProblem(TypePreconditionFailed, "A resource already exists at this identifier.").
+				WithHeader(etagField, existing.String())
+		}
+	}
+	return nil
+}
+
+func malformedETagList(field string) *Problem {
+	return NewProblem(TypeMalformedRequest, "The "+field+" header field is not a valid entity-tag list.").
+		WithErrors(ProblemError{Location: "header." + field, Code: "invalid_entity_tag",
+			Detail: "expected \"*\" or a comma-separated list of quoted entity-tags"})
+}
+
+// ErrStaleVersion is what a storage compare-and-update returns when the row
+// version it was told to expect is no longer current. The handler maps it
+// with StaleVersionProblem; it never reaches the wire as a 500.
+var ErrStaleVersion = errors.New("apiv2: row version is stale")
+
+// EvaluateGuardedPreconditions evaluates a guarded mutation's preconditions
+// in RFC 9110 13.2.2 order once the resource is known to exist: If-Match
+// first (nil, 428, 412 with the current ETag, or 400), then If-None-Match,
+// which on a state-changing request answers 412 when any listed tag weakly
+// matches the current representation or the field is "*". A handler whose
+// input binds both fields calls this instead of EvaluateIfMatch alone.
+func EvaluateGuardedPreconditions(ifMatch, ifNoneMatch string, current EntityTag) *Problem {
+	if p := EvaluateIfMatch(ifMatch, current); p != nil {
+		return p
+	}
+	if ifNoneMatch == "" {
+		return nil
+	}
+	tags, star, err := ParseETagList(ifNoneMatch)
+	if err != nil {
+		return malformedETagList(ifNoneMatchField)
+	}
+	if star {
+		return NewProblem(TypePreconditionFailed,
+			"If-None-Match: * refuses the mutation because the resource exists.").
+			WithHeader(etagField, current.String())
+	}
+	for _, t := range tags {
+		if WeakMatch(t, current) {
+			return NewProblem(TypePreconditionFailed,
+				"A tag named by If-None-Match matches the current representation; the mutation was not applied.").
+				WithHeader(etagField, current.String())
+		}
+	}
+	return nil
+}
+
+// EvaluateReadPreconditions evaluates a conditional read's preconditions in
+// RFC 9110 13.2.2 order: an optional If-Match first (an absent field passes;
+// no tag matching the current representation is 412 with the current ETag;
+// a malformed field is 400), then If-None-Match, whose weak match reports
+// notModified. A handler binds both fields and calls this instead of
+// EvaluateIfNoneMatch alone.
+func EvaluateReadPreconditions(ifMatch, ifNoneMatch string, current EntityTag) (notModified bool, p *Problem) {
+	if ifMatch != "" {
+		if p := EvaluateIfMatch(ifMatch, current); p != nil {
+			return false, p
+		}
+	}
+	return EvaluateIfNoneMatch(ifNoneMatch, current)
+}
+
+// EvaluateCreateOnlyPreconditions evaluates a create-only write's
+// preconditions in RFC 9110 13.2.2 order: an optional If-Match first (an
+// absent field passes; against a missing resource any If-Match, even "*",
+// is 412 with no ETag; against an existing one a non-matching tag is 412
+// with its ETag), then the create-only If-None-Match.
+func EvaluateCreateOnlyPreconditions(ifMatch, ifNoneMatch string, existing *EntityTag) *Problem {
+	if ifMatch != "" {
+		if existing == nil {
+			if _, _, err := ParseETagList(ifMatch); err != nil {
+				return malformedETagList(ifMatchField)
+			}
+			return NewProblem(TypePreconditionFailed, "If-Match names a resource, but none exists at this identifier.")
+		}
+		if p := EvaluateIfMatch(ifMatch, *existing); p != nil {
+			return p
+		}
+	}
+	return EvaluateCreateOnly(ifNoneMatch, existing)
+}
+
+// IsOverwrite reports whether an If-Match field is the wildcard: the caller
+// asked for a deliberate overwrite, so a compare-and-update that loses a race
+// to a writer who left the resource in place is re-applied against the
+// latest version rather than answered 412. A field that does not parse is
+// not an overwrite; EvaluateIfMatch has already rejected it.
+func IsOverwrite(ifMatch string) bool {
+	_, star, err := ParseETagList(ifMatch)
+	return err == nil && star
+}
+
+// StaleVersionProblem is the 412 precondition_failed a lost
+// compare-and-update race produces, whichever precondition admitted the
+// request (an exact If-Match, If-Match: *, or a create-only If-None-Match: *).
+// current is the ETag the caller may see; pass the zero value to omit the
+// header when the caller may not.
+func StaleVersionProblem(current EntityTag) *Problem {
+	p := NewProblem(TypePreconditionFailed,
+		"The resource changed while the request was being applied; fetch it again and retry against the current ETag.")
+	if !current.IsZero() {
+		p = p.WithHeader(etagField, current.String())
+	}
+	return p
+}
+
+// NotModified turns a conditional read's output into the 304 answer: Status
+// becomes 304, the ETag header field the current tag, and the body stays
+// zero; Huma writes no body on 304 and the listener drops Content-Type. The
+// output shape (a direct int Status and a direct string `header:"ETag"`) is
+// what Register requires of a Conditional operation, so a type that reaches
+// here has both.
+func NotModified[O any](out *O, current EntityTag) *O {
+	v := reflect.ValueOf(out).Elem()
+	v.FieldByName("Status").SetInt(http.StatusNotModified)
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		// Direct exported fields only, the same rule Register applies: Huma
+		// writes no header from an embedded struct or an unexported field.
+		if f := t.Field(i); !f.Anonymous && f.IsExported() && strings.EqualFold(f.Tag.Get("header"), etagField) {
+			v.Field(i).SetString(current.String())
+		}
+	}
+	return out
+}
