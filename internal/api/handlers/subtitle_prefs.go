@@ -74,24 +74,32 @@ func (h *SubtitlePrefHandler) HandleGetSubtitlePref(w http.ResponseWriter, r *ht
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	pref, err := h.GetSubtitlePreference(r.Context(), userID, profileID, seriesID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
 
-	pref, err := store.GetSubtitlePreference(r.Context(), profileID, seriesID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
-		return
-	}
+	writeJSON(w, http.StatusOK, toSubtitlePrefResponse(pref))
+}
 
+// GetSubtitlePreference is the read v1 GET /subtitle-prefs/{series_id} and
+// v2 getSubtitlePreference share. A failure is an *APIError; a profile with
+// no preference for the series is 404 not_found.
+func (h *SubtitlePrefHandler) GetSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
+	var none userstore.SubtitlePreference
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	pref, err := store.GetSubtitlePreference(ctx, profileID, seriesID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
 	if pref == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Subtitle preference not found")
-		return
+		return none, apiError(http.StatusNotFound, "not_found", "Subtitle preference not found")
 	}
-
-	writeJSON(w, http.StatusOK, toSubtitlePrefResponse(*pref))
+	return *pref, nil
 }
 
 // HandleSetSubtitlePref handles PUT /subtitle-prefs/{series_id}.
@@ -111,12 +119,6 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
 	pref := userstore.SubtitlePreference{
 		ProfileID:            profileID,
 		SeriesID:             seriesID,
@@ -129,14 +131,34 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 	if req.ShowForcedSubtitles != nil {
 		pref.ShowForcedSubtitles = *req.ShowForcedSubtitles
 		pref.HasShowForcedSubtitles = true
-	} else {
-		// This endpoint replaces the combined subtitle-preference row. Preserve
-		// an existing forced-subtitle override when clients update only the track
-		// selection; otherwise an omitted optional field silently resets it.
-		existing, getErr := store.GetSubtitlePreference(r.Context(), profileID, seriesID)
+	}
+
+	if err := h.SetSubtitlePreference(r.Context(), userID, pref); err != nil {
+		writeAPIError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetSubtitlePreference is the write v1 PUT /subtitle-prefs/{series_id} and
+// v2 updateSubtitlePreference share: the legacy row and the canonical
+// profile_series rows commit together, and a user_settings.changed event
+// follows each canonical row that moved. The row is replaced whole, except
+// that a preference without a forced-subtitle override
+// (!HasShowForcedSubtitles) keeps the override already stored, so a client
+// updating only the track selection does not silently reset it. A failure is
+// an *APIError; a value the canonical contract refuses is a 400 bad_request.
+func (h *SubtitlePrefHandler) SetSubtitlePreference(ctx context.Context, userID int, pref userstore.SubtitlePreference) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+
+	if !pref.HasShowForcedSubtitles {
+		existing, getErr := store.GetSubtitlePreference(ctx, pref.ProfileID, pref.SeriesID)
 		if getErr != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to preserve subtitle preference")
-			return
+			return apiError(http.StatusInternalServerError, "internal_error", "Failed to preserve subtitle preference")
 		}
 		if existing != nil && existing.HasShowForcedSubtitles {
 			pref.ShowForcedSubtitles = existing.ShowForcedSubtitles
@@ -149,19 +171,16 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 	// legacy row and the canonical rows disagreeing.
 	sync, err := planSeriesSubtitleSync(pref)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
-	if err := h.applySeriesSubtitleSync(r.Context(), store, userID, profileID, seriesID, sync,
+	if err := h.applySeriesSubtitleSync(ctx, store, userID, pref.ProfileID, pref.SeriesID, sync,
 		func(tx userstore.PreferenceSettingsWriter) error {
-			return tx.SetSubtitlePreference(r.Context(), pref)
+			return tx.SetSubtitlePreference(ctx, pref)
 		}); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store subtitle preference")
-		return
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to store subtitle preference")
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // HandleDeleteSubtitlePref handles DELETE /subtitle-prefs/{series_id}.
@@ -175,27 +194,36 @@ func (h *SubtitlePrefHandler) HandleDeleteSubtitlePref(w http.ResponseWriter, r 
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.DeleteSubtitlePreference(r.Context(), userID, profileID, seriesID); err != nil {
+		writeAPIError(w, err)
 		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteSubtitlePreference is the delete v1 DELETE /subtitle-prefs/{series_id}
+// and v2 deleteSubtitlePreference share. Deleting a preference that does not
+// exist succeeds. A failure is an *APIError.
+func (h *SubtitlePrefHandler) DeleteSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
 	// Deleting the legacy row means "no per-series preference", spelled
 	// canonically as the absence of the profile_series rows.
-	if err := h.applySeriesSubtitleSync(r.Context(), store, userID, profileID, seriesID,
+	if err := h.applySeriesSubtitleSync(ctx, store, userID, profileID, seriesID,
 		[]profileSettingSync{
 			{key: settingskeys.PlaybackSubtitleLanguage},
 			{key: settingskeys.PlaybackSubtitleMode},
 			{key: settingskeys.PlaybackShowForcedSubtitles},
 		}, func(tx userstore.PreferenceSettingsWriter) error {
-			return tx.DeleteSubtitlePreference(r.Context(), profileID, seriesID)
+			return tx.DeleteSubtitlePreference(ctx, profileID, seriesID)
 		}); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete subtitle preference")
-		return
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete subtitle preference")
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // --- Canonical sync ---

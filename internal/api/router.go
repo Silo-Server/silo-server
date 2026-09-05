@@ -1898,6 +1898,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if adminHandler != nil {
 		v2deps.AdminUsers = adminHandler
 	}
+	if audioPrefHandler != nil {
+		v2deps.AudioPreferences = audioPrefHandler
+	}
+	if libraryPlaybackPrefHandler != nil {
+		v2deps.LibraryPlaybackPreferences = libraryPlaybackPrefHandler
+	}
+	if subtitlePrefHandler != nil {
+		v2deps.SubtitlePreferences = subtitlePrefHandler
+	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -56,24 +57,32 @@ func (h *AudioPrefHandler) HandleGetAudioPref(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	pref, err := h.GetAudioPreference(r.Context(), userID, profileID, seriesID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
 
-	pref, err := store.GetAudioPreference(r.Context(), profileID, seriesID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get audio preference")
-		return
-	}
+	writeJSON(w, http.StatusOK, toAudioPrefResponse(pref))
+}
 
+// GetAudioPreference is the read v1 GET /audio-prefs/{series_id} and v2
+// getAudioPreference share. A failure is an *APIError; a profile with no
+// preference for the series is 404 not_found.
+func (h *AudioPrefHandler) GetAudioPreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.AudioPreference, error) {
+	var none userstore.AudioPreference
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	pref, err := store.GetAudioPreference(ctx, profileID, seriesID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get audio preference")
+	}
 	if pref == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Audio preference not found")
-		return
+		return none, apiError(http.StatusNotFound, "not_found", "Audio preference not found")
 	}
-
-	writeJSON(w, http.StatusOK, toAudioPrefResponse(*pref))
+	return *pref, nil
 }
 
 // HandleSetAudioPref handles PUT /audio-prefs/{series_id}.
@@ -93,37 +102,45 @@ func (h *AudioPrefHandler) HandleSetAudioPref(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	pref := userstore.AudioPreference{
+	if err := h.SetAudioPreference(r.Context(), userID, userstore.AudioPreference{
 		ProfileID:       profileID,
 		SeriesID:        seriesID,
 		AudioTrackIndex: req.AudioTrackIndex,
 		AudioLanguage:   req.AudioLanguage,
 		TrackSignature:  req.TrackSignature,
-	}
-	language := req.AudioLanguage
-	sync, err := appendStringSync(nil, settingskeys.PlaybackAudioLanguage, &language)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	if err := applyLegacyPreferenceSettingsSync(r.Context(), store, h.EventsHub, userID,
-		userstore.SettingIdentity{
-			Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
-		}, sync, func(tx userstore.PreferenceSettingsWriter) error {
-			return tx.SetAudioPreference(r.Context(), pref)
-		}); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store audio preference")
+	}); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetAudioPreference is the write v1 PUT /audio-prefs/{series_id} and v2
+// updateAudioPreference share: the legacy row and the canonical
+// profile_series audio-language row commit together, and a
+// user_settings.changed event follows each canonical row that moved. A
+// failure is an *APIError; a language the canonical contract refuses is a
+// 400 bad_request naming audio_language.
+func (h *AudioPrefHandler) SetAudioPreference(ctx context.Context, userID int, pref userstore.AudioPreference) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	language := pref.AudioLanguage
+	sync, err := appendStringSync(nil, settingskeys.PlaybackAudioLanguage, &language)
+	if err != nil {
+		return fieldError("audio_language", err.Error())
+	}
+	if err := applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID,
+		userstore.SettingIdentity{
+			Scope: settingscontract.ScopeProfileSeries, ProfileID: pref.ProfileID, SeriesID: pref.SeriesID,
+		}, sync, func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.SetAudioPreference(ctx, pref)
+		}); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to store audio preference")
+	}
+	return nil
 }
 
 // HandleDeleteAudioPref handles DELETE /audio-prefs/{series_id}.
@@ -137,24 +154,32 @@ func (h *AudioPrefHandler) HandleDeleteAudioPref(w http.ResponseWriter, r *http.
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	if err := applyLegacyPreferenceSettingsSync(r.Context(), store, h.EventsHub, userID,
-		userstore.SettingIdentity{
-			Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
-		}, []profileSettingSync{{key: settingskeys.PlaybackAudioLanguage}},
-		func(tx userstore.PreferenceSettingsWriter) error {
-			return tx.DeleteAudioPreference(r.Context(), profileID, seriesID)
-		}); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete audio preference")
+	if err := h.DeleteAudioPreference(r.Context(), userID, profileID, seriesID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteAudioPreference is the delete v1 DELETE /audio-prefs/{series_id} and
+// v2 deleteAudioPreference share. Deleting a preference that does not exist
+// succeeds. A failure is an *APIError.
+func (h *AudioPrefHandler) DeleteAudioPreference(ctx context.Context, userID int, profileID, seriesID string) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID,
+		userstore.SettingIdentity{
+			Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
+		}, []profileSettingSync{{key: settingskeys.PlaybackAudioLanguage}},
+		func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.DeleteAudioPreference(ctx, profileID, seriesID)
+		}); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete audio preference")
+	}
+	return nil
 }
 
 // --- Helpers ---
