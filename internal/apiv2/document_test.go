@@ -688,6 +688,30 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 				return nil, nil
 			})
 		}, "must not declare"},
+		"guarded with a default on If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *struct {
+				IfMatch     string `header:"If-Match" default:"*"`
+				IfNoneMatch string `header:"If-None-Match"`
+			}) (*okOut, error) {
+				return nil, nil
+			})
+		}, "If-Match"},
+		"guarded with framework-required If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *struct {
+				IfMatch     string `header:"If-Match" required:"true"`
+				IfNoneMatch string `header:"If-None-Match"`
+			}) (*okOut, error) {
+				return nil, nil
+			})
+		}, "If-Match"},
+		"conditional with a pattern on If-None-Match": {conditional(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *struct {
+				IfMatch     string `header:"If-Match"`
+				IfNoneMatch string `header:"If-None-Match" pattern:"^\"[^\"]*\"$"`
+			}) (*okOut, error) {
+				return nil, nil
+			})
+		}, "If-None-Match"},
 		"guarded with unexported If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *unexportedIn) (*okOut, error) { return nil, nil })
 		}, "If-Match"},

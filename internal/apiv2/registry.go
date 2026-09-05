@@ -403,9 +403,33 @@ func declaresHeaderString(t reflect.Type, name string) bool {
 		if f.Type.Kind() != reflect.String || f.Tag.Get("header") != name {
 			return false
 		}
+		if bindsBeforeHandler(f) {
+			// A Huma binding tag would decide the field before the handler
+			// runs: default:"*" turns an absent If-Match into an overwrite
+			// instead of the documented 428, required:"true" answers a
+			// framework 422 in place of it, and a validation tag could
+			// reject a well-formed entity-tag list. The handler is the only
+			// source of 428/412.
+			return false
+		}
 		matches++
 	}
 	return matches == 1
+}
+
+// preconditionBindingTags are the Huma binding and validation tags that act
+// on a header value before the handler sees it.
+var preconditionBindingTags = []string{"default", codeRequired, "enum", "pattern", "minLength", "maxLength", "format"}
+
+// bindsBeforeHandler reports whether a header field carries one of
+// preconditionBindingTags.
+func bindsBeforeHandler(f reflect.StructField) bool {
+	for _, tag := range preconditionBindingTags {
+		if _, ok := f.Tag.Lookup(tag); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // declaresPathParam reports whether a route path declares {name} as one whole

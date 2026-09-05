@@ -362,7 +362,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
   create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
   output. Header fields and the conditional `Status` count only as direct exported struct
-  fields spelled canonically (`If-Match`, `If-None-Match`, `ETag`), and exactly one field
+  fields spelled canonically (`If-Match`, `If-None-Match`, `ETag`) with no Huma binding or
+  validation tag (a `default` would turn an absent `If-Match` into an overwrite instead of
+  `428`, a `required` would answer a framework `422` in its place), and exactly one field
   may bind a given header: Huma binds and writes no header
   from an embedded struct or an unexported field, and a second binding of another type
   would be written last or panic the 304 path, so either shape is refused rather than
