@@ -19,6 +19,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -92,6 +94,12 @@ type Dependencies struct {
 	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
+	// ProfileSections reads and writes a profile's home-row overrides
+	// (*handlers.SectionHandler).
+	ProfileSections ProfileSectionService
+	// SectionFlags reads the profile-facing sections settings
+	// (*handlers.SectionSettingsHandler).
+	SectionFlags SectionFlagService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -365,9 +373,27 @@ type ProgressService interface {
 	ListProgressPage(ctx context.Context, userID int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error)
 }
 
-// ProfileService is the slice of *handlers.ProfileHandler updateProfile uses.
+// ProfileService is the slice of *handlers.ProfileHandler the profile
+// operations use.
 type ProfileService interface {
+	ListProfiles(ctx context.Context, userID int) (handlers.ProfileListView, error)
+	CreateProfile(ctx context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error)
 	UpdateProfile(ctx context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error)
+}
+
+// ProfileSectionService is the slice of *handlers.SectionHandler the
+// profile section-override operations use.
+type ProfileSectionService interface {
+	ListProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) ([]userstore.SectionOverride, error)
+	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
+	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
+	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
+}
+
+// SectionFlagService is the slice of *handlers.SectionSettingsHandler
+// getProfileSectionFlags uses.
+type SectionFlagService interface {
+	AllowProfileCustomSections(ctx context.Context) bool
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile

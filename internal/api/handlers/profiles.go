@@ -52,7 +52,9 @@ func NewProfileHandler(provider userstore.UserStoreProvider) *ProfileHandler {
 
 // --- Request/Response types ---
 
-type createProfileRequest struct {
+// ProfileCreateRequest is the v1 POST /profiles body; v2 createProfile lowers
+// its own body onto it.
+type ProfileCreateRequest struct {
 	Name                       string `json:"name"`
 	Avatar                     string `json:"avatar,omitempty"`
 	PIN                        string `json:"pin,omitempty"`
@@ -125,7 +127,8 @@ type ProfileView struct {
 	UpdatedAt                  string `json:"updated_at"`
 }
 
-type profileListResponse struct {
+// ProfileListView is the v1 GET /profiles response.
+type ProfileListView struct {
 	Profiles            []ProfileView `json:"profiles"`
 	AvatarUploadEnabled bool          `json:"avatar_upload_enabled"`
 }
@@ -213,24 +216,30 @@ func (h *ProfileHandler) HandleListProfiles(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	resp, err := h.ListProfiles(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
-
-	profiles, err := store.ListProfiles(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-		return
-	}
-
-	resp := profileListResponse{
-		Profiles:            h.toProfileResponses(r.Context(), store, profiles),
-		AvatarUploadEnabled: h.AvatarStore != nil,
-	}
-
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListProfiles lists the account's household. v1 GET /profiles and v2
+// listProfiles both call it; a failure is an *APIError carrying the v1
+// status, code and message.
+func (h *ProfileHandler) ListProfiles(ctx context.Context, userID int) (ProfileListView, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return ProfileListView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	profiles, err := store.ListProfiles(ctx)
+	if err != nil {
+		return ProfileListView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
+	}
+	return ProfileListView{
+		Profiles:            h.toProfileResponses(ctx, store, profiles),
+		AvatarUploadEnabled: h.AvatarStore != nil,
+	}, nil
 }
 
 // HandleCreateProfile handles POST /profiles.
@@ -241,45 +250,79 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var req createProfileRequest
+	var req ProfileCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-
-	if strings.TrimSpace(req.Name) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile name is required")
+	created, err := h.CreateProfile(r.Context(), ProfileCreateCommand{
+		UserID:          userID,
+		ActiveProfileID: activeProfileIDOf(r),
+		Request:         req,
+		VerifyProfile: func(id string) error {
+			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+		},
+	})
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
+			writeProfileManagementPermissionError(w, apiErr.cause)
+			return
+		}
+		writeAPIError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// ProfileCreateCommand is a profile creation with its request already parsed
+// and its caller already reduced to an identity.
+type ProfileCreateCommand struct {
+	UserID int
+	// ActiveProfileID is the profile the caller acts as ("" when none).
+	ActiveProfileID string
+	Request         ProfileCreateRequest
+	// VerifyProfile confirms a PIN-locked primary profile is verified for
+	// this request; it returns access.ErrProfileUnverified when it is not.
+	VerifyProfile func(profileID string) error
+}
+
+// CreateProfile creates a household profile: validation, the bootstrap or
+// household-manager authorization, the profile limit, the name-conflict
+// check, the atomic column and canonical-settings write, and the re-read.
+// v1 POST /profiles and v2 createProfile both call it; a failure is an
+// *APIError carrying the v1 status, code and message.
+func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCommand) (ProfileView, error) {
+	var none ProfileView
+	req := cmd.Request
+	userID := cmd.UserID
+	if strings.TrimSpace(req.Name) == "" {
+		return none, fieldError("name", "Profile name is required")
 	}
 	avatarRef, err := normalizePresetAvatarReference(req.Avatar)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+		return none, fieldError("avatar", err.Error())
 	}
 
 	maxPlaybackQuality, ok := access.ParsePlaybackQualityPreset(req.MaxPlaybackQuality)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
-		return
+		return none, fieldError("max_playback_quality", "Invalid max_playback_quality")
 	}
 
 	// Planned before anything is written: a preference value the canonical
 	// store would refuse must fail the request while it is still a no-op.
 	settingsSync, err := planCreateProfileSettingsSync(req)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	existingProfiles, err := store.ListProfiles(r.Context())
+	existingProfiles, err := store.ListProfiles(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
 	}
 	// The very first profile on a user can be bootstrapped without
 	// primary/admin privileges (it becomes the primary); everything after
@@ -287,56 +330,36 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 	// being primary.
 	isBootstrap := len(existingProfiles) == 0
 	if !isBootstrap {
-		allowed, err := h.canManageHouseholdProfiles(r, store)
+		allowed, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
 		if err != nil {
-			writeProfileManagementPermissionError(w, err)
-			return
+			return none, profileManagementError(err)
 		}
 		if !allowed {
-			writeError(w, http.StatusForbidden, "forbidden", "Profile management requires the primary profile or admin access")
-			return
+			return none, apiError(http.StatusForbidden, "forbidden", "Profile management requires the primary profile or admin access")
 		}
 	}
 	// Access-policy fields only make sense when set by a manager on a managed
 	// profile. On bootstrap the caller is becoming primary themselves, so non-
 	// admin bootstrap creations must leave those fields at their defaults.
-	if isBootstrap && !apimw.IsAdmin(r.Context()) &&
+	if isBootstrap && !apimw.IsAdmin(ctx) &&
 		(req.IsChild || req.MaxContentRating != "" ||
 			req.LibraryRestrictionsEnabled || len(req.AllowedLibraryIDs) > 0 ||
 			req.MaxPlaybackQuality != "") {
-		writeError(
-			w,
-			http.StatusForbidden,
-			"forbidden",
-			"Profile access settings require the primary profile or admin access",
-		)
-		return
+		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 	}
 	if h.UserRepo != nil {
-		user, err := h.UserRepo.GetByID(r.Context(), userID)
+		user, err := h.UserRepo.GetByID(ctx, userID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user")
-			return
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
 		}
 		if user != nil && user.MaxProfiles >= 1 && len(existingProfiles) >= user.MaxProfiles {
-			writeError(
-				w,
-				http.StatusConflict,
-				"profile_limit_reached",
-				fmt.Sprintf("This account has reached its profile limit (%d)", user.MaxProfiles),
-			)
-			return
+			return none, apiError(http.StatusConflict, "profile_limit_reached",
+				fmt.Sprintf("This account has reached its profile limit (%d)", user.MaxProfiles))
 		}
 	}
 
 	if profileNameConflicts(existingProfiles, req.Name, "") {
-		writeError(
-			w,
-			http.StatusConflict,
-			"name_conflict",
-			"A profile with this name already exists",
-		)
-		return
+		return none, apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
 	}
 
 	showForcedSubtitles := true
@@ -368,53 +391,47 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := h.createProfileWithSettingsSync(r.Context(), store, userID, profile, settingsSync); err != nil {
-		slog.ErrorContext(r.Context(), "profile create failed to sync canonical settings",
+	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 	}
 
 	// Fetch the created profile directly by ID (no race condition).
-	createdPtr, err := store.GetProfile(r.Context(), profileID)
+	createdPtr, err := store.GetProfile(ctx, profileID)
 	if err != nil || createdPtr == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve created profile")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve created profile")
 	}
 	created := *createdPtr
 
 	// If PIN was provided, update the profile to set it.
 	if req.PIN != "" {
-		if err := store.UpdateProfile(r.Context(), created.ID, userstore.UpdateProfileInput{
+		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
 			PIN: &req.PIN,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
-			return
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
 		}
 		// Re-read the profile to get the updated state.
-		p, err := store.GetProfile(r.Context(), created.ID)
+		p, err := store.GetProfile(ctx, created.ID)
 		if err != nil || p == nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after PIN set")
-			return
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after PIN set")
 		}
 		created = *p
 	}
 	if req.ShowForcedSubtitles != nil && !*req.ShowForcedSubtitles {
-		if err := store.UpdateProfile(r.Context(), created.ID, userstore.UpdateProfileInput{
+		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
 			ShowForcedSubtitles: req.ShowForcedSubtitles,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set forced subtitle preference")
-			return
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set forced subtitle preference")
 		}
-		p, err := store.GetProfile(r.Context(), created.ID)
+		p, err := store.GetProfile(ctx, created.ID)
 		if err != nil || p == nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after forced subtitle update")
-			return
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after forced subtitle update")
 		}
 		created = *p
 	}
 
-	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), store, created))
+	return h.toProfileResponse(ctx, store, created), nil
 }
 
 // HandleUpdateProfile handles PUT /profiles/{id}.
@@ -447,7 +464,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 	})
 	if err != nil {
 		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == "profile_management" {
+		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
 			writeProfileManagementPermissionError(w, apiErr.cause)
 			return
 		}
@@ -592,11 +609,16 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 	return h.toProfileResponse(ctx, store, *profile), nil
 }
 
+// codeProfileManagement is the error code of a household-management check
+// the caller did not pass; the v1 handlers branch on it to render the
+// PIN-verification message.
+const codeProfileManagement = "profile_management"
+
 // profileManagementError wraps a household-permission failure so the v1
 // handler can keep its exact wording (writeProfileManagementPermissionError)
 // and the v2 listener still sees the status.
 func profileManagementError(err error) *APIError {
-	out := &APIError{Status: http.StatusInternalServerError, Code: "profile_management", Message: "Failed to check profile permissions", cause: err}
+	out := &APIError{Status: http.StatusInternalServerError, Code: codeProfileManagement, Message: "Failed to check profile permissions", cause: err}
 	if errors.Is(err, access.ErrProfileUnverified) {
 		out.Status = http.StatusForbidden
 		out.Message = "Profile management requires verifying the primary profile PIN"
