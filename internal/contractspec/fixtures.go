@@ -133,9 +133,17 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			fail("%s: duplicate fixture name", where)
 		}
 		names[f.Name] = true
-		if f.ExpectedStatus == 204 || f.ExpectedStatus == 304 {
+		if dup := duplicateHeaderName(f.Request.Headers); dup != "" {
+			fail("%s: request headers spell %q more than once", where, dup)
+		}
+		if dup := duplicateHeaderName(f.ResponseHeaders); dup != "" {
+			fail("%s: response headers spell %q more than once", where, dup)
+		}
+		// A 204 or 304 has no representation, and a HEAD answer carries the
+		// headers of the GET it mirrors but no body whatever the status.
+		if f.ExpectedStatus == 204 || f.ExpectedStatus == 304 || f.Request.Method == "HEAD" {
 			if f.BodyFile != nil || f.Schema != nil || f.ResponseMediaType != nil {
-				fail("%s: a %d fixture has no representation: body_file, schema and response_media_type must be null", where, f.ExpectedStatus)
+				fail("%s: a bodyless fixture (%s %d) has no representation: body_file, schema and response_media_type must be null", where, f.Request.Method, f.ExpectedStatus)
 			}
 			if f.ExpectedStatus == 304 && headerValue(f.ResponseHeaders, "ETag") == "" {
 				fail("%s: a 304 fixture must record ETag", where)
@@ -247,12 +255,32 @@ func addResource(c *jsonschema.Compiler, id string, raw []byte) error {
 
 // headerValue reads a recorded response header regardless of how the fixture
 // spelled its name: HTTP header names are case-insensitive, and a fixture that
-// wrote "etag" carries the same validator as one that wrote "ETag".
+// wrote "etag" carries the same validator as one that wrote "ETag". The
+// lookup is unambiguous because duplicateHeaderName has already refused a
+// fixture spelling one name twice.
 func headerValue(headers map[string]string, name string) string {
 	for k, v := range headers {
 		if strings.EqualFold(k, name) {
 			return v
 		}
+	}
+	return ""
+}
+
+// duplicateHeaderName returns a header name the map spells more than once
+// under different casings ("ETag" and "etag"), or "" when every name is
+// unique. Such a fixture would be read nondeterministically.
+func duplicateHeaderName(headers map[string]string) string {
+	seen := make(map[string]string, len(headers))
+	for k := range headers {
+		lower := strings.ToLower(k)
+		if first, ok := seen[lower]; ok {
+			if first > k {
+				first, k = k, first
+			}
+			return first + "/" + k
+		}
+		seen[lower] = k
 	}
 	return ""
 }

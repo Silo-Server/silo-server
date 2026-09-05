@@ -124,6 +124,28 @@ func TestFixtureValidationSeededFailures(t *testing.T) {
 				return f
 			})
 		}, "a guarded 204 DELETE fixture records an ETag"},
+		{"response headers spell ETag twice", func(t *testing.T, m fstest.MapFS) {
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "guarded_delete_ok" {
+						h := e["response_headers"].(map[string]any)
+						h["ETag"] = ""
+						h["etag"] = `"stale"`
+					}
+				}
+				return f
+			})
+		}, `response headers spell "ETag/etag" more than once`},
+		{"HEAD fixture with a body file", func(t *testing.T, m fstest.MapFS) {
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "get_system_info_ok" {
+						e["request"].(map[string]any)["method"] = "HEAD"
+					}
+				}
+				return f
+			})
+		}, "'/fixtures/3/body_file': got string, want null"},
 		{"guarded 204 DELETE records a lowercase etag", func(t *testing.T, m fstest.MapFS) {
 			editIndex(t, m, func(f []map[string]any) []map[string]any {
 				for _, e := range f {

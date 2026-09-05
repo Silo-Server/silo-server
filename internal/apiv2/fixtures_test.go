@@ -250,7 +250,14 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			headers[name] = v
 		}
 		var mediaType, schema, bodyFile *string
-		if c.status == http.StatusNotModified || c.status == http.StatusNoContent {
+		if c.method == http.MethodHead {
+			// A HEAD answer carries the headers of the GET it mirrors
+			// (Content-Type included) and never a body, whatever the
+			// status: the index entry records the headers alone.
+			if rec.Body.Len() != 0 {
+				t.Fatalf("%s: HEAD %d carries a body %q", c.name, c.status, rec.Body.String())
+			}
+		} else if c.status == http.StatusNotModified || c.status == http.StatusNoContent {
 			// A 204 or 304 has no representation: no body file, no media
 			// type, no schema. The index entry records the headers alone.
 			if rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "" {
