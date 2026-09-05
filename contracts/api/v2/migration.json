@@ -35899,13 +35899,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profile/sections",
+        "operation_id": "listProfileSectionOverrides"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape (/profile/sections). Read is snake_case, matching the write (v1 answered PascalCase store fields; the Phase 1 catalogs flagged the GET/PUT casing mismatch). scope is an enum (home, library) and must agree with library_id (v1 stored any pair). Store timestamps are nullable instants."
     },
     {
       "listener": "api",
@@ -35974,13 +35974,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/profile/sections",
+        "operation_id": "replaceProfileSectionOverrides"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Full replacement of one page's override set stays PUT; scope and library_id move from the body to the query so GET, PUT and DELETE address the set the same way. Recipe gate failures (unknown_recipe, invalid_config) are 422 at body.overrides; custom_disabled stays 403."
     },
     {
       "listener": "api",
@@ -36036,13 +36036,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profile/sections/flags",
+        "operation_id": "getProfileSectionFlags"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil; sectionSettingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil; sectionSettingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape."
     },
     {
       "listener": "api",
@@ -36104,13 +36104,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/profile/sections",
+        "operation_id": "resetProfileSectionOverrides"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The /reset suffix is dropped: DELETE on the set addressed by scope and library_id."
     },
     {
       "listener": "api",
@@ -36174,13 +36174,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profile/sections/settings",
+        "operation_id": "getProfileSectionSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag."
     },
     {
       "listener": "api",
@@ -36290,13 +36290,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/profiles",
+        "operation_id": "listProfiles"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Collection envelope (items, no page: the household is bounded by the account's profile limit) plus avatar_upload_enabled; profile_scoped with the header optional, as v1."
     },
     {
       "listener": "api",
@@ -36379,13 +36379,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/profiles",
+        "operation_id": "createProfile"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. 201 with Location. Reuses the updateProfile member rules: name required, max_playback_quality strict enum, quality_preference and subtitle_mode free-form (#135), pin 1 to 72 bytes, allowlist validated against existing libraries (422, not a foreign-key 500); no member admits null. name_conflict and profile_limit_reached stay 409."
     },
     {
       "listener": "api",

@@ -5,11 +5,18 @@
 
 /** Operation ids keyed by `METHOD /path`, as the committed v2 OpenAPI document lists them. */
 export const v2Operations = {
+  "DELETE /api/v2/profile/sections": "resetProfileSectionOverrides",
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/admin/users": "listAdminUsers",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
+  "GET /api/v2/profile/sections": "listProfileSectionOverrides",
+  "GET /api/v2/profile/sections/flags": "getProfileSectionFlags",
+  "GET /api/v2/profile/sections/settings": "getProfileSectionSettings",
+  "GET /api/v2/profiles": "listProfiles",
   "GET /api/v2/progress": "listProgress",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
   "PATCH /api/v2/profiles/{id}": "updateProfile",
+  "POST /api/v2/profiles": "createProfile",
+  "PUT /api/v2/profile/sections": "replaceProfileSectionOverrides",
 } as const;

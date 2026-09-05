@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "id": "s-continue",
+      "section_type": "continue_watching",
+      "title": "Continue Watching",
+      "featured": false,
+      "item_limit": 20,
+      "hidden": true,
+      "is_custom": false,
+      "customized": true,
+      "position": 0
+    },
+    {
+      "id": "u-gems",
+      "section_type": "hidden_gems",
+      "title": "Hidden gems",
+      "featured": false,
+      "item_limit": 12,
+      "hidden": false,
+      "is_custom": true,
+      "customized": false,
+      "position": 1,
+      "config": {
+        "library_ids": [
+          3
+        ]
+      }
+    }
+  ]
+}
+
