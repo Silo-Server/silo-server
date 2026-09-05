@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/unsupported_media_type",
+  "title": "Unsupported media type",
+  "status": 415,
+  "detail": "The request media type is not supported; send multipart/form-data.",
+  "instance": "urn:silo:request:000000000000000000000027"
+}
+

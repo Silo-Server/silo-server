@@ -169,7 +169,7 @@ type PlaybackSessionsQuery struct {
 }
 
 type playbackSessionsReader interface {
-	Load(ctx context.Context, r *http.Request, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
+	Load(ctx context.Context, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
 }
 
 func resolvePlaybackSessionsLoader(
@@ -209,7 +209,6 @@ func NewPlaybackSessionsLoader(
 // Load returns the playback sessions visible to the current request.
 func (l *PlaybackSessionsLoader) Load(
 	ctx context.Context,
-	r *http.Request,
 	query PlaybackSessionsQuery,
 ) ([]playbackSessionRow, error) {
 	if l == nil || l.pool == nil {
@@ -326,7 +325,7 @@ func (l *PlaybackSessionsLoader) Load(
 		); err != nil {
 			return nil, fmt.Errorf("scanning playback session: %w", err)
 		}
-		s.PosterURL = l.presignPosterURL(r, posterPath)
+		s.PosterURL = l.presignPosterURL(ctx, posterPath)
 		s.StreamBitrateKbps = streamBitrateKbps
 		s.TargetAudioChannels = targetAudioChannels
 		s.TargetBitrateKbps = targetBitrateKbps
@@ -351,9 +350,9 @@ func (l *PlaybackSessionsLoader) Load(
 	return sessions, nil
 }
 
-func (l *PlaybackSessionsLoader) presignPosterURL(r *http.Request, path string) string {
+func (l *PlaybackSessionsLoader) presignPosterURL(ctx context.Context, path string) string {
 	if l != nil && l.DetailSvc != nil {
-		return l.DetailSvc.PresignURL(r.Context(), cardThumbnailPath(path), "card")
+		return l.DetailSvc.PresignURL(ctx, cardThumbnailPath(path), "card")
 	}
 	return ""
 }

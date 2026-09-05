@@ -298,7 +298,7 @@ function ProfileEditorForm({
       }
     } else if (deleteExistingUpload) {
       try {
-        finalProfile = await deleteAvatarMutation.mutateAsync(savedProfile.id);
+        finalProfile = await deleteAvatarMutation.mutateAsync(savedProfile);
       } catch {
         finalProfile = savedProfile;
       }

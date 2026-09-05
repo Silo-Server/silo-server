@@ -802,7 +802,15 @@ Successful protected reads and mutations return the current ETag, except a prote
 whose bodyless `204` has no representation left to validate and carries none. First-party
 clients handle `412` by fetching the canonical representation and offering reload, comparison,
 or a deliberate overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
-Conditional reads may return `304`. V2 does not add a generic response-body revision; a body
+Conditional reads may return `304`. A response that carries an `ETag` is served identity-encoded
+whatever `Accept-Encoding` asked for: a strong validator names the representation data including
+its content coding (RFC 9110 8.8.1), so the listener's compression layer skips validator-bearing v2
+responses (`apiv2.IdentityEncoded`) rather than letting a gzip body and an identity body share one
+strong tag or rewriting the tag per coding. The tag a client received is therefore the tag it echoes
+in `If-Match` or `If-None-Match`, whichever coding it accepts; responses without a validator
+compress as usual. A request whose `Accept-Encoding` excludes identity (`identity;q=0`, or `*;q=0`
+without a positive `identity` entry, RFC 9110 12.5.3) is answered `406 not_acceptable` on a
+validator-bearing operation rather than with a coding the client refused. V2 does not add a generic response-body revision; a body
 revision exists only for a domain requirement such as capability invalidation or future offline
 synchronization. The implementation follows RFC 9110 parsing and precedence, including lists,
 optional whitespace, wildcard rules, and strong comparison, independent of Huma helper behavior.
@@ -1075,6 +1083,24 @@ inferred set; the profile read model documents canonical values without constrai
 stored ones, every string member of a profile is always emitted, ids are string `ID`s, and instants
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
+
+The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
+`updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
+`verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides
+`listProfileSectionOverrides`, `replaceProfileSectionOverrides`, `resetProfileSectionOverrides`,
+`getProfileSectionSettings`, `getProfileSectionFlags` under `/api/v2/profile/sections`. The
+deliberate v1 differences, recorded per row in the ledger: `createProfile` answers `201` with a
+`Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
+from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
+ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
+keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
+reports `expires_at` as a nullable instant; `uploadProfileAvatar` is the first Huma multipart
+operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
+types or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
+server without an upload store answers `503`; section overrides drop the `/reset` suffix
+(`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
+method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
+casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
 ## v1 lifecycle and release sequence
 

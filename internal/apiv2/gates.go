@@ -3,6 +3,7 @@ package apiv2
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,14 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+)
+
+// Legacy v1 error codes the gates translate that have no v2 problem type of
+// their own (the others reuse the matching ProblemType's ID).
+const (
+	legacyForbiddenCode      = "forbidden"
+	legacyDemoRestrictedCode = "demo_restricted"
+	legacyBadRequestCode     = "bad_request"
 )
 
 // classGate composes the existing chi-style gates onto a Huma operation from
@@ -182,9 +191,9 @@ func (d *denialWriter) problem() *Problem {
 		// keeps a type of its own rather than collapsing into permission_denied.
 		p = NewProblem(TypeProfileVerificationRequired,
 			"The declared profile is locked; verify it and retry with X-Profile-Token.")
-	case "forbidden", "demo_restricted":
+	case legacyForbiddenCode, legacyDemoRestrictedCode:
 		p = NewProblem(TypePermissionDenied, safeDetail(legacy.Message, "The caller is not permitted to perform this operation."))
-	case "not_found":
+	case TypeNotFound.ID:
 		p = NewProblem(TypeNotFound, safeDetail(legacy.Message, "The requested resource does not exist."))
 	case "rate_limit_exceeded":
 		p = NewProblem(TypeRateLimited, "Too many requests; retry after the Retry-After delay.")
@@ -193,9 +202,9 @@ func (d *denialWriter) problem() *Problem {
 		} else {
 			p = p.WithRetryAfter(1)
 		}
-	case "bad_request":
+	case legacyBadRequestCode:
 		p = badRequestProblem(d.reason)
-	case "internal_error":
+	case TypeInternalError.ID:
 		p = NewProblem(TypeInternalError, "An unexpected error occurred.")
 	default:
 		if d.status >= 500 || d.status == 0 {
@@ -336,6 +345,32 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 		next(ctx)
 		return
 	}
+	if op.RequestBody.Content[mediaTypeMultipart] != nil {
+		// A multipart operation takes the form and nothing else; the
+		// boundary parameter is the framework's to parse.
+		if !multipartMediaTypeOK(ct) {
+			writeProblem(w, r, NewProblem(TypeUnsupportedMediaType, "The request media type is not supported; send multipart/form-data."))
+			return
+		}
+		// The framework's body cap applies to bodies it reads itself; the
+		// form parser reads the request directly, so the declared limit is
+		// enforced here, before any part is parsed or stored.
+		limit := operationBodyLimit(op)
+		if r.ContentLength > limit {
+			writeProblem(w, r, NewProblem(TypePayloadTooLarge, fmt.Sprintf("The request body exceeds the %d-byte limit.", limit)))
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		defer func() {
+			// Parts larger than the parser's memory threshold are spooled
+			// to temp files; the response is complete once next returns.
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
+		}()
+		next(ctx)
+		return
+	}
 	if !structuredMediaTypeOK(ct) {
 		writeProblem(w, r, NewProblem(TypeUnsupportedMediaType, "The request media type is not supported; send application/json."))
 		return
@@ -344,6 +379,22 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 	// everything the accepted header said.
 	r.Header.Set("Content-Type", mediaTypeJSON)
 	next(ctx)
+}
+
+// mediaTypeMultipart is the one non-JSON request media type the listener
+// accepts, on operations that declare a multipart form (avatar upload).
+const mediaTypeMultipart = "multipart/form-data"
+
+// multipartMediaTypeOK reports whether a Content-Type names a multipart
+// form; its parameters (boundary) are left to the form parser.
+func multipartMediaTypeOK(ct string) bool {
+	return strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0])) == mediaTypeMultipart
+}
+
+// requestMediaTypeOK reports whether the listener can accept a request media
+// type on some operation: JSON everywhere, the multipart form where declared.
+func requestMediaTypeOK(mediaType string) bool {
+	return structuredMediaTypeOK(mediaType) || mediaType == mediaTypeMultipart
 }
 
 // contentEncodingOK reports whether a request body is unencoded. An absent

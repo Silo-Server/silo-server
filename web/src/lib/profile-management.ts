@@ -1,5 +1,5 @@
-import type { CreateProfileRequest, Profile } from "@/api/types";
-import type { ProfileUpdate } from "@/hooks/queries/profiles";
+import type { Profile } from "@/api/types";
+import type { ProfileCreate, ProfileUpdate } from "@/hooks/queries/profiles";
 import { avatarPresetRef, parseProfileAvatarPresetRef } from "@/lib/profile-avatars";
 import {
   formatPlaybackQualityPreset,
@@ -63,22 +63,32 @@ export function createProfileDraft(profile?: Profile | null): ProfileDraft {
   };
 }
 
-export function buildProfileRequestFromDraft(draft: ProfileDraft): CreateProfileRequest {
-  const body: CreateProfileRequest = {
+/**
+ * The v2 POST body for a new profile. A member with nothing to set is omitted:
+ * there is nothing to clear on a profile that does not exist yet, and the
+ * contract rejects empty strings where v1 read them as "unset".
+ */
+export function buildProfileRequestFromDraft(draft: ProfileDraft): ProfileCreate {
+  const maxPlaybackQuality = playbackQualityValueFromPreset(draft.maxPlaybackQuality);
+  const body: ProfileCreate = {
     name: draft.name.trim(),
-    avatar: draft.avatarPreset ? avatarPresetRef(draft.avatarPreset) : "",
     is_child: draft.isChild,
-    max_content_rating: draft.maxContentRating,
-    max_playback_quality: playbackQualityValueFromPreset(draft.maxPlaybackQuality),
     library_restrictions_enabled: draft.libraryRestrictionsEnabled,
     allowed_library_ids: draft.libraryRestrictionsEnabled
-      ? sortUniqueLibraryIDs(draft.allowedLibraryIDs)
+      ? sortUniqueLibraryIDs(draft.allowedLibraryIDs).map(String)
       : [],
   };
 
-  if (draft.clearPin) {
-    body.pin = "";
-  } else if (draft.pin.trim() !== "") {
+  if (draft.avatarPreset) {
+    body.avatar = avatarPresetRef(draft.avatarPreset);
+  }
+  if (draft.maxContentRating !== "") {
+    body.max_content_rating = draft.maxContentRating;
+  }
+  if (maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p") {
+    body.max_playback_quality = maxPlaybackQuality;
+  }
+  if (!draft.clearPin && draft.pin.trim() !== "") {
     body.pin = draft.pin.trim();
   }
 

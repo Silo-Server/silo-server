@@ -77,6 +77,10 @@ func fixtureCases() []fixtureCase {
 			scenario: "A path under /api/v2/ with no operation registered at it.",
 			method:   http.MethodGet, path: "/api/v2/library/items/fixture-missing",
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "head_not_found",
+			scenario: "HEAD on a path under /api/v2/ with no operation registered at it: the 404 problem's headers with no body.",
+			method:   http.MethodHead, path: "/api/v2/library/items/fixture-missing",
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}},
 		{name: "authentication_required",
 			scenario: "An authenticated operation called without a credential.",
 			method:   http.MethodPost, path: "/api/v2/probe/authenticated", body: validBody,
@@ -135,6 +139,105 @@ func fixtureCases() []fixtureCase {
 			scenario: "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
 			method:   http.MethodGet, path: "/api/v2/admin/users?offset=50", headers: bearer(adminToken),
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_profiles_ok", operationID: "listProfiles",
+			scenario: "The household on the signed-in account, before any profile is selected; the collection is bounded and unpaginated.",
+			method:   http.MethodGet, path: "/api/v2/profiles", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileCollection"},
+		{name: "create_profile_created", operationID: "createProfile",
+			scenario: "A household manager creates a child profile with an allowlist: 201 with the profile's Location.",
+			method:   http.MethodPost, path: "/api/v2/profiles", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			body:   `{"name":"Kid","is_child":true,"allowed_library_ids":["3"],"max_playback_quality":"1080p"}`,
+			status: http.StatusCreated, assertHeaders: []string{"Content-Type", "Cache-Control", "Location"}, schema: "#/components/schemas/Profile"},
+		{name: "create_profile_name_required", operationID: "createProfile",
+			scenario: "The only required member is the name.",
+			method:   http.MethodPost, path: "/api/v2/profiles", headers: bearer(memberToken),
+			body:   `{"is_child":true}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_profile_section_overrides_ok", operationID: "listProfileSectionOverrides",
+			scenario: "The acting profile's saved home-page overrides in snake_case: a customized admin section and a profile-built one; nullable overrides are explicit null.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SectionOverrideCollection"},
+		{name: "list_profile_section_overrides_library_id_required", operationID: "listProfileSectionOverrides",
+			scenario: "A library page must be addressed by its library: scope=library without library_id is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections?scope=library", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "replace_profile_section_overrides_null_not_clearable", operationID: "replaceProfileSectionOverrides",
+			scenario: "Explicit null on an override member that does not admit it is a validation failure naming the member by index.",
+			method:   http.MethodPut, path: "/api/v2/profile/sections", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			body:   `{"overrides":[{"section_id":"s-continue","hidden":null}]}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_profile_section_settings_ok", operationID: "getProfileSectionSettings",
+			scenario: "The home page as the acting profile sees it: an admin section it hid and a section it built, with the recipe config as an extension bag.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections/settings", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionSettingCollection"},
+		{name: "get_profile_section_flags_ok", operationID: "getProfileSectionFlags",
+			scenario: "What this server lets profiles do to their pages.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections/flags", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionFlags"},
+		{name: "delete_profile_primary_protected", operationID: "deleteProfile",
+			scenario: "The primary profile cannot be deleted: a conflict, as v1 answered.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-primary", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "delete_profile_verification_required", operationID: "deleteProfile",
+			scenario: "A household mutation declared as a PIN-locked profile without its token.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-owner", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_household_sessions_ok", operationID: "listHouseholdSessions",
+			scenario: "The account's live playback sessions for a household manager; bounded by the stream limit and unpaginated.",
+			method:   http.MethodGet, path: "/api/v2/profiles/household/sessions", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PlaybackSessionCollection"},
+		{name: "list_household_sessions_verification_required", operationID: "listHouseholdSessions",
+			scenario: "A household read declared as a PIN-locked profile without its token.",
+			method:   http.MethodGet, path: "/api/v2/profiles/household/sessions", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "verify_profile_pin_ok", operationID: "verifyProfilePIN",
+			scenario: "A matching PIN: the X-Profile-Token that unlocks the profile for this login session, with its expiry.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: bearer(memberToken),
+			body:   `{"pin":"1234"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileVerification"},
+		{name: "verify_profile_pin_wrong", operationID: "verifyProfilePIN",
+			scenario: "A wrong PIN is not an error: valid is false and no token is issued.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: bearer(memberToken),
+			body:   `{"pin":"0000"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileVerification"},
+		{name: "verify_profile_pin_required", operationID: "verifyProfilePIN",
+			scenario: "The PIN member is required.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: bearer(memberToken),
+			body:   `{}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "verify_profile_pin_authentication_required", operationID: "verifyProfilePIN",
+			scenario: "A PIN check needs a signed-in account; the profile header is not needed.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: nil,
+			body:   `{"pin":"1234"}`,
+			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "upload_profile_avatar_ok", operationID: "uploadProfileAvatar",
+			scenario: "A multipart form with the avatar part: the profile with its uploaded avatar.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: with(bearer(memberToken), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("avatar", "me.png", "image/png", "png-bytes"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Profile"},
+		{name: "upload_profile_avatar_unsupported_media_type", operationID: "uploadProfileAvatar",
+			scenario: "The avatar is a multipart form, not a JSON document.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: bearer(memberToken),
+			body:   `{"avatar":"..."}`,
+			status: http.StatusUnsupportedMediaType, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "upload_profile_avatar_part_type_rejected", operationID: "uploadProfileAvatar",
+			scenario: "A part outside the declared image types is a validation failure naming the part.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: with(bearer(memberToken), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("avatar", "me.gif", "image/gif", "gif-bytes"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "upload_profile_avatar_verification_required", operationID: "uploadProfileAvatar",
+			scenario: "An upload declared as a PIN-locked profile without its token.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: with(with(bearer(memberToken), "X-Profile-Id", "p-locked"), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("avatar", "me.png", "image/png", "png-bytes"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "delete_profile_avatar_not_found", operationID: "deleteProfileAvatar",
+			scenario: "The profile is not on the account.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-missing/avatar", headers: bearer(memberToken),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "delete_profile_avatar_authentication_required", operationID: "deleteProfileAvatar",
+			scenario: "An avatar removal needs a signed-in account.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-owner/avatar", headers: nil,
+			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: TypePreconditionRequired.ID,
 			scenario: "A guarded mutation without If-Match: the server refuses before touching the resource and names the field to send.",
 			method:   http.MethodPut, path: "/api/v2/probe/guarded/a", body: `{"name":"fixture"}`,
@@ -162,6 +265,18 @@ func fixtureCases() []fixtureCase {
 			headers: map[string]string{"If-Match": RenderETag(guardedProbeScope, "a", 1).String()},
 			status:  http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
 	}
+}
+
+// fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
+// with a fixed boundary so the request body is stable.
+const fixtureMultipartType = "multipart/form-data; boundary=silo-fixture-boundary"
+
+// fixtureMultipart builds a one-part multipart body with the fixed boundary.
+func fixtureMultipart(field, filename, contentType, data string) string {
+	return "--silo-fixture-boundary\r\n" +
+		"Content-Disposition: form-data; name=\"" + field + "\"; filename=\"" + filename + "\"\r\n" +
+		"Content-Type: " + contentType + "\r\n\r\n" +
+		data + "\r\n--silo-fixture-boundary--\r\n"
 }
 
 // fixtureDeps is the pilot wiring (parity gates plus the pilot fakes) with a
@@ -250,7 +365,18 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			headers[name] = v
 		}
 		var mediaType, schema, bodyFile *string
-		if c.status == http.StatusNotModified || c.status == http.StatusNoContent {
+		if c.method == http.MethodHead {
+			// A HEAD answer carries the headers of the GET it mirrors
+			// (Content-Type included) and never a body, whatever the
+			// status: the index entry records the headers alone. The
+			// recorder still holds whatever the handler wrote, because
+			// suppressing the body of a HEAD response is net/http's job
+			// (a real server's ResponseWriter discards it after Write
+			// counts it for Content-Length), which httptest.ResponseRecorder
+			// does not perform; the listener leaves it to the server rather
+			// than duplicating it, so the capture discards the bytes here.
+			rec.Body.Reset()
+		} else if c.status == http.StatusNotModified || c.status == http.StatusNoContent {
 			// A 204 or 304 has no representation: no body file, no media
 			// type, no schema. The index entry records the headers alone.
 			if rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "" {
