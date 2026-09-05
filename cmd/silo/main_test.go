@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/api"
@@ -48,6 +49,65 @@ func TestConfigureS3Clients_SetsCORSOnPublicAssetsBucket(t *testing.T) {
 	}
 	if got := publicServer.CORSRequests(); got != 1 {
 		t.Fatalf("public assets bucket CORS requests = %d, want 1", got)
+	}
+}
+
+func TestWaitForShutdownWorkWaitsForEveryCleanup(t *testing.T) {
+	one := make(chan struct{})
+	two := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- waitForShutdownWork(context.Background(), []<-chan struct{}{one, two})
+	}()
+
+	close(one)
+	select {
+	case err := <-done:
+		t.Fatalf("wait returned before every cleanup completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(two)
+	if err := <-done; err != nil {
+		t.Fatalf("waitForShutdownWork: %v", err)
+	}
+}
+
+func TestRunShutdownWorkWithTimeoutUsesFreshContext(t *testing.T) {
+	called := false
+	err := runShutdownWorkWithTimeout(100*time.Millisecond, func(ctx context.Context) error {
+		called = true
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("cleanup context was already canceled: %v", err)
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) <= 0 {
+			t.Fatalf("cleanup context deadline = %v, ok=%v", deadline, ok)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("runShutdownWorkWithTimeout: %v", err)
+	}
+	if !called {
+		t.Fatal("cleanup work was not called")
+	}
+}
+
+func TestRunShutdownWorkWithTimeoutHonorsDeadline(t *testing.T) {
+	err := runShutdownWorkWithTimeout(10*time.Millisecond, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runShutdownWorkWithTimeout error = %v, want deadline exceeded", err)
+	}
+}
+
+func TestWaitForShutdownWorkHonorsDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitForShutdownWork(ctx, []<-chan struct{}{make(chan struct{})}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForShutdownWork error = %v, want context cancellation", err)
 	}
 }
 

@@ -2667,7 +2667,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		unlock()
 		return nil, err
 	}
-	h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
+	if !h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession) {
+		unlock()
+		return nil, context.Canceled
+	}
 	unlock()
 
 	if opts.ToneMapMode != "" {
@@ -2697,7 +2700,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				replaceUnlock()
 				return nil, err
 			}
-			h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
+			if !h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession) {
+				replaceUnlock()
+				return nil, context.Canceled
+			}
 			replaceUnlock()
 			fallbackManifestDeadline := time.Now().Add(compatManifestStartupTimeout)
 			if _, fallbackErr := transcodeSession.WaitForManifest(time.Until(fallbackManifestDeadline)); fallbackErr != nil {
@@ -2740,6 +2746,15 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// Register the exit monitor and persist the reconstruction recipe (shared with
 	// the remote path). On a failed compat-store write roll back this abandoned
 	// transcode rather than leaking it.
+	transcodeSession.SetRestartHook(func(ctx context.Context) {
+		if h.tm.StartThrottler != nil {
+			h.tm.StartThrottler(ctx, transcodeSession)
+		}
+		h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
+	})
+	if h.tm.StartThrottler != nil {
+		h.tm.StartThrottler(ctx, transcodeSession)
+	}
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {
