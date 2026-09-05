@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -415,6 +416,15 @@ func TestListSettingValues(t *testing.T) {
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile&keys=ui.theme,playback.preferred_quality", "", settingsOwner()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != locationQueryKeys {
 		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// A key mentioned twice is answered twice, in order: the seam does not
+	// reparse the array as CSV or deduplicate it.
+	rec = do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile&keys=ui.theme&keys=ui.theme", "", settingsOwner())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if got := strings.Count(rec.Body.String(), `"key":"ui.theme"`); got != 2 {
+		t.Fatalf("a repeated key is answered once per mention, got %d in %s", got, rec.Body.String())
 	}
 	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile", "", settingsOwner()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != locationQueryKeys || p.Errors[0].Code != codeRequired {

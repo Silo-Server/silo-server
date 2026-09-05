@@ -959,7 +959,17 @@ func (h *SettingValuesHandler) GetSettingValue(ctx context.Context, userID int, 
 // req.Key is ignored in favor of keys, whose first member fixes the scope
 // checks. Unset keys are reported with is_set false.
 func (h *SettingValuesHandler) ListSettingValues(ctx context.Context, userID int, keys []string, req SettingIdentityRequest) ([]ExplicitSettingValueView, error) {
-	keys = parseSettingKeys(strings.Join(keys, ","))
+	// keys arrive one per repeated query parameter: a comma is part of a
+	// key, not a separator, and a repeated key is answered once per mention
+	// rather than deduplicated (the v2 contract preserves the parameter as
+	// sent). v1's CSV form is parsed by its own handler before the seam.
+	trimmed := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key = strings.TrimSpace(key); key != "" {
+			trimmed = append(trimmed, key)
+		}
+	}
+	keys = trimmed
 	if len(keys) == 0 {
 		return nil, fieldError(settingFieldKeys, "Query parameter keys is required")
 	}
