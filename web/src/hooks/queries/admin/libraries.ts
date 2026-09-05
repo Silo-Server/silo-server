@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, fetchWithSession, getAccessToken } from "@/api/client";
+import { api, getAccessToken } from "@/api/client";
 import type {
   AdminJob,
   AdminJobsResponse,
@@ -39,14 +39,7 @@ import {
   staleMediaIDFromV2,
   unmatchedItemFromV2,
 } from "@/api/v2/libraries";
-import {
-  decodeV2Response,
-  v2,
-  V2_CLIENT_HEADERS,
-  V2ProblemError,
-  type V2Body,
-  type V2Result,
-} from "@/api/v2/request";
+import { v2, V2ProblemError, type V2Body, type V2Result } from "@/api/v2/request";
 import { adminKeys, libraryKeys } from "../keys";
 import { toast } from "sonner";
 import type { LibraryReorderEntry } from "@/pages/adminLibraryOrder";
@@ -683,20 +676,10 @@ export function useUploadLibraryPoster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, file }: { id: number; file: File }): Promise<Library> => {
-      // uploadLibraryPoster is the one multipart operation in this section;
-      // the typed boundary only encodes JSON bodies, so the fetch is issued
-      // here and the response is decoded through the contract.
-      const form = new FormData();
-      form.append("poster", file);
-      const { res } = await fetchWithSession(
-        `/api/v2/libraries/${encodeURIComponent(String(id))}/poster`,
-        {
-          method: "PUT",
-          headers: { Accept: "application/json", ...V2_CLIENT_HEADERS },
-          body: form,
-        },
-      );
-      const library = await decodeV2Response("PUT /api/v2/libraries/{id}/poster", res);
+      const library = await v2("PUT /api/v2/libraries/{id}/poster", {
+        path: { id: String(id) },
+        form: { poster: file },
+      });
       return libraryFromV2(library);
     },
     onSuccess: () => {
