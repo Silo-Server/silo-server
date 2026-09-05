@@ -266,11 +266,15 @@ func (reg *Registry) getLibraryLayout(ctx context.Context, in *LibraryViewInput)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	return &SectionLayoutOutput{Body: sectionLayoutOf(view)}, nil
+}
+
+func sectionLayoutOf(view handlers.SectionLayoutView) SectionLayout {
 	out := SectionLayout{Sections: make([]SectionLayoutEntry, 0, len(view.Sections))}
 	for _, s := range view.Sections {
 		out.Sections = append(out.Sections, SectionLayoutEntry{ID: s.ID, SectionType: s.SectionType, Title: s.Title, Featured: s.Featured, ItemLimit: s.ItemLimit, IsCustom: s.IsCustom, Customized: s.Customized})
 	}
-	return &SectionLayoutOutput{Body: out}, nil
+	return out
 }
 
 func sectionOf(v handlers.SectionView) Section {

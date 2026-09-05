@@ -5,11 +5,14 @@
 
 /** Operation ids keyed by `METHOD /path`, as the committed v2 OpenAPI document lists them. */
 export const v2Operations = {
+  "DELETE /api/v2/home/dismissals/{surface}/{item_id}": "undismissHomeItem",
   "DELETE /api/v2/libraries/roots/override": "deleteRootOverride",
   "DELETE /api/v2/libraries/{id}": "deleteLibrary",
   "DELETE /api/v2/libraries/{id}/poster": "deleteLibraryPoster",
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/admin/users": "listAdminUsers",
+  "GET /api/v2/calendar": "getCalendar",
+  "GET /api/v2/home/layout": "getHomeLayout",
   "GET /api/v2/libraries": "listLibraries",
   "GET /api/v2/libraries/metadata-match-queue": "listMetadataMatchQueues",
   "GET /api/v2/libraries/provider-defaults": "getLibraryProviderDefaults",
@@ -39,6 +42,7 @@ export const v2Operations = {
   "POST /api/v2/libraries/{id}/metadata-match-queue/cancel": "cancelMetadataMatchQueue",
   "POST /api/v2/libraries/{id}/metadata-match-queue/retry": "retryMetadataMatchQueue",
   "POST /api/v2/libraries/{id}/refresh-metadata": "refreshLibraryMetadata",
+  "PUT /api/v2/home/dismissals/{surface}/{item_id}": "dismissHomeItem",
   "PUT /api/v2/libraries/roots/override": "setRootOverride",
   "PUT /api/v2/libraries/{id}/poster": "uploadLibraryPoster",
   "PUT /api/v2/libraries/{id}/providers": "setLibraryProviders",

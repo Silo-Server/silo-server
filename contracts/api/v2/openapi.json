@@ -473,6 +473,161 @@
         ],
         "type": "object"
       },
+      "Calendar": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "description": "Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CalendarDay"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
+      "CalendarDay": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "description": "YYYY-MM-DD in the viewer's zone",
+            "examples": [
+              "2026-01-10"
+            ],
+            "type": "string"
+          },
+          "items": {
+            "description": "Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CalendarEvent"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "date",
+          "items"
+        ],
+        "type": "object"
+      },
+      "CalendarEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "air_at": {
+            "description": "The airing as an instant, when the network's time and zone are known",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "air_date": {
+            "description": "The source air date, YYYY-MM-DD",
+            "examples": [
+              "2026-01-09"
+            ],
+            "type": "string"
+          },
+          "air_time": {
+            "description": "Wall-clock time in the network's zone, HH:MM",
+            "examples": [
+              "21:00"
+            ],
+            "type": "string"
+          },
+          "air_timezone": {
+            "description": "The network's IANA zone",
+            "examples": [
+              "America/New_York"
+            ],
+            "type": "string"
+          },
+          "badges": {
+            "description": "series_premiere, season_premiere, finale; empty, never null",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "content_id": {
+            "examples": [
+              "episode:severance-s02e01"
+            ],
+            "type": "string"
+          },
+          "episode_number": {
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "episode_title": {
+            "type": "string"
+          },
+          "local_air_date": {
+            "description": "The air date in the viewer's zone, YYYY-MM-DD; the day this event is listed under",
+            "examples": [
+              "2026-01-10"
+            ],
+            "type": "string"
+          },
+          "poster_thumbhash": {
+            "type": "string"
+          },
+          "poster_url": {
+            "examples": [
+              "https://s3.example.test/poster.jpg"
+            ],
+            "type": "string"
+          },
+          "season_number": {
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_id": {
+            "examples": [
+              "series:severance"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The movie or series title",
+            "examples": [
+              "Severance"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "description": "movie, episode, or season_premiere",
+            "examples": [
+              "episode"
+            ],
+            "type": "string"
+          },
+          "watched": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content_id",
+          "type",
+          "title",
+          "air_date",
+          "local_air_date",
+          "watched",
+          "badges"
+        ],
+        "type": "object"
+      },
       "CatalogItem": {
         "additionalProperties": false,
         "properties": {
@@ -1288,6 +1443,26 @@
           "Size",
           "Filename"
         ],
+        "type": "object"
+      },
+      "HomeDismissal": {
+        "additionalProperties": false,
+        "properties": {
+          "progress_updated_at": {
+            "description": "Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "series_id": {
+            "description": "Required for next_up: the series the episode card belongs to",
+            "examples": [
+              "series:severance"
+            ],
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "Impersonation": {
@@ -4450,6 +4625,743 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/calendar": {
+      "get": {
+        "operationId": "getCalendar",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "First local day of the window, YYYY-MM-DD",
+            "explode": false,
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "description": "First local day of the window, YYYY-MM-DD",
+              "examples": [
+                "2026-01-05"
+              ],
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last local day of the window, YYYY-MM-DD; at most 30 days after start",
+            "explode": false,
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "description": "Last local day of the window, YYYY-MM-DD; at most 30 days after start",
+              "examples": [
+                "2026-01-11"
+              ],
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which items to include; absent is all",
+            "explode": false,
+            "in": "query",
+            "name": "filter",
+            "schema": {
+              "description": "Which items to include; absent is all",
+              "enum": [
+                "all",
+                "everything",
+                "following",
+                "favorites",
+                "watchlist",
+                "popular",
+                "trending"
+              ],
+              "examples": [
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "IANA zone the days are reckoned in; absent is UTC",
+            "explode": false,
+            "in": "query",
+            "name": "timezone",
+            "schema": {
+              "description": "IANA zone the days are reckoned in; absent is UTC",
+              "examples": [
+                "America/New_York"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Restrict to one library",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "Restrict to one library",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.",
+        "tags": [
+          "home"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/home/dismissals/{surface}/{item_id}": {
+      "delete": {
+        "operationId": "undismissHomeItem",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The home surface the item is hidden from",
+            "in": "path",
+            "name": "surface",
+            "required": true,
+            "schema": {
+              "description": "The home surface the item is hidden from",
+              "enum": [
+                "continue_watching",
+                "next_up"
+              ],
+              "examples": [
+                "continue_watching"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Content identifier of the card",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "Content identifier of the card",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Show a dismissed card again; an item that was not dismissed is left as is.",
+        "tags": [
+          "home"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "dismissHomeItem",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The home surface the item is hidden from",
+            "in": "path",
+            "name": "surface",
+            "required": true,
+            "schema": {
+              "description": "The home surface the item is hidden from",
+              "enum": [
+                "continue_watching",
+                "next_up"
+              ],
+              "examples": [
+                "continue_watching"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Content identifier of the card",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "Content identifier of the card",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HomeDismissal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal.",
+        "tags": [
+          "home"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/home/layout": {
+      "get": {
+        "operationId": "getHomeLayout",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SectionLayout"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The home page's section layout for the acting profile, without items.",
+        "tags": [
+          "home"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },

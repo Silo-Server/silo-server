@@ -105,6 +105,14 @@ type Dependencies struct {
 	// LibraryCollections answers a library's collections to viewers
 	// (*handlers.LibraryCollectionHandler).
 	LibraryCollections LibraryCollectionService
+	// Calendar answers the airing calendar (*handlers.CalendarHandler).
+	Calendar CalendarService
+	// HomeDismissals records and clears home-card dismissals
+	// (*handlers.HomeDismissalHandler).
+	HomeDismissals HomeDismissalService
+	// HomeSections answers the home page to viewers
+	// (*handlers.SectionHandler).
+	HomeSections HomeSectionService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -444,6 +452,24 @@ type LibraryCollectionService interface {
 	LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (handlers.LibraryCollectionTabView, error)
 	LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error)
 	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter) ([]handlers.CollectionItemView, error)
+}
+
+// CalendarService is the slice of *handlers.CalendarHandler getCalendar uses.
+type CalendarService interface {
+	Calendar(ctx context.Context, q handlers.CalendarQuery, access catalogpkg.AccessFilter) (handlers.CalendarView, error)
+}
+
+// HomeDismissalService is the slice of *handlers.HomeDismissalHandler the
+// dismissal operations use.
+type HomeDismissalService interface {
+	DismissHomeItem(ctx context.Context, cmd handlers.HomeDismissalCommand) error
+	UndismissHomeItem(ctx context.Context, userID int, profileID, surface, itemID string) error
+}
+
+// HomeSectionService is the slice of *handlers.SectionHandler the
+// viewer-facing home reads use.
+type HomeSectionService interface {
+	HomeLayout(ctx context.Context) (handlers.SectionLayoutView, error)
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not
