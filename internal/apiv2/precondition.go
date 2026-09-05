@@ -174,7 +174,11 @@ func WeakMatch(a, b EntityTag) bool {
 const (
 	ifMatchField     = "If-Match"
 	ifNoneMatchField = "If-None-Match"
-	etagField        = "ETag"
+	// emptyETagList is the spelling joinPreconditionFields gives a present
+	// but empty precondition field: one empty list element, which the
+	// RFC 9110 5.6.1 #-rule tolerates and ParseETagList reads as no tags.
+	emptyETagList = ","
+	etagField     = "ETag"
 )
 
 // EvaluateIfMatch decides a guarded mutation's precondition once the resource
@@ -281,15 +285,17 @@ func StaleVersionProblem(current EntityTag) *Problem {
 // NotModified turns a conditional read's output into the 304 answer: Status
 // becomes 304, the ETag header field the current tag, and the body stays
 // zero; Huma writes no body on 304 and the listener drops Content-Type. The
-// output shape (a direct int Status and a string `header:"ETag"`) is what
-// Register requires of a Conditional operation, so a type that reaches here
-// has both.
+// output shape (a direct int Status and a direct string `header:"ETag"`) is
+// what Register requires of a Conditional operation, so a type that reaches
+// here has both.
 func NotModified[O any](out *O, current EntityTag) *O {
 	v := reflect.ValueOf(out).Elem()
 	v.FieldByName("Status").SetInt(http.StatusNotModified)
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
-		if strings.EqualFold(t.Field(i).Tag.Get("header"), etagField) {
+		// Direct fields only, the same rule Register applies: Huma writes
+		// no header from an embedded struct.
+		if !t.Field(i).Anonymous && strings.EqualFold(t.Field(i).Tag.Get("header"), etagField) {
 			v.Field(i).SetString(current.String())
 		}
 	}

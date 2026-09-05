@@ -32,6 +32,22 @@ func TestGuardedProbeMissingIfMatchIs428(t *testing.T) {
 	}
 }
 
+// TestGuardedProbeEmptyIfMatchIs412: RFC 9110 5.6.1 lets a #-list be empty,
+// and an empty list matches no tag. Only an absent field is 428.
+func TestGuardedProbeEmptyIfMatchIs412(t *testing.T) {
+	h, store := guardedHandler(t)
+	for _, field := range []string{"", " ", ","} {
+		rec := do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"beta"}`, map[string]string{"If-Match": field})
+		requireProblem(t, rec, TypePreconditionFailed)
+		if rec.Header().Get("ETag") == "" {
+			t.Fatalf("If-Match %q: 412 lacks the current ETag", field)
+		}
+	}
+	if row, _ := store.Get("a"); row.Name != "alpha" || row.Version != 1 {
+		t.Fatalf("resource changed: %+v", row)
+	}
+}
+
 func TestGuardedProbeStaleIfMatchIs412WithETag(t *testing.T) {
 	h, store := guardedHandler(t)
 	current := RenderETag(1, guardedProbeScope)

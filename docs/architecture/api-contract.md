@@ -353,16 +353,21 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
   DELETE only), `Conditional` (GET, HEAD only) or `CreateOnly` (PUT only, exclusive with
   `Guarded`); `Register` panics when a guarded input does not bind a string
-  `header:"If-Match"` or its output a string `header:"ETag"`, when a conditional input does
-  not bind `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output,
-  and when a create-only input does not bind `header:"If-None-Match"` with a string `ETag`
-  on the output. A guarded operation documents `412` and `428`, a required `If-Match`
-  parameter, and the `ETag` header on every `2xx`; a conditional read documents `304` with
+  `header:"If-Match"` or its output a string `header:"ETag"` (a guarded DELETE answers `204`
+  with no validator and must declare none), when a conditional input does not bind
+  `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
+  create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
+  output. Header fields count only as direct struct fields: Huma binds and writes no header
+  from an embedded struct, so one declared there is refused rather than silently unsent. A
+  guarded operation documents `412` and `428`, a required `If-Match` parameter, and the
+  `ETag` header on every `2xx` other than `204`; a conditional read documents `304` with
   `ETag`; a create-only PUT documents `412`, an optional `If-None-Match` parameter and
   `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
   `x-silo-create-only` so a reader can enumerate them. The router joins repeated `If-Match`
   and `If-None-Match` lines into one comma-separated list before the input is bound (RFC
-  9110 5.3), so a tag on a second line is evaluated.
+  9110 5.3), so a tag on a second line is evaluated, and rewrites a present but empty field
+  to an empty list so it is `412` (an empty list matches nothing) rather than the `428` an
+  absent field earns.
   `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(version, scope)` (strong,
   quoted, opaque; the scope keeps redacted representations from sharing a validator),
   `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),

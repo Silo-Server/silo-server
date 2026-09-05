@@ -260,6 +260,19 @@ type guardedDocOutput struct {
 	Body probeEcho
 }
 
+// validatorHeaders is an embedded shape a domain package might be tempted to
+// share between outputs. Huma writes no header from an embedded struct, so
+// Register refuses it: the ETag must be a direct field.
+type validatorHeaders struct {
+	ETag string `header:"ETag"`
+}
+
+type embeddedConditionalDocOutput struct {
+	Status int
+	validatorHeaders
+	Body probeEcho
+}
+
 func registerConcurrencyDocProbes(reg *Registry) {
 	current := RenderETag(1, "doc")
 	Register(reg, Operation{
@@ -291,6 +304,19 @@ func registerConcurrencyDocProbes(reg *Registry) {
 			return nil, p
 		}
 		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
+	})
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodDelete, Prefix+"/docprobe/{id}", "deleteDocProbe", "probe", "guarded delete"),
+		Class:     ClassPublic,
+		Guarded:   true,
+	}, func(_ context.Context, in *struct {
+		ID      string `path:"id"`
+		IfMatch string `header:"If-Match"`
+	}) (*struct{}, error) {
+		if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+			return nil, p
+		}
+		return &struct{}{}, nil
 	})
 	Register(reg, Operation{
 		Operation:  humaOp(http.MethodPut, Prefix+"/docprobe/created/{id}", "putCreatedDocProbe", "probe", "create-only"),
@@ -372,6 +398,13 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	}
 	if _, ok := get.Responses["412"]; ok {
 		t.Fatal("a conditional read must not document 412")
+	}
+	del := doc.Paths[Prefix+"/docprobe/{id}"]["delete"]
+	if del.Responses["204"].Headers["ETag"] != nil {
+		t.Fatalf("a 204 has no representation to validate, yet documents ETag: %+v", del.Responses["204"])
+	}
+	if _, ok := del.Responses["428"]; !ok {
+		t.Fatalf("guarded delete lacks 428: %v", del.Responses)
 	}
 	created := doc.Paths[Prefix+"/docprobe/created/{id}"]["put"]
 	if generic["paths"].(map[string]any)[Prefix+"/docprobe/created/{id}"].(map[string]any)["put"].(map[string]any)[extCreateOnly] != true {
@@ -502,6 +535,12 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"create-only and guarded": {func() Operation { op := createOnly(http.MethodPut); op.Guarded = true; return op }(), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}, "exclusive"},
+		"guarded DELETE with ETag": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
+		}, "must not declare"},
+		"conditional with embedded ETag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*embeddedConditionalDocOutput, error) { return nil, nil })
+		}, "ETag"},
 		"create-only without If-None-Match": {createOnly(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *noHeaders) (*okOut, error) { return nil, nil })
 		}, "If-None-Match"},
@@ -511,7 +550,7 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"guarded without If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *noHeaders) (*okOut, error) { return nil, nil })
 		}, "If-Match"},
-		"guarded without ETag": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
+		"guarded without ETag": {guarded(http.MethodPatch), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*noETag, error) { return nil, nil })
 		}, "ETag"},
 		"guarded with a non-string ETag": {guarded(http.MethodPatch), func(r *Registry, op Operation) {
@@ -541,11 +580,16 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 			newChiRouter(Dependencies{testRegister: func(reg *Registry) { c.reg(reg, c.op) }})
 		})
 	}
-	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+	for _, method := range []string{http.MethodPut, http.MethodPatch} {
 		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
 			Register(reg, guarded(method), func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}})
 	}
+	// A guarded DELETE answers 204 with no validator, so its output declares
+	// none.
+	newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+		Register(reg, guarded(http.MethodDelete), func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
+	}})
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
 			Register(reg, conditional(method), func(context.Context, *okIn) (*okOut, error) { return nil, nil })

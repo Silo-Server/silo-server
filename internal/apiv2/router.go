@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/textproto"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -235,9 +236,20 @@ func requestID(next http.Handler) http.Handler {
 func joinPreconditionFields(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, field := range []string{ifMatchField, ifNoneMatchField} {
-			if vs := r.Header.Values(field); len(vs) > 1 {
-				r.Header.Set(field, strings.Join(vs, ", "))
+			vs, present := r.Header[textproto.CanonicalMIMEHeaderKey(field)]
+			if !present {
+				continue
 			}
+			joined := strings.Join(vs, ", ")
+			if strings.TrimSpace(joined) == "" {
+				// Huma binds a header to a string, where a present but
+				// empty field is indistinguishable from an absent one. The
+				// RFC #-list rule makes the empty field an empty list that
+				// matches nothing (412), not a missing precondition (428),
+				// so it is rewritten to a spelling the parser sees as empty.
+				joined = emptyETagList
+			}
+			r.Header.Set(field, joined)
 		}
 		next.ServeHTTP(w, r)
 	})

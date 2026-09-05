@@ -851,14 +851,27 @@ func TestGuardedOperationsAreMarkedIfMatch(t *testing.T) {
 	if len(declared) == 0 {
 		t.Fatal("the v2 registry declares nothing")
 	}
+	guarded := map[string]bool{}
 	for _, op := range declared {
 		if !op.Guarded {
 			continue
 		}
+		guarded[op.OperationID] = true
 		for _, e := range byOperation[op.OperationID] {
 			if e.Concurrency != ConcurrencyIfMatch {
 				t.Errorf("%s maps to guarded v2 operation %s but is not marked concurrency %s", e.key(), op.OperationID, ConcurrencyIfMatch)
 			}
+		}
+	}
+	// The other direction: a row the ledger marks if_match that already names
+	// its v2 operation must resolve to a registration declared Guarded, so a
+	// port cannot drop the decision by omitting the declaration.
+	for _, e := range ledger.Entries {
+		if e.Concurrency != ConcurrencyIfMatch || e.V2.OperationID == nil {
+			continue
+		}
+		if !guarded[*e.V2.OperationID] {
+			t.Errorf("%s is marked concurrency %s but its v2 operation %s is not declared Guarded", e.key(), ConcurrencyIfMatch, *e.V2.OperationID)
 		}
 	}
 }

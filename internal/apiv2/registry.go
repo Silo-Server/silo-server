@@ -277,7 +277,14 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 		if !declaresHeaderString(in, ifMatchField) {
 			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"`", ifMatchField)
 		}
-		if !declaresHeaderString(out, etagField) {
+		if op.Method == http.MethodDelete {
+			// The deleted representation has no validator: a 204 carries
+			// no ETag, so the output must not declare one (Huma would
+			// document it on the 204).
+			if declaresHeaderString(out, etagField) {
+				return fmt.Errorf("guarded delete: output must not declare `header:\"%s\"`; a 204 has no representation to validate", etagField)
+			}
+		} else if !declaresHeaderString(out, etagField) {
 			return fmt.Errorf("guarded: output must declare a string field with `header:\"%s\"`", etagField)
 		}
 	}
@@ -295,17 +302,19 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 	return nil
 }
 
-// declaresHeaderString reports whether struct type t (or an embedded struct)
-// has a string field bound to the named header, compared case-insensitively
-// as HTTP header names are.
+// declaresHeaderString reports whether struct type t has a direct string
+// field bound to the named header, compared case-insensitively as HTTP header
+// names are. Only direct fields count: Huma ignores embedded structs when it
+// binds and writes headers, so a field declared through one never reaches
+// the wire.
 func declaresHeaderString(t reflect.Type, name string) bool {
 	if t == nil || t.Kind() != reflect.Struct {
 		return false
 	}
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		if f.Anonymous && f.Type.Kind() == reflect.Struct && declaresHeaderString(f.Type, name) {
-			return true
+		if f.Anonymous {
+			continue
 		}
 		if strings.EqualFold(f.Tag.Get("header"), name) && f.Type.Kind() == reflect.String {
 			return true

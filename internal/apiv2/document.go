@@ -209,7 +209,10 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 		}
 	}
 	for status, resp := range registered.Responses {
-		if code, err := strconv.Atoi(status); err != nil || code < 200 || code >= 300 {
+		code, err := strconv.Atoi(status)
+		if err != nil || code < 200 || code >= 300 || code == http.StatusNoContent {
+			// A 204 has no representation to validate; Register refuses an
+			// ETag field on a guarded DELETE's output for the same reason.
 			continue
 		}
 		if resp.Headers == nil {

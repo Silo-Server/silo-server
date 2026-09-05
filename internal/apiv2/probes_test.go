@@ -278,9 +278,9 @@ type guardedProbeWriteOutput struct {
 	Body guardedProbeBody
 }
 
-type guardedProbeDeleteOutput struct {
-	ETag string `header:"ETag"`
-}
+// guardedProbeDeleteOutput declares no ETag: the deleted representation has
+// no validator and Register refuses one on a guarded DELETE.
+type guardedProbeDeleteOutput struct{}
 
 func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 	return func(reg *Registry) {
