@@ -1934,6 +1934,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if userPluginSettingsHandler != nil {
 		v2deps.PluginSettings = userPluginSettingsHandler
 	}
+	if sectionHandler != nil {
+		v2deps.ProfileSections = sectionHandler
+	}
+	if sectionSettingsHandler != nil {
+		v2deps.SectionFlags = sectionSettingsHandler
+	}
 	if deps.v2Wiring != nil {
 		deps.v2Wiring(v2deps)
 	}

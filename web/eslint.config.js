@@ -51,8 +51,11 @@ export default tseslint.config(
       "src/hooks/queries/settingValues.ts",
       "src/hooks/queries/subtitleAppearance.ts",
       "src/hooks/useOverlayPrefs.ts",
+      "src/lib/profile-management.ts",
       "src/lib/seriesSubtitleSettings.ts",
       "src/pages/OAuthComplete.tsx",
+      "src/pages/ProfileCustomizeHome.tsx",
+      "src/pages/setup-wizard/steps/ProfileStep.tsx",
       "src/player/utils/subtitleChoicePersistence.ts",
     ],
     rules: {

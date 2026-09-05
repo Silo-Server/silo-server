@@ -440,7 +440,7 @@ func TestUpdateProfilePublishesUserSettingsEvents(t *testing.T) {
 // visible to every profile-DTO reader on every platform.
 
 // listProfilesVia sends GET /profiles as profile-1's own session.
-func listProfilesVia(t *testing.T, handler *ProfileHandler) profileListResponse {
+func listProfilesVia(t *testing.T, handler *ProfileHandler) ProfileListView {
 	t.Helper()
 	req := newAuthorizedProfileRequestWithRole(http.MethodGet, "/profiles", "", "user", "profile-1")
 	rr := httptest.NewRecorder()
@@ -448,14 +448,14 @@ func listProfilesVia(t *testing.T, handler *ProfileHandler) profileListResponse 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /profiles = %d: %s", rr.Code, rr.Body.String())
 	}
-	var resp profileListResponse
+	var resp ProfileListView
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decoding profile list: %v", err)
 	}
 	return resp
 }
 
-func profileFromList(t *testing.T, resp profileListResponse, profileID string) ProfileView {
+func profileFromList(t *testing.T, resp ProfileListView, profileID string) ProfileView {
 	t.Helper()
 	for _, p := range resp.Profiles {
 		if p.ID == profileID {

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { listProfiles } from "@/hooks/queries/profiles";
 import type { Library, Profile } from "@/api/types";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -63,7 +64,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
 
   const profilesQuery = useQuery({
     queryKey: ["setup-wizard", "profiles"],
-    queryFn: () => api<{ profiles: Profile[] }>("/profiles").then((d) => d.profiles ?? []),
+    queryFn: () => listProfiles().then((d) => d.profiles),
     enabled: !!user,
     retry: shouldRetrySetupQuery,
   });

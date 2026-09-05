@@ -244,7 +244,7 @@ func registerSettings(reg *Registry) {
 			Description: "The public settings manifest, exactly the canonical bytes of contracts/settings/v1 with maintainer-only fields removed; the same document v1 /settings/manifest serves.",
 			Content: map[string]*huma.MediaType{
 				mediaTypeJSON: {Schema: &huma.Schema{
-					Type:                 "object",
+					Type:                 huma.TypeObject,
 					Description:          "A settings manifest. Its members are fixed by the settings contract (contracts/settings/v1), not by this document.",
 					AdditionalProperties: true,
 					Extensions:           map[string]any{extExtensionBag: "settings-manifest"},
