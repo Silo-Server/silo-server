@@ -7247,6 +7247,7 @@
       "release_flow": "core_admin",
       "tier": 1,
       "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Absolute assignment converges without changing use_count or dispatching an effect. Concurrent edits remain last-writer-wins as documented below; retry safety does not preserve a later admin edit. The admin-invitations section owns any change to that concurrency policy.",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -24557,7 +24558,8 @@
       "section": "auth-devices",
       "release_flow": "settings",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Stale retry hazard: a setting write re-registers the same profile/device identity after forgetting it; a delayed retry deletes the new settings and registration. The auth-devices section must bind forgetting to a registration generation before clients may retry.",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -24617,7 +24619,8 @@
       "section": "auth-devices",
       "release_flow": "settings",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Stale retry hazard: the reset deletes every current canonical and legacy device setting, so a delayed retry clears settings written after the first reset. The auth-devices section must guard the settings resource with a generation precondition before clients may retry.",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
@@ -24628,7 +24631,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deviceHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: a reset to defaults; nothing stale to protect."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deviceHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The current reset is unguarded and non-retryable; a generation precondition is required before automatic retries can preserve newer settings."
     },
     {
       "listener": "api",
@@ -36391,7 +36394,8 @@
       "section": "profiles",
       "release_flow": "profiles",
       "tier": 1,
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Stale retry hazard: ResetSectionOverrides deletes the current page's whole override set, so a delayed retry removes a layout saved after the first reset. The profiles section must guard the override resource with a generation precondition before clients may retry.",
       "disposition": "ported",
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
