@@ -56,7 +56,6 @@ export default function AdminDashboard() {
   const [isAddPanelOpen, setIsAddPanelOpen] = useState(false);
 
   const libraries = librariesQuery.data ?? [];
-  const { refetch: refetchSessions } = sessionsQuery;
   const { refetch: refetchLibraries } = librariesQuery;
   const { refetch: refetchUsers } = usersQuery;
   const hasDashboardData =
@@ -66,7 +65,9 @@ export default function AdminDashboard() {
     usersQuery.data !== undefined;
   const hasStaleDashboardData =
     statsQuery.isStale || sessionsQuery.isStale || librariesQuery.isStale || usersQuery.isStale;
-  const dashboardDataUpdatedAt = Math.max(
+  // The oldest section sets overall freshness; a session-only poll must not
+  // claim the whole dashboard was refreshed or postpone its next refresh.
+  const dashboardDataUpdatedAt = Math.min(
     statsQuery.dataUpdatedAt,
     sessionsQuery.dataUpdatedAt,
     librariesQuery.dataUpdatedAt,
@@ -112,7 +113,7 @@ export default function AdminDashboard() {
       try {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
-          queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
+          queryClient.invalidateQueries({ queryKey: adminKeys.liveSessionsRoot() }),
           queryClient.invalidateQueries({ queryKey: adminKeys.libraries(), refetchType: "none" }),
           queryClient.invalidateQueries({ queryKey: adminKeys.users(), refetchType: "none" }),
           // Widgets that own their own data: invalidate by prefix so every
@@ -125,7 +126,7 @@ export default function AdminDashboard() {
         ]);
         const nextStats = await fetchAdminStats({ refresh: true });
         queryClient.setQueryData(adminKeys.stats(), nextStats);
-        await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
+        await Promise.all([refetchLibraries(), refetchUsers()]);
         const refreshedAt = Date.now();
         setLastDashboardUpdatedAt(refreshedAt);
         setRelativeUpdatedNow(refreshedAt);
@@ -144,7 +145,7 @@ export default function AdminDashboard() {
         }
       }
     },
-    [queryClient, refetchLibraries, refetchSessions, refetchUsers],
+    [queryClient, refetchLibraries, refetchUsers],
   );
 
   useEffect(() => {
@@ -167,21 +168,6 @@ export default function AdminDashboard() {
       void refreshDashboard({ manual: true });
       return;
     }
-
-    if (
-      lastDashboardUpdatedAt &&
-      Date.now() - lastDashboardUpdatedAt >= DASHBOARD_AUTO_REFRESH_MS
-    ) {
-      void refreshDashboard({ manual: false });
-    }
-
-    const interval = window.setInterval(() => {
-      void refreshDashboard({ manual: false });
-    }, DASHBOARD_AUTO_REFRESH_MS);
-
-    return () => {
-      window.clearInterval(interval);
-    };
   }, [
     hasDashboardData,
     hasStaleDashboardData,
@@ -190,6 +176,18 @@ export default function AdminDashboard() {
     pageActivity.canPollDashboard,
     refreshDashboard,
   ]);
+
+  // Session polls update query timestamps independently. Keep the periodic
+  // refresh on its own clock, including after a transient request failure.
+  useEffect(() => {
+    if (!pageActivity.canPollDashboard || isManualRefreshPending) return;
+    const interval = window.setInterval(() => {
+      void refreshDashboard({ manual: false }).catch((error: unknown) => {
+        console.error("Failed to refresh dashboard", error);
+      });
+    }, DASHBOARD_AUTO_REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [isManualRefreshPending, pageActivity.canPollDashboard, refreshDashboard]);
 
   const toggleCustomizing = useCallback(() => {
     layout.setCustomizing(!layout.isCustomizing);

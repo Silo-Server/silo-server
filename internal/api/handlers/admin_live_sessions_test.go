@@ -184,38 +184,64 @@ func TestStaleViewNeitherClassifiesNorHides(t *testing.T) {
 	}
 }
 
-// A retired measurement nobody reports is an ended session, and a missing or
-// stale publisher cannot make it live again. Un-hiding it under blindness put
-// every session that ended in the last TombstoneRetention back on the default
-// list as an identity-only row, counted as an active stream, for as long as the
-// view stayed stale.
-func TestBlindViewStillHidesPrunedUnclaimedSessions(t *testing.T) {
-	snapshot := snapshotOf(
-		streamtelemetry.LiveByteFacts{SessionID: "tombstone", ViewerBytes: 8192, MeasurementPruned: true,
-			ViewerLastByteAt: readAt.Add(-20 * time.Minute), StartedAt: settled},
-		// Still being measured somewhere: a missing publisher could be the one
-		// delivering, so this one is un-hidden exactly as before.
-		streamtelemetry.LiveByteFacts{SessionID: "live-unclaimed", ViewerBytes: 8192,
-			ViewerLastByteAt: readAt.Add(-2 * minimumDeliveryIdleWindow), StartedAt: settled},
-	)
+// Measurement retirement is independent of playback ownership. A missing
+// reporter may still own a paused or fully buffered session.
+func TestBlindViewDoesNotClassifyPrunedSessions(t *testing.T) {
+	snapshot := snapshotOf(streamtelemetry.LiveByteFacts{
+		SessionID: "tombstone", ViewerBytes: 8192, MeasurementPruned: true,
+		ViewerLastByteAt: readAt.Add(-20 * time.Minute), StartedAt: settled,
+	})
 	for _, blind := range []struct {
 		name            string
 		complete, stale bool
-	}{{"stale", true, true}, {"incomplete", false, false}} {
+	}{
+		{"stale", true, true}, {"incomplete", false, false},
+	} {
 		t.Run(blind.name, func(t *testing.T) {
-			sessions, noDelivery, unclaimedIdle := decorateLiveSessions(
-				snapshot, nil, false, blind.complete, blind.stale, readAt, minimumDeliveryIdleWindow,
-			)
-			if len(sessions) != 1 || sessions[0].SessionID != "live-unclaimed" || noDelivery != 0 || unclaimedIdle != 1 {
-				t.Fatalf("blind view = sessions %+v, counts %d/%d", sessions, noDelivery, unclaimedIdle)
-			}
-			revealed, _, _ := decorateLiveSessions(
-				snapshot, nil, true, blind.complete, blind.stale, readAt, minimumDeliveryIdleWindow,
-			)
-			if len(revealed) != 2 {
-				t.Fatalf("include_idle did not reveal the tombstone: %+v", revealed)
+			sessions, noDelivery, idle := decorateLiveSessions(snapshot, nil, false, blind.complete, blind.stale, readAt, minimumDeliveryIdleWindow)
+			if len(sessions) != 1 || noDelivery != 0 || idle != 0 {
+				t.Fatalf("blind view hid a potentially live session: rows=%d no_delivery=%d idle=%d", len(sessions), noDelivery, idle)
 			}
 		})
+	}
+}
+
+func TestPausedSessionSurvivesMissingReporter(t *testing.T) {
+	cfg := streamtelemetry.DefaultConfig("api")
+	params := streamtelemetry.ViewParams{Freshness: cfg.Freshness, MembershipTTL: cfg.MembershipTTL, MaxMergedSessions: 10, MaxMergedTransfers: 10, MaxRoutesPerSession: 10}
+	measurement := streamtelemetry.Snapshot{
+		PublisherID: "proxy", CapturedAt: readAt,
+		Coverage: streamtelemetry.PublisherCoverage{Declared: true, ConfiguredFamilies: streamtelemetry.AllFamilies},
+		Sessions: []streamtelemetry.SessionView{{
+			SessionID: "paused", MeasurementPruned: true, StartedAt: settled,
+			Routes: []streamtelemetry.RouteActivityView{{Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 8192, LastByteAccepted: settled}},
+		}},
+	}
+	api := streamtelemetry.Snapshot{
+		PublisherID: "api", ReportingPublisherID: "api#reported", CapturedAt: readAt,
+		Coverage: measurement.Coverage,
+	}
+	reporter := streamtelemetry.Snapshot{
+		PublisherID: "api#reported", CapturedAt: readAt, Coverage: streamtelemetry.PublisherCoverage{Declared: true},
+		Sessions: []streamtelemetry.SessionView{{SessionID: "paused", Reported: true, ReportedPaused: true, StartedAt: settled}},
+	}
+	for _, stale := range []bool{false, true} {
+		if stale {
+			reporter.CapturedAt = readAt.Add(-2 * cfg.Freshness)
+		}
+		set := streamtelemetry.PublisherSet{Snapshots: []streamtelemetry.Snapshot{measurement, api, reporter}}
+		for _, snapshot := range set.Snapshots {
+			set.Members = append(set.Members, streamtelemetry.Member{PublisherID: snapshot.PublisherID, LastHeartbeat: readAt})
+		}
+		view := streamtelemetry.BuildGlobalView(set, readAt, params)
+		if view.Complete == stale {
+			t.Fatalf("stale=%v complete=%v", stale, view.Complete)
+		}
+		sessions, _, idle := decorateLiveSessions(streamtelemetry.LiveByteFactsFromGlobalView(view),
+			[]playbackSessionRow{{SessionID: "paused", IsPaused: true}}, false, view.Complete, false, readAt, minimumDeliveryIdleWindow)
+		if len(sessions) != 1 || idle != 0 || !sessions[0].IsPaused {
+			t.Fatalf("stale reporter=%v: rows=%d idle=%d", stale, len(sessions), idle)
+		}
 	}
 }
 

@@ -40,7 +40,8 @@ export function NowPlayingWidget() {
     !sessionsQuery.isLoading &&
     !sessionsQuery.error &&
     sessions.length === 0 &&
-    !source.canRevealHidden;
+    !source.canRevealHidden &&
+    (sessionsQuery.data?.telemetry_enabled === false || source.trustworthy);
   useReportCollapsed(isIdle);
 
   if (isIdle) {

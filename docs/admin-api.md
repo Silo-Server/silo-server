@@ -1431,12 +1431,16 @@ The rest:
   reports it. It is carried for diagnosis and is not an input to classification.
 
 Under a stale or incomplete view (`view_stale`, `!view_complete`) both flags
-are cleared, with one exception: an `unclaimed_idle` row whose measurement is
-`measurement_pruned` stays classified and stays hidden. That row is memory of a
-session no publisher is measuring any more, and a missing or stale publisher
-cannot make it live again; un-hiding it put every session that ended in the
-last `TombstoneRetention` back on the default list as an identity-only row for
-as long as the view stayed blind.
+are cleared, including for `measurement_pruned` rows. A paused or fully buffered
+session can have a retired measurement while a missing reporter still owns its
+playback. Retired rows may therefore reappear while the view is unhealthy;
+clients must display the view-health warning rather than treat the list or its
+count as a complete inventory of active viewers.
+
+The web live-session queries refresh every 30 seconds while the page is visible,
+focused, and not frozen, even when no legacy playback event arrives. This lets
+idle classifications and measured-only membership changes reach the Activity
+page. Dashboard refresh includes both the default and revealed query variants.
 
 ## The reporting publisher
 

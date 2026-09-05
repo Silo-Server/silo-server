@@ -114,6 +114,22 @@ describe("DashboardGrid collapse", () => {
     ).toBe("true");
   });
 
+  it.each([
+    { view_available: false, label: "starting up" },
+    { view_complete: false, label: "partial" },
+    { view_stale: true, label: "measured (stale)" },
+  ])("keeps the $label warning visible for an empty view", async ({ label, ...health }) => {
+    mocks.useAdminLiveSessions.mockReturnValue({
+      data: { ...live([]), ...health },
+      isLoading: false,
+      error: null,
+    });
+    const { container } = renderGrid();
+    expect(await screen.findByText(label)).toBeTruthy();
+    expect(screen.queryByText("Nothing playing right now")).toBeNull();
+    expect(rowsOf(container)).toBe("3");
+  });
+
   it("keeps its full height while loading and after a failure", () => {
     mocks.useAdminLiveSessions.mockReturnValue({ data: undefined, isLoading: true, error: null });
     const loading = renderGrid();

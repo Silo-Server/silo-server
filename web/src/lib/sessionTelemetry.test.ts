@@ -112,9 +112,8 @@ describe("describeSessionDelivery", () => {
     expect(describeSessionDelivery(session, { viewBlind: true })?.unclaimed).toBe(false);
   });
 
-  // A retired measurement is an ended session; no missing publisher can revive
-  // it, so the server keeps hiding it under blindness and the badge follows.
-  it("keeps badging a pruned unclaimed row while the merged view is blind", () => {
+  // A retired measurement may belong to a paused session whose reporter is missing.
+  it("does not badge a pruned row while its reporter may be missing", () => {
     const session = sessionWith({
       evidence: "measured",
       viewer_bytes: 8192,
@@ -122,7 +121,7 @@ describe("describeSessionDelivery", () => {
       measurement_pruned: true,
     });
 
-    expect(describeSessionDelivery(session, { viewBlind: true })?.unclaimed).toBe(true);
+    expect(describeSessionDelivery(session, { viewBlind: true })?.unclaimed).toBe(false);
   });
 
   it("suppresses unclaimed framing when the merged view is incomplete", () => {

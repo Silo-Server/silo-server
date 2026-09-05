@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { AdminStats, AdminLiveSessionsResponse } from "@/api/types";
+import { usePageActivity } from "@/hooks/usePageActivity";
 import { adminKeys } from "../keys";
 
 const ADMIN_STALE_TIME = 30_000;
@@ -41,6 +42,7 @@ export function useAdminStats() {
  * @param includeHidden keep the rows reported as playing that delivered nothing.
  */
 export function useAdminLiveSessions(includeHidden: boolean) {
+  const { canPollDashboard } = usePageActivity();
   return useQuery({
     queryKey: adminKeys.liveSessions(includeHidden),
     queryFn: () =>
@@ -62,5 +64,8 @@ export function useAdminLiveSessions(includeHidden: boolean) {
           },
       ),
     staleTime: ADMIN_STALE_TIME,
+    // Measurement and idle expiry change without legacy sessions.replaced events.
+    // Poll both visibility variants while the page is active.
+    refetchInterval: canPollDashboard ? ADMIN_STALE_TIME : false,
   });
 }
