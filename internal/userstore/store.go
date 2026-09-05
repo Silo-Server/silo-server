@@ -107,6 +107,9 @@ type UserStore interface {
 	ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]Favorite, error)
 	ListFavoritesByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	IsFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetFavorite answers the profile's favorite entry for the item, nil when
+	// the item is not a favorite.
+	GetFavorite(ctx context.Context, profileID, mediaItemID string) (*Favorite, error)
 	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
 	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
@@ -116,6 +119,9 @@ type UserStore interface {
 	ListWatchlist(ctx context.Context, profileID string, limit, offset int) ([]WatchlistEntry, error)
 	ListWatchlistByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	InWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetWatchlistEntry answers the profile's watchlist entry for the item,
+	// nil when the item is not on the watchlist.
+	GetWatchlistEntry(ctx context.Context, profileID, mediaItemID string) (*WatchlistEntry, error)
 	// RemoveWatchedFromWatchlist reports the profile's preference for pruning
 	// fully-watched entries from the watchlist (defaults true): movies are
 	// removed outright on completion, while fully-watched series are only

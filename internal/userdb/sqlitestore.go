@@ -204,6 +204,14 @@ func (s *SQLiteUserStore) IsFavorite(_ context.Context, profileID, mediaItemID s
 	return IsFavorite(s.db, profileID, mediaItemID)
 }
 
+func (s *SQLiteUserStore) GetFavorite(_ context.Context, profileID, mediaItemID string) (*userstore.Favorite, error) {
+	return GetFavorite(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) GetWatchlistEntry(_ context.Context, profileID, mediaItemID string) (*userstore.WatchlistEntry, error) {
+	return GetWatchlistEntry(s.db, profileID, mediaItemID)
+}
+
 func (s *SQLiteUserStore) AddToWatchlist(_ context.Context, profileID, mediaItemID string) error {
 	return AddToWatchlist(s.db, profileID, mediaItemID)
 }

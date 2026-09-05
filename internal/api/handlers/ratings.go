@@ -118,13 +118,21 @@ func (h *RatingsHandler) HandleDeleteRating(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.ratingsRepo.Delete(r.Context(), userID, profileID, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete rating")
+	if err := h.DeleteRating(r.Context(), userID, profileID, itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	h.markStale(r.Context(), userID, profileID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteRating removes the profile's rating of an item. Deleting a rating
+// that does not exist succeeds, so a retried delete converges.
+func (h *RatingsHandler) DeleteRating(ctx context.Context, userID int, profileID, itemID string) error {
+	if err := h.ratingsRepo.Delete(ctx, userID, profileID, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete rating")
+	}
+	h.markStale(ctx, userID, profileID)
+	return nil
 }
 
 // HandleGetRating handles GET /ratings/{item_id}.
@@ -156,6 +164,16 @@ func (h *RatingsHandler) HandleGetRating(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// ListRatings answers the store page [offset, offset+limit) of the profile's
+// ratings, newest first.
+func (h *RatingsHandler) ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalog.UserRating, error) {
+	ratings, err := h.ratingsRepo.List(ctx, userID, profileID, limit, offset)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
+	}
+	return ratings, nil
+}
+
 // HandleListRatings handles GET /ratings/.
 // Returns paginated ratings for the current user+profile.
 func (h *RatingsHandler) HandleListRatings(w http.ResponseWriter, r *http.Request) {
@@ -164,9 +182,9 @@ func (h *RatingsHandler) HandleListRatings(w http.ResponseWriter, r *http.Reques
 
 	limit, offset := parsePagination(r)
 
-	ratings, err := h.ratingsRepo.List(r.Context(), userID, profileID, limit, offset)
+	ratings, err := h.ListRatings(r.Context(), userID, profileID, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list ratings")
+		writeAPIError(w, err)
 		return
 	}
 

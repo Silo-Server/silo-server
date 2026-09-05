@@ -148,7 +148,13 @@ func (s stubStore) ListFavoritesByMediaItems(context.Context, string, []string) 
 	panic("unused")
 }
 func (s stubStore) IsFavorite(context.Context, string, string) (bool, error) { panic("unused") }
-func (s stubStore) AddToWatchlist(context.Context, string, string) error     { panic("unused") }
+func (s stubStore) GetFavorite(context.Context, string, string) (*userstore.Favorite, error) {
+	panic("unused")
+}
+func (s stubStore) GetWatchlistEntry(context.Context, string, string) (*userstore.WatchlistEntry, error) {
+	panic("unused")
+}
+func (s stubStore) AddToWatchlist(context.Context, string, string) error { panic("unused") }
 func (s stubStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }

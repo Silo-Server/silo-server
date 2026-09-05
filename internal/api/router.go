@@ -1907,6 +1907,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if libraryCollectionHandler != nil {
 		v2deps.LibraryCollections = libraryCollectionHandler
 	}
+	if personalDataHandler != nil && itemsHandler != nil {
+		v2deps.PersonalLists = personalDataHandler
+	}
+	if ratingsHandler != nil {
+		v2deps.Ratings = ratingsHandler
+	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {

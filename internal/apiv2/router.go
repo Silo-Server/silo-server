@@ -105,6 +105,11 @@ type Dependencies struct {
 	// LibraryCollections answers a library's collections to viewers
 	// (*handlers.LibraryCollectionHandler).
 	LibraryCollections LibraryCollectionService
+	// PersonalLists reads and edits a profile's favorites
+	// (*handlers.PersonalDataHandler).
+	PersonalLists PersonalListService
+	// Ratings reads and edits a profile's ratings (*handlers.RatingsHandler).
+	Ratings RatingService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -444,6 +449,28 @@ type LibraryCollectionService interface {
 	LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (handlers.LibraryCollectionTabView, error)
 	LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error)
 	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter) ([]handlers.CollectionItemView, error)
+}
+
+// PersonalListService is the slice of *handlers.PersonalDataHandler the
+// favorites operations use. Every method acts as the viewer's profile and
+// returns an *handlers.APIError on failure.
+type PersonalListService interface {
+	// ListFavorites answers the store page [offset, offset+limit) of the
+	// profile's favorites, newest first, and the cards of the entries the
+	// viewer may see, in the same order.
+	ListFavorites(ctx context.Context, viewer handlers.PersonalListViewer, limit, offset int) ([]userstore.Favorite, []handlers.CollectionItemView, error)
+	// GetFavorite answers the entry of an item the viewer may see; found is
+	// false when the item is not a favorite.
+	GetFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.Favorite, found bool, err error)
+	AddFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+	RemoveFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+}
+
+// RatingService is the slice of *handlers.RatingsHandler the ratings
+// operations use.
+type RatingService interface {
+	ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalogpkg.UserRating, error)
+	DeleteRating(ctx context.Context, userID int, profileID, itemID string) error
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

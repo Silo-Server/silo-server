@@ -73,6 +73,42 @@ func (s *PostgresUserStore) IsFavorite(ctx context.Context, profileID, mediaItem
 	return count > 0, err
 }
 
+func (s *PostgresUserStore) GetFavorite(ctx context.Context, profileID, mediaItemID string) (*userstore.Favorite, error) {
+	var f userstore.Favorite
+	var addedAt time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT profile_id, media_item_id, added_at FROM user_favorites
+		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+		s.userID, profileID, mediaItemID,
+	).Scan(&f.ProfileID, &f.MediaItemID, &addedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting favorite: %w", err)
+	}
+	f.AddedAt = timeToString(addedAt)
+	return &f, nil
+}
+
+func (s *PostgresUserStore) GetWatchlistEntry(ctx context.Context, profileID, mediaItemID string) (*userstore.WatchlistEntry, error) {
+	var e userstore.WatchlistEntry
+	var addedAt time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT profile_id, media_item_id, added_at FROM user_watchlist
+		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+		s.userID, profileID, mediaItemID,
+	).Scan(&e.ProfileID, &e.MediaItemID, &addedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting watchlist entry: %w", err)
+	}
+	e.AddedAt = timeToString(addedAt)
+	return &e, nil
+}
+
 func (s *PostgresUserStore) ListFavoritesByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(mediaItemIDs))
 	if len(mediaItemIDs) == 0 {

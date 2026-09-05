@@ -5,11 +5,15 @@
 
 /** Operation ids keyed by `METHOD /path`, as the committed v2 OpenAPI document lists them. */
 export const v2Operations = {
+  "DELETE /api/v2/favorites/{item_id}": "deleteFavorite",
   "DELETE /api/v2/libraries/roots/override": "deleteRootOverride",
   "DELETE /api/v2/libraries/{id}": "deleteLibrary",
   "DELETE /api/v2/libraries/{id}/poster": "deleteLibraryPoster",
+  "DELETE /api/v2/ratings/{item_id}": "deleteRating",
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/admin/users": "listAdminUsers",
+  "GET /api/v2/favorites": "listFavorites",
+  "GET /api/v2/favorites/{item_id}": "getFavorite",
   "GET /api/v2/libraries": "listLibraries",
   "GET /api/v2/libraries/metadata-match-queue": "listMetadataMatchQueues",
   "GET /api/v2/libraries/provider-defaults": "getLibraryProviderDefaults",
@@ -27,6 +31,7 @@ export const v2Operations = {
   "GET /api/v2/library/{id}/user-collections": "listLibraryUserCollections",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
   "GET /api/v2/progress": "listProgress",
+  "GET /api/v2/ratings": "listRatings",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
   "PATCH /api/v2/libraries/{id}": "updateLibrary",
@@ -39,6 +44,7 @@ export const v2Operations = {
   "POST /api/v2/libraries/{id}/metadata-match-queue/cancel": "cancelMetadataMatchQueue",
   "POST /api/v2/libraries/{id}/metadata-match-queue/retry": "retryMetadataMatchQueue",
   "POST /api/v2/libraries/{id}/refresh-metadata": "refreshLibraryMetadata",
+  "PUT /api/v2/favorites/{item_id}": "addFavorite",
   "PUT /api/v2/libraries/roots/override": "setRootOverride",
   "PUT /api/v2/libraries/{id}/poster": "uploadLibraryPoster",
   "PUT /api/v2/libraries/{id}/providers": "setLibraryProviders",

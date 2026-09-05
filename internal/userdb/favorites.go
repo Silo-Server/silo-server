@@ -2,6 +2,7 @@ package userdb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -70,6 +71,40 @@ func ListFavorites(db *sql.DB, profileID string, limit, offset int) ([]Favorite,
 		favorites = append(favorites, f)
 	}
 	return favorites, rows.Err()
+}
+
+// GetFavorite answers a profile's favorite entry for a media item, nil when
+// the item is not a favorite.
+func GetFavorite(db *sql.DB, profileID, mediaItemID string) (*Favorite, error) {
+	var f Favorite
+	err := db.QueryRow(
+		`SELECT profile_id, media_item_id, added_at FROM favorites WHERE profile_id = ? AND media_item_id = ?`,
+		profileID, mediaItemID,
+	).Scan(&f.ProfileID, &f.MediaItemID, &f.AddedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+// GetWatchlistEntry answers a profile's watchlist entry for a media item, nil
+// when the item is not on the watchlist.
+func GetWatchlistEntry(db *sql.DB, profileID, mediaItemID string) (*WatchlistEntry, error) {
+	var e WatchlistEntry
+	err := db.QueryRow(
+		`SELECT profile_id, media_item_id, added_at FROM watchlist WHERE profile_id = ? AND media_item_id = ?`,
+		profileID, mediaItemID,
+	).Scan(&e.ProfileID, &e.MediaItemID, &e.AddedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
 // IsFavorite checks whether a media item is in a profile's favorites.

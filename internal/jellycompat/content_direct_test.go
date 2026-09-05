@@ -394,6 +394,12 @@ func (s *progressCountingStore) ListFavoritesByMediaItems(context.Context, strin
 func (s *progressCountingStore) IsFavorite(context.Context, string, string) (bool, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) GetFavorite(context.Context, string, string) (*userstore.Favorite, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) GetWatchlistEntry(context.Context, string, string) (*userstore.WatchlistEntry, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) AddToWatchlist(context.Context, string, string) error {
 	panic("unused")
 }
