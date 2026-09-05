@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiClientError, api } from "@/api/client";
 import { sectionFromV2 } from "@/api/v2/catalog";
-import { v2 } from "@/api/v2/request";
 import type {
   SectionsResponse,
   HomeLayoutResponse,
@@ -11,10 +10,11 @@ import type {
   HomeSectionItemsResponse,
   PageSectionListResponse,
   PageSectionConfig,
-  SaveOverridesRequest,
-  ProfileSectionOverridesResponse,
-  SettingsSectionsResponse,
+  SectionOverride,
+  SettingsSectionEntry,
 } from "@/api/types";
+import type { components } from "@/api/v2/schema";
+import { v2, type V2Query } from "@/api/v2/request";
 import { sectionKeys } from "./keys";
 import { invalidateAdminCollectionQueries } from "./collectionSurfaceRefresh";
 import { runBulkDelete, type BulkDeleteProgress } from "./bulkDelete";
@@ -31,55 +31,34 @@ import { runBulkDelete, type BulkDeleteProgress } from "./bulkDelete";
 export const HOME_SECTION_STALE_TIME = 10 * 60 * 1000;
 export const HOME_SECTION_GC_TIME = 60 * 60 * 1000;
 
-interface RawSectionOverride {
-  ID?: string;
-  SectionID?: string;
-  Position?: number | null;
-  Hidden?: boolean;
-  Removed?: boolean;
-  SectionType?: string;
-  Title?: string;
-  Featured?: boolean | null;
-  ItemLimit?: number | null;
-  Config?: string;
+/** The scope of a profile's section overrides, as the v2 contract enumerates it. */
+export type ProfileSectionScope = NonNullable<V2Query<"GET /api/v2/profile/sections">["scope"]>;
+
+export interface SaveOverridesRequest {
+  scope: ProfileSectionScope;
+  library_id?: string;
+  overrides: SectionOverride[];
 }
 
-interface RawProfileSectionOverridesResponse {
-  overrides: RawSectionOverride[];
-}
-
-function parseOverrideConfig(config?: string): Record<string, unknown> | undefined {
-  if (!config) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(config) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function normalizeProfileSectionOverridesResponse(
-  response: RawProfileSectionOverridesResponse,
-): ProfileSectionOverridesResponse {
-  return {
-    overrides: response.overrides.map((override) => ({
-      id: override.ID || undefined,
-      section_id: override.SectionID || undefined,
-      position: override.Position ?? undefined,
-      hidden: override.Hidden,
-      removed: override.Removed,
-      section_type: override.SectionType || undefined,
-      title: override.Title || undefined,
-      featured: override.Featured ?? undefined,
-      item_limit: override.ItemLimit ?? undefined,
-      config: parseOverrideConfig(override.Config),
-    })),
-  };
+/**
+ * Projects the stored v2 overrides onto the `SectionOverride` shape the home
+ * screen editor reads and writes back: null members become absent ones.
+ */
+export function profileSectionOverridesFromV2(
+  items: components["schemas"]["SectionOverride"][],
+): SectionOverride[] {
+  return items.map((override) => ({
+    id: override.id || undefined,
+    section_id: override.section_id || undefined,
+    position: override.position ?? undefined,
+    hidden: override.hidden,
+    removed: override.removed,
+    section_type: override.section_type || undefined,
+    title: override.title || undefined,
+    featured: override.featured ?? undefined,
+    item_limit: override.item_limit ?? undefined,
+    config: override.config,
+  }));
 }
 
 export function useHomeSections(enabled = true) {
@@ -296,26 +275,30 @@ export function useReorderSections() {
   });
 }
 
-export function useProfileSectionSettings(scope: string, libraryId?: number) {
+function sectionScopeQuery(scope: ProfileSectionScope, libraryId?: string | number) {
+  return { scope, library_id: libraryId ? String(libraryId) : undefined };
+}
+
+export function useProfileSectionSettings(scope: ProfileSectionScope, libraryId?: number) {
   return useQuery({
     queryKey: sectionKeys.profileOverrides(scope, libraryId ? String(libraryId) : undefined),
-    queryFn: () => {
-      const params = new URLSearchParams({ scope });
-      if (libraryId) params.set("library_id", String(libraryId));
-      return api<SettingsSectionsResponse>(`/profile/sections/settings?${params}`);
+    queryFn: async (): Promise<{ sections: SettingsSectionEntry[] }> => {
+      const settings = await v2("GET /api/v2/profile/sections/settings", {
+        query: sectionScopeQuery(scope, libraryId),
+      });
+      return { sections: settings.items };
     },
   });
 }
 
-export function useProfileSectionOverrides(scope: string, libraryId?: number) {
+export function useProfileSectionOverrides(scope: ProfileSectionScope, libraryId?: number) {
   return useQuery({
     queryKey: sectionKeys.profileOverridesRaw(scope, libraryId ? String(libraryId) : undefined),
-    queryFn: () => {
-      const params = new URLSearchParams({ scope });
-      if (libraryId) params.set("library_id", String(libraryId));
-      return api<RawProfileSectionOverridesResponse>(`/profile/sections?${params}`).then(
-        normalizeProfileSectionOverridesResponse,
-      );
+    queryFn: async (): Promise<{ overrides: SectionOverride[] }> => {
+      const overrides = await v2("GET /api/v2/profile/sections", {
+        query: sectionScopeQuery(scope, libraryId),
+      });
+      return { overrides: profileSectionOverridesFromV2(overrides.items) };
     },
   });
 }
@@ -324,9 +307,9 @@ export function useSaveProfileOverrides() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: SaveOverridesRequest) =>
-      api<void>("/profile/sections", {
-        method: "PUT",
-        body: JSON.stringify(data),
+      v2("PUT /api/v2/profile/sections", {
+        query: sectionScopeQuery(data.scope, data.library_id),
+        body: { overrides: data.overrides },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: sectionKeys.all });
@@ -337,13 +320,10 @@ export function useSaveProfileOverrides() {
 export function useResetProfileOverrides() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (params: { scope: string; libraryId?: string }) => {
-      const searchParams = new URLSearchParams({ scope: params.scope });
-      if (params.libraryId) searchParams.set("library_id", params.libraryId);
-      return api<void>(`/profile/sections/reset?${searchParams}`, {
-        method: "DELETE",
-      });
-    },
+    mutationFn: (params: { scope: ProfileSectionScope; libraryId?: string }) =>
+      v2("DELETE /api/v2/profile/sections", {
+        query: sectionScopeQuery(params.scope, params.libraryId),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: sectionKeys.all });
     },

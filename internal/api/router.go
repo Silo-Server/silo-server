@@ -1921,6 +1921,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.HomeSections = sectionHandler
 	}
 	v2deps.Recipes = &handlers.RecipeHandler{}
+	if sectionHandler != nil {
+		v2deps.ProfileSections = sectionHandler
+	}
+	if sectionSettingsHandler != nil {
+		v2deps.SectionFlags = sectionSettingsHandler
+	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -3610,8 +3616,10 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	r.Use(apimw.Metrics)
 
 	// Compress text-like responses (JSON, SVG, …), while leaving exact bulk
-	// media routes unwrapped so their io.ReaderFrom/sendfile path survives.
-	r.Use(httpstream.CompressExcept(5, skipNativeMediaCompression))
+	// media routes unwrapped so their io.ReaderFrom/sendfile path survives,
+	// and serving validator-bearing v2 responses identity-encoded so a strong
+	// ETag names exactly one representation (apiv2.IdentityEncoded).
+	r.Use(httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded))
 
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {

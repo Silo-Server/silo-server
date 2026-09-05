@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -80,9 +81,45 @@ func (h *SectionHandler) HomeLayout(ctx context.Context) (SectionLayoutView, err
 	return sectionLayoutOf(resolved), nil
 }
 
+// requireViewableLibrary is the gate every profile-scoped section read
+// shares: the viewer scope must admit the library and, when a folder
+// repository is wired, the library must exist and be enabled. Every refusal
+// is the same not_found so a restricted profile cannot probe which libraries
+// exist, an unrestricted one is not handed a fabricated default layout for
+// an id that was never a library, and a library an administrator disabled
+// (including one DeleteLibrary disabled ahead of its asynchronous removal)
+// stops serving the moment the flag flips.
+func (h *SectionHandler) requireViewableLibrary(ctx context.Context, libraryID int) error {
+	return requireViewableLibrary(ctx, h.FolderRepo, libraryID)
+}
+
+func requireViewableLibrary(ctx context.Context, folders *catalog.FolderRepository, libraryID int) error {
+	if !viewerCanAccessLibrary(ctx, libraryID) {
+		return apiError(http.StatusNotFound, "not_found", "Library not found")
+	}
+	if folders == nil {
+		return nil
+	}
+	folder, err := folders.GetByID(ctx, libraryID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrFolderNotFound) {
+			return apiError(http.StatusNotFound, "not_found", "Library not found")
+		}
+		slog.ErrorContext(ctx, "loading library for profile-scoped read", "component", "api", "library_id", libraryID, "error", err)
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load library")
+	}
+	if !folder.Enabled {
+		return apiError(http.StatusNotFound, "not_found", "Library not found")
+	}
+	return nil
+}
+
 // LibraryLayout answers the library's section layout for the profile on
 // the context.
 func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int) (SectionLayoutView, error) {
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return SectionLayoutView{}, err
+	}
 	resolved, _, _, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
 		return SectionLayoutView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -108,6 +145,9 @@ func sectionLayoutOf(resolved []sections.ResolvedSection) SectionLayoutView {
 
 // LibrarySections answers every section of the library with its items.
 func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, viewer SectionViewer) (SectionsView, error) {
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return SectionsView{}, err
+	}
 	resolved, accessFilter, profileID, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
 		return SectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -121,6 +161,9 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 
 // LibrarySectionItems answers one section of the library with its items.
 func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer) (SectionView, error) {
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return SectionView{}, err
+	}
 	resolved, accessFilter, profileID, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -157,12 +200,22 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 	return SectionView{}, apiError(http.StatusNotFound, "not_found", "Section not found")
 }
 
+// requireViewableLibrary is the collection reads' share of the gate above:
+// the library must be in scope, exist, and be enabled before any
+// collection is looked up. Without it an unrestricted viewer could name a
+// library id that was never a library and be answered with personal
+// collections that carry no explicit library membership, which the store
+// treats as visible on every tab.
+func (h *LibraryCollectionHandler) requireViewableLibrary(ctx context.Context, libraryID int) error {
+	return requireViewableLibrary(ctx, h.FolderRepo, libraryID)
+}
+
 // LibraryUserCollections answers the viewer's own collections opted into
 // the library's Collections tab. Personal collections are private to their
 // owner; this never reveals other users' rows.
 func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return nil, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return nil, err
 	}
 	if h.UserCollectionPool == nil {
 		return []usercollections.ServerVisibleCollection{}, nil
@@ -184,8 +237,8 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 // curated collection in full and, when groups are configured, the grouped
 // and ungrouped cards including the viewer's opted-in personal collections.
 func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (LibraryCollectionTabView, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return LibraryCollectionTabView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return LibraryCollectionTabView{}, err
 	}
 	adminCollections, err := h.repo.ListByLibrary(ctx, libraryID, catalog.ListLibraryCollectionsOptions{})
 	if err != nil {
@@ -292,28 +345,58 @@ func (h *LibraryCollectionHandler) libraryCollectionResponsesOf(ctx context.Cont
 	return out
 }
 
+// CollectionItemPage bounds one page of a collection's items: at most
+// Limit items starting Offset positions into the collection's order. The
+// zero value asks for the whole collection in one answer, which is what v1
+// still serves.
+type CollectionItemPage struct {
+	Limit  int
+	Offset int
+}
+
+// paged reports whether the caller asked for a page rather than the whole
+// collection.
+func (p CollectionItemPage) paged() bool {
+	return p.Limit > 0
+}
+
 // LibraryCollectionItems answers the items of one visible collection of the
-// library, in curated order or as the smart query resolves them.
-func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalog.AccessFilter) ([]CollectionItemView, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return nil, apiError(http.StatusNotFound, "not_found", "Library not found")
+// library, in curated order or as the smart query resolves them. With a
+// page it answers that window of the order and whether more follow; the
+// zero page answers everything and never reports more.
+func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalog.AccessFilter, page CollectionItemPage) ([]CollectionItemView, bool, error) {
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return nil, false, err
 	}
 	collection, err := h.repo.GetByID(ctx, collectionID)
-	if err != nil || collection.LibraryID != libraryID || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {
-		return nil, apiError(http.StatusNotFound, "not_found", "Collection not found")
+	if err != nil || !collectionSpansLibrary(collection, libraryID) || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {
+		return nil, false, apiError(http.StatusNotFound, "not_found", "Collection not found")
 	}
-	var items []itemListResponse
+	var (
+		items   []itemListResponse
+		hasMore bool
+	)
 	if catalog.IsLiveQueryType(collection.CollectionType) {
-		items, err = h.loadLiveCollectionItems(ctx, collection, access)
+		items, hasMore, err = h.loadLiveCollectionItems(ctx, collection, access, page)
 	} else {
-		items, err = h.loadOrderedCollectionItems(ctx, collectionID)
+		items, hasMore, err = h.loadOrderedCollectionItems(ctx, collectionID, access, page)
 	}
 	if err != nil {
 		var queryErr smartCollectionQueryError
 		if errors.As(err, &queryErr) {
-			return nil, apiError(http.StatusBadRequest, "bad_request", err.Error())
+			return nil, false, apiError(http.StatusBadRequest, "bad_request", err.Error())
 		}
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection items")
+		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection items")
 	}
-	return items, nil
+	return items, hasMore, nil
+}
+
+// collectionSpansLibrary reports whether the collection is a member of the
+// library: listed in its full membership (LibraryIDs, the rows of
+// library_collection_libraries that ListByLibrary joins on) or carrying it
+// as the legacy primary LibraryID. A collection spanning libraries [1,2]
+// is listed on both Collections tabs, so its items must be served from
+// either library too.
+func collectionSpansLibrary(collection *models.LibraryCollection, libraryID int) bool {
+	return collection.LibraryID == libraryID || slices.Contains(collection.LibraryIDs, libraryID)
 }

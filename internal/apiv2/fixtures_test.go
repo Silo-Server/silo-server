@@ -77,6 +77,10 @@ func fixtureCases() []fixtureCase {
 			scenario: "A path under /api/v2/ with no operation registered at it.",
 			method:   http.MethodGet, path: "/api/v2/library/items/fixture-missing",
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "head_not_found",
+			scenario: "HEAD on a path under /api/v2/ with no operation registered at it: the 404 problem's headers with no body.",
+			method:   http.MethodHead, path: "/api/v2/library/items/fixture-missing",
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}},
 		{name: "authentication_required",
 			scenario: "An authenticated operation called without a credential.",
 			method:   http.MethodPost, path: "/api/v2/probe/authenticated", body: validBody,
@@ -164,7 +168,7 @@ func fixtureCases() []fixtureCase {
 		{name: "delete_library_accepted", operationID: "deleteLibrary",
 			scenario: "Deletion is queued as an admin job: 202 with the job.",
 			method:   http.MethodDelete, path: "/api/v2/libraries/1", headers: bearer(adminToken),
-			status: http.StatusAccepted, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminJob"},
+			status: http.StatusAccepted, assertHeaders: []string{"Content-Type", "Cache-Control", "Location"}, schema: "#/components/schemas/AdminJob"},
 		{name: "delete_library_conflict", operationID: "deleteLibrary",
 			scenario: "A deletion already queued or running for the library.",
 			method:   http.MethodDelete, path: "/api/v2/libraries/2", headers: bearer(adminToken),
@@ -213,9 +217,9 @@ func fixtureCases() []fixtureCase {
 			scenario: "Every root the scanner skipped, across libraries.",
 			method:   http.MethodGet, path: "/api/v2/libraries/skipped-roots", headers: bearer(adminToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SkippedRootCollection"},
-		{name: "list_stale_ids_ok", operationID: "listStaleIds",
-			scenario: "Provider identifiers that no longer resolve, with the items carrying them.",
-			method:   http.MethodGet, path: "/api/v2/libraries/stale-ids", headers: bearer(adminToken),
+		{name: "list_stale_ids_ok", operationID: opListStaleIDs,
+			scenario: "The first page of provider identifiers that no longer resolve, with the items carrying them.",
+			method:   http.MethodGet, path: "/api/v2/libraries/stale-ids?limit=2", headers: bearer(adminToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/StaleMediaIDCollection"},
 		{name: "rematch_stale_id_permission_denied", operationID: "rematchStaleId",
 			scenario: "A rematch requested by a member account; success answers 204 with no body.",
@@ -256,7 +260,7 @@ func fixtureCases() []fixtureCase {
 		{name: "refresh_library_metadata_accepted", operationID: "refreshLibraryMetadata",
 			scenario: "A full refresh queued as an admin job: 202 with the job.",
 			method:   http.MethodPost, path: "/api/v2/libraries/1/refresh-metadata", headers: bearer(adminToken), body: `{"mode":"full"}`,
-			status: http.StatusAccepted, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminJob"},
+			status: http.StatusAccepted, assertHeaders: []string{"Content-Type", "Cache-Control", "Location"}, schema: "#/components/schemas/AdminJob"},
 		{name: "refresh_library_metadata_invalid_mode", operationID: "refreshLibraryMetadata",
 			scenario: "A refresh mode outside the enum is a validation failure naming body.mode.",
 			method:   http.MethodPost, path: "/api/v2/libraries/1/refresh-metadata", headers: bearer(adminToken), body: `{"mode":"deep"}`,
@@ -271,8 +275,8 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "upload_library_poster_ok", operationID: "uploadLibraryPoster",
 			scenario: "A multipart poster upload; the library is answered with its new presigned poster URL.",
-			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", "multipart/form-data; boundary=silo-fixture"),
-			body:   posterFixtureBody("poster", "image/png"),
+			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("poster", "poster.png", "image/png", strings.Repeat("\x89", 16)),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Library"},
 		{name: "upload_library_poster_unsupported_media_type", operationID: "uploadLibraryPoster",
 			scenario: "A JSON body on the multipart upload operation.",
@@ -280,8 +284,8 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnsupportedMediaType, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "upload_library_poster_unsupported_image", operationID: "uploadLibraryPoster",
 			scenario: "A part whose media type is not JPEG, PNG or WebP is a validation failure naming body.poster.",
-			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", "multipart/form-data; boundary=silo-fixture"),
-			body:   posterFixtureBody("poster", "image/gif"),
+			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("poster", "poster.png", "image/gif", strings.Repeat("\x89", 16)),
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "delete_library_poster_not_found", operationID: "deleteLibraryPoster",
 			scenario: "A library identifier that names no library; success answers 204 with no body.",
@@ -400,7 +404,7 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/library/1/collections", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
 			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "get_library_collection_items_ok", operationID: "getLibraryCollectionItems",
-			scenario: "Every card of one collection in its curated order; a bounded collection without a cursor.",
+			scenario: "The first page of one collection's cards in its curated order; a small collection fits in one page.",
 			method:   http.MethodGet, path: "/api/v2/library/1/collections/c1/items", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/CatalogItemCollection"},
 		{name: "get_library_collection_items_query_invalid", operationID: "getLibraryCollectionItems",
@@ -415,14 +419,144 @@ func fixtureCases() []fixtureCase {
 			scenario: "A profile-scoped library read without a credential.",
 			method:   http.MethodGet, path: "/api/v2/library/1/user-collections",
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_profiles_ok", operationID: "listProfiles",
+			scenario: "The household on the signed-in account, before any profile is selected; the collection is bounded and unpaginated.",
+			method:   http.MethodGet, path: "/api/v2/profiles", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileCollection"},
+		{name: "create_profile_created", operationID: "createProfile",
+			scenario: "A household manager creates a child profile with an allowlist: 201 with the profile's Location.",
+			method:   http.MethodPost, path: "/api/v2/profiles", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			body:   `{"name":"Kid","is_child":true,"allowed_library_ids":["3"],"max_playback_quality":"1080p"}`,
+			status: http.StatusCreated, assertHeaders: []string{"Content-Type", "Cache-Control", "Location"}, schema: "#/components/schemas/Profile"},
+		{name: "create_profile_name_required", operationID: "createProfile",
+			scenario: "The only required member is the name.",
+			method:   http.MethodPost, path: "/api/v2/profiles", headers: bearer(memberToken),
+			body:   `{"is_child":true}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_profile_section_overrides_ok", operationID: "listProfileSectionOverrides",
+			scenario: "The acting profile's saved home-page overrides in snake_case: a customized admin section and a profile-built one; nullable overrides are explicit null.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SectionOverrideCollection"},
+		{name: "list_profile_section_overrides_library_id_required", operationID: "listProfileSectionOverrides",
+			scenario: "A library page must be addressed by its library: scope=library without library_id is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections?scope=library", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "replace_profile_section_overrides_null_not_clearable", operationID: "replaceProfileSectionOverrides",
+			scenario: "Explicit null on an override member that does not admit it is a validation failure naming the member by index.",
+			method:   http.MethodPut, path: "/api/v2/profile/sections", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			body:   `{"overrides":[{"section_id":"s-continue","hidden":null}]}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_profile_section_settings_ok", operationID: "getProfileSectionSettings",
+			scenario: "The home page as the acting profile sees it: an admin section it hid and a section it built, with the recipe config as an extension bag.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections/settings", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionSettingCollection"},
+		{name: "get_profile_section_flags_ok", operationID: "getProfileSectionFlags",
+			scenario: "What this server lets profiles do to their pages.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections/flags", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionFlags"},
+		{name: "delete_profile_primary_protected", operationID: "deleteProfile",
+			scenario: "The primary profile cannot be deleted: a conflict, as v1 answered.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-primary", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "delete_profile_verification_required", operationID: "deleteProfile",
+			scenario: "A household mutation declared as a PIN-locked profile without its token.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-owner", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_household_sessions_ok", operationID: "listHouseholdSessions",
+			scenario: "The account's live playback sessions for a household manager; bounded by the stream limit and unpaginated.",
+			method:   http.MethodGet, path: "/api/v2/profiles/household/sessions", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PlaybackSessionCollection"},
+		{name: "list_household_sessions_verification_required", operationID: "listHouseholdSessions",
+			scenario: "A household read declared as a PIN-locked profile without its token.",
+			method:   http.MethodGet, path: "/api/v2/profiles/household/sessions", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "verify_profile_pin_ok", operationID: "verifyProfilePIN",
+			scenario: "A matching PIN: the X-Profile-Token that unlocks the profile for this login session, with its expiry.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: bearer(memberToken),
+			body:   `{"pin":"1234"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileVerification"},
+		{name: "verify_profile_pin_wrong", operationID: "verifyProfilePIN",
+			scenario: "A wrong PIN is not an error: valid is false and no token is issued.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: bearer(memberToken),
+			body:   `{"pin":"0000"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileVerification"},
+		{name: "verify_profile_pin_required", operationID: "verifyProfilePIN",
+			scenario: "The PIN member is required.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: bearer(memberToken),
+			body:   `{}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "verify_profile_pin_authentication_required", operationID: "verifyProfilePIN",
+			scenario: "A PIN check needs a signed-in account; the profile header is not needed.",
+			method:   http.MethodPost, path: "/api/v2/profiles/p-owner/verify-pin", headers: nil,
+			body:   `{"pin":"1234"}`,
+			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "upload_profile_avatar_ok", operationID: "uploadProfileAvatar",
+			scenario: "A multipart form with the avatar part: the profile with its uploaded avatar.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: with(bearer(memberToken), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("avatar", "me.png", "image/png", "png-bytes"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Profile"},
+		{name: "upload_profile_avatar_unsupported_media_type", operationID: "uploadProfileAvatar",
+			scenario: "The avatar is a multipart form, not a JSON document.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: bearer(memberToken),
+			body:   `{"avatar":"..."}`,
+			status: http.StatusUnsupportedMediaType, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "upload_profile_avatar_part_type_rejected", operationID: "uploadProfileAvatar",
+			scenario: "A part outside the declared image types is a validation failure naming the part.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: with(bearer(memberToken), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("avatar", "me.gif", "image/gif", "gif-bytes"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "upload_profile_avatar_verification_required", operationID: "uploadProfileAvatar",
+			scenario: "An upload declared as a PIN-locked profile without its token.",
+			method:   http.MethodPut, path: "/api/v2/profiles/p-owner/avatar", headers: with(with(bearer(memberToken), "X-Profile-Id", "p-locked"), "Content-Type", fixtureMultipartType),
+			body:   fixtureMultipart("avatar", "me.png", "image/png", "png-bytes"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "delete_profile_avatar_not_found", operationID: "deleteProfileAvatar",
+			scenario: "The profile is not on the account.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-missing/avatar", headers: bearer(memberToken),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "delete_profile_avatar_authentication_required", operationID: "deleteProfileAvatar",
+			scenario: "An avatar removal needs a signed-in account.",
+			method:   http.MethodDelete, path: "/api/v2/profiles/p-owner/avatar", headers: nil,
+			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: TypePreconditionRequired.ID,
+			scenario: "A guarded mutation without If-Match: the server refuses before touching the resource and names the field to send.",
+			method:   http.MethodPut, path: "/api/v2/probe/guarded/a", body: `{"name":"fixture"}`,
+			status: http.StatusPreconditionRequired, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: TypePreconditionFailed.ID,
+			scenario: "A guarded mutation whose If-Match names a stale version: nothing changes and ETag carries the current validator to retry with.",
+			method:   http.MethodPut, path: "/api/v2/probe/guarded/a", body: `{"name":"fixture"}`,
+			headers: map[string]string{"If-Match": RenderETag(guardedProbeScope, "a", 0).String()},
+			status:  http.StatusPreconditionFailed, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: problem},
+		{name: TypePreconditionFailed.ID + "_create_only",
+			scenario: "A create-only PUT (If-None-Match: *) at an id that already holds a resource: nothing changes and ETag carries the existing validator.",
+			method:   http.MethodPut, path: "/api/v2/probe/created/a", body: `{"name":"fixture"}`,
+			headers: map[string]string{"If-None-Match": "*"},
+			status:  http.StatusPreconditionFailed, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: problem},
+		{name: "not_modified",
+			scenario: "A conditional read whose If-None-Match matches the current ETag: 304 with the validator, no body.",
+			method:   http.MethodGet, path: "/api/v2/probe/guarded/a",
+			headers: map[string]string{"If-None-Match": RenderETag(guardedProbeScope, "a", 1).String()},
+			status:  http.StatusNotModified, assertHeaders: []string{"Cache-Control", "ETag"}},
+		// Last: one handler serves every case, and the cases above read
+		// resource "a" at version 1.
+		{name: "guarded_delete_ok",
+			scenario: "A guarded DELETE whose If-Match names the current ETag: 204 with no body and no validator, since the representation is gone.",
+			method:   http.MethodDelete, path: "/api/v2/probe/guarded/a",
+			headers: map[string]string{"If-Match": RenderETag(guardedProbeScope, "a", 1).String()},
+			status:  http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
 	}
 }
 
-// posterFixtureBody is a deterministic multipart body with one image part
-// of 16 bytes under the fixed boundary silo-fixture.
-func posterFixtureBody(field, contentType string) string {
-	return "--silo-fixture\r\nContent-Disposition: form-data; name=\"" + field + "\"; filename=\"poster.png\"\r\nContent-Type: " + contentType + "\r\n\r\n" +
-		strings.Repeat("\x89", 16) + "\r\n--silo-fixture--\r\n"
+// fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
+// with a fixed boundary so the request body is stable.
+const fixtureMultipartType = "multipart/form-data; boundary=silo-fixture-boundary"
+
+// fixtureMultipart builds a one-part multipart body with the fixed boundary.
+func fixtureMultipart(field, filename, contentType, data string) string {
+	return "--silo-fixture-boundary\r\n" +
+		"Content-Disposition: form-data; name=\"" + field + "\"; filename=\"" + filename + "\"\r\n" +
+		"Content-Type: " + contentType + "\r\n\r\n" +
+		data + "\r\n--silo-fixture-boundary--\r\n"
 }
 
 // fixtureDeps is the pilot wiring (parity gates plus the pilot fakes) with a
@@ -457,15 +591,17 @@ func fixtureDeps() Dependencies {
 }
 
 type fixtureIndexEntry struct {
-	Name              string            `json:"name"`
-	OperationID       *string           `json:"operation_id"`
-	Scenario          string            `json:"scenario"`
-	Request           fixtureRequest    `json:"request"`
-	ExpectedStatus    int               `json:"expected_status"`
-	ResponseHeaders   map[string]string `json:"response_headers"`
-	ResponseMediaType string            `json:"response_media_type"`
-	Schema            string            `json:"schema"`
-	BodyFile          string            `json:"body_file"`
+	Name            string            `json:"name"`
+	OperationID     *string           `json:"operation_id"`
+	Scenario        string            `json:"scenario"`
+	Request         fixtureRequest    `json:"request"`
+	ExpectedStatus  int               `json:"expected_status"`
+	ResponseHeaders map[string]string `json:"response_headers"`
+	// The three are null on a bodyless 204 or 304, which carries no
+	// representation.
+	ResponseMediaType *string `json:"response_media_type"`
+	Schema            *string `json:"schema"`
+	BodyFile          *string `json:"body_file"`
 }
 
 type fixtureRequest struct {
@@ -516,14 +652,35 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			}
 			headers[name] = v
 		}
-		mediaType := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])
-		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, rec.Body.Bytes(), "", "  "); err != nil {
-			t.Fatalf("%s: body is not JSON: %v", c.name, err)
+		var mediaType, schema, bodyFile *string
+		if c.method == http.MethodHead {
+			// A HEAD answer carries the headers of the GET it mirrors
+			// (Content-Type included) and never a body, whatever the
+			// status: the index entry records the headers alone. The
+			// recorder still holds whatever the handler wrote, because
+			// suppressing the body of a HEAD response is net/http's job
+			// (a real server's ResponseWriter discards it after Write
+			// counts it for Content-Length), which httptest.ResponseRecorder
+			// does not perform; the listener leaves it to the server rather
+			// than duplicating it, so the capture discards the bytes here.
+			rec.Body.Reset()
+		} else if c.status == http.StatusNotModified || c.status == http.StatusNoContent {
+			// A 204 or 304 has no representation: no body file, no media
+			// type, no schema. The index entry records the headers alone.
+			if rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "" {
+				t.Fatalf("%s: %d carries a body %q or Content-Type %q", c.name, c.status, rec.Body.String(), rec.Header().Get("Content-Type"))
+			}
+		} else {
+			mt := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])
+			var pretty bytes.Buffer
+			if err := json.Indent(&pretty, rec.Body.Bytes(), "", "  "); err != nil {
+				t.Fatalf("%s: body is not JSON: %v", c.name, err)
+			}
+			pretty.WriteByte('\n')
+			name := c.name + ".json"
+			files[name] = pretty.Bytes()
+			mediaType, schema, bodyFile = &mt, &c.schema, &name
 		}
-		pretty.WriteByte('\n')
-		bodyFile := c.name + ".json"
-		files[bodyFile] = pretty.Bytes()
 		var opID *string
 		if c.operationID != "" {
 			id := c.operationID
@@ -533,7 +690,7 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			Name: c.name, OperationID: opID, Scenario: c.scenario,
 			Request:        fixtureRequest{Method: c.method, Path: c.path, Headers: c.headers, Body: c.body},
 			ExpectedStatus: c.status, ResponseHeaders: headers, ResponseMediaType: mediaType,
-			Schema: c.schema, BodyFile: bodyFile,
+			Schema: schema, BodyFile: bodyFile,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })

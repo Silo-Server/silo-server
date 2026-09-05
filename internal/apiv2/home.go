@@ -92,20 +92,6 @@ type HomeSectionItemsInput struct {
 	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
 }
 
-// SectionConfig is a recipe's configuration document. Its keys are fixed by
-// the recipe named in section_type, not by this contract.
-type SectionConfig map[string]any
-
-// Schema declares the config as a named extension bag.
-func (SectionConfig) Schema(_ huma.Registry) *huma.Schema {
-	return &huma.Schema{
-		Type:                 "object",
-		Description:          "A recipe's configuration document; its keys are fixed by the recipe named in section_type.",
-		AdditionalProperties: true,
-		Extensions:           map[string]any{extExtensionBag: "section-config"},
-	}
-}
-
 // RecipePreset is one gallery preset: a recipe plus the config it starts from.
 type RecipePreset struct {
 	Key              string        `json:"key" example:"new_this_week"`
@@ -191,12 +177,16 @@ func registerHome(reg *Registry) {
 	dismiss := humaOp(http.MethodPut, Prefix+"/home/dismissals/{surface}/{item_id}", opDismissHomeItem, "home",
 		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal.")
 	dismiss.DefaultStatus = http.StatusNoContent
-	Register(reg, viewer(dismiss), reg.dismissHomeItem)
+	dismissOp := viewer(dismiss)
+	dismissOp.RetrySafety = RetrySafetyNaturalIdempotent
+	Register(reg, dismissOp, reg.dismissHomeItem)
 
 	undismiss := humaOp(http.MethodDelete, Prefix+"/home/dismissals/{surface}/{item_id}", opUndismissHomeItem, "home",
 		"Show a dismissed card again; an item that was not dismissed is left as is.")
 	undismiss.DefaultStatus = http.StatusNoContent
-	Register(reg, viewer(undismiss), reg.undismissHomeItem)
+	undismissOp := viewer(undismiss)
+	undismissOp.RetrySafety = RetrySafetyNaturalIdempotent
+	Register(reg, undismissOp, reg.undismissHomeItem)
 
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
 		"The home page's section layout for the acting profile, without items.")), reg.getHomeLayout)
@@ -317,7 +307,7 @@ func (reg *Registry) getCalendar(ctx context.Context, in *CalendarInput) (*Calen
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.Calendar(ctx, q, handlers.ViewerAccessFilter(ctx, ""))
+	view, err := svc.Calendar(ctx, q, handlers.AccessFilterFromContext(ctx, ""))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -418,9 +408,9 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	return &SectionOutput{Body: sectionOf(view)}, nil
 }
 
-// sectionConfigOf decodes a recipe's raw config document; anything that is
+// recipeDefaultConfigOf decodes a recipe's raw config document; anything that is
 // not a JSON object (including null and empty) is the empty bag.
-func sectionConfigOf(raw json.RawMessage) SectionConfig {
+func recipeDefaultConfigOf(raw json.RawMessage) SectionConfig {
 	out := SectionConfig{}
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &out)
@@ -434,7 +424,7 @@ func sectionConfigOf(raw json.RawMessage) SectionConfig {
 func recipeDefinitionOf(def recipes.RecipeDefinition) RecipeDefinition {
 	presets := make([]RecipePreset, 0, len(def.Presets))
 	for _, p := range def.Presets {
-		presets = append(presets, RecipePreset{Key: p.Key, DisplayName: p.DisplayName, Icon: p.Icon, DescriptionShort: p.DescriptionShort, DescriptionLong: p.DescriptionLong, DefaultParams: sectionConfigOf(p.DefaultParams)})
+		presets = append(presets, RecipePreset{Key: p.Key, DisplayName: p.DisplayName, Icon: p.Icon, DescriptionShort: p.DescriptionShort, DescriptionLong: p.DescriptionLong, DefaultParams: recipeDefaultConfigOf(p.DefaultParams)})
 	}
 	return RecipeDefinition{Type: def.Type, Category: string(def.Category), Presets: presets, AvoidDuplicates: def.AvoidDuplicates, SupportsRotation: def.SupportsRotation, AdminOnly: def.AdminOnly}
 }

@@ -767,6 +767,48 @@ func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collecti
 	return nil
 }
 
+// ListItemIDsPage answers one window of a collection's stored item order:
+// the media item IDs at positions [offset, offset+limit) in the same order
+// ListItems uses, and whether stored positions follow the window. It probes
+// one row past the window so a caller never has to count the collection to
+// learn that. A limit of zero or less answers an empty window.
+func (r *LibraryCollectionRepository) ListItemIDsPage(ctx context.Context, collectionID string, limit, offset int) ([]string, bool, error) {
+	if limit <= 0 {
+		return []string{}, false, nil
+	}
+	offset = max(offset, 0)
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT media_item_id
+		FROM library_collection_items
+		WHERE collection_id = $1
+		ORDER BY position ASC, source_rank ASC, media_item_id ASC
+		LIMIT $2 OFFSET $3
+	`, collectionID, limit+1, offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing collection item page: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0, limit+1)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, false, fmt.Errorf("scanning collection item page: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterating collection item page: %w", err)
+	}
+
+	hasMore := len(ids) > limit
+	if hasMore {
+		ids = ids[:limit]
+	}
+	return ids, hasMore, nil
+}
+
 func (r *LibraryCollectionRepository) ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT collection_id, media_item_id, position, source_rank, created_at, updated_at

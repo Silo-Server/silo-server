@@ -195,16 +195,19 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 func TestReconcileSpecSeeded(t *testing.T) {
 	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
 	observed := []string{
-		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json", "PATCH " + Prefix + "/profiles/{id}", "GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
-		"GET " + Prefix + "/libraries", "POST " + Prefix + "/libraries", "PATCH " + Prefix + "/libraries/{id}", "DELETE " + Prefix + "/libraries/{id}",
-		"POST " + Prefix + "/libraries/{id}/check-mount", "GET " + Prefix + "/libraries/metadata-match-queue", "GET " + Prefix + "/libraries/provider-defaults",
-		"POST " + Prefix + "/libraries/reorder", "GET " + Prefix + "/libraries/roots", "PUT " + Prefix + "/libraries/roots/override", "DELETE " + Prefix + "/libraries/roots/override",
-		"GET " + Prefix + "/libraries/skipped-roots", "GET " + Prefix + "/libraries/stale-ids", "POST " + Prefix + "/libraries/stale-ids/{content_id}/rematch", "GET " + Prefix + "/libraries/unmatched-items",
-		"POST " + Prefix + "/libraries/{id}/confirm-empty-root-cleanup", "GET " + Prefix + "/libraries/{id}/metadata-match-queue", "POST " + Prefix + "/libraries/{id}/metadata-match-queue/retry",
-		"POST " + Prefix + "/libraries/{id}/metadata-match-queue/cancel", "POST " + Prefix + "/libraries/{id}/refresh-metadata", "GET " + Prefix + "/libraries/{id}/providers",
-		"PUT " + Prefix + "/libraries/{id}/providers", "PUT " + Prefix + "/libraries/{id}/poster", "DELETE " + Prefix + "/libraries/{id}/poster",
-		"GET " + Prefix + "/library/{id}/layout", "GET " + Prefix + "/library/{id}/sections", "GET " + Prefix + "/library/{id}/sections/{section_id}/items",
-		"GET " + Prefix + "/library/{id}/collections", "GET " + Prefix + "/library/{id}/collections/{collection_id}/items", "GET " + Prefix + "/library/{id}/user-collections",
+		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json", "PATCH " + Prefix + "/profiles/{id}",
+		"GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup", "GET " + Prefix + "/libraries",
+		"POST " + Prefix + "/libraries", "PATCH " + Prefix + "/libraries/{id}", "DELETE " + Prefix + "/libraries/{id}", "POST " + Prefix + "/libraries/{id}/check-mount",
+		"GET " + Prefix + "/libraries/metadata-match-queue", "GET " + Prefix + "/libraries/provider-defaults", "POST " + Prefix + "/libraries/reorder", "GET " + Prefix + "/libraries/roots",
+		"PUT " + Prefix + "/libraries/roots/override", "DELETE " + Prefix + "/libraries/roots/override", "GET " + Prefix + "/libraries/skipped-roots", "GET " + Prefix + "/libraries/stale-ids",
+		"POST " + Prefix + "/libraries/stale-ids/{content_id}/rematch", "GET " + Prefix + "/libraries/unmatched-items", "POST " + Prefix + "/libraries/{id}/confirm-empty-root-cleanup", "GET " + Prefix + "/libraries/{id}/metadata-match-queue",
+		"POST " + Prefix + "/libraries/{id}/metadata-match-queue/retry", "POST " + Prefix + "/libraries/{id}/metadata-match-queue/cancel", "POST " + Prefix + "/libraries/{id}/refresh-metadata", "GET " + Prefix + "/libraries/{id}/providers",
+		"PUT " + Prefix + "/libraries/{id}/providers", "PUT " + Prefix + "/libraries/{id}/poster", "DELETE " + Prefix + "/libraries/{id}/poster", "GET " + Prefix + "/library/{id}/layout",
+		"GET " + Prefix + "/library/{id}/sections", "GET " + Prefix + "/library/{id}/sections/{section_id}/items", "GET " + Prefix + "/library/{id}/collections", "GET " + Prefix + "/library/{id}/collections/{collection_id}/items",
+		"GET " + Prefix + "/library/{id}/user-collections", "GET " + Prefix + "/profile/sections", "PUT " + Prefix + "/profile/sections", "DELETE " + Prefix + "/profile/sections",
+		"GET " + Prefix + "/profile/sections/flags", "GET " + Prefix + "/profile/sections/settings", "GET " + Prefix + "/profiles", "POST " + Prefix + "/profiles",
+		"DELETE " + Prefix + "/profiles/{id}", "GET " + Prefix + "/profiles/household/sessions", "POST " + Prefix + "/profiles/{id}/verify-pin", "PUT " + Prefix + "/profiles/{id}/avatar",
+		"DELETE " + Prefix + "/profiles/{id}/avatar",
 		"GET " + Prefix + "/calendar", "PUT " + Prefix + "/home/dismissals/{surface}/{item_id}", "DELETE " + Prefix + "/home/dismissals/{surface}/{item_id}", "GET " + Prefix + "/home/layout",
 		"GET " + Prefix + "/home/sections", "GET " + Prefix + "/home/sections/{id}/items", "GET " + Prefix + "/sections/recipes", "GET " + Prefix + "/sections/recipes/{type}/candidates",
 	}
@@ -277,9 +280,14 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 			o := humaOp(http.MethodPost, Prefix+"/x", "postX", "x", "")
 			o.MaxBodyBytes = 10
 			return o
-		}(), Class: ClassPublic},
-		"negative body limit": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic, MaxBodyBytes: -1},
-		"perm class":          {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPermissionGated},
+		}(), Class: ClassPublic, RetrySafety: RetrySafetyNaturalIdempotent},
+		"negative body limit": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic, MaxBodyBytes: -1, RetrySafety: RetrySafetyNaturalIdempotent},
+		// Retry safety is a required declaration on every mutation and
+		// meaningless on a read.
+		"mutation without retry safety": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic},
+		"unknown retry safety":          {Operation: humaOp(http.MethodDelete, Prefix+"/x", "deleteX", "x", ""), Class: ClassPublic, RetrySafety: RetrySafety("retry_later")},
+		"read with retry safety":        {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPublic, RetrySafety: RetrySafetyNaturalIdempotent},
+		"perm class":                    {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPermissionGated},
 	}
 	for name, op := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -296,9 +304,10 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 	t.Run("item-scoped permission with an id parameter", func(t *testing.T) {
 		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
 			Register(reg, Operation{
-				Operation:  humaOp(http.MethodPatch, Prefix+"/items/{id}", "patchItem", "x", ""),
-				Class:      ClassPermissionGated,
-				Permission: policy.PermissionMetadataCuration,
+				Operation:   humaOp(http.MethodPatch, Prefix+"/items/{id}", "patchItem", "x", ""),
+				Class:       ClassPermissionGated,
+				Permission:  policy.PermissionMetadataCuration,
+				RetrySafety: RetrySafetyNaturalIdempotent,
 			}, func(context.Context, *struct {
 				ID string `path:"id"`
 			}) (*probeOutput, error) {

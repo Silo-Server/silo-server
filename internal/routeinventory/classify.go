@@ -58,6 +58,10 @@ const (
 	traitAuthenticated = "authenticated"
 	traitActingAdmin   = "acting_admin"
 	traitRateLimited   = "rate_limited"
+	traitViewerAccess  = "viewer_access"
+	traitProfileReq    = "profile_required"
+	traitOptionalView  = "optional_viewer_access"
+	mwRequestID        = "middleware.RequestID"
 )
 
 // Middleware markers for router.go sites that register through a spread
@@ -429,8 +433,8 @@ var authRules = []authRule{
 	{marker: "markerEditAccess", class: authPermissionGated, trait: "marker_edit", rank: 50},
 	{marker: "metadataItemAccess", class: authPermissionGated, trait: "metadata_curation", rank: 50},
 	{marker: "metadataCurationAccess", class: authPermissionGated, trait: "metadata_curation", rank: 50},
-	{marker: "RequireViewerAccess", class: authProfileScoped, trait: "viewer_access", rank: 40},
-	{marker: "RequireProfile", class: authProfileScoped, trait: "profile_required", rank: 40},
+	{marker: "RequireViewerAccess", class: authProfileScoped, trait: traitViewerAccess, rank: 40},
+	{marker: "RequireProfile", class: authProfileScoped, trait: traitProfileReq, rank: 40},
 	// The Apple push display gate (internal/api/middleware/apple_push_display.go)
 	// requires auth on both credential paths and resolves a profile: ordinary
 	// tokens fall back to RequireAuth + viewer access + RequireProfile, and a
@@ -438,8 +442,8 @@ var authRules = []authRule{
 	// session and written to X-Profile-Id. router.go registers it through the
 	// spread slice `displayMiddlewares`, which is the identifier the analyzer
 	// prints, so both spellings carry the same rules.
-	{marker: markerApplePushDisplayAuth, class: authProfileScoped, trait: "profile_required", rank: 40},
-	{marker: markerDisplayMiddlewares, class: authProfileScoped, trait: "profile_required", rank: 40},
+	{marker: markerApplePushDisplayAuth, class: authProfileScoped, trait: traitProfileReq, rank: 40},
+	{marker: markerDisplayMiddlewares, class: authProfileScoped, trait: traitProfileReq, rank: 40},
 	{marker: "RequireAuth", class: authAuthenticated, trait: traitAuthenticated, rank: 30},
 	{marker: "requireBearer", class: authNodeBearer, trait: "node_bearer", rank: 30},
 	{marker: "OptionalAuth", class: authOptional, trait: "optional_auth", rank: 20},
@@ -453,30 +457,30 @@ var traitOnlyRules = []authRule{
 	{marker: "demoGuard", trait: "demo_guarded"},
 	{marker: "meterEgress", trait: "egress_metered"},
 	{marker: "cors.Handler", trait: "cors"},
-	{marker: "optionalProfileViewerAccess", trait: "optional_viewer_access"},
+	{marker: "optionalProfileViewerAccess", trait: traitOptionalView},
 	// router.go builds `passwordChangeMiddlewares` for POST
 	// /api/v1/auth/account/password: optionalProfileViewerAccess plus, when a
 	// limiter is configured, RateLimitMW.AuthEndpointHandler("password_change").
 	// RequireAuth is applied separately by the enclosing group. Conditional
 	// limiters are recorded as present, matching the RateLimitMW rules above.
-	{marker: markerPasswordChange, trait: "optional_viewer_access"},
+	{marker: markerPasswordChange, trait: traitOptionalView},
 	{marker: markerPasswordChange, trait: traitRateLimited},
 	// The Apple push display gate always ends in RequireAuth-equivalent
 	// authentication, viewer access, and RequireProfile; `displayMiddlewares`
 	// also prepends RateLimitMW.Handler when a limiter is configured. See the
 	// matching authRules entries for the class.
 	{marker: markerApplePushDisplayAuth, trait: traitAuthenticated},
-	{marker: markerApplePushDisplayAuth, trait: "viewer_access"},
+	{marker: markerApplePushDisplayAuth, trait: traitViewerAccess},
 	{marker: markerDisplayMiddlewares, trait: traitAuthenticated},
-	{marker: markerDisplayMiddlewares, trait: "viewer_access"},
+	{marker: markerDisplayMiddlewares, trait: traitViewerAccess},
 	{marker: markerDisplayMiddlewares, trait: traitRateLimited},
 }
 
 // infrastructureMiddleware is the base stack every request passes through. It
 // is listed so a genuinely new middleware stands out as unclassified.
 var infrastructureMiddleware = []string{
-	"apimw.RequestID", "middleware.RequestID", "middleware.Recoverer", "apimw.RequestLogger", "apimw.Metrics",
-	"httpstream.CompressExcept", "clientip.Middleware", "activitylog.NewMiddleware",
+	"apimw.RequestID", mwRequestID, "middleware.Recoverer", "apimw.RequestLogger", "apimw.Metrics",
+	"httpstream.CompressExcept", "httpstream.CompressWithExclusions", "clientip.Middleware", "activitylog.NewMiddleware",
 }
 
 func classifyAuth(middleware []string) (string, []string) {

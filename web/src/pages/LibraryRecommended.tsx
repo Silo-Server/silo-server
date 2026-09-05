@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
-import { useLibraryCollectionItems } from "@/hooks/queries/libraryCollections";
+import {
+  flattenLibraryCollectionItems,
+  useLibraryCollectionItems,
+} from "@/hooks/queries/libraryCollections";
+import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { fetchLibrarySectionItems, useLibraryLayout } from "@/hooks/queries/sections";
 import { useSidebarPins } from "@/hooks/queries/sidebarPins";
 import MediaCarousel from "@/components/MediaCarousel";
@@ -326,20 +330,58 @@ function PinnedCollectionCarousel({
   collectionId: string;
   name: string;
 }) {
-  const { data: items, isLoading } = useLibraryCollectionItems(libraryId, collectionId);
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useLibraryCollectionItems(libraryId, collectionId);
+  const items = useMemo(() => flattenLibraryCollectionItems(data), [data]);
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
-  if (!isLoading && (!items || items.length === 0)) return null;
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  // Access filtering can empty a whole page while later pages still hold
+  // items the profile may see; keep paging until something shows or the
+  // collection runs out.
+  useEffect(() => {
+    if (items.length === 0) loadMore();
+  }, [items.length, loadMore]);
+
+  const sentinelRef = useIntersectionObserver({
+    onIntersect: loadMore,
+    enabled: Boolean(hasNextPage) && !isFetchingNextPage,
+    rootMargin: "0px 400px 0px 0px",
+  });
+
+  const empty = items.length === 0;
+  if (empty && !isLoading && !hasNextPage) return null;
 
   return (
-    <MediaCarousel title={name} loading={isLoading}>
-      {(items ?? []).map((item) => (
+    <MediaCarousel title={name} loading={isLoading || (empty && Boolean(hasNextPage))}>
+      {items.map((item) => (
         <div key={item.content_id} className={posterWidthClasses}>
           <ItemCard item={item} overlayPrefs={overlayPrefs} quickActionMode={quickActionMode} />
         </div>
       ))}
+      {hasNextPage ? (
+        <div
+          ref={sentinelRef}
+          className={`${posterWidthClasses} flex items-center justify-center`}
+          data-testid="pinned-collection-load-more"
+        >
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={isFetchingNextPage}
+            className="text-muted-foreground hover:text-primary rounded-md border border-dashed px-3 py-2 text-xs font-medium transition-colors disabled:opacity-60"
+          >
+            {isFetchingNextPage ? "Loading…" : "Show more"}
+          </button>
+        </div>
+      ) : null}
     </MediaCarousel>
   );
 }

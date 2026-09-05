@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -34,10 +35,13 @@ type LibrarySectionItemsInput struct {
 	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
 }
 
-// LibraryCollectionItemsInput names one collection of the library.
+// LibraryCollectionItemsInput names one collection of the library and the
+// page of its items.
 type LibraryCollectionItemsInput struct {
 	ID           ID     `path:"id" doc:"Library identifier" example:"1"`
 	CollectionID string `path:"collection_id" minLength:"1" doc:"Collection identifier" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
+	LimitParam
+	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvZmZzZXQiOjUwfQ"`
 }
 
 // SectionLayoutEntry is one section of a page layout, without items.
@@ -187,10 +191,14 @@ type UserCollectionCollectionOutput struct {
 	Body UserCollectionCollection
 }
 
-// CatalogItemCollection is a bounded list of cards.
+// CatalogItemCollection is a page of cards.
 type CatalogItemCollection struct {
 	Collection[CatalogItem]
 }
+
+// opGetLibraryCollectionItems is the operation id; the cursor scope is
+// bound to it.
+const opGetLibraryCollectionItems = "getLibraryCollectionItems"
 
 // CatalogItemCollectionOutput is the getLibraryCollectionItems response.
 type CatalogItemCollectionOutput struct {
@@ -198,6 +206,7 @@ type CatalogItemCollectionOutput struct {
 }
 
 func registerLibraryViews(reg *Registry) {
+	cursors := NewCursors(reg.deps.CursorSecret)
 	viewer := func(op huma.Operation) Operation {
 		return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}
 	}
@@ -209,8 +218,10 @@ func registerLibraryViews(reg *Registry) {
 		"One section of the library with its cards.")), reg.getLibrarySectionItems)
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/library/{id}/collections", "getLibraryCollections", "libraries",
 		"The library's Collections tab: curated collections, their groups, and the viewer's opted-in personal collections.")), reg.getLibraryCollections)
-	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/library/{id}/collections/{collection_id}/items", "getLibraryCollectionItems", "libraries",
-		"Every card of one visible collection of the library, in its curated or query order.")), reg.getLibraryCollectionItems)
+	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/library/{id}/collections/{collection_id}/items", opGetLibraryCollectionItems, "libraries",
+		"Page the cards of one visible collection of the library, in its curated or query order.")), func(ctx context.Context, in *LibraryCollectionItemsInput) (*CatalogItemCollectionOutput, error) {
+		return reg.getLibraryCollectionItems(ctx, cursors, in)
+	})
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/library/{id}/user-collections", "listLibraryUserCollections", "libraries",
 		"The viewer's own personal collections opted into this library's tab.")), reg.listLibraryUserCollections)
 }
@@ -233,7 +244,7 @@ func sectionViewer(ctx context.Context, imageSize string) handlers.SectionViewer
 	if err != nil {
 		size = imagesize.Unset
 	}
-	return handlers.SectionViewer{Access: handlers.ViewerAccessFilter(ctx, ""), ImageSize: size}
+	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
@@ -408,7 +419,13 @@ func (reg *Registry) getLibraryCollections(ctx context.Context, in *LibraryViewI
 	return &LibraryCollectionTabOutput{Body: out}, nil
 }
 
-func (reg *Registry) getLibraryCollectionItems(ctx context.Context, in *LibraryCollectionItemsInput) (*CatalogItemCollectionOutput, error) {
+// getLibraryCollectionItems pages the collection's order by offset behind
+// an opaque cursor: a curated collection has no natural key beyond its
+// stored position, and a smart collection's order is whatever its query
+// sorts by. The seam cuts the window before loading items and reports
+// whether positions follow it, so a page the access filter thins out still
+// points at the next window.
+func (reg *Registry) getLibraryCollectionItems(ctx context.Context, cursors *Cursors, in *LibraryCollectionItemsInput) (*CatalogItemCollectionOutput, error) {
 	svc, p := reg.libraryCollections()
 	if p != nil {
 		return nil, p
@@ -417,18 +434,39 @@ func (reg *Registry) getLibraryCollectionItems(ctx context.Context, in *LibraryC
 	if p != nil {
 		return nil, p
 	}
-	if _, _, p := viewerIdentity(ctx); p != nil {
+	userID, profileID, p := viewerIdentity(ctx)
+	if p != nil {
 		return nil, p
 	}
-	views, err := svc.LibraryCollectionItems(ctx, id, in.CollectionID, handlers.ViewerAccessFilter(ctx, ""))
+	scope := CursorScope{
+		OperationID: opGetLibraryCollectionItems,
+		// The items are access-filtered, so the cursor dies with the viewer
+		// policy it was minted under.
+		Security:   strconv.Itoa(userID) + "/" + profileID + "/" + viewerScopeDigest(ctx),
+		Filter:     "library_id=" + strconv.Itoa(id) + "&collection_id=" + in.CollectionID,
+		Sort:       "collection",
+		Tiebreaker: "position",
+	}
+	offset, p := decodeOffset(cursors, scope, in.Cursor)
+	if p != nil {
+		return nil, p
+	}
+	views, hasMore, err := svc.LibraryCollectionItems(ctx, id, in.CollectionID, handlers.AccessFilterFromContext(ctx, ""), handlers.CollectionItemPage{Limit: in.Limit, Offset: offset})
 	if err != nil {
 		return nil, collectionItemsProblem(err)
+	}
+	next := ""
+	if hasMore {
+		next, err = cursors.Encode(scope, offsetPosition{Offset: offset + in.Limit})
+		if err != nil {
+			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+		}
 	}
 	items := make([]CatalogItem, 0, len(views))
 	for _, v := range views {
 		items = append(items, catalogItemOfListing(v))
 	}
-	return &CatalogItemCollectionOutput{Body: CatalogItemCollection{Collection: NewCollection(items)}}, nil
+	return &CatalogItemCollectionOutput{Body: CatalogItemCollection{Collection: Paginated(items, next)}}, nil
 }
 
 // collectionItemsProblem maps the v1 decision: a smart query the executor

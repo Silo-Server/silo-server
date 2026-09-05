@@ -1,5 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, fetchWithSession, getAccessToken } from "@/api/client";
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, getAccessToken } from "@/api/client";
 import type {
   AdminJob,
   AdminJobsResponse,
@@ -16,7 +16,6 @@ import type {
   LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
-  LibrarySkippedRoot,
   StaleMediaID,
   LibraryProviderChainResponse,
   ScanResponse,
@@ -39,14 +38,7 @@ import {
   staleMediaIDFromV2,
   unmatchedItemFromV2,
 } from "@/api/v2/libraries";
-import {
-  decodeV2Response,
-  v2,
-  V2_CLIENT_HEADERS,
-  V2ProblemError,
-  type V2Body,
-  type V2Result,
-} from "@/api/v2/request";
+import { v2, V2ProblemError, type V2Body, type V2Result } from "@/api/v2/request";
 import { adminKeys, libraryKeys } from "../keys";
 import { toast } from "sonner";
 import type { LibraryReorderEntry } from "@/pages/adminLibraryOrder";
@@ -233,58 +225,103 @@ export function useReorderLibraries() {
   });
 }
 
-export function useSkippedLibraryRoots() {
-  return useQuery({
-    queryKey: adminKeys.librarySkippedRoots(),
-    queryFn: ({ signal }): Promise<LibrarySkippedRoot[]> =>
-      v2("GET /api/v2/libraries/skipped-roots", { signal }).then((page) =>
-        page.items.map(skippedRootFromV2),
-      ),
+export function useSkippedLibraryRoots({
+  enabled = true,
+  search = "",
+}: { enabled?: boolean; search?: string } = {}) {
+  const query = search.trim();
+  return useInfiniteQuery({
+    queryKey: [...adminKeys.librarySkippedRoots(), query],
+    queryFn: async ({ pageParam, signal }) => {
+      const page = await v2("GET /api/v2/libraries/skipped-roots", {
+        query: {
+          limit: 50,
+          ...(query ? { q: query } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        signal,
+      });
+      return {
+        roots: page.items.map(skippedRootFromV2),
+        nextCursor: page.page?.has_more ? page.page.next_cursor : undefined,
+      };
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    enabled,
     staleTime: ADMIN_STALE_TIME,
   });
 }
 
-/** Page size for the library root walk: the v2 maximum. */
-const LIBRARY_ROOTS_PAGE_LIMIT = 200;
+/** Page size of the library roots listing. */
+export const LIBRARY_ROOTS_PAGE_LIMIT = 50;
+
+export interface LibraryRootsPage {
+  roots: LibraryRoot[];
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
+  /** Roots matching the filter across every page, for the section header. */
+  total: number;
+}
 
 /**
- * Fetches every observed root of one library by walking the cursor-paginated
- * v2 listing. The admin screen pages the rows client-side, so the walk runs
- * to completion.
+ * Fetches one page of a library's observed roots. Every page makes the server
+ * reload the library's overrides and item-group claims, so callers page on
+ * demand rather than walking the whole listing up front. The search is
+ * server-side over root path, title and sample file path across every page.
  */
-export async function fetchAllLibraryRoots(
+export async function fetchLibraryRootsPage(
   libraryId: number,
   state?: string,
+  search?: string,
+  cursor?: string,
   signal?: AbortSignal,
-): Promise<LibraryRoot[]> {
-  const roots: LibraryRoot[] = [];
-  let cursor: string | undefined;
-  for (;;) {
-    const page = await v2("GET /api/v2/libraries/roots", {
-      query: {
-        library_id: String(libraryId),
-        limit: LIBRARY_ROOTS_PAGE_LIMIT,
-        ...(state ? { state } : {}),
-        ...(cursor === undefined ? {} : { cursor }),
-      },
-      signal,
-    });
-    roots.push(...page.items.map(libraryRootFromV2));
-    if (!page.page?.has_more || !page.page.next_cursor) return roots;
-    cursor = page.page.next_cursor;
-  }
+): Promise<LibraryRootsPage> {
+  const page = await v2("GET /api/v2/libraries/roots", {
+    query: {
+      library_id: String(libraryId),
+      limit: LIBRARY_ROOTS_PAGE_LIMIT,
+      ...(state ? { state } : {}),
+      ...(search ? { q: search } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return {
+    roots: page.items.map(libraryRootFromV2),
+    nextCursor: page.page?.has_more && page.page.next_cursor ? page.page.next_cursor : undefined,
+    total: page.total,
+  };
 }
 
-export function useLibraryRoots(libraryId?: number, state?: string) {
-  return useQuery({
-    queryKey: adminKeys.libraryRoots(libraryId, state),
-    queryFn: ({ signal }) => {
-      if (!libraryId) return Promise.resolve([] as LibraryRoot[]);
-      return fetchAllLibraryRoots(libraryId, state, signal);
-    },
-    enabled: !!libraryId,
+/**
+ * Pages a library's observed roots by cursor. The first page loads only while
+ * `enabled` holds (the diagnostics section that shows the rows is collapsed
+ * by default); further pages load through `fetchNextPage`. A change of
+ * `search` is a new query key, so paging restarts from the first page.
+ */
+export function useLibraryRoots(
+  libraryId?: number,
+  state?: string,
+  { enabled = true, search = "" }: { enabled?: boolean; search?: string } = {},
+) {
+  const trimmed = search.trim();
+  return useInfiniteQuery({
+    queryKey: adminKeys.libraryRoots(libraryId, state, trimmed),
+    queryFn: ({ pageParam, signal }) =>
+      fetchLibraryRootsPage(libraryId ?? 0, state, trimmed, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled: enabled && !!libraryId,
     staleTime: ADMIN_STALE_TIME,
   });
+}
+
+/** Flattens the loaded pages of useLibraryRoots into one list. */
+export function flattenLibraryRoots(
+  data: { pages: LibraryRootsPage[] } | undefined,
+): LibraryRoot[] {
+  return data?.pages.flatMap((page) => page.roots) ?? [];
 }
 
 export function useUpsertLibraryRootOverride() {
@@ -295,7 +332,9 @@ export function useUpsertLibraryRootOverride() {
         body: { ...override, library_id: String(library_id) },
       }),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryRoots(variables.library_id) });
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "libraries", "roots", variables.library_id],
+      });
       toast.success("Root override saved");
     },
     onError: (err) => {
@@ -312,7 +351,9 @@ export function useDeleteLibraryRootOverride() {
         query: { library_id: String(body.library_id), root_path: body.root_path },
       }),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryRoots(variables.library_id) });
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "libraries", "roots", variables.library_id],
+      });
       toast.success("Root override removed");
     },
     onError: (err) => {
@@ -321,15 +362,62 @@ export function useDeleteLibraryRootOverride() {
   });
 }
 
-export function useStaleMediaIDs() {
-  return useQuery({
-    queryKey: adminKeys.staleMediaIDs(),
-    queryFn: ({ signal }): Promise<StaleMediaID[]> =>
-      v2("GET /api/v2/libraries/stale-ids", { signal }).then((page) =>
-        page.items.map(staleMediaIDFromV2),
-      ),
+export const STALE_MEDIA_IDS_PAGE_LIMIT = 50;
+
+export interface StaleMediaIDsPage {
+  staleIDs: StaleMediaID[];
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
+}
+
+/**
+ * Fetches one page of the stale provider identifiers. The listing is cursor
+ * paginated; `cursor` is `page.next_cursor` of the previous page.
+ */
+export async function fetchStaleMediaIDsPage(
+  cursor?: string,
+  signal?: AbortSignal,
+  search = "",
+): Promise<StaleMediaIDsPage> {
+  const page = await v2("GET /api/v2/libraries/stale-ids", {
+    query: {
+      limit: STALE_MEDIA_IDS_PAGE_LIMIT,
+      ...(search ? { q: search } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return {
+    staleIDs: page.items.map(staleMediaIDFromV2),
+    nextCursor: page.page?.has_more && page.page.next_cursor ? page.page.next_cursor : undefined,
+  };
+}
+
+/**
+ * Pages the stale provider identifiers by cursor. The first page loads only
+ * while `enabled` holds (the diagnostics section that shows the rows is
+ * collapsed by default); further pages load through `fetchNextPage`.
+ */
+export function useStaleMediaIDs({
+  enabled = true,
+  search = "",
+}: { enabled?: boolean; search?: string } = {}) {
+  const query = search.trim();
+  return useInfiniteQuery({
+    queryKey: [...adminKeys.staleMediaIDs(), query],
+    queryFn: ({ pageParam, signal }) => fetchStaleMediaIDsPage(pageParam, signal, query),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled,
     staleTime: ADMIN_STALE_TIME,
   });
+}
+
+/** Flattens the loaded pages of useStaleMediaIDs into one list. */
+export function flattenStaleMediaIDs(
+  data: { pages: StaleMediaIDsPage[] } | undefined,
+): StaleMediaID[] {
+  return data?.pages.flatMap((page) => page.staleIDs) ?? [];
 }
 
 export function useRematchStaleMediaID() {
@@ -487,10 +575,8 @@ type MetadataMatchQueueDetailV2 = V2Result<"GET /api/v2/libraries/{id}/metadata-
 
 /**
  * One page of a library's matcher backlog as the admin screen renders it.
- * The v2 listing is cursor paginated; the screen keeps a numeric offset for
- * its "Page N" label, and the hook resolves that offset by walking cursors
- * from the first page (the backlog view is ten rows per page, so the walk is
- * short in practice).
+ * The v2 listing is cursor paginated; the page carries the cursor of the
+ * next page so an infinite query can retain the chain across refetches.
  */
 export interface LibraryMetadataMatchQueuePage extends Omit<
   MetadataMatchQueueDetailV2,
@@ -498,7 +584,6 @@ export interface LibraryMetadataMatchQueuePage extends Omit<
 > {
   library_id: number;
   limit: number;
-  offset: number;
   /** The failure detail with the fields the screen reads narrowed. */
   movies: Array<
     Omit<MetadataMatchQueueDetailV2["movies"][number], "failure_detail" | "library_id"> & {
@@ -516,6 +601,8 @@ export interface LibraryMetadataMatchQueuePage extends Omit<
     Omit<MetadataMatchQueueDetailV2["raw_files"][number], "library_id"> & { library_id: number }
   >;
   has_more: boolean;
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
 }
 
 function failureDetailFromV2(detail: unknown): LibraryMetadataMatchFailureDetail | undefined {
@@ -525,14 +612,12 @@ function failureDetailFromV2(detail: unknown): LibraryMetadataMatchFailureDetail
 
 export function metadataMatchQueuePageFromV2(
   detail: MetadataMatchQueueDetailV2,
-  offset: number,
 ): LibraryMetadataMatchQueuePage {
   const { page, ...rest } = detail;
   return {
     ...rest,
     library_id: Number(detail.library_id),
     limit: METADATA_MATCH_QUEUE_PAGE_SIZE,
-    offset,
     movies: detail.movies.map((entry) => ({
       ...entry,
       library_id: Number(entry.library_id),
@@ -548,44 +633,41 @@ export function metadataMatchQueuePageFromV2(
       library_id: Number(entry.library_id),
     })),
     has_more: page.has_more,
+    nextCursor: page.has_more && page.next_cursor ? page.next_cursor : undefined,
   };
 }
 
+/** Fetches one page of a library's matcher backlog; `cursor` is the previous page's `nextCursor`. */
 export async function fetchLibraryMetadataMatchQueuePage(
   libraryId: number,
-  offset: number,
+  cursor?: string,
   signal?: AbortSignal,
 ): Promise<LibraryMetadataMatchQueuePage> {
-  let cursor: string | undefined;
-  let skipped = 0;
-  for (;;) {
-    const detail = await v2("GET /api/v2/libraries/{id}/metadata-match-queue", {
-      path: { id: String(libraryId) },
-      query: {
-        limit: METADATA_MATCH_QUEUE_PAGE_SIZE,
-        ...(cursor === undefined ? {} : { cursor }),
-      },
-      signal,
-    });
-    if (
-      skipped >= offset ||
-      !detail.page.has_more ||
-      !detail.page.next_cursor ||
-      detail.page.next_cursor === cursor
-    ) {
-      return metadataMatchQueuePageFromV2(detail, skipped);
-    }
-    skipped += METADATA_MATCH_QUEUE_PAGE_SIZE;
-    cursor = detail.page.next_cursor;
-  }
+  const detail = await v2("GET /api/v2/libraries/{id}/metadata-match-queue", {
+    path: { id: String(libraryId) },
+    query: {
+      limit: METADATA_MATCH_QUEUE_PAGE_SIZE,
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return metadataMatchQueuePageFromV2(detail);
 }
 
-export function useLibraryMetadataMatchQueueDetail(libraryId: number | null, offset = 0) {
+/**
+ * Pages a library's matcher backlog by cursor. The loaded pages keep their
+ * cursors, so the periodic refetch refreshes each page in place instead of
+ * walking the chain from the first page again.
+ */
+export function useLibraryMetadataMatchQueueDetail(libraryId: number | null) {
   const pageActivity = usePageActivity();
 
-  return useQuery({
-    queryKey: [...adminKeys.libraryMatchQueueDetail(libraryId ?? 0), offset],
-    queryFn: ({ signal }) => fetchLibraryMetadataMatchQueuePage(libraryId ?? 0, offset, signal),
+  return useInfiniteQuery({
+    queryKey: adminKeys.libraryMatchQueueDetail(libraryId ?? 0),
+    queryFn: ({ pageParam, signal }) =>
+      fetchLibraryMetadataMatchQueuePage(libraryId ?? 0, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: libraryId !== null,
     staleTime: 0,
     refetchInterval: pageActivity.canApplyRealtimeUpdates ? 10_000 : false,
@@ -683,20 +765,10 @@ export function useUploadLibraryPoster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, file }: { id: number; file: File }): Promise<Library> => {
-      // uploadLibraryPoster is the one multipart operation in this section;
-      // the typed boundary only encodes JSON bodies, so the fetch is issued
-      // here and the response is decoded through the contract.
-      const form = new FormData();
-      form.append("poster", file);
-      const { res } = await fetchWithSession(
-        `/api/v2/libraries/${encodeURIComponent(String(id))}/poster`,
-        {
-          method: "PUT",
-          headers: { Accept: "application/json", ...V2_CLIENT_HEADERS },
-          body: form,
-        },
-      );
-      const library = await decodeV2Response("PUT /api/v2/libraries/{id}/poster", res);
+      const library = await v2("PUT /api/v2/libraries/{id}/poster", {
+        path: { id: String(id) },
+        form: { poster: file },
+      });
       return libraryFromV2(library);
     },
     onSuccess: () => {
@@ -771,49 +843,48 @@ const UNMATCHED_PAGE_SIZE = 10;
 export interface UnmatchedLibraryItemsPage {
   items: UnmatchedLibraryItem[];
   total: number;
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
 }
 
 /**
- * Fetches page `page` of the unmatched-item listing. v2 is cursor paginated
- * and the admin table keeps a page number for its range label and total, so
- * the hook walks cursors from the first page to reach the requested one.
+ * Fetches one page of the unmatched-item listing; `cursor` is the previous
+ * page's `nextCursor`. The search is server-side and spans the whole table.
  */
 export async function fetchUnmatchedLibraryItemsPage(
-  page: number,
   search: string,
+  cursor?: string,
   signal?: AbortSignal,
 ): Promise<UnmatchedLibraryItemsPage> {
-  let cursor: string | undefined;
-  let index = 0;
-  for (;;) {
-    const result = await v2("GET /api/v2/libraries/unmatched-items", {
-      query: {
-        limit: UNMATCHED_PAGE_SIZE,
-        ...(search ? { q: search } : {}),
-        ...(cursor === undefined ? {} : { cursor }),
-      },
-      signal,
-    });
-    if (
-      index >= page ||
-      !result.page?.has_more ||
-      !result.page.next_cursor ||
-      result.page.next_cursor === cursor
-    ) {
-      return { items: result.items.map(unmatchedItemFromV2), total: result.total };
-    }
-    index += 1;
-    cursor = result.page.next_cursor;
-  }
+  const result = await v2("GET /api/v2/libraries/unmatched-items", {
+    query: {
+      limit: UNMATCHED_PAGE_SIZE,
+      ...(search ? { q: search } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return {
+    items: result.items.map(unmatchedItemFromV2),
+    total: result.total,
+    nextCursor:
+      result.page?.has_more && result.page.next_cursor ? result.page.next_cursor : undefined,
+  };
 }
 
-export function useUnmatchedLibraryItems(page = 0, search = "") {
+/**
+ * Pages the unmatched-item listing by cursor. The loaded pages keep their
+ * cursors, so opening page N costs one request and a refetch refreshes the
+ * loaded pages in place instead of walking the chain from the first page.
+ */
+export function useUnmatchedLibraryItems(search = "") {
   const trimmed = search.trim();
-  return useQuery({
-    queryKey: adminKeys.unmatchedItems(page, trimmed),
-    queryFn: ({ signal }) => fetchUnmatchedLibraryItemsPage(page, trimmed, signal),
+  return useInfiniteQuery({
+    queryKey: adminKeys.unmatchedItems(trimmed),
+    queryFn: ({ pageParam, signal }) => fetchUnmatchedLibraryItemsPage(trimmed, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     staleTime: ADMIN_STALE_TIME,
-    placeholderData: (prev) => prev,
   });
 }
 

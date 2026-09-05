@@ -9,7 +9,30 @@
       "file_count": 3,
       "first_seen_at": "2026-01-02T03:04:05.678Z",
       "last_seen_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "library_id": "1",
+      "library_name": "Movies",
+      "root_path": "/media/movies/Extras0",
+      "reason": "no_media_files",
+      "sample_file_path": "/media/movies/Extras/a.txt",
+      "file_count": 3,
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "library_id": "1",
+      "library_name": "Movies",
+      "root_path": "/media/movies/Extras1",
+      "reason": "no_media_files",
+      "sample_file_path": "/media/movies/Extras/a.txt",
+      "file_count": 3,
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
     }
-  ]
+  ],
+  "page": {
+    "has_more": false
+  }
 }
 

@@ -10,13 +10,14 @@ import (
 )
 
 func requestAccessFilter(r *http.Request) catalog.AccessFilter {
-	return ViewerAccessFilter(r.Context(), deviceMetadataFromRequest(r).DeviceID)
+	return AccessFilterFromContext(r.Context(), deviceMetadataFromRequest(r).DeviceID)
 }
 
-// ViewerAccessFilter is the viewer's access filter from the identity
-// the middleware stored on the context; deviceID is the caller's declared
-// device, "" when it declared none.
-func ViewerAccessFilter(ctx context.Context, deviceID string) catalog.AccessFilter {
+// AccessFilterFromContext is the viewer's catalog access filter from the
+// claims, profile and viewer scope the gates stored in ctx; deviceID is the
+// caller's device when known. v1 reads it from the request (requestAccessFilter);
+// v2 handlers, which never read headers, call this directly.
+func AccessFilterFromContext(ctx context.Context, deviceID string) catalog.AccessFilter {
 	if scope, ok := access.GetScope(ctx); ok {
 		return catalog.AccessFilter{
 			AllowedLibraryIDs:  scope.AllowedLibraryIDs,

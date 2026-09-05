@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/textproto"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -20,8 +21,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -115,6 +117,12 @@ type Dependencies struct {
 	HomeSections HomeSectionService
 	// Recipes answers the section recipe gallery (*handlers.RecipeHandler).
 	Recipes RecipeService
+	// ProfileSections reads and writes a profile's home-row overrides
+	// (*handlers.SectionHandler).
+	ProfileSections ProfileSectionService
+	// SectionFlags reads the profile-facing sections settings
+	// (*handlers.SectionSettingsHandler).
+	SectionFlags SectionFlagService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -150,11 +158,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(requestID)
 	r.Use(observe)
 	r.Use(dropDelegationPattern)
+	r.Use(joinPreconditionFields)
 	r.Use(bufferResponse)
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
-	api.UseMiddleware(observeOperation, defaultHeaders, classGate(deps), observeIdentity, normalizeAccept, mediaTypeGuard, queryGuard)
+	api.UseMiddleware(observeOperation, defaultHeaders, classGate(deps), observeIdentity, normalizeAccept, encodingGuard, mediaTypeGuard, queryGuard)
 
 	reg := &Registry{api: api, deps: deps}
 	registerAll(reg)
@@ -215,23 +224,43 @@ func humaConfig() huma.Config {
 // documents a RawBody member as application/octet-stream even when the
 // operation also declares a structured Body (updateProfile reads the raw
 // document only for its omitted-versus-null rule), and the listener accepts
-// application/json alone. It runs after Huma has built the request body and
+// application/json and, on an operation declaring a multipart form,
+// multipart/form-data alone. A multipart body is always required: the form
+// is the whole request, and an absent one is the 415 the guard documents. It runs after Huma has built the request body and
 // before the operation reaches the document, so the schema Huma derived for
 // validation is untouched.
-func documentAcceptedRequestMediaTypes(_ *huma.OpenAPI, op *huma.Operation) {
+func documentAcceptedRequestMediaTypes(oapi *huma.OpenAPI, op *huma.Operation) {
 	if op.RequestBody == nil {
 		return
 	}
-	// A multipart operation (an upload with no structured Body) is the one
-	// case the guard accepts a non-JSON body; its declaration stays.
-	if len(op.RequestBody.Content) == 1 && op.RequestBody.Content[mediaTypeMultipart] != nil {
-		return
-	}
 	for mediaType := range op.RequestBody.Content {
-		if !structuredMediaTypeOK(mediaType) {
+		if !requestMediaTypeOK(mediaType) {
 			delete(op.RequestBody.Content, mediaType)
 		}
 	}
+	if media := op.RequestBody.Content[mediaTypeMultipart]; media != nil {
+		op.RequestBody.Required = true
+		nameMultipartForm(oapi, op, media)
+	}
+}
+
+// nameMultipartForm moves the form schema Huma derived for a multipart
+// operation into components under the form type's name and leaves a
+// reference in its place, as every other request schema is named. The
+// framework's own "file required" check reads the inline schema, so the
+// operation checks the part itself.
+func nameMultipartForm(oapi *huma.OpenAPI, op *huma.Operation, media *huma.MediaType) {
+	name, _ := op.Metadata[metaFormSchema].(string)
+	if name == "" || media.Schema == nil || media.Schema.Ref != "" {
+		return
+	}
+	schemas := oapi.Components.Schemas.Map()
+	if prev, taken := schemas[name]; taken && prev != media.Schema {
+		panic(fmt.Sprintf("apiv2: %s: form schema name %q is already registered", op.OperationID, name))
+	}
+	media.Schema.AdditionalProperties = false
+	schemas[name] = media.Schema
+	media.Schema = &huma.Schema{Ref: "#/components/schemas/" + name}
 }
 
 // requestID exposes the canonical request ID. Under the API listener,
@@ -250,6 +279,33 @@ func requestID(next http.Handler) http.Handler {
 		// Set through the map to keep the contract's spelling (X-Request-ID);
 		// Header.Set would canonicalize it.
 		w.Header()[RequestIDHeader] = []string{id}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// joinPreconditionFields folds repeated If-Match and If-None-Match header
+// lines into one comma-separated value (RFC 9110 5.3: a recipient may combine
+// list-based fields in order). Huma binds a header input from Header.Get,
+// which returns the first line only, so without this a second line would be
+// silently dropped and the precondition evaluated against half the list.
+func joinPreconditionFields(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, field := range []string{ifMatchField, ifNoneMatchField} {
+			vs, present := r.Header[textproto.CanonicalMIMEHeaderKey(field)]
+			if !present {
+				continue
+			}
+			joined := strings.Join(vs, ", ")
+			if strings.TrimSpace(joined) == "" {
+				// Huma binds a header to a string, where a present but
+				// empty field is indistinguishable from an absent one. The
+				// RFC #-list rule makes the empty field an empty list that
+				// matches nothing (412), not a missing precondition (428),
+				// so it is rewritten to a spelling the parser sees as empty.
+				joined = emptyETagList
+			}
+			r.Header.Set(field, joined)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -357,6 +413,15 @@ func (b *bufferedWriter) flush() {
 		// The client is gone; a success body has nobody to read it.
 		return
 	}
+	if b.status == http.StatusNotModified || b.status == http.StatusNoContent {
+		// No body travels with these statuses, so no representation header
+		// describes one; Huma negotiates Content-Type before it knows. A
+		// HEAD body is not cleared here: net/http's ResponseWriter discards
+		// it on a real connection (after counting it for Content-Length),
+		// so the listener leaves that to the server.
+		b.w.Header().Del("Content-Type")
+		b.body.Reset()
+	}
 	b.w.WriteHeader(b.status)
 	_, _ = b.w.Write(b.body.Bytes())
 }
@@ -393,9 +458,32 @@ type ProgressService interface {
 	ListProgressPage(ctx context.Context, userID int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error)
 }
 
-// ProfileService is the slice of *handlers.ProfileHandler updateProfile uses.
+// ProfileService is the slice of *handlers.ProfileHandler the profile
+// operations use.
 type ProfileService interface {
+	ListProfiles(ctx context.Context, userID int) (handlers.ProfileListView, error)
+	CreateProfile(ctx context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error)
 	UpdateProfile(ctx context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error)
+	DeleteProfile(ctx context.Context, cmd handlers.ProfileDeleteCommand) error
+	ListHouseholdSessions(ctx context.Context, q handlers.HouseholdSessionsQuery) ([]handlers.PlaybackSessionView, error)
+	VerifyPIN(ctx context.Context, cmd handlers.ProfileVerifyPINCommand) (handlers.ProfileVerification, error)
+	UploadAvatar(ctx context.Context, up handlers.ProfileAvatarUpload) (handlers.ProfileView, error)
+	DeleteAvatar(ctx context.Context, userID int, profileID string) (handlers.ProfileView, error)
+}
+
+// ProfileSectionService is the slice of *handlers.SectionHandler the
+// profile section-override operations use.
+type ProfileSectionService interface {
+	ListProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) ([]userstore.SectionOverride, error)
+	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
+	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
+	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
+}
+
+// SectionFlagService is the slice of *handlers.SectionSettingsHandler
+// getProfileSectionFlags uses.
+type SectionFlagService interface {
+	AllowProfileCustomSections(ctx context.Context) bool
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile
@@ -422,12 +510,12 @@ type LibraryAdminService interface {
 	ConfirmEmptyRootCleanup(ctx context.Context, id int) error
 	ListMetadataMatchQueues(ctx context.Context) ([]handlers.MetadataMatchQueueStatusView, error)
 	LibraryProviderDefaults(ctx context.Context, libraryType string) (map[string][]handlers.ChainLevelEntryView, error)
-	ReorderLibraries(ctx context.Context, entries []catalogpkg.FolderReorderEntry) error
-	ListLibraryRoots(ctx context.Context, libraryID int, state string, limit, offset int) ([]handlers.LibraryRootView, int, error)
+	ReorderLibraries(ctx context.Context, entries []mediacatalog.FolderReorderEntry) error
+	ListLibraryRoots(ctx context.Context, libraryID int, state, search string, limit, offset int) ([]handlers.LibraryRootView, int, error)
 	SetRootOverride(ctx context.Context, userID int, req handlers.RootOverrideUpsertRequest) error
 	DeleteRootOverride(ctx context.Context, req handlers.RootOverrideDeleteRequest) error
-	ListSkippedRoots(ctx context.Context) ([]handlers.SkippedRootView, error)
-	ListStaleIDs(ctx context.Context) ([]handlers.StaleMediaIDView, error)
+	ListSkippedRoots(ctx context.Context, search string, limit, offset int) ([]handlers.SkippedRootView, error)
+	ListStaleIDs(ctx context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, error)
 	RematchStaleID(ctx context.Context, contentID string) error
 	ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
 	GetMetadataMatchQueue(ctx context.Context, id, limit, offset int) (handlers.MetadataMatchQueueDetailView, error)
@@ -453,12 +541,12 @@ type LibrarySectionService interface {
 type LibraryCollectionService interface {
 	LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (handlers.LibraryCollectionTabView, error)
 	LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error)
-	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter) ([]handlers.CollectionItemView, error)
+	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access mediacatalog.AccessFilter, page handlers.CollectionItemPage) ([]handlers.CollectionItemView, bool, error)
 }
 
 // CalendarService is the slice of *handlers.CalendarHandler getCalendar uses.
 type CalendarService interface {
-	Calendar(ctx context.Context, q handlers.CalendarQuery, access catalogpkg.AccessFilter) (handlers.CalendarView, error)
+	Calendar(ctx context.Context, q handlers.CalendarQuery, access mediacatalog.AccessFilter) (handlers.CalendarView, error)
 }
 
 // HomeDismissalService is the slice of *handlers.HomeDismissalHandler the

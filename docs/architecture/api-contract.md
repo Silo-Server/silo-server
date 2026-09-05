@@ -350,11 +350,160 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Request IDs.** v1 routes set no request-ID response header; v2 sets `X-Request-ID` from the
   same context value `apimw.RequestID` already stored, so the request log, activity log, and the
   Problem Details `instance` name the same request.
+- **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
+  DELETE only), `Conditional` (GET, HEAD only) or `CreateOnly` (PUT only, exclusive with
+  `Guarded`); `Register` panics when a guarded input does not bind a string
+  `header:"If-Match"` and a string `header:"If-None-Match"` (the second precondition RFC
+  9110 13.2.2 evaluates after the first; an input that did not bind it would let the field
+  be dropped and a forbidden write applied) or its output a string `header:"ETag"` (a
+  guarded DELETE answers a bodyless `204` and nothing else: its output declares no `ETag`
+  of any type, no body, and no `Status`, its `DefaultStatus` is unset or `204`, and its
+  `Responses` declares no other `2xx`), when a conditional input does not bind
+  `header:"If-None-Match"` and `header:"If-Match"` with a string `ETag` and an int `Status`
+  on the output, and when a create-only input does not bind `header:"If-None-Match"` and
+  `header:"If-Match"` with a string `ETag` on the output. On a read or a create-only write
+  the `If-Match` is optional but, when present, is evaluated first (RFC 9110 13.2.2): a tag
+  not matching the current representation, or any tag against a missing resource, is
+  `412`, so a stale precondition can never fall through to a `200`, `304`, or create. Header fields and the conditional `Status` count only as direct exported struct
+  fields spelled canonically (`If-Match`, `If-None-Match`, `ETag`) with no Huma binding or
+  validation tag (a `default` would turn an absent `If-Match` into an overwrite instead of
+  `428`, a `required` would answer a framework `422` in its place), and exactly one field
+  may bind a given header: Huma binds and writes no header
+  from an embedded struct or an unexported field, and a second binding of another type
+  would be written last or panic the 304 path, so either shape is refused rather than
+  silently wrong. A guarded handler
+  treats `If-Match: *` as a deliberate overwrite through the compare-and-update as well:
+  a race lost to a writer who left the resource in place is retried against the latest
+  version, however many writers land, with `If-None-Match` and the domain rule judged again
+  against that latest row on every retry; a race lost to a delete is `412` with no `ETag`,
+  and only an exact tag turns a lost race into `412` with the current `ETag`. A create-only
+  handler that loses its write evaluates `If-None-Match` again against the latest state and
+  retries while the condition holds, so only a state that falsifies the condition is `412`. `TestGuardedOperationsAreMarkedIfMatch`
+  reconciles both directions, requires the marking only on a row eligible to carry it
+  (tier-1, ported, PUT/PATCH/DELETE, so a redesigned or replaced row that names a guarded
+  operation is not caught between two rules), and refuses a guarded operation that maps to
+  no legacy row unless `guardedWithoutLegacyRow` names it with a reason. A
+  guarded operation documents `412` and `428`, a required `If-Match` parameter, an optional
+  `If-None-Match` parameter, and the `ETag` header on every `2xx`
+  (except a guarded DELETE's `204`, which carries none) and on the `412`; a conditional read
+  documents `304` with `ETag`, `412` with `ETag`, and an optional `If-Match` parameter; a
+  create-only PUT documents `412` with `ETag`, optional `If-Match` and `If-None-Match`
+  parameters and `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
+  `x-silo-create-only` so a reader can enumerate them. The router joins repeated `If-Match`
+  and `If-None-Match` lines into one comma-separated list before the input is bound (RFC
+  9110 5.3), so a tag on a second line is evaluated, and rewrites a present but empty field
+  to an empty list so it is `412` (an empty list matches nothing) rather than the `428` an
+  absent field earns.
+  `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(scope, id, version)`
+  (strong, quoted, opaque; the scope keeps redacted representations from sharing a
+  validator, the resource id keeps two resources at one version from sharing one through a
+  SHA-256 binding over a length-prefixed encoding, since ids may be client-selected, and the
+  version source must be monotonic across delete and recreate at the same id, so a
+  validator minted for one resource or its deleted predecessor never matches another),
+  `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),
+  `StrongMatch` / `WeakMatch`, `EvaluateIfMatch` (nil, `428`, `412` with the current `ETag`, or
+  `400 malformed_request` without echoing the value), `EvaluateGuardedPreconditions` (the RFC
+  9110 13.2.2 order for a mutation that binds both fields: `If-Match` first, then an
+  `If-None-Match` whose match or `*` is `412`), `EvaluateReadPreconditions` and
+  `EvaluateCreateOnlyPreconditions` (the same order for a read and a create-only write, with
+  an optional `If-Match`), `EvaluateIfNoneMatch` and `NotModified`
+  for `304`, `EvaluateCreateOnly` for `If-None-Match: *`, and the `ErrStaleVersion` sentinel a
+  storage compare-and-update returns, mapped by `StaleVersionProblem`. The handler loads
+  first (`404` before any precondition), evaluates, then writes. The ledger's optional
+  `concurrency: if_match` field names the rows that will register `Guarded`; the gate limits
+  it to tier-1 ported mutation rows and reconciles every guarded registration against it. No
+  production resource is guarded yet; the first section that guards one adds its row version.
+- **Mutation retry safety is encoded.** The ledger's curated `retry_safety` field classifies
+  every tier-1 ported mutation row (POST, PUT, PATCH, DELETE) by one of the seven strategies
+  above, spelled `natural_idempotent`, `unique_constraint`, `domain_identity`, `coalescing`,
+  `durable_dispatch`, `idempotency_key`, `non_retryable`; an optional `retry_safety_note` (at
+  most 300 characters) explains a non-obvious choice and is required for `idempotency_key` and
+  `non_retryable`. `migration.schema.json` forbids both fields on any other row and
+  `internal/contractledger` requires the value on every such row. `apiv2.Operation`
+  carries the same enum as `RetrySafety`: `Register` panics when a mutating operation omits it
+  or a GET/HEAD declares it, and the document records it as `x-silo-retry-safety`.
+  `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
+  classified legacy row or disagrees with it, unless `mutationWithoutLegacyRow` names a
+  v2-only mutation with a reason, and when a classified row names a v2 operation the
+  registry does not declare as a mutation; it compares only rows eligible for the
+  classification, so a redesigned or replaced row that names a v2 mutation is not caught
+  between the schema and the gate. No generic key store exists, so `Register`
+  refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
+  `Idempotency-Key` header under any other strategy: the strategy, its required header, and
+  the durable replay store land together with the first operation the inventory proves
+  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
+  tier-1 ported mutation rows (219 distinct operations) are classified (106
+  `natural_idempotent`, 25 `unique_constraint`, 14 `domain_identity`, 9 `coalescing`, 10
+  `durable_dispatch`, 55 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  one-shot display or a secret shown once (invite-code top-up, admin session message,
+  webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
+  first call never touched (node force-reload, per node and fleet-wide), a token-issuing
+  send with no request identity (invitation create and resend, whose retry supersedes the
+  token the first call mailed), a blanket command over whatever currently matches rather
+  than a named target (library scan cancel, metadata-match-queue cancel, task cancel by key,
+  notifications read-all), a playback command minted fresh on every call (admin session
+  pause and resume, whose delayed retry reverts the newer state), a fresh server-side cutoff a retry would move (history remove,
+  mark-unwatched), a shared-key artwork replacement a stale retry would clobber (library
+  poster upload), an external call made before any durable claim (provider device-auth
+  start and API-key exchange), a one-shot token-bearing or secret-bearing response that cannot be replayed
+  (device-pairing poll, OAuth completion, invitation acceptance, initial setup, API-key and
+  webhook creation), a shared-key or identity-keyed replacement a stale retry would clobber
+  (profile avatar upload, provider disconnect), a profile update whose account-wide
+  access-policy revision bump is not change-gated, an unconditional
+  repoint of
+  cluster-wide state (policy version activation and document enable/disable, whose stale
+  retry restores an obsolete policy), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
+  confirmation), a
+  command that re-runs its side effect on every call (watch-together selection and
+  suggestion promotion, which reset playback and clear member sessions each time;
+  metadata-match-queue retry, which schedules another run once the first is leased; node
+  capability reprobe, which holds the GPU gate through a multi-minute cold build), or a
+  delete or replace that converges only while nothing intervenes: a delayed retry after a
+  lost response destroys a resource re-created after the first success (email-address
+  clear, push-device unregister, library and collection poster delete, profile avatar
+  delete, Discord unlink, collection item add and remove, profile section overrides
+  replace and reset, device forget and device-settings reset), so each stays `non_retryable`
+  until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
+  (email-address verification; favorites, watchlist, and rating add and remove; taste seed;
+  account and node deletion) name the durable dispatch or cleanup the v2 port must add before
+  their retry is safe. The existing v2 profile creation and deletion operations remain
+  `non_retryable` until their durable identity and cleanup defects are fixed. Library creation,
+  settings updates, stale-ID rematch, and provider-chain replacement also remain
+  `non_retryable`: their current seams cannot resume dispatch after saving state, or
+  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Forty-two rows (41 distinct operations)
+  carry a `DEFECT` note where v1 gates on
+  process-local state, fires an external effect inline, lacks the dedup or ordering its
+  identity implies, or re-runs a side effect a retry should not repeat (task run, collection
+  sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
+  invite-code redemption during signup, playback route events, mark-watched history,
+  watch-together selection and promotion, metadata-match-queue retry, playback session
+  progress, sync progress, download status, ebook reader progress, and onboarding progress,
+  whose last-write-wins update lets a delayed retry rewind a newer report, favorites,
+  watchlist, and rating add and remove, the taste seed, subtitle download and upload,
+  whose unique key resolves a retry but whose losing insert deletes the winner's S3
+  object, transcode start, which replaces a live session under the same id, and media
+  request creation, whose partial unique index stops covering a request once it reaches a
+  terminal state, node creation, whose cross-replica pool reload runs after the insert
+  without a transaction, push device registration (Apple and FCM), whose update overwrites
+  a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
+  field presence rather than on an effective change, the provider device-auth poll, whose
+  completion check is a plain read ahead of the plugin call, admin user update, whose
+  password branch re-hashes and revokes every session on each attempt, profile creation,
+  whose name and limit checks run in application code with no unique index on the
+  account-scoped name, account deletion, whose impersonation-session revocation follows
+  the commit, node deletion, whose pool invalidation follows the commit, and profile
+  deletion, whose object and device cleanup cannot resume after the row disappears,
+  library creation,
+  whose seeding and initial scan run after the insert without a transaction, and the
+  library provider chain, whose matcher wake fires unconditionally after the save); their
+  v2 port must move the gate
+  to shared durable state, add the missing unique constraint or event time, gate the
+  dispatch on a reported change, or make the repeat a no-op before the declared strategy
+  holds.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
-  tracked on #882: opt-in optimistic concurrency (strong ETag, `If-Match`, the `428`/`412`
-  separation, and RFC parser conformance tests); per-operation mutation retry / idempotency
-  classification; the durable `202` job acceptance and its monitor/cancel shape; the
+  tracked on #882: the durable `202` job acceptance and its monitor/cancel shape; the
   atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
   sunset headers.
 
@@ -637,6 +786,12 @@ Adding supported idempotency to an operation later is additive. Before foundatio
 the v1 inventory classifies every durable-effect operation by the strategies above and identifies
 any residual group that can justify one shared implementation.
 
+An absolute assignment can remain `natural_idempotent` without a concurrency guard: repeated
+identical invite-code updates converge and do not increment usage or dispatch another effect.
+That classification does not protect a later administrator edit from an older request. Whether
+admission-control edits require version guarding belongs to the admin-invitations section;
+retry classification and protection against concurrent edits are separate decisions.
+
 ### Optimistic concurrency
 
 Concurrency protection is opt-in per operation rather than a default for every mutation. The
@@ -662,10 +817,19 @@ change, and includes the current ETag when the caller remains authorized to see 
 is missing or intentionally hidden returns `404` before precondition evaluation; a request that
 passes its precondition but conflicts with current domain state returns `409`.
 
-Successful protected reads and mutations return the current ETag, and first-party clients handle
-`412` by fetching the canonical representation and offering reload, comparison, or a deliberate
-overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
-Conditional reads may return `304`. V2 does not add a generic response-body revision; a body
+Successful protected reads and mutations return the current ETag, except a protected `DELETE`,
+whose bodyless `204` has no representation left to validate and carries none. First-party
+clients handle `412` by fetching the canonical representation and offering reload, comparison,
+or a deliberate overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
+Conditional reads may return `304`. A response that carries an `ETag` is served identity-encoded
+whatever `Accept-Encoding` asked for: a strong validator names the representation data including
+its content coding (RFC 9110 8.8.1), so the listener's compression layer skips validator-bearing v2
+responses (`apiv2.IdentityEncoded`) rather than letting a gzip body and an identity body share one
+strong tag or rewriting the tag per coding. The tag a client received is therefore the tag it echoes
+in `If-Match` or `If-None-Match`, whichever coding it accepts; responses without a validator
+compress as usual. A request whose `Accept-Encoding` excludes identity (`identity;q=0`, or `*;q=0`
+without a positive `identity` entry, RFC 9110 12.5.3) is answered `406 not_acceptable` on a
+validator-bearing operation rather than with a coding the client refused. V2 does not add a generic response-body revision; a body
 revision exists only for a domain requirement such as capability invalidation or future offline
 synchronization. The implementation follows RFC 9110 parsing and precedence, including lists,
 optional whitespace, wildcard rules, and strong comparison, independent of Huma helper behavior.
@@ -939,6 +1103,24 @@ stored ones, every string member of a profile is always emitted, ids are string 
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
+The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
+`updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
+`verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides
+`listProfileSectionOverrides`, `replaceProfileSectionOverrides`, `resetProfileSectionOverrides`,
+`getProfileSectionSettings`, `getProfileSectionFlags` under `/api/v2/profile/sections`. The
+deliberate v1 differences, recorded per row in the ledger: `createProfile` answers `201` with a
+`Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
+from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
+ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
+keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
+reports `expires_at` as a nullable instant; `uploadProfileAvatar` is the first Huma multipart
+operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
+types or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
+server without an upload store answers `503`; section overrides drop the `/reset` suffix
+(`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
+method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
+casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+
 **Section catalog-libraries (Phase 4).** Thirty operations under the `libraries` tag: the
 acting-admin, demo-guarded management surface `listLibraries`, `createLibrary`, `updateLibrary`,
 `deleteLibrary`, `checkLibraryMount`, `confirmEmptyRootCleanup`, `listMetadataMatchQueues`,
@@ -952,7 +1134,7 @@ acting-admin, demo-guarded management surface `listLibraries`, `createLibrary`, 
 one `CatalogItem` schema (`internal/apiv2/catalog_types.go`), which the catalog-items and
 catalog-home sections reuse. Deliberate differences from v1, all recorded on the ledger rows:
 `PUT` full updates are `PATCH`; offset paging (roots, unmatched items, the per-library match
-queue) is `limit` plus an opaque cursor; ids are string `ID`s and timestamps UTC-millisecond
+queue) is `limit` plus an opaque cursor, and v1's unpaginated stale-ID list pages the same way; ids are string `ID`s and timestamps UTC-millisecond
 instants; the provider-chain `levels` map is an ordered array of `{content_level, entries}` and
 `library_type` is required on the defaults read; `deleteRootOverride` takes its root in the query;
 the refresh `mode` and `image_size` are strict enums answered `422`; the queued-work operations

@@ -25,17 +25,24 @@ import { V2ProblemError } from "@/api/v2/request";
 
 import {
   fetchAdminLibraries,
-  fetchAllLibraryRoots,
   fetchLibraryMetadataMatchQueuePage,
   fetchUnmatchedLibraryItemsPage,
+  useUnmatchedLibraryItems,
   useCheckLibraryMount,
   useCreateLibrary,
   useDeleteLibrary,
   useLibraryMetadataMatchQueues,
+  useLibraryMetadataMatchQueueDetail,
   useLibraryProviders,
+  useLibraryRoots,
+  useSkippedLibraryRoots,
+  flattenLibraryRoots,
+  LIBRARY_ROOTS_PAGE_LIMIT,
   useRefreshLibraryMetadata,
   useSetLibraryProviders,
   useStaleMediaIDs,
+  flattenStaleMediaIDs,
+  STALE_MEDIA_IDS_PAGE_LIMIT,
   useUpdateLibrary,
 } from "./libraries";
 
@@ -184,10 +191,11 @@ describe("library admin hooks on the v2 contract", () => {
     expect(check.roots.map((r) => r.path)).toEqual(checkLibraryMountOk.roots.map((r) => r.path));
   });
 
-  it("walks every page of the library roots listing", async () => {
+  it("pages the library roots listing on demand", async () => {
     const fetchMock = stubFetch((url) => {
       expect(url.pathname).toBe("/api/v2/libraries/roots");
       expect(url.searchParams.get("library_id")).toBe("1");
+      expect(url.searchParams.get("limit")).toBe(String(LIBRARY_ROOTS_PAGE_LIMIT));
       if (url.searchParams.get("cursor") === null) return jsonResponse(listLibraryRootsOk);
       expect(url.searchParams.get("cursor")).toBe(listLibraryRootsOk.page.next_cursor);
       return jsonResponse({
@@ -197,19 +205,136 @@ describe("library admin hooks on the v2 contract", () => {
       });
     });
 
-    const roots = await fetchAllLibraryRoots(1, "ambiguous");
+    const { result } = renderHook(() => useLibraryRoots(1, "ambiguous", { search: " Heat " }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+
+    // Only the first page loads up front, with the trimmed search sent to the server.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("state")).toBe("ambiguous");
+    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("q")).toBe("Heat");
+    expect(result.current.hasNextPage).toBe(true);
+    expect(result.current.data?.pages[0]?.total).toBe(3);
+    expect(flattenLibraryRoots(result.current.data).map((r) => r.root_path)).toEqual([
+      "/media/movies/Alien",
+      "/media/movies/Blade Runner",
+    ]);
+    expect(flattenLibraryRoots(result.current.data)[0]?.library_id).toBe(1);
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("state")).toBe("ambiguous");
-    expect(roots.map((r) => r.root_path)).toEqual([
+    expect(flattenLibraryRoots(result.current.data).map((r) => r.root_path)).toEqual([
       "/media/movies/Alien",
       "/media/movies/Blade Runner",
       "/media/movies/Heat",
     ]);
-    expect(roots[0]?.library_id).toBe(1);
   });
 
-  it("resolves a numeric unmatched-items page by following cursors", async () => {
+  it("does not load library roots until the caller enables the query", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(listLibraryRootsOk));
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useLibraryRoots(1, "ambiguous", { enabled }),
+      { wrapper: createWrapper(), initialProps: { enabled: false } },
+    );
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("q")).toBeNull();
+  });
+
+  it("restarts library roots paging from the first page when the search changes", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url.searchParams.get("q") === "heat") {
+        return jsonResponse({
+          items: [{ ...listLibraryRootsOk.items[0], root_path: "/media/movies/Heat" }],
+          page: { has_more: false },
+          total: 1,
+        });
+      }
+      if (url.searchParams.get("cursor") === null) return jsonResponse(listLibraryRootsOk);
+      return jsonResponse({
+        items: [{ ...listLibraryRootsOk.items[0], root_path: "/media/movies/Blade Runner" }],
+        page: { has_more: false },
+        total: 3,
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ search }: { search: string }) => useLibraryRoots(1, "ambiguous", { search }),
+      { wrapper: createWrapper(), initialProps: { search: "" } },
+    );
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+
+    rerender({ search: "heat" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    const last = requestsOf(fetchMock)[2]?.url.searchParams;
+    expect(last?.get("q")).toBe("heat");
+    expect(last?.get("cursor")).toBeNull();
+    expect(flattenLibraryRoots(result.current.data).map((r) => r.root_path)).toEqual([
+      "/media/movies/Heat",
+    ]);
+  });
+
+  it("defers skipped roots and sends search on each bounded page", async () => {
+    const fetchMock = stubFetch((url) =>
+      jsonResponse({
+        items: [],
+        page: url.searchParams.has("cursor")
+          ? { has_more: false }
+          : { has_more: true, next_cursor: "next" },
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useSkippedLibraryRoots({ enabled, search: " Extras " }),
+      { wrapper: createWrapper(), initialProps: { enabled: false } },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const request of requestsOf(fetchMock)) {
+      expect(request.url.searchParams.get("q")).toBe("Extras");
+      expect(request.url.searchParams.get("limit")).toBe("50");
+    }
+  });
+
+  it("restarts stale IDs with server-side search", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(listStaleIdsOk));
+    const { result, rerender } = renderHook(({ search }) => useStaleMediaIDs({ search }), {
+      wrapper: createWrapper(),
+      initialProps: { search: "" },
+    });
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    rerender({ search: " Lost " });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("q")).toBe("Lost");
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("cursor")).toBeNull();
+  });
+
+  it("fetches an unmatched-items page by cursor with the server-side search", async () => {
     const fetchMock = stubFetch((url) => {
       expect(url.pathname).toBe("/api/v2/libraries/unmatched-items");
       expect(url.searchParams.get("q")).toBe("a");
@@ -221,49 +346,170 @@ describe("library admin hooks on the v2 contract", () => {
       });
     });
 
-    const first = await fetchUnmatchedLibraryItemsPage(0, "a");
+    const first = await fetchUnmatchedLibraryItemsPage("a");
     expect(first.items.map((i) => i.title)).toEqual(["Alpha"]);
     expect(first.total).toBe(listUnmatchedItemsOk.total);
     expect(first.items[0]?.library_id).toBe(1);
+    expect(first.nextCursor).toBe(listUnmatchedItemsOk.page.next_cursor);
 
-    const second = await fetchUnmatchedLibraryItemsPage(1, "a");
+    // A later page is requested with its cursor directly, not by replaying earlier pages.
+    const second = await fetchUnmatchedLibraryItemsPage("a", first.nextCursor);
     expect(second.items.map((i) => i.title)).toEqual(["Beta"]);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(second.nextCursor).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("cursor")).toBe(
+      listUnmatchedItemsOk.page.next_cursor,
+    );
+  });
+
+  it("retains the unmatched-items cursor chain across refetches", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url.searchParams.get("cursor") === null) return jsonResponse(listUnmatchedItemsOk);
+      return jsonResponse({
+        items: [{ ...listUnmatchedItemsOk.items[0], content_id: "movie:b", title: "Beta" }],
+        page: { has_more: false },
+        total: listUnmatchedItemsOk.total,
+      });
+    });
+
+    const { result } = renderHook(() => useUnmatchedLibraryItems(" a "), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+    expect(result.current.data?.pages).toHaveLength(1);
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await result.current.refetch();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    // The refetch replays exactly the loaded pages with their stored cursors
+    // and the trimmed search term; it never walks from the first page to
+    // rebuild the chain.
+    expect(
+      requestsOf(fetchMock).map((r) => [
+        r.url.searchParams.get("q"),
+        r.url.searchParams.get("cursor"),
+      ]),
+    ).toEqual([
+      ["a", null],
+      ["a", listUnmatchedItemsOk.page.next_cursor],
+      ["a", null],
+      ["a", listUnmatchedItemsOk.page.next_cursor],
+    ]);
+    expect(result.current.data?.pages[1]?.items[0]?.title).toBe("Beta");
   });
 
   it("decodes the matcher backlog detail with the page fields the section reads", async () => {
-    stubFetch(() => jsonResponse(getMetadataMatchQueueOk));
+    const fetchMock = stubFetch(() => jsonResponse(getMetadataMatchQueueOk));
 
-    const page = await fetchLibraryMetadataMatchQueuePage(1, 0);
+    const page = await fetchLibraryMetadataMatchQueuePage(1);
 
     expect(page.library_id).toBe(1);
-    expect(page.offset).toBe(0);
     expect(page.limit).toBe(10);
     expect(page.has_more).toBe(true);
+    expect(page.nextCursor).toBe(getMetadataMatchQueueOk.page.next_cursor);
     expect(page.movies[0]?.failure_kind).toBe("no_match");
     expect(page.movies[0]?.failure_detail).toEqual({ candidates: 0 });
+
+    // A later page is requested with its cursor directly, not by replaying earlier pages.
+    await fetchLibraryMetadataMatchQueuePage(1, page.nextCursor);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("cursor")).toBe(
+      getMetadataMatchQueueOk.page.next_cursor,
+    );
   });
 
-  it("lists matcher queue statuses and stale ids with numeric library ids", async () => {
-    stubFetch((url) =>
-      url.pathname.endsWith("/stale-ids")
-        ? jsonResponse(listStaleIdsOk)
-        : jsonResponse(listMetadataMatchQueuesOk),
-    );
+  it("retains the matcher backlog cursor chain across refetches", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url.searchParams.get("cursor") === null) return jsonResponse(getMetadataMatchQueueOk);
+      return jsonResponse({
+        ...getMetadataMatchQueueOk,
+        movies: [{ ...getMetadataMatchQueueOk.movies[0], media_file_id: "121" }],
+        page: { has_more: false },
+      });
+    });
+
+    const { result } = renderHook(() => useLibraryMetadataMatchQueueDetail(1), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+    expect(result.current.data?.pages).toHaveLength(1);
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await result.current.refetch();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    // The refetch replays exactly the loaded pages with their stored cursors.
+    expect(requestsOf(fetchMock).map((r) => r.url.searchParams.get("cursor"))).toEqual([
+      null,
+      getMetadataMatchQueueOk.page.next_cursor,
+      null,
+      getMetadataMatchQueueOk.page.next_cursor,
+    ]);
+    expect(result.current.data?.pages[1]?.movies[0]?.media_file_id).toBe("121");
+  });
+
+  it("lists matcher queue statuses with numeric library ids", async () => {
+    stubFetch(() => jsonResponse(listMetadataMatchQueuesOk));
 
     const queues = renderHook(() => useLibraryMetadataMatchQueues(), {
       wrapper: createWrapper(),
     });
-    const stale = renderHook(() => useStaleMediaIDs(), { wrapper: createWrapper() });
     await waitFor(() => expect(queues.result.current.isSuccess).toBe(true));
-    await waitFor(() => expect(stale.result.current.isSuccess).toBe(true));
 
     expect(queues.result.current.data?.map((q) => q.library_id)).toEqual(
       listMetadataMatchQueuesOk.items.map((q) => Number(q.library_id)),
     );
-    expect(stale.result.current.data?.map((s) => s.library_id)).toEqual(
+  });
+
+  it("pages the stale ids listing on demand with numeric library ids", async () => {
+    const fetchMock = stubFetch((url) => {
+      expect(url.pathname).toBe("/api/v2/libraries/stale-ids");
+      expect(url.searchParams.get("limit")).toBe(String(STALE_MEDIA_IDS_PAGE_LIMIT));
+      if (url.searchParams.get("cursor") === null) return jsonResponse(listStaleIdsOk);
+      expect(url.searchParams.get("cursor")).toBe(listStaleIdsOk.page.next_cursor);
+      return jsonResponse({
+        items: [{ ...listStaleIdsOk.items[0], content_id: "series:lost-2004", library_id: "0" }],
+        page: { has_more: false },
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useStaleMediaIDs({ enabled }),
+      { wrapper: createWrapper(), initialProps: { enabled: false } },
+    );
+
+    // Nothing loads until the diagnostics section opens.
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.hasNextPage).toBe(true);
+    expect(flattenStaleMediaIDs(result.current.data).map((s) => s.library_id)).toEqual(
       listStaleIdsOk.items.map((s) => Number(s.library_id)),
     );
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(flattenStaleMediaIDs(result.current.data).map((s) => s.content_id)).toEqual([
+      ...listStaleIdsOk.items.map((s) => s.content_id),
+      "series:lost-2004",
+    ]);
+    expect(flattenStaleMediaIDs(result.current.data)[2]?.library_id).toBe(0);
   });
 
   it("maps the provider chain both ways between the level list and the form map", async () => {
