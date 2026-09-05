@@ -104,12 +104,16 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		Paths map[string]map[string]struct {
 			OperationID string                     `json:"operationId"`
 			Responses   map[string]json.RawMessage `json:"responses"`
+			Guarded     bool                       `json:"x-silo-guarded"`
 		} `json:"paths"`
 	}
 	if err := json.Unmarshal(doc, &spec); err != nil {
 		return []string{err.Error()}
 	}
-	type opInfo struct{ statuses map[string]bool }
+	type opInfo struct {
+		statuses map[string]bool
+		guarded  bool
+	}
 	ops := map[string]opInfo{}
 	for _, methods := range spec.Paths {
 		for _, op := range methods {
@@ -117,7 +121,7 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			for s := range op.Responses {
 				statuses[s] = true
 			}
-			ops[op.OperationID] = opInfo{statuses: statuses}
+			ops[op.OperationID] = opInfo{statuses: statuses, guarded: op.Guarded}
 		}
 	}
 
@@ -136,10 +140,14 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			if f.ExpectedStatus == 304 && f.ResponseHeaders["ETag"] == "" {
 				fail("%s: a 304 fixture must record ETag", where)
 			}
-			if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && f.ResponseHeaders["ETag"] != "" {
-				// A guarded DELETE's 204 has no validator; a bodyless 204
-				// from a PUT or PATCH output that carries only ETag does.
-				fail("%s: a 204 DELETE fixture records an ETag, but a deleted representation has no validator", where)
+			// A guarded DELETE's 204 has no validator (Register refuses an
+			// ETag on its output); an ordinary DELETE may carry one, as may
+			// a bodyless 204 from a PUT or PATCH. Probe fixtures name no
+			// operation, so they fall back to the method-only reading the
+			// probes were written against.
+			guarded := f.OperationID == nil || ops[*f.OperationID].guarded
+			if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && guarded && f.ResponseHeaders["ETag"] != "" {
+				fail("%s: a guarded 204 DELETE fixture records an ETag, but a deleted representation has no validator", where)
 			}
 			if f.OperationID != nil {
 				if info, ok := ops[*f.OperationID]; !ok || !info.statuses[fmt.Sprint(f.ExpectedStatus)] {
