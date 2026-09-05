@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -103,5 +104,73 @@ func TestSetAudioPreferenceStampsUpdatedAtOnSQLite(t *testing.T) {
 	}
 	if ts, err := time.Parse(time.RFC3339Nano, pref.UpdatedAt); err != nil || ts.IsZero() {
 		t.Fatalf("updated_at %q is not a valid RFC3339 instant: %v", pref.UpdatedAt, err)
+	}
+}
+
+// TestGetAudioPreferenceCanonicalOverlaysCanonicalLanguage replays the v2
+// read finding: /settings/values changes the canonical profile_series
+// language without touching the legacy row, and playback resolves the
+// canonical value, so the v2 GET must show it over the legacy track identity;
+// an absent canonical row is no language preference.
+func TestGetAudioPreferenceCanonicalOverlaysCanonicalLanguage(t *testing.T) {
+	_, store := newValuesTestHandler(t)
+	ctx := t.Context()
+	handler := NewAudioPrefHandler(testUserStoreProvider{store: store})
+	const legacyStamp = "2026-01-01T00:00:00Z"
+	if err := store.SetAudioPreference(ctx, userstore.AudioPreference{
+		ProfileID: "profile-1", SeriesID: "series-1", AudioTrackIndex: 2, AudioLanguage: "en",
+		TrackSignature: &userstore.AudioTrackSignature{Language: "en", Codec: "aac", Channels: 2},
+		UpdatedAt:      legacyStamp,
+	}); err != nil {
+		t.Fatalf("legacy write: %v", err)
+	}
+	canonicalID := userstore.SettingIdentity{
+		Key: settingskeys.PlaybackAudioLanguage, Scope: settingscontract.ScopeProfileSeries,
+		ProfileID: "profile-1", SeriesID: "series-1",
+	}
+	if _, err := store.UpsertSettingValue(ctx, canonicalID, []byte(`"ja"`)); err != nil {
+		t.Fatalf("canonical write: %v", err)
+	}
+
+	got, err := handler.GetAudioPreferenceCanonical(ctx, 1, "profile-1", "series-1")
+	if err != nil {
+		t.Fatalf("canonical read: %v", err)
+	}
+	if got.AudioLanguage != "ja" {
+		t.Fatalf("audio_language = %q, want the canonical ja", got.AudioLanguage)
+	}
+	if got.AudioTrackIndex != 2 || got.TrackSignature == nil || got.TrackSignature.Codec != "aac" {
+		t.Fatalf("track identity was not the legacy row's: %+v", got)
+	}
+	if got.UpdatedAt == legacyStamp {
+		t.Fatalf("updated_at = %q, want the newer canonical stamp", got.UpdatedAt)
+	}
+	// v1's read is untouched.
+	if legacy, err := handler.GetAudioPreference(ctx, 1, "profile-1", "series-1"); err != nil || legacy.AudioLanguage != "en" || legacy.UpdatedAt != legacyStamp {
+		t.Fatalf("v1 read = %+v, %v; want the legacy row unchanged", legacy, err)
+	}
+
+	if _, err := store.DeleteSettingValue(ctx, canonicalID); err != nil {
+		t.Fatalf("clearing canonical row: %v", err)
+	}
+	got, err = handler.GetAudioPreferenceCanonical(ctx, 1, "profile-1", "series-1")
+	if err != nil {
+		t.Fatalf("canonical read after clear: %v", err)
+	}
+	if got.AudioLanguage != "" || got.AudioTrackIndex != 2 || got.UpdatedAt != legacyStamp {
+		t.Fatalf("after clearing the canonical row = %+v; want no language over the legacy track", got)
+	}
+
+	// No legacy row: 404 as on v1, even with a canonical language row.
+	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key: settingskeys.PlaybackAudioLanguage, Scope: settingscontract.ScopeProfileSeries,
+		ProfileID: "profile-1", SeriesID: "series-2",
+	}, []byte(`"ja"`)); err != nil {
+		t.Fatalf("canonical write: %v", err)
+	}
+	_, err = handler.GetAudioPreferenceCanonical(ctx, 1, "profile-1", "series-2")
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusNotFound || apiErr.Code != "not_found" {
+		t.Fatalf("canonical read without a legacy row = %v, want 404 not_found", err)
 	}
 }

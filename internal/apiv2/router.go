@@ -488,7 +488,7 @@ type AdminUserService interface {
 // AudioPreferenceService is the slice of *handlers.AudioPrefHandler the
 // audio preference operations use.
 type AudioPreferenceService interface {
-	GetAudioPreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.AudioPreference, error)
+	GetAudioPreferenceCanonical(ctx context.Context, userID int, profileID, seriesID string) (userstore.AudioPreference, error)
 	SetAudioPreference(ctx context.Context, userID int, pref userstore.AudioPreference) error
 	DeleteAudioPreference(ctx context.Context, userID int, profileID, seriesID string) error
 }
@@ -496,7 +496,7 @@ type AudioPreferenceService interface {
 // SubtitlePreferenceService is the slice of *handlers.SubtitlePrefHandler the
 // subtitle preference operations use.
 type SubtitlePreferenceService interface {
-	GetSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error)
+	GetSubtitlePreferenceCanonical(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error)
 	SetSubtitlePreferenceCanonical(ctx context.Context, userID int, pref userstore.SubtitlePreference) error
 	DeleteSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) error
 }

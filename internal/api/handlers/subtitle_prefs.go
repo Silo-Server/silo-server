@@ -83,9 +83,8 @@ func (h *SubtitlePrefHandler) HandleGetSubtitlePref(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, toSubtitlePrefResponse(pref))
 }
 
-// GetSubtitlePreference is the read v1 GET /subtitle-prefs/{series_id} and
-// v2 getSubtitlePreference share. A failure is an *APIError; a profile with
-// no preference for the series is 404 not_found.
+// GetSubtitlePreference reads the legacy preference used by v1. A missing
+// series preference returns a 404 APIError.
 func (h *SubtitlePrefHandler) GetSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
 	var none userstore.SubtitlePreference
 	store, err := h.storeProvider.ForUser(ctx, userID)
@@ -100,6 +99,54 @@ func (h *SubtitlePrefHandler) GetSubtitlePreference(ctx context.Context, userID 
 		return none, apiError(http.StatusNotFound, "not_found", "Subtitle preference not found")
 	}
 	return *pref, nil
+}
+
+// GetSubtitlePreferenceCanonical keeps the legacy track identity and overlays
+// canonical series language, mode, and forced-subtitle settings for v2. Absent
+// canonical rows clear those overrides; a missing legacy track row remains a 404.
+// v1 keeps its legacy-only read.
+func (h *SubtitlePrefHandler) GetSubtitlePreferenceCanonical(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
+	var none userstore.SubtitlePreference
+	pref, err := h.GetSubtitlePreference(ctx, userID, profileID, seriesID)
+	if err != nil {
+		return none, err
+	}
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	base := userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
+	}
+	var (
+		language, mode *string
+		forced         *bool
+	)
+	languageAt, err := canonicalMemberAt(ctx, store, base, settingskeys.PlaybackSubtitleLanguage, &language)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
+	modeAt, err := canonicalMemberAt(ctx, store, base, settingskeys.PlaybackSubtitleMode, &mode)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
+	forcedAt, err := canonicalMemberAt(ctx, store, base, settingskeys.PlaybackShowForcedSubtitles, &forced)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
+	}
+	pref.SubtitleLanguage, pref.SubtitleMode = "", ""
+	if language != nil {
+		pref.SubtitleLanguage = *language
+	}
+	if mode != nil {
+		pref.SubtitleMode = *mode
+	}
+	pref.HasShowForcedSubtitles = forced != nil
+	pref.ShowForcedSubtitles = forced != nil && *forced
+	for _, at := range []string{languageAt, modeAt, forcedAt} {
+		pref.UpdatedAt = newestUpdatedAt(pref.UpdatedAt, at)
+	}
+	return pref, nil
 }
 
 // HandleSetSubtitlePref handles PUT /subtitle-prefs/{series_id}.

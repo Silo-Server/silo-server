@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -313,23 +314,54 @@ func mergeLibraryPlaybackPatch(ctx context.Context, tx userstore.PreferenceSetti
 
 // canonicalMember loads the canonical row for key at base into *into, leaving
 // it nil when the row is unset.
-func canonicalMember[T any](ctx context.Context, tx userstore.PreferenceSettingsWriter, base userstore.SettingIdentity, key string, into **T) error {
+func canonicalMember[T any](ctx context.Context, r settingValueReader, base userstore.SettingIdentity, key string, into **T) error {
+	_, err := canonicalMemberAt(ctx, r, base, key, into)
+	return err
+}
+
+// settingValueReader is the one canonical read the preference seams need,
+// satisfied by a UserStore outside a transaction and by a
+// PreferenceSettingsWriter inside one.
+type settingValueReader interface {
+	GetSettingValue(ctx context.Context, id userstore.SettingIdentity) (*userstore.SettingValue, error)
+}
+
+// canonicalMemberAt is canonicalMember that also reports the row's
+// UpdatedAt ("" when the row is absent), for reads that surface the newest
+// write.
+func canonicalMemberAt[T any](ctx context.Context, r settingValueReader, base userstore.SettingIdentity, key string, into **T) (string, error) {
 	id := base
 	id.Key = key
-	row, err := tx.GetSettingValue(ctx, id)
+	row, err := r.GetSettingValue(ctx, id)
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", key, err)
+		return "", fmt.Errorf("reading %s: %w", key, err)
 	}
 	if row == nil {
 		*into = nil
-		return nil
+		return "", nil
 	}
 	var v T
 	if err := json.Unmarshal(row.Value, &v); err != nil {
-		return fmt.Errorf("decoding %s: %w", key, err)
+		return "", fmt.Errorf("decoding %s: %w", key, err)
 	}
 	*into = &v
-	return nil
+	return row.UpdatedAt, nil
+}
+
+// newestUpdatedAt is the later of two RFC3339 store timestamps. A candidate
+// that does not parse loses, so a malformed canonical stamp never replaces
+// the legacy one; a current that does not parse yields to any parsable
+// candidate.
+func newestUpdatedAt(current, candidate string) string {
+	ct, err := time.Parse(time.RFC3339Nano, candidate)
+	if err != nil {
+		return current
+	}
+	cur, err := time.Parse(time.RFC3339Nano, current)
+	if err != nil || ct.After(cur) {
+		return candidate
+	}
+	return current
 }
 
 // libraryPlaybackPreferenceOf is the legacy composite row for req, and

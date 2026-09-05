@@ -18812,7 +18812,7 @@
         "path": "/api/v2/audio-prefs/{series_id}",
         "operation_id": "getAudioPreference"
       },
-      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; default is emitted as a bool; instants are UTC ms."
+      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; default is emitted as a bool; instants are UTC ms. The read goes through its own seam entry point, GetAudioPreferenceCanonical: the legacy user_audio_preferences row is the resource (a profile without one is 404 even when a canonical language row exists) and supplies the track identity, and audio_language is overlaid from the canonical profile_series row playback resolves — a present row replaces the legacy member, an absent row means no language (empty) — since PUT and DELETE /settings/values never reach the legacy row v1 GET still reads; updated_at is the newer of the two rows."
     },
     {
       "listener": "api",
@@ -41750,7 +41750,7 @@
         "path": "/api/v2/subtitle-prefs/{series_id}",
         "operation_id": "getSubtitlePreference"
       },
-      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; forced and hearing_impaired are emitted as bools; show_forced_subtitles is absent when the profile has no override; instants are UTC ms."
+      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; forced and hearing_impaired are emitted as bools; show_forced_subtitles is absent when the profile has no override; instants are UTC ms. The read goes through its own seam entry point, GetSubtitlePreferenceCanonical: the legacy user_subtitle_preferences row is the resource (a profile without one is 404 even when canonical rows exist) and supplies the track identity (index, external path, signature), and subtitle_language, subtitle_mode and show_forced_subtitles are overlaid from the canonical profile_series rows playback resolves — a present row replaces the legacy member, an absent row means the member is unset (empty language or mode, show_forced_subtitles absent) — since PUT and DELETE /settings/values never reach the legacy row v1 GET still reads; updated_at is the newest of the legacy row and the canonical rows."
     },
     {
       "listener": "api",

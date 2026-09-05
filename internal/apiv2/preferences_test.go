@@ -11,13 +11,16 @@ import (
 
 // fakeAudioPreferences keeps one profile's audio preferences keyed by
 // series and answers 404 not_found for a missing one, as the real seam does.
+// Its read stands in for the canonical seam entry point
+// (GetAudioPreferenceCanonical): the kept row is the overlaid state — legacy
+// track identity with the canonical language — never the legacy table alone.
 type fakeAudioPreferences struct {
 	prefs map[string]userstore.AudioPreference
 	last  *userstore.AudioPreference
 	err   error
 }
 
-func (f *fakeAudioPreferences) GetAudioPreference(_ context.Context, _ int, profileID, seriesID string) (userstore.AudioPreference, error) {
+func (f *fakeAudioPreferences) GetAudioPreferenceCanonical(_ context.Context, _ int, profileID, seriesID string) (userstore.AudioPreference, error) {
 	if f.err != nil {
 		return userstore.AudioPreference{}, f.err
 	}
@@ -165,14 +168,17 @@ func fixtureLibraryPlaybackPreferences() []userstore.LibraryPlaybackPreference {
 }
 
 // fakeSubtitlePreferences keeps one profile's subtitle preferences keyed by
-// profile/series and records the last write it accepted.
+// profile/series and records the last write it accepted. Its read stands in
+// for the canonical seam entry point (GetSubtitlePreferenceCanonical): the
+// kept row is the overlaid state — legacy track identity with the canonical
+// language, mode and forced override — never the legacy table alone.
 type fakeSubtitlePreferences struct {
 	prefs map[string]userstore.SubtitlePreference
 	last  *userstore.SubtitlePreference
 	err   error
 }
 
-func (f *fakeSubtitlePreferences) GetSubtitlePreference(_ context.Context, _ int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
+func (f *fakeSubtitlePreferences) GetSubtitlePreferenceCanonical(_ context.Context, _ int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
 	if f.err != nil {
 		return userstore.SubtitlePreference{}, f.err
 	}
@@ -431,6 +437,38 @@ func TestGetSubtitlePreference(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-none", "", owner), TypeNotFound)
 	// Another profile on the same account does not see the owner's preference.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", with(bearer(memberToken), "X-Profile-Id", "p-kid")), TypeNotFound)
+}
+
+// TestGetPreferencesRenderClearedCanonicalMembers pins the wire shape the
+// canonical seams produce after /settings/values cleared the members playback
+// resolves: the track identity stays, the language and mode are empty
+// strings, and show_forced_subtitles is absent rather than null.
+func TestGetPreferencesRenderClearedCanonicalMembers(t *testing.T) {
+	subs := &fakeSubtitlePreferences{prefs: map[string]userstore.SubtitlePreference{"p-owner/series-8f2c1a": {
+		ProfileID: "p-owner", SeriesID: "series-8f2c1a", SubtitleTrackIndex: 2,
+		TrackSignature: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "eng"},
+		UpdatedAt:      "2026-01-02T03:04:05Z",
+	}}}
+	audio := &fakeAudioPreferences{prefs: map[string]userstore.AudioPreference{"p-owner/series-8f2c1a": {
+		ProfileID: "p-owner", SeriesID: "series-8f2c1a", AudioTrackIndex: 1,
+		TrackSignature: &userstore.AudioTrackSignature{Language: "eng", Codec: "eac3"},
+		UpdatedAt:      "2026-01-02T03:04:05Z",
+	}}}
+	deps := preferenceDeps(audio, nil)
+	deps.SubtitlePreferences = subs
+	h := newTestHandler(t, deps)
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	rec := do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner)
+	want := `{"profile_id":"p-owner","series_id":"series-8f2c1a","subtitle_language":"","subtitle_track_index":2,"subtitle_mode":"","track_signature":{"source":"embedded","language":"eng","forced":false,"hearing_impaired":false},"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
+	if rec.Code != 200 || rec.Body.String() != want {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/audio-prefs/series-8f2c1a", "", owner)
+	want = `{"profile_id":"p-owner","series_id":"series-8f2c1a","audio_track_index":1,"audio_language":"","track_signature":{"language":"eng","codec":"eac3","default":false},"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
+	if rec.Code != 200 || rec.Body.String() != want {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestUpdateSubtitlePreference(t *testing.T) {

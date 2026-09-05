@@ -237,8 +237,12 @@ func registerPreferences(reg *Registry) {
 	}, reg.deleteLibraryPlaybackPreference)
 }
 
-// getAudioPreference answers as v1 GET /audio-prefs/{series_id}: the stored
-// preference, or 404 not_found when the profile has none for the series.
+// getAudioPreference answers as v1 GET /audio-prefs/{series_id} — the stored
+// preference, or 404 not_found when the profile has no legacy row for the
+// series — through its own seam entry point, GetAudioPreferenceCanonical,
+// which overlays audio_language from the canonical profile_series row
+// playback resolves (present row wins, absent row is no language), since
+// /settings/values writes never reach the legacy row v1 GET still reads.
 func (reg *Registry) getAudioPreference(ctx context.Context, in *AudioPreferenceInput) (*AudioPreferenceOutput, error) {
 	if reg.deps.AudioPreferences == nil {
 		return nil, unavailable("preference")
@@ -248,7 +252,7 @@ func (reg *Registry) getAudioPreference(ctx context.Context, in *AudioPreference
 	if claims == nil || profileID == "" {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	pref, err := reg.deps.AudioPreferences.GetAudioPreference(ctx, claims.UserID, profileID, string(in.SeriesID))
+	pref, err := reg.deps.AudioPreferences.GetAudioPreferenceCanonical(ctx, claims.UserID, profileID, string(in.SeriesID))
 	if err != nil {
 		return nil, preferenceProblem(err)
 	}
@@ -427,8 +431,13 @@ func libraryPlaybackPreferenceOf(p userstore.LibraryPlaybackPreference) (Library
 	return out, nil
 }
 
-// getSubtitlePreference answers as v1 GET /subtitle-prefs/{series_id}: the
-// stored preference, or 404 not_found when the profile has none for the series.
+// getSubtitlePreference answers as v1 GET /subtitle-prefs/{series_id} — the
+// stored preference, or 404 not_found when the profile has no legacy row for
+// the series — through its own seam entry point,
+// GetSubtitlePreferenceCanonical, which overlays subtitle_language,
+// subtitle_mode and show_forced_subtitles from the canonical profile_series
+// rows playback resolves (present row wins, absent row is unset), since
+// /settings/values writes never reach the legacy row v1 GET still reads.
 func (reg *Registry) getSubtitlePreference(ctx context.Context, in *SubtitlePreferenceInput) (*SubtitlePreferenceOutput, error) {
 	if reg.deps.SubtitlePreferences == nil {
 		return nil, unavailable("preference")
@@ -438,7 +447,7 @@ func (reg *Registry) getSubtitlePreference(ctx context.Context, in *SubtitlePref
 	if claims == nil || profileID == "" {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	pref, err := reg.deps.SubtitlePreferences.GetSubtitlePreference(ctx, claims.UserID, profileID, string(in.SeriesID))
+	pref, err := reg.deps.SubtitlePreferences.GetSubtitlePreferenceCanonical(ctx, claims.UserID, profileID, string(in.SeriesID))
 	if err != nil {
 		return nil, preferenceProblem(err)
 	}

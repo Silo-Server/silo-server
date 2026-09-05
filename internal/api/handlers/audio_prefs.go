@@ -66,9 +66,8 @@ func (h *AudioPrefHandler) HandleGetAudioPref(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, toAudioPrefResponse(pref))
 }
 
-// GetAudioPreference is the read v1 GET /audio-prefs/{series_id} and v2
-// getAudioPreference share. A failure is an *APIError; a profile with no
-// preference for the series is 404 not_found.
+// GetAudioPreference reads the legacy preference used by v1. A missing
+// series preference returns a 404 APIError.
 func (h *AudioPrefHandler) GetAudioPreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.AudioPreference, error) {
 	var none userstore.AudioPreference
 	store, err := h.storeProvider.ForUser(ctx, userID)
@@ -83,6 +82,34 @@ func (h *AudioPrefHandler) GetAudioPreference(ctx context.Context, userID int, p
 		return none, apiError(http.StatusNotFound, "not_found", "Audio preference not found")
 	}
 	return *pref, nil
+}
+
+// GetAudioPreferenceCanonical keeps the legacy track identity and overlays the
+// canonical series language for v2. An absent canonical row clears the language;
+// a missing legacy track row remains a 404. v1 keeps its legacy-only read.
+func (h *AudioPrefHandler) GetAudioPreferenceCanonical(ctx context.Context, userID int, profileID, seriesID string) (userstore.AudioPreference, error) {
+	var none userstore.AudioPreference
+	pref, err := h.GetAudioPreference(ctx, userID, profileID, seriesID)
+	if err != nil {
+		return none, err
+	}
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	var language *string
+	languageAt, err := canonicalMemberAt(ctx, store, userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
+	}, settingskeys.PlaybackAudioLanguage, &language)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get audio preference")
+	}
+	pref.AudioLanguage = ""
+	if language != nil {
+		pref.AudioLanguage = *language
+	}
+	pref.UpdatedAt = newestUpdatedAt(pref.UpdatedAt, languageAt)
+	return pref, nil
 }
 
 // HandleSetAudioPref handles PUT /audio-prefs/{series_id}.

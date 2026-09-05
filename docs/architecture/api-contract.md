@@ -1055,7 +1055,17 @@ canonical `profile_library` rows (the four keys the patch writes; `updated_at` i
 them) rather than the legacy table v1 `GET` still lists, so the list matches what playback
 resolves. A library whose overrides exist only in the legacy row is not listed: canonical is
 the source of truth, and every v1 `PUT` since the sync existed mirrors into canonical rows, so a
-legacy-only row is data written before the sync. And
+legacy-only row is data written before the sync. The per-series `GET`s read through their
+own seam entry points too, `GetAudioPreferenceCanonical` and `GetSubtitlePreferenceCanonical`:
+the legacy row is the resource — it holds the track identity (index, external path, signature)
+nothing else stores, and a profile without one is `404` exactly as on v1 even when canonical
+rows exist — and the members playback resolves canonically (`audio_language`;
+`subtitle_language`, `subtitle_mode`, `show_forced_subtitles`) are overlaid from the
+`profile_series` rows: a present row replaces the legacy member, an absent row means the member
+is unset (empty string, or absent for `show_forced_subtitles`), and `updated_at` is the newest
+of the rows read. This is the same rule the v2 subtitle `PUT` already applies to the forced
+override: `PUT`/`DELETE /settings/values` change the canonical rows without mirroring into the
+legacy row, so a v2 read of the legacy copy would contradict playback. And
 a member the seam rejects
 (`audio_language` on audio, any of the four on the library patch, a non-integer `library_id`)
 is a `422` naming it where v1 answered `400`. None of the nine registers `Guarded`, `Conditional` or `CreateOnly`: a
