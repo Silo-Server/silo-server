@@ -4528,6 +4528,1006 @@
     },
     {
       "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/auth/account/capability",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "account_capability.ok",
+          "category": "status_headers",
+          "description": "A bearer session answers 200 with the password capability object.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/capability"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "schema_version",
+                  "change_password",
+                  "requires_current_password",
+                  "minimum_password_length",
+                  "maximum_password_bytes"
+                ]
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "account_capability.meaning",
+          "category": "data_meaning",
+          "description": "The member's primary profile may change the shared account password: change_password is true with the server's length policy.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/capability"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/schema_version",
+                "op": "equals",
+                "value": 1
+              },
+              {
+                "pointer": "/change_password",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/requires_current_password",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/minimum_password_length",
+                "op": "equals",
+                "value": 8
+              },
+              {
+                "pointer": "/maximum_password_bytes",
+                "op": "equals",
+                "value": 72
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "account_capability.no_profile",
+          "category": "data_meaning",
+          "description": "A non-admin session without a declared profile cannot change the password: change_password is false, everything else unchanged.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/capability"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/change_password",
+                "op": "equals",
+                "value": false
+              },
+              {
+                "pointer": "/requires_current_password",
+                "op": "equals",
+                "value": true
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "passwordChangeAllowed falls back to the account role when no profile is declared, so only an admin may change the password profile-less.",
+          "v2_expectation": null
+        },
+        {
+          "id": "account_capability.secondary_profile",
+          "category": "field_presence_nullability",
+          "description": "A secondary profile still receives the full object, with change_password false; no field is omitted or null.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/capability"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "schema_version",
+                  "change_password",
+                  "requires_current_password",
+                  "minimum_password_length",
+                  "maximum_password_bytes"
+                ]
+              },
+              {
+                "pointer": "/change_password",
+                "op": "equals",
+                "value": false
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "account_capability.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/capability"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "account_capability.bad_token",
+          "category": "authorization",
+          "description": "A malformed bearer is rejected as an invalid token.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/capability",
+            "headers": {
+              "Authorization": "Bearer not-a-jwt"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid or expired token"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "account_capability.error_shape",
+          "category": "error",
+          "description": "The only handler failure is a store error (500 internal_error); the reachable refusal is the auth middleware's standard error envelope.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/capability"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/auth/account/password",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "password.ok",
+          "category": "status_headers",
+          "description": "The primary profile rotates the account password with the correct current password: 204 with no body.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "${member_password}",
+              "new_password": "fixture-rotated-pw1"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "password.meaning",
+          "category": "data_meaning",
+          "description": "After the change the old password no longer logs in and the new one does.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "${member_password}",
+              "new_password": "fixture-rotated-pw1"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "then": [
+            {
+              "method": "POST",
+              "description": "the old password is refused",
+              "principal": {
+                "class": "public"
+              },
+              "request": {
+                "path": "/api/v1/auth/login",
+                "body": {
+                  "username": "${member_username}",
+                  "password": "${member_password}"
+                }
+              },
+              "expect": {
+                "status": 401,
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "op": "equals",
+                    "value": "application/json"
+                  }
+                ],
+                "body": [
+                  {
+                    "pointer": "/error",
+                    "op": "equals",
+                    "value": "invalid_credentials"
+                  },
+                  {
+                    "pointer": "",
+                    "op": "keys_equal",
+                    "value": [
+                      "error",
+                      "message"
+                    ]
+                  },
+                  {
+                    "pointer": "/error",
+                    "op": "type",
+                    "value": "string"
+                  },
+                  {
+                    "pointer": "/message",
+                    "op": "type",
+                    "value": "string"
+                  },
+                  {
+                    "pointer": "/message",
+                    "op": "equals",
+                    "value": "Invalid username or password"
+                  }
+                ]
+              }
+            },
+            {
+              "method": "POST",
+              "description": "the new password logs in",
+              "principal": {
+                "class": "public"
+              },
+              "request": {
+                "path": "/api/v1/auth/login",
+                "body": {
+                  "username": "${member_username}",
+                  "password": "fixture-rotated-pw1"
+                }
+              },
+              "expect": {
+                "status": 200,
+                "body": [
+                  {
+                    "pointer": "/user/username",
+                    "op": "equals",
+                    "value": "${member_username}"
+                  }
+                ]
+              }
+            }
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.shape",
+          "category": "field_presence_nullability",
+          "description": "The success has no JSON body and no Content-Type.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "${member_password}",
+              "new_password": "fixture-rotated-pw1"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "absent"
+              }
+            ],
+            "body_kind": "empty"
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "password.wrong_current",
+          "category": "error",
+          "description": "A wrong current password is 400 invalid_current_password.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "not-the-password",
+              "new_password": "fixture-rotated-pw1"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "invalid_current_password"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Current password is incorrect"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.weak",
+          "category": "error",
+          "description": "A new password under 8 characters is 400 weak_password; the current password is verified first.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "${member_password}",
+              "new_password": "short"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "weak_password"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Password must be at least 8 characters"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.too_long",
+          "category": "error",
+          "description": "A new password over 72 bytes is 400 password_too_long.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "${member_password}",
+              "new_password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "password_too_long"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Password must be at most 72 bytes"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.missing_fields",
+          "category": "error",
+          "description": "An empty object is 400 bad_request: both fields are required.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {}
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Current password and new password are required"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.malformed_json",
+          "category": "error",
+          "description": "A non-JSON body is 400 bad_request.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "raw_body": "{not json"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.no_profile",
+          "category": "authorization",
+          "description": "A non-admin session without a declared profile is 403 password_change_forbidden before the body is read.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "${member_password}",
+              "new_password": "fixture-rotated-pw1"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "password_change_forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Changing the account password requires the account's primary profile"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.secondary_profile",
+          "category": "authorization",
+          "description": "A secondary profile may not replace the shared account password: 403 password_change_forbidden.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "${member_password}",
+              "new_password": "fixture-rotated-pw1"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "password_change_forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Changing the account password requires the account's primary profile"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "password.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "body": {
+              "current_password": "x",
+              "new_password": "y"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "password.bad_token",
+          "category": "authorization",
+          "description": "A malformed bearer is rejected as an invalid token.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/auth/account/password",
+            "headers": {
+              "Authorization": "Bearer not-a-jwt"
+            },
+            "body": {
+              "current_password": "x",
+              "new_password": "y"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid or expired token"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
       "method": "POST",
       "path": "/api/v1/auth/logout",
       "registration_index": 0,
