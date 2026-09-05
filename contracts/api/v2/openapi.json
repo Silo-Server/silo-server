@@ -6226,11 +6226,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's favorites; succeeds whether or not it was one, so a retry converges.",
+        "summary": "Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
       "get": {
@@ -6529,11 +6530,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's favorites. Adding an item that is already a favorite is a no-op, so a retry converges.",
+        "summary": "Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -6876,6 +6878,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -7353,6 +7356,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -7423,6 +7427,19 @@
               "description": "Only roots in this inference state",
               "examples": [
                 "ambiguous"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Case-insensitive substring over root path, title and sample file path",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Case-insensitive substring over root path, title and sample file path",
+              "examples": [
+                "heat"
               ],
               "type": "string"
             }
@@ -7730,6 +7747,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "put": {
@@ -7914,6 +7932,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -7940,6 +7959,43 @@
               "examples": [
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Substring over root path, library name or reason",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Substring over root path, library name or reason",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
               "type": "string"
             }
           }
@@ -8051,7 +8107,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List every root the scanner skipped, across libraries.",
+        "summary": "Page roots the scanner skipped, across libraries.",
         "tags": [
           "libraries"
         ],
@@ -8082,6 +8138,46 @@
             "schema": {
               "examples": [
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Substring over title, provider, provider ID or library name",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Substring over title, provider, provider ID or library name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJvIjo1MH0"
               ],
               "type": "string"
             }
@@ -8194,7 +8290,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List provider identifiers that no longer resolve, with the items carrying them.",
+        "summary": "List provider identifiers that no longer resolve, with the items carrying them, a page at a time.",
         "tags": [
           "libraries"
         ],
@@ -8350,6 +8446,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -8589,7 +8686,15 @@
                 }
               }
             },
-            "description": "Accepted"
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "description": "URI of the queued job",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8703,6 +8808,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "patch": {
@@ -8908,6 +9014,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -9065,6 +9172,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -9222,6 +9330,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -9566,6 +9675,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -9723,6 +9833,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -9873,6 +9984,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
       "put": {
@@ -10073,6 +10185,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -10418,6 +10531,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -10481,7 +10595,15 @@
                 }
               }
             },
-            "description": "Accepted"
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "description": "URI of the queued job",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -10625,6 +10747,7 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "coalescing",
         "x-silo-service-backed": true
       }
     },
@@ -11914,6 +12037,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
       "get": {
@@ -12294,6 +12418,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -12953,6 +13078,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -13255,6 +13381,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
       "patch": {
@@ -13460,6 +13587,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -13610,6 +13738,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
       "put": {
@@ -13810,6 +13939,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -14006,6 +14136,7 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -14528,11 +14659,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the acting profile's rating of the item; succeeds whether or not one existed, so a retry converges.",
+        "summary": "Remove the acting profile's rating of the item; an absent rating succeeds, but automatic retries repeat the recommendation refresh.",
         "tags": [
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
       "get": {
@@ -14871,11 +15003,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Set the acting profile's rating of the item, replacing any earlier rating; a repeated PUT converges on the same rating.",
+        "summary": "Set the acting profile's rating of the item, replacing any earlier rating; automatic retries repeat the rating timestamp and recommendation refresh.",
         "tags": [
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -15355,11 +15488,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's watchlist; succeeds whether or not it was on it, so a retry converges.",
+        "summary": "Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
       "get": {
@@ -15658,11 +15792,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's watchlist. Adding an item that is already on it is a no-op, so a retry converges.",
+        "summary": "Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     }

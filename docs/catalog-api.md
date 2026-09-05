@@ -46,3 +46,12 @@ Check it before saving a Watchlist or Favorites preference. The older
 `collection_sort_preferences` boolean is also true on servers that predate the
 personal-list kinds and reject them with a 400, so it cannot be used to detect
 them. When `sort_preference_kinds` is absent, assume `library` and `user` only.
+
+## V2 personal-list pagination
+
+`GET /api/v2/favorites` and `GET /api/v2/watchlist` use opaque cursors over descending
+`added_at`, then descending item ID. The cursor retains the database timestamp's full precision;
+clients must send it unchanged rather than construct it from visible timestamps. PostgreSQL orders
+by the stored timestamp column so the existing profile/time indexes can serve the page. Visible
+`added_at` fields remain UTC timestamps with millisecond precision. V1 list queries and timestamp
+formatting are unchanged.

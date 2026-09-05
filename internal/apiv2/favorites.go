@@ -58,7 +58,7 @@ func registerFavorites(reg *Registry) {
 	}
 	mutation := func(op huma.Operation) Operation {
 		op.DefaultStatus = http.StatusNoContent
-		return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}
+		return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	}
 
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/favorites", opListFavorites, "favorites",
@@ -70,10 +70,10 @@ func registerFavorites(reg *Registry) {
 		"Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getFavorite)
 	Register(reg, mutation(humaOp(http.MethodPut, Prefix+"/favorites/{item_id}", "addFavorite", "favorites",
-		"Add the item to the acting profile's favorites. Adding an item that is already a favorite is a no-op, so a retry converges.")),
+		"Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.")),
 		reg.addFavorite)
 	Register(reg, mutation(humaOp(http.MethodDelete, Prefix+"/favorites/{item_id}", "deleteFavorite", "favorites",
-		"Remove the item from the acting profile's favorites; succeeds whether or not it was one, so a retry converges.")),
+		"Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.")),
 		reg.deleteFavorite)
 }
 

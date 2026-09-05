@@ -59,10 +59,10 @@ export interface paths {
     };
     /** Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it). */
     get: operations["getFavorite"];
-    /** Add the item to the acting profile's favorites. Adding an item that is already a favorite is a no-op, so a retry converges. */
+    /** Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated. */
     put: operations["addFavorite"];
     post?: never;
-    /** Remove the item from the acting profile's favorites; succeeds whether or not it was one, so a retry converges. */
+    /** Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects. */
     delete: operations["deleteFavorite"];
     options?: never;
     head?: never;
@@ -336,7 +336,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every root the scanner skipped, across libraries. */
+    /** Page roots the scanner skipped, across libraries. */
     get: operations["listSkippedRoots"];
     put?: never;
     post?: never;
@@ -353,7 +353,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List provider identifiers that no longer resolve, with the items carrying them. */
+    /** List provider identifiers that no longer resolve, with the items carrying them, a page at a time. */
     get: operations["listStaleIds"];
     put?: never;
     post?: never;
@@ -700,10 +700,10 @@ export interface paths {
     };
     /** Answer the acting profile's rating of the item, or 404 when the profile has not rated it. */
     get: operations["getRating"];
-    /** Set the acting profile's rating of the item, replacing any earlier rating; a repeated PUT converges on the same rating. */
+    /** Set the acting profile's rating of the item, replacing any earlier rating; automatic retries repeat the rating timestamp and recommendation refresh. */
     put: operations["setRating"];
     post?: never;
-    /** Remove the acting profile's rating of the item; succeeds whether or not one existed, so a retry converges. */
+    /** Remove the acting profile's rating of the item; an absent rating succeeds, but automatic retries repeat the recommendation refresh. */
     delete: operations["deleteRating"];
     options?: never;
     head?: never;
@@ -770,10 +770,10 @@ export interface paths {
     };
     /** Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it). */
     get: operations["getWatchlistEntry"];
-    /** Add the item to the acting profile's watchlist. Adding an item that is already on it is a no-op, so a retry converges. */
+    /** Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated. */
     put: operations["addToWatchlist"];
     post?: never;
-    /** Remove the item from the acting profile's watchlist; succeeds whether or not it was on it, so a retry converges. */
+    /** Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects. */
     delete: operations["deleteWatchlistEntry"];
     options?: never;
     head?: never;
@@ -4260,6 +4260,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
@@ -5575,6 +5576,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6059,6 +6061,8 @@ export interface operations {
         library_id: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Case-insensitive substring over root path, title and sample file path */
+        q?: string;
         /** @description Only roots in this inference state */
         state?: string;
       };
@@ -6429,7 +6433,14 @@ export interface operations {
   };
   listSkippedRoots: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over root path, library name or reason */
+        q?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;
@@ -6535,7 +6546,14 @@ export interface operations {
   };
   listStaleIds: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over title, provider, provider ID or library name */
+        q?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;

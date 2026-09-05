@@ -55,7 +55,7 @@ func registerWatchlist(reg *Registry) {
 	}
 	mutation := func(op huma.Operation) Operation {
 		op.DefaultStatus = http.StatusNoContent
-		return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}
+		return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	}
 
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/watchlist", opListWatchlist, "watchlist",
@@ -67,10 +67,10 @@ func registerWatchlist(reg *Registry) {
 		"Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getWatchlistEntry)
 	Register(reg, mutation(humaOp(http.MethodPut, Prefix+"/watchlist/{item_id}", "addToWatchlist", "watchlist",
-		"Add the item to the acting profile's watchlist. Adding an item that is already on it is a no-op, so a retry converges.")),
+		"Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated.")),
 		reg.addToWatchlist)
 	Register(reg, mutation(humaOp(http.MethodDelete, Prefix+"/watchlist/{item_id}", "deleteWatchlistEntry", "watchlist",
-		"Remove the item from the acting profile's watchlist; succeeds whether or not it was on it, so a retry converges.")),
+		"Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.")),
 		reg.deleteWatchlistEntry)
 }
 

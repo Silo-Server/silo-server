@@ -65,9 +65,9 @@ func (s *PostgresUserStore) ListFavorites(ctx context.Context, profileID string,
 }
 
 // ListFavoritesPage pages by keyset over (added_at DESC, media_item_id DESC).
-// added_at compares at whole-second precision on both sides, which is the
-// precision timeToString keeps, so a key read back from a row compares equal
-// to the stored value.
+// Page rows retain the full stored timestamp precision for the next cursor.
+// Comparing the raw column lets the profile/added_at index serve the order;
+// the API formats visible instants separately.
 func (s *PostgresUserStore) ListFavoritesPage(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.Favorite, error) {
 	query, args, err := s.listKeysetQuery(`SELECT profile_id, media_item_id, added_at FROM user_favorites`, profileID, after, limit)
 	if err != nil {
@@ -86,7 +86,7 @@ func (s *PostgresUserStore) ListFavoritesPage(ctx context.Context, profileID str
 		if err := rows.Scan(&f.ProfileID, &f.MediaItemID, &addedAt); err != nil {
 			return nil, fmt.Errorf("scanning favorite row: %w", err)
 		}
-		f.AddedAt = timeToString(addedAt)
+		f.AddedAt = addedAt.UTC().Format(time.RFC3339Nano)
 		favorites = append(favorites, f)
 	}
 	return favorites, rows.Err()
@@ -106,11 +106,11 @@ func (s *PostgresUserStore) listKeysetQuery(selectClause, profileID string, afte
 		}
 		args = append(args, addedAt, after.MediaItemID)
 		query += fmt.Sprintf(`
-		 AND (date_trunc('second', added_at), media_item_id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+		 AND (added_at, media_item_id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
 	}
 	args = append(args, limit)
 	query += fmt.Sprintf(`
-		 ORDER BY date_trunc('second', added_at) DESC, media_item_id DESC
+		 ORDER BY added_at DESC, media_item_id DESC
 		 LIMIT $%d`, len(args))
 	return query, args, nil
 }
@@ -269,7 +269,7 @@ func (s *PostgresUserStore) ListWatchlistPage(ctx context.Context, profileID str
 		if err := rows.Scan(&w.ProfileID, &w.MediaItemID, &addedAt); err != nil {
 			return nil, fmt.Errorf("scanning watchlist row: %w", err)
 		}
-		w.AddedAt = timeToString(addedAt)
+		w.AddedAt = addedAt.UTC().Format(time.RFC3339Nano)
 		entries = append(entries, w)
 	}
 	return entries, rows.Err()

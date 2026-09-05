@@ -246,8 +246,7 @@ func TestPostgresCollectionSortPreferences(t *testing.T) {
 }
 
 // TestPostgresPersonalListPage runs the keyset favorites/watchlist paging
-// conformance test against the Postgres backend, which is what pins the
-// date_trunc('second') comparison to the precision timeToString reports.
+// conformance test against the Postgres backend.
 // Skips unless SILO_TEST_DATABASE_URL is set.
 func TestPostgresPersonalListPage(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
