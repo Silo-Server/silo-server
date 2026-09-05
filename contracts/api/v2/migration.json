@@ -30250,8 +30250,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Arms a one-shot flag; a retry re-arms the same flag."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Destructive one-shot allowance: a scan may consume it before a retry re-arms it, and in a multi-root library a later scan can then prune a different newly empty root without a fresh confirmation. The v2 port must bind the confirmation to the warning it answers."
     },
     {
       "listener": "api",
@@ -30374,7 +30374,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Deletes every queued match for the library by folder; a retry after a lost response cancels matcher work queued in between. The v2 port must bind cancellation to stable queue entries or a queue generation."
     },
     {
       "listener": "api",
@@ -33058,7 +33059,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "MarkAllRead covers every currently unread delivery with no cutoff; a retry after a lost response hides a notification that arrived in between. The v2 port must carry a delivery cutoff so a retry targets the original set."
     },
     {
       "listener": "api",
@@ -39598,7 +39600,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Cancels every scan queued or running for the library rather than a named run; a retry after a lost response can cancel a replacement scan the first call never targeted. The v2 port must cancel a stable scan run id."
     },
     {
       "listener": "api",
