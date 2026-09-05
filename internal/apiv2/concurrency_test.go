@@ -234,6 +234,67 @@ func TestGuardedProbeLostRaceIs412(t *testing.T) {
 	}
 }
 
+// TestGuardedProbeWildcardSurvivesLostRace: "*" is a deliberate overwrite,
+// so a writer that lands between the load and the compare-and-update does
+// not turn it into a 412 while the resource still exists.
+func TestGuardedProbeWildcardSurvivesLostRace(t *testing.T) {
+	store := newGuardedProbeStore()
+	h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.afterGet = func() {
+		if _, err := store.Update("a", 1, "racer"); err != nil {
+			t.Errorf("race setup: %v", err)
+		}
+	}
+	rec := do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"beta"}`, map[string]string{"If-Match": "*"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if row, _ := store.Get("a"); row.Name != "beta" || row.Version != 3 {
+		t.Fatalf("row = %+v", row)
+	}
+	if got := rec.Header().Get("ETag"); got != RenderETag(3, guardedProbeScope).String() {
+		t.Fatalf("ETag = %q", got)
+	}
+	// An exact tag in the same race is still 412: the caller named a version.
+	store.afterGet = func() {
+		if _, err := store.Update("a", 3, "racer"); err != nil {
+			t.Errorf("race setup: %v", err)
+		}
+	}
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"gamma"}`, map[string]string{"If-Match": RenderETag(3, guardedProbeScope).String()})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got := rec.Header().Get("ETag"); got != RenderETag(4, guardedProbeScope).String() {
+		t.Fatalf("412 ETag = %q", got)
+	}
+}
+
+// TestGuardedProbeRaceWinnerDeletedOmitsETag: when the compare-and-update
+// loses to a delete, the 412 advertises no validator, because there is no
+// current representation; "*" cannot re-apply either, since the resource is
+// gone.
+func TestGuardedProbeRaceWinnerDeletedOmitsETag(t *testing.T) {
+	for _, field := range []string{RenderETag(1, guardedProbeScope).String(), "*"} {
+		for _, method := range []string{http.MethodPut, http.MethodDelete} {
+			store := newGuardedProbeStore()
+			h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+			store.afterGet = func() {
+				if err := store.Delete("a", 1); err != nil {
+					t.Errorf("race setup: %v", err)
+				}
+			}
+			body := ""
+			if method == http.MethodPut {
+				body = `{"name":"beta"}`
+			}
+			rec := do(t, h, method, "/api/v2/probe/guarded/a", body, map[string]string{"If-Match": field})
+			requireProblem(t, rec, TypePreconditionFailed)
+			if got := rec.Header().Get("ETag"); got != "" {
+				t.Fatalf("%s If-Match %q: 412 after the winner deleted the row advertises ETag %q", method, field, got)
+			}
+		}
+	}
+}
+
 // TestStaleVersionSentinelFromStore: the store's compare-and-update returns
 // the sentinel, not a bespoke error.
 func TestStaleVersionSentinelFromStore(t *testing.T) {

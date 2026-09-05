@@ -357,8 +357,15 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   with no validator and must declare none), when a conditional input does not bind
   `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
   create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
-  output. Header fields count only as direct struct fields: Huma binds and writes no header
-  from an embedded struct, so one declared there is refused rather than silently unsent. A
+  output. Header fields and the conditional `Status` count only as direct exported struct
+  fields: Huma binds and writes no header from an embedded struct or an unexported field,
+  so one declared either way is refused rather than silently unsent. A guarded handler
+  treats `If-Match: *` as a deliberate overwrite through the compare-and-update as well:
+  a race lost to a writer who left the resource in place is re-applied against the latest
+  version, a race lost to a delete is `412` with no `ETag`, and only an exact tag turns a
+  lost race into `412` with the current `ETag`. `TestGuardedOperationsAreMarkedIfMatch`
+  reconciles both directions and refuses a guarded operation that maps to no legacy row
+  unless `guardedWithoutLegacyRow` names it with a reason. A
   guarded operation documents `412` and `428`, a required `If-Match` parameter, and the
   `ETag` header on every `2xx` other than `204` and on the `412`; a conditional read
   documents `304` with `ETag`; a create-only PUT documents `412` with `ETag`, an optional

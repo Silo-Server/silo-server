@@ -295,8 +295,8 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 		if !declaresHeaderString(out, etagField) {
 			return fmt.Errorf("conditional: output must declare a string field with `header:\"%s\"`", etagField)
 		}
-		if f, ok := out.FieldByName("Status"); !ok || f.Type.Kind() != reflect.Int || len(f.Index) != 1 {
-			return fmt.Errorf("conditional: output must declare a direct int Status field so the handler can answer 304")
+		if f, ok := out.FieldByName("Status"); !ok || !f.IsExported() || f.Type.Kind() != reflect.Int || len(f.Index) != 1 {
+			return fmt.Errorf("conditional: output must declare a direct, exported int Status field so the handler can answer 304")
 		}
 	}
 	return nil

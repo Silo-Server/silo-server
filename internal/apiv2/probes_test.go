@@ -181,6 +181,10 @@ type guardedProbeRow struct {
 type guardedProbeStore struct {
 	mu   sync.Mutex
 	rows map[string]guardedProbeRow
+	// afterGet, when set, runs once after the next Get returns its row and
+	// before the caller's compare-and-update: the test's way to land a
+	// concurrent writer in the window the precondition exists to cover.
+	afterGet func()
 }
 
 func newGuardedProbeStore() *guardedProbeStore {
@@ -192,8 +196,13 @@ func newGuardedProbeStore() *guardedProbeStore {
 
 func (s *guardedProbeStore) Get(id string) (guardedProbeRow, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	row, ok := s.rows[id]
+	hook := s.afterGet
+	s.afterGet = nil
+	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return row, ok
 }
 
@@ -335,10 +344,21 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				return nil, NewProblem(TypeConflict, "A reserved probe resource cannot be replaced.")
 			}
 			updated, err := store.Update(in.ID, row.Version, in.Body.Name)
-			if err != nil {
+			for err != nil {
 				// The compare-and-update lost a race with another writer.
-				latest, _ := store.Get(in.ID)
-				return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				latest, exists := store.Get(in.ID)
+				if !exists {
+					// The winner deleted the row: nothing current to
+					// advertise, so the 412 carries no ETag.
+					return nil, StaleVersionProblem(EntityTag{})
+				}
+				if !IsOverwrite(in.IfMatch) {
+					return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				}
+				// "*" asked for a deliberate overwrite and the resource still
+				// exists, so the precondition still holds: apply against the
+				// latest version.
+				updated, err = store.Update(in.ID, latest.Version, in.Body.Name)
 			}
 			return &guardedProbeWriteOutput{
 				ETag: RenderETag(updated.Version, guardedProbeScope).String(),
@@ -359,8 +379,17 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				return nil, p
 			}
 			if err := store.Delete(in.ID, row.Version); err != nil {
-				latest, _ := store.Get(in.ID)
-				return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				latest, exists := store.Get(in.ID)
+				if !exists {
+					return nil, StaleVersionProblem(EntityTag{})
+				}
+				if !IsOverwrite(in.IfMatch) {
+					return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				}
+				// "*": the resource still exists, so delete whatever is there.
+				if err := store.Delete(in.ID, latest.Version); err != nil {
+					return nil, StaleVersionProblem(EntityTag{})
+				}
 			}
 			// The deleted representation has no ETag: 204 with no validator.
 			return &guardedProbeDeleteOutput{}, nil

@@ -270,6 +270,16 @@ func malformedETagList(field string) *Problem {
 // with StaleVersionProblem; it never reaches the wire as a 500.
 var ErrStaleVersion = errors.New("apiv2: row version is stale")
 
+// IsOverwrite reports whether an If-Match field is the wildcard: the caller
+// asked for a deliberate overwrite, so a compare-and-update that loses a race
+// to a writer who left the resource in place is re-applied against the
+// latest version rather than answered 412. A field that does not parse is
+// not an overwrite; EvaluateIfMatch has already rejected it.
+func IsOverwrite(ifMatch string) bool {
+	_, star, err := ParseETagList(ifMatch)
+	return err == nil && star
+}
+
 // StaleVersionProblem is the 412 precondition_failed a lost
 // compare-and-update race produces, whichever precondition admitted the
 // request (an exact If-Match, If-Match: *, or a create-only If-None-Match: *).

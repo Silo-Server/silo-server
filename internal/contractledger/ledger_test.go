@@ -3,6 +3,7 @@ package contractledger
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -837,6 +838,12 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 	}), "only for a method a Guarded v2 operation may use")
 }
 
+// guardedWithoutLegacyRow names the guarded v2 operations that port no
+// legacy route and so have no ledger row to mark, each with the reason. It
+// is empty today; the reconcile test refuses an unmapped guarded operation
+// that is not listed here.
+var guardedWithoutLegacyRow = map[string]string{}
+
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
 // ledger: every operation registered Guarded must have each legacy row that
 // maps to it marked if_match. The Guarded set is empty until the first
@@ -847,37 +854,100 @@ func TestGuardedOperationsAreMarkedIfMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byOperation := map[string][]Entry{}
-	for _, e := range ledger.Entries {
-		if e.V2.OperationID != nil {
-			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
-		}
-	}
 	declared := apiv2registry.DeclaredOperations()
 	if len(declared) == 0 {
 		t.Fatal("the v2 registry declares nothing")
 	}
+	for _, problem := range concurrencyMismatches(ledger.Entries, declared, guardedWithoutLegacyRow) {
+		t.Error(problem)
+	}
+}
+
+// TestConcurrencyMismatchesFire proves every reconcile branch with a
+// synthetic registry and ledger, since the live registry guards nothing yet.
+func TestConcurrencyMismatchesFire(t *testing.T) {
+	opID := func(s string) *string { return &s }
+	entries := []Entry{
+		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, Concurrency: ConcurrencyIfMatch, V2: V2Target{OperationID: opID("updateThing")}},
+		{copied: copied{Method: http.MethodDelete, Path: "/api/v1/things/{id}"}, V2: V2Target{OperationID: opID("deleteThing")}},
+	}
+	guarded := func(id string) apiv2registry.Declared {
+		return apiv2registry.Declared{Method: http.MethodPut, OperationID: id, Guarded: true}
+	}
+	cases := []struct {
+		name     string
+		declared []apiv2registry.Declared
+		exempt   map[string]string
+		want     string
+	}{
+		{"agree", []apiv2registry.Declared{guarded("updateThing")}, nil, ""},
+		{"mapped row unmarked", []apiv2registry.Declared{guarded("updateThing"), guarded("deleteThing")}, nil, "is not marked concurrency"},
+		{"guarded op with no row", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, nil, "maps to no legacy row"},
+		{"guarded op with no row, exempt with reason", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, map[string]string{"replaceThing": "v2-only resource"}, ""},
+		{"guarded op with no row, exempt without reason", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, map[string]string{"replaceThing": ""}, "maps to no legacy row"},
+		{"marked row, op not guarded", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing"}}, nil, "is not declared Guarded"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := concurrencyMismatches(entries, tc.declared, tc.exempt)
+			if tc.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("unexpected problems: %v", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+				t.Fatalf("want one problem containing %q, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+// concurrencyMismatches reconciles the ledger's if_match markings with the
+// v2 registry in both directions. exempt names guarded operations that port
+// no legacy route, each with a reason.
+func concurrencyMismatches(entries []Entry, declared []apiv2registry.Declared, exempt map[string]string) []string {
+	byOperation := map[string][]Entry{}
+	for _, e := range entries {
+		if e.V2.OperationID != nil {
+			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
+		}
+	}
+	var problems []string
 	guarded := map[string]bool{}
 	for _, op := range declared {
 		if !op.Guarded {
 			continue
 		}
 		guarded[op.OperationID] = true
-		for _, e := range byOperation[op.OperationID] {
+		rows := byOperation[op.OperationID]
+		if len(rows) == 0 {
+			// Without a mapped row the marking check would pass vacuously. A
+			// port records its v2 operation on the legacy row; a v2-only
+			// guarded operation with no legacy ancestor names itself in
+			// guardedWithoutLegacyRow with the reason.
+			if reason := exempt[op.OperationID]; reason != "" {
+				continue
+			}
+			problems = append(problems, fmt.Sprintf("guarded v2 operation %s maps to no legacy row; set v2.operation_id on the row it ports, or record it in guardedWithoutLegacyRow with a reason", op.OperationID))
+			continue
+		}
+		for _, e := range rows {
 			if e.Concurrency != ConcurrencyIfMatch {
-				t.Errorf("%s maps to guarded v2 operation %s but is not marked concurrency %s", e.key(), op.OperationID, ConcurrencyIfMatch)
+				problems = append(problems, fmt.Sprintf("%s maps to guarded v2 operation %s but is not marked concurrency %s", e.key(), op.OperationID, ConcurrencyIfMatch))
 			}
 		}
 	}
 	// The other direction: a row the ledger marks if_match that already names
 	// its v2 operation must resolve to a registration declared Guarded, so a
 	// port cannot drop the decision by omitting the declaration.
-	for _, e := range ledger.Entries {
+	for _, e := range entries {
 		if e.Concurrency != ConcurrencyIfMatch || e.V2.OperationID == nil {
 			continue
 		}
 		if !guarded[*e.V2.OperationID] {
-			t.Errorf("%s is marked concurrency %s but its v2 operation %s is not declared Guarded", e.key(), ConcurrencyIfMatch, *e.V2.OperationID)
+			problems = append(problems, fmt.Sprintf("%s is marked concurrency %s but its v2 operation %s is not declared Guarded", e.key(), ConcurrencyIfMatch, *e.V2.OperationID))
 		}
 	}
+	return problems
 }
