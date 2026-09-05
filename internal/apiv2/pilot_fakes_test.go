@@ -2,14 +2,19 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -128,14 +133,46 @@ func (f *fakeProgress) page(profileID, status string, after *userstore.ProgressK
 }
 
 type fakeProfiles struct {
-	last *handlers.ProfileUpdateCommand
-	view handlers.ProfileView
-	err  error
+	last             *handlers.ProfileUpdateCommand
+	lastCreate       *handlers.ProfileCreateCommand
+	lastDelete       *handlers.ProfileDeleteCommand
+	lastSessions     *handlers.HouseholdSessionsQuery
+	lastVerify       *handlers.ProfileVerifyPINCommand
+	lastUpload       *fakeUpload
+	lastAvatarDelete string
+	view             handlers.ProfileView
+	sessions         []handlers.PlaybackSessionView
+	err              error
+	avatarStore      bool
+	// noAvatarStore makes UploadAvatar answer the v1 503 (no upload store).
+	noAvatarStore bool
 	// lockedPrimary, when set, is the PIN-locked primary profile the fake
 	// treats as managing the household: like v1 canManageHouseholdAs it runs
 	// the command's verifier for it and answers an unverified one with the
 	// 403 profile_management the real service returns.
 	lockedPrimary string
+}
+
+func (f *fakeProfiles) ListProfiles(_ context.Context, _ int) (handlers.ProfileListView, error) {
+	if f.err != nil {
+		return handlers.ProfileListView{}, f.err
+	}
+	return handlers.ProfileListView{Profiles: []handlers.ProfileView{f.view}, AvatarUploadEnabled: f.avatarStore}, nil
+}
+
+func (f *fakeProfiles) CreateProfile(_ context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error) {
+	f.lastCreate = &cmd
+	if f.err != nil {
+		return handlers.ProfileView{}, f.err
+	}
+	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
+		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
+		}
+	}
+	view := f.view
+	view.ID, view.Name = "p-new", cmd.Request.Name
+	return view, nil
 }
 
 func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error) {
@@ -149,6 +186,140 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 		}
 	}
 	return f.view, nil
+}
+
+// manage runs the fake's household-manager check: like v1
+// canManageHouseholdAs it runs the command's verifier for a PIN-locked
+// primary profile and answers an unverified one with the 403
+// profile_management the real service returns.
+func (f *fakeProfiles) manage(activeProfileID string, verify func(string) error) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.lockedPrimary != "" && activeProfileID == f.lockedPrimary {
+		if err := verify(f.lockedPrimary); err != nil {
+			return &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
+		}
+	}
+	return nil
+}
+
+func (f *fakeProfiles) DeleteProfile(_ context.Context, cmd handlers.ProfileDeleteCommand) error {
+	f.lastDelete = &cmd
+	if err := f.manage(cmd.ActiveProfileID, cmd.VerifyProfile); err != nil {
+		return err
+	}
+	if cmd.ProfileID == "p-primary" {
+		return &handlers.APIError{Status: http.StatusConflict, Code: "primary_profile_protected", Message: "The primary profile cannot be deleted. Delete the user account instead."}
+	}
+	if cmd.ProfileID != f.view.ID {
+		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+	}
+	return nil
+}
+
+func (f *fakeProfiles) ListHouseholdSessions(_ context.Context, q handlers.HouseholdSessionsQuery) ([]handlers.PlaybackSessionView, error) {
+	f.lastSessions = &q
+	if err := f.manage(q.ActiveProfileID, q.VerifyProfile); err != nil {
+		return nil, err
+	}
+	return f.sessions, nil
+}
+
+func (f *fakeProfiles) VerifyPIN(_ context.Context, cmd handlers.ProfileVerifyPINCommand) (handlers.ProfileVerification, error) {
+	f.lastVerify = &cmd
+	if f.err != nil {
+		return handlers.ProfileVerification{}, f.err
+	}
+	if cmd.ProfileID != f.view.ID {
+		return handlers.ProfileVerification{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found or has no PIN"}
+	}
+	if cmd.PIN != "1234" {
+		return handlers.ProfileVerification{Valid: false}, nil
+	}
+	return handlers.ProfileVerification{Valid: true, ProfileToken: "pvt_fixture", ExpiresAt: fixedTime().Add(12 * time.Hour)}, nil
+}
+
+func (f *fakeProfiles) UploadAvatar(_ context.Context, up handlers.ProfileAvatarUpload) (handlers.ProfileView, error) {
+	data, _ := io.ReadAll(up.File)
+	f.lastUpload = &fakeUpload{ProfileID: up.ProfileID, ContentType: up.ContentType, Size: len(data)}
+	if f.err != nil {
+		return handlers.ProfileView{}, f.err
+	}
+	if f.noAvatarStore {
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Avatar upload storage is not configured"}
+	}
+	if up.ProfileID != f.view.ID {
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+	}
+	if len(data) > 10<<20 {
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: "Avatar must be under 10 MB"}
+	}
+	if string(data) == "not-an-image" {
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Invalid image file"}
+	}
+	view := f.view
+	view.Avatar, view.AvatarSource, view.AvatarURL = "upload:avatars/1/p-owner/original", "upload", "https://s3.example.test/avatars/1/p-owner/256.jpg"
+	return view, nil
+}
+
+func (f *fakeProfiles) DeleteAvatar(_ context.Context, _ int, profileID string) (handlers.ProfileView, error) {
+	f.lastAvatarDelete = profileID
+	if f.err != nil {
+		return handlers.ProfileView{}, f.err
+	}
+	if profileID != f.view.ID {
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+	}
+	return f.view, nil
+}
+
+type fakeUpload struct {
+	ProfileID   string
+	ContentType string
+	Size        int
+}
+
+// fixtureProfilelessSession is a live session the reporting node attributed to
+// the account but to no profile, as a Jellyfin-protocol client produces; the
+// fixture proves the null profile_id validates against the contract.
+func fixtureProfilelessSession() handlers.PlaybackSessionView {
+	duration := 8520
+	return handlers.PlaybackSessionView{
+		SessionID: "ps-9c1d", UserID: 1, Username: "laura",
+		MediaFileID: 7, RequestedMediaFileID: 7, ContentID: "tt0111161", MediaTitle: "The Shawshank Redemption", MediaType: "movie",
+		PosterURL: "/api/v1/images/poster/7", PlayMethod: "direct", ReportingNode: "api", EffectivePlayMethod: "direct",
+		FileDuration: &duration, StartedAt: fixedTime(), UpdatedAt: fixedTime().Add(2 * time.Minute),
+		PositionSeconds: 120, IsPaused: true, HasPlaybackControl: false,
+		ClientName: "Infuse", ClientVersion: "8.1", ClientLabel: "Infuse 8.1", ClientLabelFull: "Infuse 8.1", ClientUserAgent: "Infuse/8.1",
+		SourceContainer: "mkv", SourceVideoCodec: "h264", SourceVideoResolution: "1080p", SourceAudioCodec: "aac",
+		VideoDecision: "copy", AudioDecision: "copy", IsJellyfinClient: true,
+	}
+}
+
+// fixtureSession is one live session with every member set, so the fixture
+// shows the whole shape.
+func fixtureSession() handlers.PlaybackSessionView {
+	season, episode, duration, kbps, channels, node := 1, 3, 2640, 12000, 6, 3
+	return handlers.PlaybackSessionView{
+		SessionID: "ps-7f3a", UserID: 1, Username: "laura", ProfileID: "p-owner", ProfileName: "Laura",
+		MediaFileID: 42, RequestedMediaFileID: 42, ContentID: "ep-123", MediaTitle: "Pilot", MediaType: "episode",
+		SeriesName: "Example Show", EpisodeName: "Pilot", SeasonNumber: &season, EpisodeNumber: &episode,
+		PosterURL: "/api/v1/images/poster/42", PlayMethod: "transcode", ReportingNode: "node-3", NodeDisplayName: "Basement",
+		FileDuration: &duration, StartedAt: fixedTime(), UpdatedAt: fixedTime().Add(time.Minute),
+		PositionSeconds: 61.5, IsPaused: false, HasPlaybackControl: true,
+		ClientIP: "", ClientName: "Silo for Apple TV", ClientVersion: "1.4.0", ClientBuild: "1400", ClientChannel: "release",
+		ClientLabel: "Silo for Apple TV 1.4", ClientLabelFull: "Silo for Apple TV 1.4.0 (1400)", ClientUserAgent: "Silo/1.4.0",
+		AudioTrackIndex: 0, TranscodeAudio: true, StreamBitrateKbps: &kbps,
+		TargetResolution: "1080p", TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetAudioChannels: &channels, TargetBitrateKbps: &kbps,
+		TranscodeHWAccel: "videotoolbox", ToneMapMode: "hardware", SourceContainer: "mkv", SourceBitrateKbps: &kbps,
+		SourceVideoCodec: "hevc", SourceVideoResolution: "2160p", SourceAudioCodec: "truehd", SourceAudioChannels: &channels,
+		SourceAudioLanguage: "eng", SourceAudioTitle: "TrueHD 7.1", SourceAudioLayout: "7.1",
+		RequestedVideoCodec: "h264", RequestedVideoResolution: "1080p", VideoDecision: "transcode", AudioDecision: "transcode",
+		EffectivePlayMethod: "transcode", IsJellyfinClient: false,
+		RoutingWorkload: "video_transcode", RoutingExecution: "prefer_worker", RoutingExecutionNodeID: &node, RoutingExecutionNodeName: "Basement",
+		RoutingEgress: "prefer_proxy", RoutingEgressNodeID: &node, RoutingEgressNodeName: "Basement",
+	}
 }
 
 // fakeLibraries knows the libraries whose ids are in known.
@@ -222,10 +393,12 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	}
 	deps.Progress = progress
 	if profiles == nil {
-		profiles = &fakeProfiles{view: fixtureProfileView()}
+		profiles = &fakeProfiles{view: fixtureProfileView(), sessions: []handlers.PlaybackSessionView{fixtureSession(), fixtureProfilelessSession()}}
 	}
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
+	deps.ProfileSections = &fakeProfileSections{rows: fixtureSectionOverrides()}
+	deps.SectionFlags = fakeSectionFlags{allow: true}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
@@ -239,4 +412,59 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
 	return deps
+}
+
+// fakeProfileSections stores one override set and resolves a fixed page.
+type fakeProfileSections struct {
+	rows       []userstore.SectionOverride
+	lastQuery  handlers.SectionOverridesQuery
+	lastWrites []handlers.SectionOverrideWrite
+	lastFilter mediacatalog.AccessFilter
+	reset      bool
+	err        error
+}
+
+func (f *fakeProfileSections) ListProfileOverrides(_ context.Context, q handlers.SectionOverridesQuery) ([]userstore.SectionOverride, error) {
+	f.lastQuery = q
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.rows, nil
+}
+
+func (f *fakeProfileSections) SaveProfileOverrides(_ context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error {
+	f.lastQuery, f.lastWrites = q, writes
+	return f.err
+}
+
+func (f *fakeProfileSections) ResetProfileOverrides(_ context.Context, q handlers.SectionOverridesQuery) error {
+	f.lastQuery, f.reset = q, true
+	return f.err
+}
+
+func (f *fakeProfileSections) ResolveProfileSectionSettings(_ context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error) {
+	f.lastQuery = handlers.SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: scope}
+	if libraryID != nil {
+		f.lastQuery.LibraryID = strconv.Itoa(*libraryID)
+	}
+	f.lastFilter = filter
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []sections.ResolvedSection{
+		{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
+		{ID: "u-gems", SectionType: "hidden_gems", Title: "Hidden gems", ItemLimit: 12, Position: 1, IsCustom: true, Config: json.RawMessage(`{"library_ids":[3]}`)},
+	}, nil
+}
+
+type fakeSectionFlags struct{ allow bool }
+
+func (f fakeSectionFlags) AllowProfileCustomSections(context.Context) bool { return f.allow }
+
+func fixtureSectionOverrides() []userstore.SectionOverride {
+	pos, featured, limit := 2, false, 10
+	return []userstore.SectionOverride{
+		{ID: "o-1", ProfileID: "p-owner", Scope: "home", SectionID: "s-continue", Position: &pos, Hidden: true, Featured: &featured, ItemLimit: &limit, Title: "Keep watching", CreatedAt: "2026-01-02T03:04:05Z", UpdatedAt: "2026-01-02T03:04:05Z"},
+		{ID: "o-2", ProfileID: "p-owner", Scope: "home", IsUserAdded: true, UserSectionType: "hidden_gems", UserConfig: `{"library_ids":[3]}`, UserTitle: "Hidden gems"},
+	}
 }

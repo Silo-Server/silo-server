@@ -19,9 +19,9 @@ import type {
   SetupRequest,
   SignupRequest,
   User,
-  VerifyPinResponse,
 } from "@/api/types";
 import { v2, V2ProblemError } from "@/api/v2/request";
+import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hooks/queries/profiles";
 import { restoreUserSession, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -47,7 +47,7 @@ interface AuthState {
   endImpersonation: () => Promise<void>;
   logout: () => void;
   selectProfile: (profile: Profile, profileToken?: string) => void;
-  verifyProfilePin: (profileId: string, pin: string) => Promise<VerifyPinResponse>;
+  verifyProfilePin: (profileId: string, pin: string) => Promise<ProfileVerification>;
   clearProfile: () => void;
 }
 
@@ -330,11 +330,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearAuthState]);
 
   const verifyProfilePin = useCallback(
-    async (profileId: string, pin: string): Promise<VerifyPinResponse> => {
-      return api(`/profiles/${profileId}/verify-pin`, {
-        method: "POST",
-        body: JSON.stringify({ pin }),
-      });
+    async (profileId: string, pin: string): Promise<ProfileVerification> => {
+      return verifyProfilePIN(profileId, pin);
     },
     [],
   );
@@ -454,8 +451,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     soleProfileBootstrapRef.current = bootstrapKey;
 
     let cancelled = false;
-    const profilesRequest: Promise<{ profiles: Profile[] }> = api("/profiles");
-    profilesRequest
+    listProfiles()
       .then((data) => {
         if (cancelled) {
           return;

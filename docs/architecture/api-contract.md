@@ -939,6 +939,24 @@ stored ones, every string member of a profile is always emitted, ids are string 
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
+The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
+`updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
+`verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides
+`listProfileSectionOverrides`, `replaceProfileSectionOverrides`, `resetProfileSectionOverrides`,
+`getProfileSectionSettings`, `getProfileSectionFlags` under `/api/v2/profile/sections`. The
+deliberate v1 differences, recorded per row in the ledger: `createProfile` answers `201` with a
+`Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
+from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
+ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
+keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
+reports `expires_at` as a nullable instant; `uploadProfileAvatar` is the first Huma multipart
+operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
+types or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
+server without an upload store answers `503`; section overrides drop the `/reset` suffix
+(`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
+method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
+casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;
