@@ -299,7 +299,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, l
 	if catalog.IsLiveQueryType(collection.CollectionType) {
 		items, err = h.loadLiveCollectionItems(ctx, collection, access)
 	} else {
-		items, err = h.loadOrderedCollectionItems(ctx, collectionID)
+		items, err = h.loadOrderedCollectionItems(ctx, collectionID, access)
 	}
 	if err != nil {
 		var queryErr smartCollectionQueryError

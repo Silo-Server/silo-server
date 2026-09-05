@@ -3011,7 +3011,11 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 	})
 }
 
-func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Context, collectionID string) ([]itemListResponse, error) {
+// loadOrderedCollectionItems answers a manual collection's stored items in
+// curated order, keeping only those the viewer's access filter admits
+// (library allow/deny lists, content-rating ceiling); inaccessible items are
+// dropped and the order of the survivors is preserved.
+func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Context, collectionID string, access catalog.AccessFilter) ([]itemListResponse, error) {
 	collectionItems, err := h.repo.ListItems(ctx, collectionID)
 	if err != nil {
 		return nil, err
@@ -3022,7 +3026,7 @@ func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Contex
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
 
-	items, err := h.itemRepo.GetByIDs(ctx, contentIDs)
+	items, err := h.itemRepo.GetByIDsWithAccess(ctx, contentIDs, access)
 	if err != nil {
 		return nil, err
 	}
