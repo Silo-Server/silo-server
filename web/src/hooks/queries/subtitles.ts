@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api, ApiClientError } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import {
   SERIES_SUBTITLE_SETTING_KEYS,
   seriesSubtitleSettingPath,
@@ -141,7 +142,7 @@ export function useDeleteSubtitlePreference() {
 
   return useMutation({
     mutationFn: async (prefId: string) => {
-      await api<void>(`/subtitle-prefs/${prefId}`, { method: "DELETE" });
+      await v2("DELETE /api/v2/subtitle-prefs/{series_id}", { path: { series_id: prefId } });
       await Promise.all(
         SERIES_SUBTITLE_SETTING_KEYS.map((key) =>
           api<void>(seriesSubtitleSettingPath(key, prefId), { method: "DELETE" }).catch((error) => {

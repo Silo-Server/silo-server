@@ -5,11 +5,20 @@
 
 /** Operation ids keyed by `METHOD /path`, as the committed v2 OpenAPI document lists them. */
 export const v2Operations = {
+  "DELETE /api/v2/audio-prefs/{series_id}": "deleteAudioPreference",
+  "DELETE /api/v2/library-playback-prefs/{library_id}": "deleteLibraryPlaybackPreference",
+  "DELETE /api/v2/subtitle-prefs/{series_id}": "deleteSubtitlePreference",
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/admin/users": "listAdminUsers",
+  "GET /api/v2/audio-prefs/{series_id}": "getAudioPreference",
+  "GET /api/v2/library-playback-prefs": "listLibraryPlaybackPreferences",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
   "GET /api/v2/progress": "listProgress",
+  "GET /api/v2/subtitle-prefs/{series_id}": "getSubtitlePreference",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
+  "PATCH /api/v2/library-playback-prefs/{library_id}": "updateLibraryPlaybackPreference",
   "PATCH /api/v2/profiles/{id}": "updateProfile",
+  "PUT /api/v2/audio-prefs/{series_id}": "updateAudioPreference",
+  "PUT /api/v2/subtitle-prefs/{series_id}": "updateSubtitlePreference",
 } as const;
