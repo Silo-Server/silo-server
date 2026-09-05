@@ -534,6 +534,12 @@ func TestPlaybackInfoSidecarRequiresExternalSubtitleDelivery(t *testing.T) {
 		{"sidecar client accepts both", 3, `[{"Format":"srt","Method":"Embed"},{"Format":"srt","Method":"External"}]`, 200},
 		{"embedded original retains embed support", 2, `[{"Format":"srt","Method":"Embed"}]`, 200},
 		{"embedded text delivered externally", 2, `[{"Format":"srt","Method":"External"}]`, 200},
+		{"downloaded cannot embed", 5, `[{"Format":"srt","Method":"Embed"}]`, 400},
+		{"downloaded cannot encode", 5, `[{"Format":"srt","Method":"Encode"}]`, 400},
+		{"downloaded wrong external format", 5, `[{"Format":"ass","Method":"External"}]`, 400},
+		{"downloaded external", 5, `[{"Format":"srt","Method":"External"}]`, 200},
+		{"downloaded external alias", 5, `[{"Format":"subrip","Method":"External"}]`, 200},
+		{"downloaded unrestricted", 5, `[]`, 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, item := newSubtitleSelectionHandler(t)
@@ -569,9 +575,9 @@ func TestPlaybackInfoSidecarRequiresExternalSubtitleDelivery(t *testing.T) {
 			if !found || index != tc.index {
 				t.Fatalf("selection %d %v", index, found)
 			}
-			if tc.index == 3 {
+			if tc.index == 3 || tc.index == 5 {
 				for _, stream := range source.MediaStreams {
-					if stream.Type == "Subtitle" && stream.Index == 3 && (stream.DeliveryURL == "" || stream.DeliveryMethod != "External") {
+					if stream.Type == "Subtitle" && stream.Index == tc.index && (stream.DeliveryURL == "" || stream.DeliveryMethod != "External") {
 						t.Fatalf("sidecar delivery: %+v", stream)
 					}
 				}

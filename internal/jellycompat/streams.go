@@ -272,7 +272,11 @@ func compatHLSRecipeSourceAudioChannels(source PlaybackMediaSource) int {
 	if !compatHLSTranscodesAudio(source) {
 		return 0
 	}
-	return compatSourceAudioChannels(source)
+	channels := compatSourceAudioChannels(source)
+	if !playback.IsAudioToAACStereoDownmixV3(channels, "aac", source.TargetAudioChannels) {
+		return 0
+	}
+	return channels
 }
 
 func compatSourceHasSurroundAudio(source PlaybackMediaSource) bool {

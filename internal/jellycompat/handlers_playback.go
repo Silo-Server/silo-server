@@ -2075,6 +2075,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source.SelectedSubtitleStreamIndex = resolveSelectedSubtitleStreamIndex(source.Version, len(downloaded), downloadedKnown, requestedSubtitleIndex, source.DefaultSubtitleStreamIndex)
 		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
 		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
+		applyCompatDownloadedSubtitleDelivery(&source, profile, downloaded)
 		if source.SupportsTranscoding && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(version) {
 			if !toneMapPolicyLoaded {
 				var policyErr error
@@ -3470,6 +3471,27 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 		// Full encoding cannot honor it until downloaded burn-in is implemented.
 		source.SupportsTranscoding = false
 	}
+}
+
+// Downloaded subtitles can only use the external endpoint; they cannot be
+// embedded in the original file or burned by the current encoder recipe.
+func applyCompatDownloadedSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProfile, downloaded []subtitles.DownloadedSubtitle) {
+	selected := effectiveCompatSubtitleStreamIndex(*source)
+	if selected == nil || len(profile.SubtitleProfiles) == 0 {
+		return
+	}
+	index := *selected - nextDownloadedSubtitleIndex(source.Version)
+	if index < 0 {
+		return
+	}
+	if index < len(downloaded) && slices.ContainsFunc(profile.SubtitleProfiles, func(sub SubtitleProfile) bool {
+		return strings.EqualFold(sub.Method, "External") && compatSubtitleProfileFormat(sub.Format) == compatSubtitleProfileFormat(string(downloaded[index].Format))
+	}) {
+		return
+	}
+	source.SupportsDirectPlay = false
+	source.SupportsDirectStream = false
+	source.SupportsTranscoding = false
 }
 
 func compatRequestDeviceID(r *http.Request) string {
