@@ -18729,13 +18729,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/audio-prefs/{series_id}",
+        "operation_id": "deleteAudioPreference"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; audioPrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. 204 whether or not a preference existed, as v1."
     },
     {
       "listener": "api",
@@ -18790,13 +18790,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/audio-prefs/{series_id}",
+        "operation_id": "getAudioPreference"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; audioPrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; default is emitted as a bool; instants are UTC ms."
     },
     {
       "listener": "api",
@@ -18849,13 +18849,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/audio-prefs/{series_id}",
+        "operation_id": "updateAudioPreference"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; audioPrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. Whole-preference PUT answering 204 as v1; audio_track_index is required and minimum -1, the no-track sentinel v1 clients store (v1 accepted any negative), and unknown members are refused; a language the canonical settings contract rejects is 422 at body.audio_language (v1 400)."
     },
     {
       "listener": "api",
@@ -30590,13 +30590,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/library-playback-prefs",
+        "operation_id": "listLibraryPlaybackPreferences"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryPlaybackPrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. The v1 {preferences:[...]} envelope became the standard {items:[...]} collection without pagination (the per-profile set is bounded by the library count; limit/offset are refused as unknown); library_id is a string ID (v1 int); an override the profile has not set is absent rather than null; instants are UTC ms."
     },
     {
       "listener": "api",
@@ -30659,13 +30659,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/library-playback-prefs/{library_id}",
+        "operation_id": "deleteLibraryPlaybackPreference"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryPlaybackPrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. 204 whether or not overrides existed, unknown library 404 as v1; a non-integer library_id is 422 at path.library_id (v1 400)."
     },
     {
       "listener": "api",
@@ -30728,13 +30728,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PATCH",
+        "path": "/api/v2/library-playback-prefs/{library_id}",
+        "operation_id": "updateLibraryPlaybackPreference"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryPlaybackPrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. v1 PUT became PATCH: an omitted member is unchanged, explicit null clears that override, and clearing every override removes the row; answers 204 as v1; a non-integer library_id is 422 at path.library_id (v1 400), an unknown library 404; a subtitle_mode outside auto/always/off or a value the canonical contract rejects is 422 at body.<member> (v1 400)."
     },
     {
       "listener": "api",
@@ -41653,13 +41653,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/subtitle-prefs/{series_id}",
+        "operation_id": "deleteSubtitlePreference"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; subtitlePrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. 204 whether or not a preference existed, as v1."
     },
     {
       "listener": "api",
@@ -41714,13 +41714,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/subtitle-prefs/{series_id}",
+        "operation_id": "getSubtitlePreference"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; subtitlePrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; forced and hearing_impaired are emitted as bools; show_forced_subtitles is absent when the profile has no override; instants are UTC ms."
     },
     {
       "listener": "api",
@@ -41783,13 +41783,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/subtitle-prefs/{series_id}",
+        "operation_id": "updateSubtitlePreference"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; subtitlePrefHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section settings-prefs. Whole-preference PUT answering 204 as v1, including keeping a stored show_forced_subtitles override when the body omits it; subtitle_track_index is required and minimum -1, the subtitles-off sentinel v1 clients store (v1 accepted any negative), and unknown members are refused; a value the canonical settings contract rejects stays a 400 (malformed_request)."
     },
     {
       "listener": "api",

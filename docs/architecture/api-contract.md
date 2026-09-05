@@ -939,6 +939,26 @@ stored ones, every string member of a profile is always emitted, ids are string 
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
+The first Phase 4 section, **settings-prefs** (`internal/apiv2/preferences.go`, tag
+`preferences`), ports the nine `profile_scoped` preference rows: `getAudioPreference`,
+`updateAudioPreference`, `deleteAudioPreference`, `getSubtitlePreference`,
+`updateSubtitlePreference`, `deleteSubtitlePreference` (per series, `series_id` a content id),
+and `listLibraryPlaybackPreferences`, `updateLibraryPlaybackPreference`,
+`deleteLibraryPlaybackPreference` (per library). Each v2 handler calls a seam extracted from the
+v1 handler (`GetAudioPreference`, `SetSubtitlePreference`, …), so the canonical-settings sync
+and the `user_settings.changed` events stay in one place and v1 is byte-identical. Deliberate
+v1 differences: the per-series `PUT`s keep v1's whole-replacement and `204` but require a
+zero-based `*_track_index` (`minimum: -1`, where `-1` is the "no track" / "subtitles off" sentinel
+v1 clients store; v1 accepted any negative) and refuse unknown members; the
+`AudioTrackSignature` and `SubtitleTrackSignature` schemas keep the store's member names with
+every member optional and are shared by the read and write bodies; the library list is the
+standard `{items: [...]}` collection without pagination instead of v1's `{preferences: [...]}`,
+with `library_id` as a string `ID`; the library `PUT` became a `PATCH` (omitted unchanged, `null`
+clears the override so it is absent from the list, clearing every override removes the row); and
+a member the seam rejects
+(`audio_language` on audio, any of the four on the library patch, a non-integer `library_id`)
+is a `422` naming it where v1 answered `400`.
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;
