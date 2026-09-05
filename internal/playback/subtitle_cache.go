@@ -53,6 +53,9 @@ type SubtitleCache struct {
 }
 
 const (
+	subtitleFormatSRT    = "srt"
+	subtitleCodecSubRip  = "subrip"
+	subtitleCodecSSA     = "ssa"
 	subtitleFormatSUP    = "sup"
 	subtitleFormatASS    = "ass"
 	subtitleMuxerWebVTT  = "webvtt"
@@ -351,6 +354,65 @@ func (c *SubtitleCache) lookup(inputPath string, trackIndex int, format string) 
 	return f, modTime, true
 }
 
+// LookupText returns a complete cached text subtitle artifact. The cache key
+// includes the source path, mtime, size, stream ordinal, and output format.
+func (c *SubtitleCache) LookupText(inputPath string, trackIndex int, format string) ([]byte, bool) {
+	format = normalizeCachedTextSubtitleFormat(format)
+	if format == "" {
+		return nil, false
+	}
+	f, _, ok := c.lookup(inputPath, trackIndex, format)
+	if !ok {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(f)
+	return data, err == nil
+}
+
+// ExtractText reuses a complete cached text track or extracts it once for this
+// request. The fill captures source identity before extraction, so a replaced
+// source cannot publish an old extract under the new file's cache key.
+func (c *SubtitleCache) ExtractText(ctx context.Context, inputPath string, trackIndex int, format string, extract func(context.Context) ([]byte, error)) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	format = normalizeCachedTextSubtitleFormat(format)
+	if format == "" {
+		return nil, fmt.Errorf("unsupported cached subtitle format")
+	}
+	if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+		return data, nil
+	}
+	fill := c.beginFill(inputPath, trackIndex, format)
+	data, err := extract(ctx)
+	if err != nil {
+		if fill != nil {
+			fill.Discard()
+		}
+		return nil, err
+	}
+	if fill != nil {
+		// Tee records cache write failures; its destination io.Discard cannot fail.
+		_, _ = fill.Tee(io.Discard).Write(data)
+		if err := fill.Commit(); err != nil {
+			slog.WarnContext(ctx, "subtitle cache commit failed", "error", err)
+		}
+	}
+	return data, nil
+}
+
+func normalizeCachedTextSubtitleFormat(format string) string {
+	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(format), ".")) {
+	case subtitleFormatSRT, subtitleCodecSubRip:
+		return subtitleFormatSRT
+	case subtitleFormatASS, subtitleCodecSSA:
+		return subtitleFormatASS
+	default:
+		return ""
+	}
+}
+
 // cachedEntryPath reports whether a committed entry exists for the given
 // source+track and returns its path plus the source file's mtime. Like
 // Lookup it stats the source on every call (a changed source reads as a
@@ -592,7 +654,7 @@ func (c *SubtitleCache) evict(dir string) {
 			}
 			continue
 		}
-		if !slices.Contains([]string{SubtitleExtPGSV3, SubtitleExtVTTV3, SubtitleExtASSV3}, filepath.Ext(e.Name())) {
+		if !slices.Contains([]string{SubtitleExtPGSV3, SubtitleExtVTTV3, SubtitleExtASSV3, ".srt"}, filepath.Ext(e.Name())) {
 			continue
 		}
 		ents = append(ents, cacheEnt{path: path, size: info.Size(), mtime: info.ModTime()})

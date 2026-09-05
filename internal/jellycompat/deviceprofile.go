@@ -11,6 +11,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+const (
+	subtitleCodecASS    = "ass"
+	subtitleCodecSRT    = "srt"
+	subtitleCodecSSA    = "ssa"
+	subtitleCodecVTT    = "vtt"
+	subtitleCodecWebVTT = "webvtt"
+	subtitleCodecSubRip = "subrip"
+)
+
 // DeviceProfile captures the subset of Jellyfin client capabilities the
 // compat layer needs for direct-play, remux, and transcode negotiation.
 type DeviceProfile struct {
@@ -19,6 +28,7 @@ type DeviceProfile struct {
 	DirectPlayProfiles  []DirectPlayProfile  `json:"DirectPlayProfiles,omitempty"`
 	TranscodingProfiles []TranscodingProfile `json:"TranscodingProfiles,omitempty"`
 	CodecProfiles       []CodecProfile       `json:"CodecProfiles,omitempty"`
+	SubtitleProfiles    []SubtitleProfile    `json:"SubtitleProfiles,omitempty"`
 }
 
 type DirectPlayProfile struct {
@@ -44,6 +54,12 @@ type CodecProfile struct {
 	SubContainer    string             `json:"SubContainer,omitempty"`
 	Conditions      []ProfileCondition `json:"Conditions,omitempty"`
 	ApplyConditions []ProfileCondition `json:"ApplyConditions,omitempty"`
+}
+
+type SubtitleProfile struct {
+	Format    string `json:"Format,omitempty"`
+	Method    string `json:"Method,omitempty"`
+	Container string `json:"Container,omitempty"`
 }
 
 type ProfileCondition struct {
@@ -123,7 +139,48 @@ func (p DeviceProfile) HasData() bool {
 		p.MaxStreamingBitrate > 0 ||
 		len(p.DirectPlayProfiles) > 0 ||
 		len(p.TranscodingProfiles) > 0 ||
-		len(p.CodecProfiles) > 0
+		len(p.CodecProfiles) > 0 ||
+		len(p.SubtitleProfiles) > 0
+}
+
+// ExternalSubtitleFormat returns the client-requested format for delivering an
+// extractable text subtitle separately from the video. Prefer an exact codec
+// match (preserving ASS styling), then the WebVTT conversion profile used by
+// Jellyfin Web and WebOS.
+func (p DeviceProfile) ExternalSubtitleFormat(codec string) (string, bool) {
+	codec = normalizeSubtitleProfileFormat(codec)
+	for _, profile := range p.SubtitleProfiles {
+		if !strings.EqualFold(strings.TrimSpace(profile.Method), "External") {
+			continue
+		}
+		format := normalizeSubtitleProfileFormat(profile.Format)
+		if format == codec {
+			return subtitleRouteFormat(format), true
+		}
+	}
+	for _, profile := range p.SubtitleProfiles {
+		if !strings.EqualFold(strings.TrimSpace(profile.Method), "External") {
+			continue
+		}
+		format := normalizeSubtitleProfileFormat(profile.Format)
+		if format == subtitleCodecVTT {
+			return subtitleCodecVTT, true
+		}
+	}
+	return "", false
+}
+
+func normalizeSubtitleProfileFormat(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case subtitleCodecSubRip:
+		return subtitleCodecSRT
+	case subtitleCodecSSA:
+		return subtitleCodecASS
+	case subtitleCodecWebVTT:
+		return subtitleCodecVTT
+	default:
+		return strings.ToLower(strings.TrimSpace(format))
+	}
 }
 
 // SupportsDirectPlay reports whether a version can be served as-is.

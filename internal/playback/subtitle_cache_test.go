@@ -310,6 +310,49 @@ func TestSubtitleCacheMissThenHit(t *testing.T) {
 	}
 }
 
+func TestSubtitleCacheTextRoundTripAndFormatIsolation(t *testing.T) {
+	c, source := newTestCache(t)
+	if _, ok := c.LookupText(source, 0, "srt"); ok {
+		t.Fatal("expected text miss on empty cache")
+	}
+	if _, err := c.ExtractText(t.Context(), source, 0, "subrip", func(context.Context) ([]byte, error) { return []byte("SRT DATA"), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := c.LookupText(source, 0, "srt"); !ok || string(got) != "SRT DATA" {
+		t.Fatalf("SRT lookup = %q, %t", got, ok)
+	}
+	if _, ok := c.LookupText(source, 0, "ass"); ok {
+		t.Fatal("SRT cache entry must not satisfy ASS lookup")
+	}
+	if _, ok := c.LookupText(source, 1, "srt"); ok {
+		t.Fatal("text cache entry must not satisfy another track")
+	}
+}
+
+func TestSubtitleCacheTextInvalidatedBySourceChange(t *testing.T) {
+	c, source := newTestCache(t)
+	if _, err := c.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) { return []byte("old extract"), nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	newTime := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(source, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.LookupText(source, 0, "srt"); ok {
+		t.Fatal("expected text miss after source mtime changed")
+	}
+	if _, err := c.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) { return []byte("new extract"), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := c.LookupText(source, 0, "srt"); !ok || string(got) != "new extract" {
+		t.Fatalf("refilled SRT lookup = %q, %t", got, ok)
+	}
+	if n := countMatching(t, c, func(name string) bool { return strings.HasSuffix(name, ".srt") }); n != 1 {
+		t.Fatalf("stale text sibling not removed: %d entries", n)
+	}
+}
+
 func TestSubtitleCacheInvalidatedBySourceMtime(t *testing.T) {
 	c, source := newTestCache(t)
 	fillEntry(t, c, source, 0, "old extract")
@@ -910,4 +953,20 @@ func countMatching(t *testing.T, c *SubtitleCache, match func(string) bool) int 
 		}
 	}
 	return n
+}
+
+func TestSubtitleCacheTextRejectsSourceChangedDuringExtraction(t *testing.T) {
+	cache, source := newTestCache(t)
+	data, err := cache.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) {
+		if err := os.WriteFile(source, []byte("replacement source with a different size"), 0o600); err != nil {
+			return nil, err
+		}
+		return []byte("old source subtitle"), nil
+	})
+	if err != nil || string(data) != "old source subtitle" {
+		t.Fatalf("current extraction: %q %v", data, err)
+	}
+	if _, ok := cache.LookupText(source, 0, "srt"); ok {
+		t.Fatal("old extract cached under replacement source")
+	}
 }

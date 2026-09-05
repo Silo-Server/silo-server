@@ -211,6 +211,156 @@ func TestHandleSubtitleStreamAllowsAPIAuxiliaryResourceForProxyRoutedSession(t *
 	}
 }
 
+func TestHandleSubtitleStreamUsesConfiguredFFmpegForEmbeddedText(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	counterPath := filepath.Join(t.TempDir(), "ffmpeg-calls")
+	t.Setenv("FFMPEG_COUNTER", counterPath)
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf x >> \"$FFMPEG_COUNTER\"\nprintf '1\\n00:00:01,000 --> 00:00:02,000\\nHello\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("media"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	file := &models.MediaFile{
+		ID:       42,
+		FilePath: mediaPath,
+		VideoTracks: []models.VideoTrack{
+			{Codec: "h264"},
+		},
+		AudioTracks: []models.AudioTrack{
+			{Codec: "aac"},
+		},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 2, Codec: "subrip", Language: "eng"},
+		},
+	}
+	source := PlaybackMediaSource{ID: "source-42", FileID: file.ID}
+	cacheRoot := t.TempDir()
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1",
+		MediaSources: []PlaybackMediaSource{source},
+	})
+	handler := &PlaybackHandler{
+		playbackStore: store,
+		fileResolver:  testCompatFileResolver{file: file},
+		FFmpegPath:    ffmpegPath,
+		SubtitleCache: playback.NewSubtitleCache(func() string { return cacheRoot }),
+	}
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/Videos/item-1/source-42/Subtitles/2/stream.js?PlaySessionId=play-1&api_key=token-1",
+		nil,
+	)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("routeItemId", "item-1")
+	routeCtx.URLParams.Add("routeMediaSourceId", source.ID)
+	routeCtx.URLParams.Add("routeIndex", "2")
+	routeCtx.URLParams.Add("routeFormat", "js")
+	ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 7})
+	recorder := httptest.NewRecorder()
+
+	handler.HandleSubtitleStream(recorder, request.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	var body struct {
+		TrackEvents []struct {
+			ID                 string `json:"Id"`
+			Text               string `json:"Text"`
+			StartPositionTicks int64  `json:"StartPositionTicks"`
+			EndPositionTicks   int64  `json:"EndPositionTicks"`
+		} `json:"TrackEvents"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode JSON subtitles: %v; body = %q", err, recorder.Body.String())
+	}
+	if len(body.TrackEvents) != 1 {
+		t.Fatalf("TrackEvents = %#v, want one event", body.TrackEvents)
+	}
+	event := body.TrackEvents[0]
+	if event.ID != "1" || event.Text != "Hello" || event.StartPositionTicks != 10_000_000 || event.EndPositionTicks != 20_000_000 {
+		t.Fatalf("TrackEvents[0] = %#v, want Jellyfin JSON cue", event)
+	}
+
+	secondRecorder := httptest.NewRecorder()
+	handler.HandleSubtitleStream(secondRecorder, request.Clone(ctx))
+	if secondRecorder.Code != http.StatusOK || secondRecorder.Body.String() != recorder.Body.String() {
+		t.Fatalf("cached response = %d %q, want first response %d %q", secondRecorder.Code, secondRecorder.Body.String(), recorder.Code, recorder.Body.String())
+	}
+	calls, err := os.ReadFile(counterPath)
+	if err != nil {
+		t.Fatalf("read ffmpeg call counter: %v", err)
+	}
+	if got := len(calls); got != 1 {
+		t.Fatalf("ffmpeg calls = %d, want 1 after cached request", got)
+	}
+}
+
+func TestHandleSubtitleStreamReturnsJellyfinJSONForExternalSRT(t *testing.T) {
+	const subtitleBody = "1\n00:00:01,250 --> 00:00:02,500\nFirst line\nSecond line\n"
+	subtitlePath := filepath.Join(t.TempDir(), "movie.en.srt")
+	if err := os.WriteFile(subtitlePath, []byte(subtitleBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	file := &models.MediaFile{
+		ID:                42,
+		FilePath:          "/media/movie.mkv",
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: subtitlePath, Language: "eng", Format: "srt"}},
+	}
+	source := PlaybackMediaSource{ID: "source-42", FileID: file.ID}
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1",
+		MediaSources: []PlaybackMediaSource{source},
+	})
+	handler := &PlaybackHandler{playbackStore: store, fileResolver: testCompatFileResolver{file: file}}
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/Videos/item-1/source-42/Subtitles/1/stream.js?PlaySessionId=play-1&api_key=token-1",
+		nil,
+	)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("routeItemId", "item-1")
+	routeCtx.URLParams.Add("routeMediaSourceId", source.ID)
+	routeCtx.URLParams.Add("routeIndex", "1")
+	routeCtx.URLParams.Add("routeFormat", "js")
+	ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 7})
+	recorder := httptest.NewRecorder()
+
+	handler.HandleSubtitleStream(recorder, request.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		TrackEvents []struct {
+			Text               string `json:"Text"`
+			StartPositionTicks int64  `json:"StartPositionTicks"`
+			EndPositionTicks   int64  `json:"EndPositionTicks"`
+		} `json:"TrackEvents"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode JSON subtitles: %v; content type = %q; body = %q", err, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+	if len(body.TrackEvents) != 1 || body.TrackEvents[0].Text != "First line\nSecond line" ||
+		body.TrackEvents[0].StartPositionTicks != 12_500_000 || body.TrackEvents[0].EndPositionTicks != 25_000_000 {
+		t.Fatalf("TrackEvents = %#v, want parsed external cue", body.TrackEvents)
+	}
+}
+
 func TestSubtitleExtractionUsesConfiguredFFmpeg(t *testing.T) {
 	ffmpeg := filepath.Join(t.TempDir(), "configured-ffmpeg")
 	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\ncase \"$*\" in *'-f srt'*) printf '1\\n00:00:01,000 --> 00:00:02,000\\nConfigured binary\\n';; *) printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nConfigured binary\\n';; esac\n"), 0o700); err != nil {

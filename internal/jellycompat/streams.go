@@ -1412,6 +1412,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 				return
 			}
+			if requestedFormat == "js" {
+				if writeErr := writeJellyfinJSONSubtitleResponse(w, data); writeErr != nil {
+					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+				}
+				return
+			}
 			writeSubtitleResponse(w, "vtt", data)
 			return
 		}
@@ -1443,6 +1449,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			}
 			// If already VTT, serve directly.
 			if dl.Format == subtitles.FormatVTT {
+				if requestedFormat == "js" {
+					if writeErr := writeJellyfinJSONSubtitleResponse(w, data); writeErr != nil {
+						writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+					}
+					return
+				}
 				writeSubtitleResponse(w, "vtt", data)
 				return
 			}
@@ -1450,6 +1462,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			vttData, convErr := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.FFmpegPath)
 			if convErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
+				return
+			}
+			if requestedFormat == "js" {
+				if writeErr := writeJellyfinJSONSubtitleResponse(w, vttData); writeErr != nil {
+					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+				}
 				return
 			}
 			writeSubtitleResponse(w, "vtt", vttData)
@@ -1469,7 +1487,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 
 	// Serve ASS/SSA as raw ASS when requested, preserving styled subtitle data.
 	if requestedFormat == "ass" && playback.IsASS(embeddedTrack.Codec) {
-		data, err := playback.ExtractSubtitleWithFormat(r.Context(), file.FilePath, embeddedOrdinal, "ass", h.FFmpegPath)
+		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "ass")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 			return
@@ -1478,11 +1496,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	data, format, subErr := playback.ExtractSubtitle(r.Context(), file.FilePath, embeddedOrdinal, h.FFmpegPath)
+	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "srt")
 	if subErr != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 		return
 	}
+	format := "srt"
 	if requestedFormat == "srt" && subtitleCanServeSRT(format) {
 		writeSubtitleResponse(w, requestedFormat, data)
 		return
@@ -1490,6 +1509,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	vttData, convErr := playback.ConvertToVTT(data, format)
 	if convErr != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
+		return
+	}
+	if requestedFormat == "js" {
+		if writeErr := writeJellyfinJSONSubtitleResponse(w, vttData); writeErr != nil {
+			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+		}
 		return
 	}
 	writeSubtitleResponse(w, "vtt", vttData)
@@ -1545,6 +1570,45 @@ func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, filePath string, trackIndex int, format string) ([]byte, error) {
+	return h.SubtitleCache.ExtractText(ctx, filePath, trackIndex, format, func(ctx context.Context) ([]byte, error) {
+		return playback.ExtractSubtitleWithFormat(ctx, filePath, trackIndex, format, h.FFmpegPath)
+	})
+}
+
+type jellyfinSubtitleTrackEvent struct {
+	ID                 string `json:"Id"`
+	Text               string `json:"Text"`
+	StartPositionTicks int64  `json:"StartPositionTicks"`
+	EndPositionTicks   int64  `json:"EndPositionTicks"`
+}
+
+func writeJellyfinJSONSubtitleResponse(w http.ResponseWriter, data []byte) error {
+	cues, err := subtitles.ParseCues(data)
+	if err != nil {
+		return err
+	}
+	events := make([]jellyfinSubtitleTrackEvent, 0, len(cues))
+	for i, cue := range cues {
+		events = append(events, jellyfinSubtitleTrackEvent{
+			ID:                 strconv.Itoa(i + 1),
+			Text:               strings.Join(cue.Lines, "\n"),
+			StartPositionTicks: int64(cue.Start / (100 * time.Nanosecond)),
+			EndPositionTicks:   int64(cue.End / (100 * time.Nanosecond)),
+		})
+	}
+	payload, err := json.Marshal(struct {
+		TrackEvents []jellyfinSubtitleTrackEvent `json:"TrackEvents"`
+	}{TrackEvents: events})
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(payload)
+	return err
 }
 
 // HandleSessionPlaying handles POST /Sessions/Playing.
