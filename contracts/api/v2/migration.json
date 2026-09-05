@@ -9949,7 +9949,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint"
+      "retry_safety": "unique_constraint",
+      "retry_safety_note": "DEFECT: the URL uniqueness resolves a retry to the existing row, but reloadPools (the cross-replica event) runs after Create with no transaction, so a node death in between leaves a node no replica loads and the retry returns on the conflict. The v2 port must resume the reload on conflict."
     },
     {
       "listener": "api",
@@ -21020,8 +21021,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
-      "retry_safety": "unique_constraint",
-      "retry_safety_note": "The first admin is keyed by the users username/email uniqueness and the setup-complete gate; a duplicate after commit fails setup_complete or duplicate instead of creating a second admin."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "SetupInitialUser creates the admin and a login session, but the tokens travel only in the 201 response: a retry after it is lost fails the setup-complete gate with 401 and the first session is orphaned. The v2 port must keep a replayable setup result until first read."
     },
     {
       "listener": "api",
@@ -21089,8 +21090,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
-      "retry_safety": "unique_constraint",
-      "retry_safety_note": "The first admin is keyed by the users username/email uniqueness and the setup-complete gate; a duplicate after commit fails setup_complete or duplicate instead of creating a second admin."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "SetupInitialUser creates the admin and a login session, but the tokens travel only in the 201 response: a retry after it is lost fails the setup-complete gate with 401 and the first session is orphaned. The v2 port must keep a replayable setup result until first read."
     },
     {
       "listener": "api",
@@ -24499,7 +24500,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint"
+      "retry_safety": "unique_constraint",
+      "retry_safety_note": "DEFECT: the device uniqueness resolves a retry to the same row, but the update writes the request token, mode, and enabled state unconditionally, so a delayed older retry restores an expired token over a newer one. The v2 port must carry a registration sequence applied only if newer."
     },
     {
       "listener": "api",
@@ -32940,7 +32942,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint"
+      "retry_safety": "unique_constraint",
+      "retry_safety_note": "DEFECT: the device uniqueness resolves a retry to the same row, but the update writes the request token, mode, and enabled state unconditionally, so a delayed older retry restores an expired token over a newer one. The v2 port must carry a registration sequence applied only if newer."
     },
     {
       "listener": "api",
@@ -36872,7 +36875,7 @@
         "operation_id": "updateProfile"
       },
       "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Only max_playback_quality is a strict enum (no 4K/UHD aliases); quality_preference and subtitle_mode stay free-form (maxLength 32) until ratified (#135) because v1 never validated them and clients send 1080p/4k/2160p/720p and default/forced_only; every string member always emitted; read model does not constrain legacy stored enum values.",
-      "retry_safety": "natural_idempotent",
+      "retry_safety": "non_retryable",
       "retry_safety_note": "DEFECT: the row converges, but updateProfile bumps the account-wide access_policy_revision whenever pin, is_child, rating, library, or quality fields are present, so an identical retry invalidates tokens minted in between across sibling profiles. The v2 port must bump only on an effective change."
     },
     {
@@ -36995,7 +36998,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Both attempts write the same deterministic per-profile object key and store the same reference, so a delayed retry of an older upload overwrites a newer avatar the profile chose in between. The v2 port must guard the avatar with If-Match on the profile or a content-addressed key."
     },
     {
       "listener": "api",
@@ -43978,7 +43982,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; watchProviderHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Not if_match: disconnect converges on the absent state; the PATCH that edits the connection is guarded.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "DeleteConnection removes whatever row currently holds the provider/user/profile identity, so a delayed retry after the profile reconnected removes the new connection. The v2 port must bind the delete to a connection generation with If-Match."
     },
     {
       "listener": "api",

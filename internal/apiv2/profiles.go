@@ -133,14 +133,15 @@ func registerProfiles(reg *Registry) {
 		// Profile scoped without a required header, as v1 PUT /profiles/{id}:
 		// an administrator or the verified primary profile manages the
 		// household, and any other caller may change only its own active
-		// profile's playback preferences. Naturally idempotent: repeating
-		// the same PATCH converges on the same state (the ledger row records
-		// the access-policy revision bump as a defect for the section that
-		// guards profiles).
+		// profile's playback preferences. Non-retryable until the profiles
+		// section guards it: the profile row converges, but v1 bumps the
+		// account-wide access_policy_revision on field presence rather than
+		// an effective change, so an identical retry invalidates tokens
+		// minted in between across sibling profiles (ledger DEFECT note).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		DemoRestricted:  true,
-		RetrySafety:     RetrySafetyNaturalIdempotent,
+		RetrySafety:     RetrySafetyNonRetryable,
 		ServiceBacked:   true,
 	}, reg.updateProfile)
 }
