@@ -207,7 +207,7 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		"GET " + Prefix + "/library/{id}/user-collections", "GET " + Prefix + "/profile/sections", "PUT " + Prefix + "/profile/sections", "DELETE " + Prefix + "/profile/sections",
 		"GET " + Prefix + "/profile/sections/flags", "GET " + Prefix + "/profile/sections/settings", "GET " + Prefix + "/profiles", "POST " + Prefix + "/profiles",
 		"DELETE " + Prefix + "/profiles/{id}", "GET " + Prefix + "/profiles/household/sessions", "POST " + Prefix + "/profiles/{id}/verify-pin", "PUT " + Prefix + "/profiles/{id}/avatar",
-		"DELETE " + Prefix + "/profiles/{id}/avatar",
+		"DELETE " + Prefix + "/profiles/{id}/avatar", "GET " + Prefix + "/history", "POST " + Prefix + "/history/remove",
 	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)

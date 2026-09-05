@@ -89,6 +89,9 @@ type Dependencies struct {
 	Accounts AccountService
 	// Progress lists watch progress (*handlers.ProgressHandler).
 	Progress ProgressService
+	// History lists and removes watch history
+	// (*handlers.PersonalDataHandler).
+	History HistoryService
 	// Profiles applies profile updates (*handlers.ProfileHandler).
 	Profiles ProfileService
 	// Libraries answers which library identifiers exist

@@ -466,33 +466,133 @@ func (h *PersonalDataHandler) HandleListHistory(w http.ResponseWriter, r *http.R
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
 	limit, offset := parsePagination(r)
 
-	entries, err := store.ListHistory(r.Context(), profileID, limit, offset)
+	entries, err := h.HistoryEntries(r.Context(), userID, profileID, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history")
+		writeAPIError(w, err)
 		return
 	}
 
-	ids, err := catalog.ResolveHistoryDisplayIDs(r.Context(), entries, h.episodeRepo)
+	cards, err := h.HistoryCards(r.Context(), sectionViewerFromRequest(r), entries)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
+		writeAPIError(w, err)
 		return
 	}
-
-	items, err := resolveItemsByIDs(h, r, ids)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
-		return
+	items := make([]itemListResponse, 0, len(cards))
+	for _, card := range cards {
+		items = append(items, card.Item)
 	}
 
 	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(entries) == limit})
+}
+
+// History seams: the v1 handlers and the v2 history operations share them.
+// Each returns an *APIError on failure.
+
+// HistoryRemovalTarget is one thing to hide from history: an item, or a
+// season/episode widened to its show.
+type HistoryRemovalTarget = historyRemovalTargetRequest
+
+// HistoryCardView is one history card: the catalog card rendered for the
+// display item (an episode collapses to its series) and the most recent
+// watch record behind it.
+type HistoryCardView struct {
+	Item  CollectionItemView
+	Entry userstore.WatchHistoryEntry
+}
+
+// HistoryEntries pages the profile's visible history rows, most recent
+// watch first.
+func (h *PersonalDataHandler) HistoryEntries(ctx context.Context, userID int, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entries, err := store.ListHistory(ctx, profileID, limit, offset)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list history")
+	}
+	return entries, nil
+}
+
+// HistoryCards renders the cards of a history page in entry order, one per
+// display item, omitting items the viewer cannot see or that left the
+// catalog.
+func (h *PersonalDataHandler) HistoryCards(ctx context.Context, viewer SectionViewer, entries []userstore.WatchHistoryEntry) ([]HistoryCardView, error) {
+	display, err := catalog.ResolveHistoryDisplayEntries(ctx, entries, h.episodeRepo)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
+	}
+	ids := make([]string, 0, len(display))
+	for _, d := range display {
+		ids = append(ids, d.DisplayID)
+	}
+	items, err := h.resolveItemCards(ctx, viewer, ids)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
+	}
+	byID := make(map[string]itemListResponse, len(items))
+	for _, item := range items {
+		byID[item.ContentID] = item
+	}
+	cards := make([]HistoryCardView, 0, len(items))
+	for _, d := range display {
+		item, ok := byID[d.DisplayID]
+		if !ok {
+			continue
+		}
+		cards = append(cards, HistoryCardView{Item: item, Entry: d.Entry})
+	}
+	return cards, nil
+}
+
+// RemoveHistory hides every watch of the targets from the profile's history
+// and notifies the profile's sessions. Removing an already hidden item is a
+// no-op, so a replay converges.
+func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, targets []HistoryRemovalTarget) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+
+	mediaItemSet := make(map[string]struct{})
+	mediaItemIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		resolvedIDs, resolveErr := h.resolveHistoryRemovalMediaItemIDs(ctx, target, filter)
+		if resolveErr != nil {
+			if isNotFound(resolveErr) {
+				return apiError(http.StatusNotFound, "not_found", "History target not found")
+			}
+			return fieldError("targets", resolveErr.Error())
+		}
+		for _, mediaItemID := range resolvedIDs {
+			if _, ok := mediaItemSet[mediaItemID]; ok {
+				continue
+			}
+			mediaItemSet[mediaItemID] = struct{}{}
+			mediaItemIDs = append(mediaItemIDs, mediaItemID)
+		}
+	}
+
+	if err := store.RemoveHistoryItems(ctx, profileID, mediaItemIDs, time.Now().UTC()); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
+	}
+
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	for _, mediaItemID := range mediaItemIDs {
+		publishUserStateEvent(
+			ctx,
+			h.EventsHub,
+			userID,
+			profileID,
+			mediaItemID,
+			"",
+			"history",
+			userStateEventState{},
+		)
+	}
+	return nil
 }
 
 // HandleRemoveHistory handles POST /history/remove.
@@ -510,52 +610,9 @@ func (h *PersonalDataHandler) HandleRemoveHistory(w http.ResponseWriter, r *http
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.RemoveHistory(r.Context(), userID, profileID, requestAccessFilter(r), req.Targets); err != nil {
+		writeAPIError(w, err)
 		return
-	}
-
-	filter := requestAccessFilter(r)
-	mediaItemSet := make(map[string]struct{})
-	mediaItemIDs := make([]string, 0, len(req.Targets))
-	for _, target := range req.Targets {
-		resolvedIDs, resolveErr := h.resolveHistoryRemovalMediaItemIDs(r.Context(), target, filter)
-		if resolveErr != nil {
-			switch {
-			case isNotFound(resolveErr):
-				writeError(w, http.StatusNotFound, "not_found", "History target not found")
-			default:
-				writeError(w, http.StatusBadRequest, "bad_request", resolveErr.Error())
-			}
-			return
-		}
-		for _, mediaItemID := range resolvedIDs {
-			if _, ok := mediaItemSet[mediaItemID]; ok {
-				continue
-			}
-			mediaItemSet[mediaItemID] = struct{}{}
-			mediaItemIDs = append(mediaItemIDs, mediaItemID)
-		}
-	}
-
-	if err := store.RemoveHistoryItems(r.Context(), profileID, mediaItemIDs, time.Now().UTC()); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to remove history")
-		return
-	}
-
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	for _, mediaItemID := range mediaItemIDs {
-		publishUserStateEvent(
-			r.Context(),
-			h.EventsHub,
-			userID,
-			profileID,
-			mediaItemID,
-			"",
-			"history",
-			userStateEventState{},
-		)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -586,27 +643,33 @@ func resolveItems[T any](h *PersonalDataHandler, r *http.Request, entries []T, g
 }
 
 func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([]itemListResponse, error) {
+	return h.resolveItemCards(r.Context(), sectionViewerFromRequest(r), ids)
+}
+
+// resolveItemCards is resolveItemsByIDs off the request: the v1 handlers
+// and the v2 history operation share it, so a card is rendered one way.
+func (h *PersonalDataHandler) resolveItemCards(ctx context.Context, viewer SectionViewer, ids []string) ([]itemListResponse, error) {
 	if len(ids) == 0 || h.itemRepo == nil {
 		return []itemListResponse{}, nil
 	}
-	mediaItems, err := h.itemRepo.GetByIDs(r.Context(), ids)
+	mediaItems, err := h.itemRepo.GetByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 
 	// Index by content ID for order-preserving lookup.
 	byID := make(map[string]*itemListResponse, len(mediaItems))
-	filter := requestAccessFilter(r)
+	filter := viewer.Access
 	// Parsed once for the whole list; the calling handler has already rejected
 	// an unrecognized value. Unset keeps the per-slot defaults below, which are
 	// deliberately asymmetric (a featured poster beside a card backdrop); an
 	// explicit size applies to every image in the response instead.
-	size := requestImageSize(r)
+	size := viewer.ImageSize
 	posterHint := requestVariantHint("featured", size)
 	cardHint := requestVariantHint("card", size)
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
-		if err := h.itemRepo.EnsureAccessible(r.Context(), mi.ContentID, filter); err != nil {
+		if err := h.itemRepo.EnsureAccessible(ctx, mi.ContentID, filter); err != nil {
 			if errors.Is(err, catalog.ErrItemNotFound) {
 				continue
 			}
@@ -616,9 +679,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 	}
 
 	userStates := map[string]*itemUserStateResponse{}
-	if store, profileID, ok := h.userStoreForRequest(r); ok {
-		if resolvedStates, err := resolveItemUserStatesWithOptions(r.Context(), store, profileID, h.episodeRepo, accessibleItems, itemUserStateOptions{
-			UserID:             apimw.GetUserID(r.Context()),
+	if store, profileID, ok := h.userStoreForContext(ctx); ok {
+		if resolvedStates, err := resolveItemUserStatesWithOptions(ctx, store, profileID, h.episodeRepo, accessibleItems, itemUserStateOptions{
+			UserID:             apimw.GetUserID(ctx),
 			EbookProgressStore: h.ebookProgressStore,
 		}); err == nil {
 			userStates = resolvedStates
@@ -639,8 +702,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(r, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		resp.PosterURL = h.presignURLCtx(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
+		resp.BackdropURL = h.presignURLCtx(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 
@@ -653,14 +716,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 			}
 		}
 		if len(unresolvedIDs) > 0 {
-			episodes, epErr := h.episodeRepo.GetByIDs(r.Context(), unresolvedIDs)
+			episodes, epErr := h.episodeRepo.GetByIDs(ctx, unresolvedIDs)
 			if epErr == nil && len(episodes) > 0 {
 				// Gather parent series for poster/metadata fallback.
 				seriesIDs := make([]string, 0, len(episodes))
 				for _, ep := range episodes {
 					seriesIDs = append(seriesIDs, ep.SeriesID)
 				}
-				parentItems, _ := h.itemRepo.GetByIDs(r.Context(), seriesIDs)
+				parentItems, _ := h.itemRepo.GetByIDs(ctx, seriesIDs)
 				parentByID := make(map[string]*models.MediaItem, len(parentItems))
 				for _, mi := range parentItems {
 					parentByID[mi.ContentID] = mi
@@ -668,7 +731,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 
 				for _, ep := range episodes {
 					// Verify the parent series is accessible.
-					if err := h.itemRepo.EnsureAccessible(r.Context(), ep.SeriesID, filter); err != nil {
+					if err := h.itemRepo.EnsureAccessible(ctx, ep.SeriesID, filter); err != nil {
 						continue
 					}
 					parent := parentByID[ep.SeriesID]
@@ -681,14 +744,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(r, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
+						resp.BackdropURL = h.presignURLCtx(ctx, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
+						resp.BackdropURL = h.presignURLCtx(ctx, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(r, sizedPosterPath(parent.PosterPath, size), posterHint)
+						resp.PosterURL = h.presignURLCtx(ctx, sizedPosterPath(parent.PosterPath, size), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
@@ -818,15 +881,19 @@ func historyEpisodeIDs(episodes []*models.Episode) []string {
 }
 
 func (h *PersonalDataHandler) userStoreForRequest(r *http.Request) (userstore.UserStore, string, bool) {
+	return h.userStoreForContext(r.Context())
+}
+
+func (h *PersonalDataHandler) userStoreForContext(ctx context.Context) (userstore.UserStore, string, bool) {
 	if h.storeProvider == nil {
 		return nil, "", false
 	}
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
+	userID := apimw.GetUserID(ctx)
+	profileID := apimw.GetProfileID(ctx)
 	if userID == 0 || profileID == "" {
 		return nil, "", false
 	}
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil || store == nil {
 		return nil, "", false
 	}
@@ -855,8 +922,12 @@ func (h *PersonalDataHandler) ensureAccessibleItem(r *http.Request, itemID strin
 // DetailService which handles plugin-prefixed paths, HTTP pass-through,
 // and legacy S3 presigning.
 func (h *PersonalDataHandler) presignURL(r *http.Request, path string, variant string) string {
+	return h.presignURLCtx(r.Context(), path, variant)
+}
+
+func (h *PersonalDataHandler) presignURLCtx(ctx context.Context, path string, variant string) string {
 	if h.detailSvc != nil {
-		return h.detailSvc.PresignURL(r.Context(), path, variant)
+		return h.detailSvc.PresignURL(ctx, path, variant)
 	}
 	return ""
 }

@@ -157,6 +157,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
 		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
 		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
+		"listHistory": true, "removeHistoryEntries": true,
 	}
 	for _, id := range libraryOperationIDs {
 		profileToken[id] = true

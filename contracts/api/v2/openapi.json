@@ -1290,6 +1290,364 @@
         ],
         "type": "object"
       },
+      "HistoryCard": {
+        "additionalProperties": false,
+        "properties": {
+          "added_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "backdrop_thumbhash": {
+            "type": "string"
+          },
+          "backdrop_url": {
+            "description": "Presigned, short-lived",
+            "type": "string"
+          },
+          "badges": {
+            "description": "Section-specific badges (new, returning, …)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "content_id": {
+            "description": "Deterministic catalog identifier",
+            "examples": [
+              "movie:heat-1995"
+            ],
+            "type": "string"
+          },
+          "content_rating": {
+            "examples": [
+              "R"
+            ],
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "genres": {
+            "description": "Empty, never null",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "item_source": {
+            "description": "On a continue-watching card: in_progress or next_up",
+            "type": "string"
+          },
+          "keywords": {
+            "description": "Empty, never null",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "last_air_date": {
+            "description": "Calendar date, YYYY-MM-DD",
+            "type": "string"
+          },
+          "logo_url": {
+            "description": "Presigned, short-lived",
+            "type": "string"
+          },
+          "manga_chapter_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "manga_volume_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "networks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "original_language": {
+            "examples": [
+              "en"
+            ],
+            "type": "string"
+          },
+          "overlay_summary": {
+            "$ref": "#/components/schemas/CatalogItemOverlay",
+            "description": "Technical badges of the best file"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "play_content_id": {
+            "description": "The item to play when the card is a series or season; absent when the item plays itself",
+            "type": "string"
+          },
+          "position_seconds": {
+            "description": "Resume position on a continue-watching card",
+            "format": "double",
+            "type": "number"
+          },
+          "poster_thumbhash": {
+            "type": "string"
+          },
+          "poster_url": {
+            "description": "Presigned, short-lived",
+            "type": "string"
+          },
+          "progress_updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "rating_imdb": {
+            "format": "double",
+            "type": "number"
+          },
+          "rating_rt_audience": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating_rt_critic": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating_tmdb": {
+            "format": "double",
+            "type": "number"
+          },
+          "release_date": {
+            "description": "Calendar date, YYYY-MM-DD",
+            "examples": [
+              "1995-12-15"
+            ],
+            "type": "string"
+          },
+          "runtime": {
+            "description": "Minutes",
+            "examples": [
+              170
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "season_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_id": {
+            "description": "Owning series of an episode or season",
+            "type": "string"
+          },
+          "series_title": {
+            "type": "string"
+          },
+          "show_status": {
+            "description": "Airing state of a series",
+            "type": "string"
+          },
+          "sort_metrics": {
+            "$ref": "#/components/schemas/CatalogItemSortMetrics",
+            "description": "The values the listing was sorted by"
+          },
+          "status": {
+            "description": "Metadata match state of the item",
+            "examples": [
+              "matched"
+            ],
+            "type": "string"
+          },
+          "studios": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "examples": [
+              "Heat"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
+            "examples": [
+              "movie"
+            ],
+            "type": "string"
+          },
+          "upcoming_event": {
+            "$ref": "#/components/schemas/CatalogItemUpcomingEvent"
+          },
+          "user_state": {
+            "$ref": "#/components/schemas/CatalogItemUserState",
+            "description": "The viewer's flags; absent without a profile"
+          },
+          "watch": {
+            "$ref": "#/components/schemas/HistoryWatch",
+            "description": "The most recent watch of the card's item"
+          },
+          "work_formats": {
+            "description": "Sibling editions of the same work",
+            "items": {
+              "$ref": "#/components/schemas/CatalogWorkFormat"
+            },
+            "type": "array"
+          },
+          "work_id": {
+            "description": "The work (book) an audiobook or ebook edition belongs to",
+            "type": "string"
+          },
+          "work_title": {
+            "type": "string"
+          },
+          "year": {
+            "examples": [
+              1995
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "watch",
+          "content_id",
+          "type",
+          "title",
+          "genres",
+          "keywords",
+          "status"
+        ],
+        "type": "object"
+      },
+      "HistoryCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/HistoryCard"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "HistoryRemovalTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "content_id": {
+            "description": "A movie, ebook, series, season or episode",
+            "examples": [
+              "episode:heat-s01e01"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "scope": {
+            "description": "item (default) removes the target itself, a series or season expanding to its episodes; show widens a season or episode to its whole series",
+            "enum": [
+              "item",
+              "show"
+            ],
+            "examples": [
+              "item"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id"
+        ],
+        "type": "object"
+      },
+      "HistoryRemoveInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "targets": {
+            "description": "Targets to hide from history",
+            "items": {
+              "$ref": "#/components/schemas/HistoryRemovalTarget"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "type": "object"
+      },
+      "HistoryWatch": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "description": "Whether the watch counted as finished",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "duration_seconds": {
+            "description": "Known runtime at the time; 0 when unknown",
+            "examples": [
+              5400
+            ],
+            "format": "double",
+            "type": "number"
+          },
+          "media_item_id": {
+            "description": "The item that was watched; an episode when the card is its series",
+            "examples": [
+              "episode:heat-s01e01"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "description": "How the watch was recorded: playback, manual, import, legacy",
+            "examples": [
+              "playback"
+            ],
+            "type": "string"
+          },
+          "watched_at": {
+            "description": "When the watch was recorded",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_item_id",
+          "watched_at",
+          "duration_seconds",
+          "completed"
+        ],
+        "type": "object"
+      },
       "Impersonation": {
         "additionalProperties": false,
         "properties": {
@@ -5717,6 +6075,374 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/history": {
+      "get": {
+        "operationId": "listHistory",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artwork variant to presign; absent picks each surface's default",
+            "explode": false,
+            "in": "query",
+            "name": "image_size",
+            "schema": {
+              "description": "Artwork variant to presign; absent picks each surface's default",
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "original"
+              ],
+              "examples": [
+                "medium"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJvIjo1MH0"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the acting profile's watch history as catalog cards, most recent watch first.",
+        "tags": [
+          "history"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/history/remove": {
+      "post": {
+        "operationId": "removeHistoryEntries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoryRemoveInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Hide the targets' watches from the acting profile's history; hiding an already hidden item is a no-op.",
+        "tags": [
+          "history"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },

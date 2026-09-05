@@ -1887,6 +1887,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if progressHandler != nil {
 		v2deps.Progress = progressHandler
 	}
+	if personalDataHandler != nil {
+		v2deps.History = personalDataHandler
+	}
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
 	}

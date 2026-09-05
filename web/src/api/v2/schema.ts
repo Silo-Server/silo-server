@@ -33,6 +33,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the acting profile's watch history as catalog cards, most recent watch first. */
+    get: operations["listHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/history/remove": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Hide the targets' watches from the acting profile's history; hiding an already hidden item is a no-op. */
+    post: operations["removeHistoryEntries"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/libraries": {
     parameters: {
       query?: never;
@@ -1246,6 +1280,172 @@ export interface components {
       IsSet: boolean;
       /** Format: int64 */
       Size: number;
+    };
+    HistoryCard: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      added_at?: string;
+      backdrop_thumbhash?: string;
+      /** @description Presigned, short-lived */
+      backdrop_url?: string;
+      /** @description Section-specific badges (new, returning, …) */
+      badges?: string[];
+      /**
+       * @description Deterministic catalog identifier
+       * @example movie:heat-1995
+       */
+      content_id: string;
+      /** @example R */
+      content_rating?: string;
+      /** Format: double */
+      duration_seconds?: number;
+      /** Format: int64 */
+      episode_number?: number;
+      /** @description Empty, never null */
+      genres: string[];
+      /** @description On a continue-watching card: in_progress or next_up */
+      item_source?: string;
+      /** @description Empty, never null */
+      keywords: string[];
+      /** @description Calendar date, YYYY-MM-DD */
+      last_air_date?: string;
+      /** @description Presigned, short-lived */
+      logo_url?: string;
+      /** Format: int64 */
+      manga_chapter_count?: number;
+      /** Format: int64 */
+      manga_volume_count?: number;
+      networks?: string[];
+      /** @example en */
+      original_language?: string;
+      /** @description Technical badges of the best file */
+      overlay_summary?: components["schemas"]["CatalogItemOverlay"];
+      overview?: string;
+      /** @description The item to play when the card is a series or season; absent when the item plays itself */
+      play_content_id?: string;
+      /**
+       * Format: double
+       * @description Resume position on a continue-watching card
+       */
+      position_seconds?: number;
+      poster_thumbhash?: string;
+      /** @description Presigned, short-lived */
+      poster_url?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      progress_updated_at?: string;
+      /** Format: double */
+      rating_imdb?: number;
+      /** Format: int64 */
+      rating_rt_audience?: number;
+      /** Format: int64 */
+      rating_rt_critic?: number;
+      /** Format: double */
+      rating_tmdb?: number;
+      /**
+       * @description Calendar date, YYYY-MM-DD
+       * @example 1995-12-15
+       */
+      release_date?: string;
+      /**
+       * Format: int64
+       * @description Minutes
+       * @example 170
+       */
+      runtime?: number;
+      /** Format: int64 */
+      season_number?: number;
+      /** @description Owning series of an episode or season */
+      series_id?: string;
+      series_title?: string;
+      /** @description Airing state of a series */
+      show_status?: string;
+      /** @description The values the listing was sorted by */
+      sort_metrics?: components["schemas"]["CatalogItemSortMetrics"];
+      /**
+       * @description Metadata match state of the item
+       * @example matched
+       */
+      status: string;
+      studios?: string[];
+      /** @example Heat */
+      title: string;
+      /**
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
+       * @example movie
+       */
+      type: string;
+      upcoming_event?: components["schemas"]["CatalogItemUpcomingEvent"];
+      /** @description The viewer's flags; absent without a profile */
+      user_state?: components["schemas"]["CatalogItemUserState"];
+      /** @description The most recent watch of the card's item */
+      watch: components["schemas"]["HistoryWatch"];
+      /** @description Sibling editions of the same work */
+      work_formats?: components["schemas"]["CatalogWorkFormat"][];
+      /** @description The work (book) an audiobook or ebook edition belongs to */
+      work_id?: string;
+      work_title?: string;
+      /**
+       * Format: int64
+       * @example 1995
+       */
+      year?: number;
+    };
+    HistoryCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["HistoryCard"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    HistoryRemovalTarget: {
+      /**
+       * @description A movie, ebook, series, season or episode
+       * @example episode:heat-s01e01
+       */
+      content_id: string;
+      /**
+       * @description item (default) removes the target itself, a series or season expanding to its episodes; show widens a season or episode to its whole series
+       * @example item
+       * @enum {string}
+       */
+      scope?: "item" | "show";
+    };
+    HistoryRemoveInputBody: {
+      /** @description Targets to hide from history */
+      targets: components["schemas"]["HistoryRemovalTarget"][];
+    };
+    HistoryWatch: {
+      /**
+       * @description Whether the watch counted as finished
+       * @example true
+       */
+      completed: boolean;
+      /**
+       * Format: double
+       * @description Known runtime at the time; 0 when unknown
+       * @example 5400
+       */
+      duration_seconds: number;
+      /**
+       * @description The item that was watched; an episode when the card is its series
+       * @example episode:heat-s01e01
+       */
+      media_item_id: string;
+      /**
+       * @description How the watch was recorded: playback, manual, import, legacy
+       * @example playback
+       */
+      source?: string;
+      /**
+       * Format: date-time
+       * @description When the watch was recorded
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      watched_at: string;
     };
     Impersonation: {
       /**
@@ -3327,6 +3527,254 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listHistory: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Artwork variant to presign; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HistoryCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  removeHistoryEntries: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["HistoryRemoveInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

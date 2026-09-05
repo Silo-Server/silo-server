@@ -28071,13 +28071,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/history",
+        "operation_id": "listHistory"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-progress (profile_scoped). Offset pagination replaced by limit+opaque cursor (offset underneath; has_more decided from the store page, so hidden/catalog-missing cards never make a page look final); offset rejected (422). Cards are the shared CatalogItem schema with an added watch object {media_item_id, watched_at, duration_seconds, completed, source} for the most recent watch behind the card (an episode watch still collapses to its series card, as v1); watched_at is a UTC-ms instant. image_size is a strict enum answered 422."
     },
     {
       "listener": "api",
@@ -28132,13 +28132,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/history/remove",
+        "operation_id": "removeHistoryEntries"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-progress (profile_scoped). Same body {targets:[{content_id, scope}]} with scope a strict enum (item|show, default item) and targets minItems 1; a rejected target is 422 at body.targets, an unknown target 404; same 204. Retry safety: natural_idempotent (hiding an already hidden item is a no-op)."
     },
     {
       "listener": "api",

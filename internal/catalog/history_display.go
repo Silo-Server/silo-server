@@ -31,6 +31,28 @@ func HistoryEpisodeScopeIDs(entries []userstore.WatchHistoryEntry) []string {
 }
 
 func ResolveHistoryDisplayIDs(ctx context.Context, entries []userstore.WatchHistoryEntry, episodeRepo *EpisodeRepository) ([]string, error) {
+	display, err := ResolveHistoryDisplayEntries(ctx, entries, episodeRepo)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(display))
+	for _, d := range display {
+		ids = append(ids, d.DisplayID)
+	}
+	return ids, nil
+}
+
+// HistoryDisplayEntry is one history card: the id the card is rendered
+// from and the most recent watch it stands for.
+type HistoryDisplayEntry struct {
+	DisplayID string
+	Entry     userstore.WatchHistoryEntry
+}
+
+// ResolveHistoryDisplayEntries is ResolveHistoryDisplayIDs keeping the
+// history row each display id was first seen on, so a listing can compose
+// the card with its watch record.
+func ResolveHistoryDisplayEntries(ctx context.Context, entries []userstore.WatchHistoryEntry, episodeRepo *EpisodeRepository) ([]HistoryDisplayEntry, error) {
 	episodeSeriesByID := make(map[string]string)
 	if episodeRepo != nil {
 		episodeIDs := make([]string, 0, len(entries))
@@ -61,7 +83,7 @@ func ResolveHistoryDisplayIDs(ctx context.Context, entries []userstore.WatchHist
 		}
 	}
 
-	ids := make([]string, 0, len(entries))
+	display := make([]HistoryDisplayEntry, 0, len(entries))
 	seen := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		displayID := strings.TrimSpace(entry.MediaItemID)
@@ -75,7 +97,7 @@ func ResolveHistoryDisplayIDs(ctx context.Context, entries []userstore.WatchHist
 			continue
 		}
 		seen[displayID] = struct{}{}
-		ids = append(ids, displayID)
+		display = append(display, HistoryDisplayEntry{DisplayID: displayID, Entry: entry})
 	}
-	return ids, nil
+	return display, nil
 }
