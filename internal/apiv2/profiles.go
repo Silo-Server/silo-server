@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -138,9 +139,12 @@ func registerProfiles(reg *Registry) {
 }
 
 // updateProfile runs the same authorization and write path as v1 PUT
-// /profiles/{id}. A PIN-locked primary profile counts as verified when the
-// viewer-access gate resolved it as such (X-Profile-Token), exactly the
-// check the v1 handler performs itself.
+// /profiles/{id}. A PIN-locked primary profile counts as verified only when
+// the viewer-access gate verified it by X-Profile-Token, the check the v1
+// handler performs itself (verifyProfileToken, which needs a login session).
+// An API-key credential is exempt from PIN verification at the gate; v1 does
+// not let that exemption stand in for the PIN when managing the household,
+// so the verifier rejects a scope whose verification was skipped.
 func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) (*ProfileOutput, error) {
 	if reg.deps.Profiles == nil {
 		return nil, unavailable("profile")
@@ -156,13 +160,16 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	if p != nil {
 		return nil, p
 	}
+	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs); p != nil {
+		return nil, p
+	}
 	view, err := reg.deps.Profiles.UpdateProfile(ctx, handlers.ProfileUpdateCommand{
 		UserID:          claims.UserID,
 		ProfileID:       string(in.ID),
 		ActiveProfileID: profileFrom(ctx),
 		Request:         req,
 		VerifyProfile: func(profileID string) error {
-			if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified {
+			if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
 				return nil
 			}
 			return access.ErrProfileUnverified
@@ -176,6 +183,34 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 		return nil, p
 	}
 	return &ProfileOutput{Body: profile}, nil
+}
+
+// rejectUnknownLibraries refuses an allowlist naming a library that does not
+// exist. The store's row-by-row insert would otherwise hit the library
+// foreign key (a 500) on Postgres, and persist a dangling id where no key
+// is enforced. A nil or empty allowlist has nothing to check.
+func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int) *Problem {
+	if ids == nil || len(*ids) == 0 {
+		return nil
+	}
+	if reg.deps.Libraries == nil {
+		return unavailable("library")
+	}
+	existing, err := reg.deps.Libraries.ExistingIDs(ctx, *ids)
+	if err != nil {
+		return serviceProblem(err)
+	}
+	known := make(map[int]bool, len(existing))
+	for _, id := range existing {
+		known[id] = true
+	}
+	for _, id := range *ids {
+		if !known[id] {
+			return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+				WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "unknown library identifier: " + strconv.Itoa(id)})
+		}
+	}
+	return nil
 }
 
 // profileProblem maps the v1 decision onto problem types: a rejected member

@@ -86,6 +86,10 @@ type Dependencies struct {
 	Progress ProgressService
 	// Profiles applies profile updates (*handlers.ProfileHandler).
 	Profiles ProfileService
+	// Libraries answers which library identifiers exist
+	// (*catalog.FolderRepository); updateProfile validates an allowlist
+	// against it so an unknown id is a 422 rather than a foreign-key 500.
+	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
 
@@ -364,6 +368,13 @@ type ProgressService interface {
 // ProfileService is the slice of *handlers.ProfileHandler updateProfile uses.
 type ProfileService interface {
 	UpdateProfile(ctx context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error)
+}
+
+// LibraryService is the slice of *catalog.FolderRepository updateProfile
+// uses to validate a library allowlist before the store sees it.
+type LibraryService interface {
+	// ExistingIDs returns the subset of ids that name a library.
+	ExistingIDs(ctx context.Context, ids []int) ([]int, error)
 }
 
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.

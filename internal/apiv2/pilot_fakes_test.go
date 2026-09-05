@@ -3,6 +3,8 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"net/http"
+	"slices"
 	"sort"
 	"time"
 
@@ -129,6 +131,11 @@ type fakeProfiles struct {
 	last *handlers.ProfileUpdateCommand
 	view handlers.ProfileView
 	err  error
+	// lockedPrimary, when set, is the PIN-locked primary profile the fake
+	// treats as managing the household: like v1 canManageHouseholdAs it runs
+	// the command's verifier for it and answers an unverified one with the
+	// 403 profile_management the real service returns.
+	lockedPrimary string
 }
 
 func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error) {
@@ -136,7 +143,31 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 	if f.err != nil {
 		return handlers.ProfileView{}, f.err
 	}
+	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
+		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: "profile_management", Message: "Profile management requires verifying the primary profile PIN"}
+		}
+	}
 	return f.view, nil
+}
+
+// fakeLibraries knows the libraries whose ids are in known.
+type fakeLibraries struct {
+	known []int
+	err   error
+}
+
+func (f fakeLibraries) ExistingIDs(_ context.Context, ids []int) ([]int, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []int
+	for _, id := range ids {
+		if slices.Contains(f.known, id) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 type fakeAdminUsers struct {
@@ -194,6 +225,7 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 		profiles = &fakeProfiles{view: fixtureProfileView()}
 	}
 	deps.Profiles = profiles
+	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()

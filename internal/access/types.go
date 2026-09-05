@@ -17,6 +17,13 @@ type Scope struct {
 	MetadataLanguageOverrides map[string]string
 	PolicyRevision            int64
 	ProfileVerified           bool
+	// PINVerificationSkipped is set when ProfileVerified holds only because
+	// the request was exempt from PIN verification (an API-key credential,
+	// ResolveInput.SkipPINVerification), not because a profile token proved
+	// the PIN. Checks that need an actual verification, such as household
+	// management by a PIN-locked primary profile, treat such a scope as
+	// unverified.
+	PINVerificationSkipped bool
 }
 
 // ResolveInput is the request input for resolving a viewer access scope.

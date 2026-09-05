@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -95,6 +96,9 @@ func TestUpdateProfileValidation(t *testing.T) {
 		// A repeated identifier would abort the store's primary-key insert;
 		// it is the client's error, answered before the store sees it.
 		{`{"allowed_library_ids":["1","1"]}`, "body.allowed_library_ids", codeInvalid},
+		// An id no library carries would hit the store's foreign key (a 500
+		// on Postgres) or persist dangling where no key is enforced.
+		{`{"allowed_library_ids":["1","9"]}`, "body.allowed_library_ids", codeInvalid},
 		// Only null clears the PIN: "" must never reach the store as the
 		// clearing sentinel, and bcrypt refuses more than 72 bytes.
 		{`{"pin":""}`, locationPIN, codeOutOfRange},
@@ -120,6 +124,25 @@ func TestUpdateProfileValidation(t *testing.T) {
 	if len(dup.Errors) != 1 || dup.Errors[0].Detail != "duplicate library identifier" {
 		t.Errorf("duplicate detail: errors = %+v", dup.Errors)
 	}
+	unknown := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":["3","9"]}`, auth), TypeValidationFailed)
+	if len(unknown.Errors) != 1 || unknown.Errors[0].Detail != "unknown library identifier: 9" {
+		t.Errorf("unknown detail: errors = %+v", unknown.Errors)
+	}
+	// Every id known: the allowlist reaches the store as parsed.
+	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":["3","1"]}`, auth); rec.Code != 200 || profiles.last.Request.AllowedLibraryIDs == nil || len(*profiles.last.Request.AllowedLibraryIDs) != 2 {
+		t.Errorf("known ids: %d %s", rec.Code, rec.Body.String())
+	}
+	// An empty allowlist has nothing to look up and clears the list without
+	// the library service; a non-empty one needs it.
+	deps := pilotDeps(nil, nil)
+	deps.Libraries = nil
+	h = newTestHandler(t, deps)
+	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":[]}`, auth); rec.Code != 200 {
+		t.Errorf("empty allowlist without library service: %d %s", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":["1"]}`, auth), TypeDependencyUnavailable)
+	deps.Libraries = fakeLibraries{err: errStore}
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":["1"]}`, auth), TypeInternalError)
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name": "x"`, auth), TypeMalformedRequest)
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/", `{}`, auth), TypeNotFound)
 }
@@ -146,6 +169,32 @@ func TestUpdateProfileDecisions(t *testing.T) {
 		if tc.want == TypeInternalError && p.Detail != "An unexpected error occurred." {
 			t.Fatalf("detail leaked: %q", p.Detail)
 		}
+	}
+
+	// A PIN-locked primary profile manages the household only once its PIN
+	// is verified. An API key passes the viewer-access gate without the PIN
+	// (SkipPINVerification), and v1 verifyProfileToken still refuses it (no
+	// login session, no profile token), so the v2 verifier refuses it too.
+	profiles := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, with(bearer(apiKeyToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
+	if err := profiles.last.VerifyProfile("p-primary-locked"); !errors.Is(err, access.ErrProfileUnverified) {
+		t.Fatalf("api key stood in for the PIN: %v", err)
+	}
+	// The same API key on an unlocked primary needs no PIN and manages the
+	// household, as in v1.
+	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, with(bearer(apiKeyToken), "X-Profile-Id", "p-primary")); rec.Code != 200 {
+		t.Fatalf("api key on unlocked primary: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := profiles.last.VerifyProfile("p-primary"); err != nil {
+		t.Fatalf("unlocked primary rejected: %v", err)
+	}
+	// A login session that presented the profile token is verified.
+	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, with(with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "t")); rec.Code != 200 {
+		t.Fatalf("session with token: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := profiles.last.VerifyProfile("p-primary-locked"); err != nil {
+		t.Fatalf("token-verified primary rejected: %v", err)
 	}
 }
 
