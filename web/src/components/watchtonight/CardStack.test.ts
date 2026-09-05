@@ -17,6 +17,7 @@ function card(type: SwipeCard["type"]): SwipeCard {
     backdrop_url: "",
     backdrop_thumbhash: "",
     logo_url: "",
+    content_rating: "",
     watch_tonight_source: "recommendation",
     cast: [],
   };

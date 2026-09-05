@@ -1,5 +1,4 @@
-import type { DiscoverResponse, DiscoverRow, RecommendationSectionResponse } from "@/api/types";
-import { catalogItemFromV2 } from "@/api/v2/catalog";
+import { catalogItemFromV2, type CatalogCardItem } from "@/api/v2/catalog";
 import type { components } from "@/api/v2/schema";
 
 /**
@@ -16,6 +15,29 @@ type WatchTonightCardV2 = components["schemas"]["WatchTonightCard"];
 type WatchTonightCardPageV2 = components["schemas"]["WatchTonightCardPage"];
 
 export type WatchTonightSource = WatchTonightItemV2["watch_tonight_source"];
+
+/** A recommendation row as the Discover and For You screens render it. */
+export interface DiscoverRow {
+  type: string;
+  label: string;
+  /** URL kind for the dedicated "see all" page (e.g. "for-you-main", "cluster", "genre"). */
+  section_kind?: string;
+  /** URL key paired with section_kind when needed (cluster index or genre name). */
+  section_key?: string;
+  items: CatalogCardItem[];
+}
+
+export interface DiscoverResponse {
+  rows: DiscoverRow[];
+}
+
+export interface RecommendationSectionResponse {
+  kind: string;
+  key?: string;
+  type: string;
+  label: string;
+  items: CatalogCardItem[];
+}
 
 export function discoverRowFromV2(row: RecommendationRowV2): DiscoverRow {
   return {

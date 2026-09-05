@@ -38,7 +38,7 @@ export function useTasteSeedItems(enabled = true) {
 
 /**
  * Submits a batch of selected content IDs as favorites and triggers a single
- * taste-profile refresh. Uses the dedicated POST /recommendations/taste-seed
+ * taste-profile refresh. Uses the dedicated POST /api/v2/recommendations/taste-seed
  * endpoint so the server can debounce the refresh into one request rather than
  * one-per-favorite.
  */

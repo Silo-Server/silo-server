@@ -4109,28 +4109,6 @@ export interface SectionsResponse {
   sections: ResolvedSection[];
 }
 
-export interface DiscoverRow {
-  type: string;
-  label: string;
-  /** URL kind for the dedicated "see all" page (e.g. "for-you-main", "cluster", "genre"). */
-  section_kind?: string;
-  /** URL key paired with section_kind when needed (cluster index or genre name). */
-  section_key?: string;
-  items: SectionItem[];
-}
-
-export interface DiscoverResponse {
-  rows: DiscoverRow[];
-}
-
-export interface RecommendationSectionResponse {
-  kind: string;
-  key?: string;
-  type: string;
-  label: string;
-  items: SectionItem[];
-}
-
 export interface ResolvedSectionLayout {
   id: string;
   section_type: string;

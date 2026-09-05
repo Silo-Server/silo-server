@@ -48,6 +48,11 @@ export default tseslint.config(
       "src/hooks/queries/libraryCollections.ts",
       "src/components/RecipeGallery/BulkApplyDialog.tsx",
       "src/pages/OAuthComplete.tsx",
+      "src/hooks/queries/recommendations.ts",
+      "src/hooks/queries/tasteSeed.ts",
+      "src/pages/Recommendations.tsx",
+      "src/pages/RecommendationsSection.tsx",
+      "src/components/RecommendationGrid.tsx",
     ],
     rules: {
       "no-restricted-syntax": [

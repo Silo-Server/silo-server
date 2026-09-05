@@ -1,14 +1,15 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import type { DiscoverResponse, RecommendationSectionResponse } from "@/api/types";
 import { catalogItemFromV2, type CatalogCardItem } from "@/api/v2/catalog";
 import {
+  type DiscoverResponse,
+  type RecommendationSectionResponse,
   discoverFromV2,
   discoverRowFromV2,
   recommendationSectionFromV2,
   swipeCardsPageFromV2,
   watchTonightFromV2,
 } from "@/api/v2/recommendations";
-import { v2, type V2Result } from "@/api/v2/request";
+import { v2, type V2PathParams, type V2Result } from "@/api/v2/request";
 import { recKeys } from "./keys";
 
 const SIMILAR_ITEMS_LIMIT = 12;
@@ -110,17 +111,39 @@ export function useDiscover() {
   });
 }
 
-export function useRecommendationSection(kind: string, key?: string) {
+/** The section kinds the contract serves; a discover row's `section_kind` is one of these. */
+export type RecommendationSectionKind =
+  V2PathParams<"GET /api/v2/recommendations/section/{kind}">["kind"];
+
+const RECOMMENDATION_SECTION_KINDS: readonly RecommendationSectionKind[] = [
+  "for-you-main",
+  "cluster",
+  "similar-users",
+  "popular",
+  "recently-added",
+  "top-rated",
+  "genre",
+];
+
+export function isRecommendationSectionKind(
+  kind: string | undefined,
+): kind is RecommendationSectionKind {
+  return (RECOMMENDATION_SECTION_KINDS as readonly string[]).includes(kind ?? "");
+}
+
+/** Reads one section; an unknown `kind` (a hand-typed URL) leaves the query disabled. */
+export function useRecommendationSection(kind: string | undefined, key?: string) {
+  const sectionKind = isRecommendationSectionKind(kind) ? kind : undefined;
   return useQuery({
-    queryKey: recKeys.section(kind, key),
+    queryKey: recKeys.section(kind ?? "", key),
     queryFn: ({ signal }): Promise<RecommendationSectionResponse> =>
       v2("GET /api/v2/recommendations/section/{kind}", {
-        path: { kind },
+        path: { kind: sectionKind ?? "for-you-main" },
         query: { key },
         signal,
       }).then(recommendationSectionFromV2),
     staleTime: 300_000,
-    enabled: !!kind,
+    enabled: sectionKind !== undefined,
   });
 }
 
