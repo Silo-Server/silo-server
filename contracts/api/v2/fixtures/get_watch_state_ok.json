@@ -1,0 +1,89 @@
+{
+  "content_id": "movie:heat-1995",
+  "type": "movie",
+  "title": "Heat",
+  "year": 1995,
+  "versions": [
+    {
+      "file_id": "42",
+      "resolution": "1080p",
+      "codec_video": "h264",
+      "codec_audio": "eac3",
+      "hdr": false,
+      "container": "mkv",
+      "file_size": 1024,
+      "duration_seconds": 10200,
+      "bitrate": 8000000,
+      "added_at": "2026-01-02T03:04:05.000Z",
+      "video_tracks": [
+        {
+          "codec": "h264",
+          "dv_config_present": false,
+          "dv_bl_compat_id_present": false,
+          "width": 1920,
+          "height": 1080,
+          "interlaced": false
+        }
+      ],
+      "audio_tracks": [
+        {
+          "language": "eng",
+          "codec": "eac3",
+          "channels": 6,
+          "default": true
+        }
+      ],
+      "chapters": [
+        {
+          "index": 1,
+          "title": "Opening",
+          "start_seconds": 0,
+          "end_seconds": 300,
+          "source": "embedded"
+        }
+      ],
+      "intro": {
+        "start_seconds": 0,
+        "end_seconds": 90
+      }
+    }
+  ],
+  "playback_variants": [
+    {
+      "variant_id": "v1",
+      "part_count": 1,
+      "default_file_id": "42",
+      "parts": [
+        {
+          "part_index": 0,
+          "default_file_id": "42",
+          "versions": []
+        }
+      ]
+    }
+  ],
+  "subtitles": [
+    {
+      "source": "embedded",
+      "language": "eng",
+      "forced": false,
+      "hearing_impaired": false
+    }
+  ],
+  "credits": {
+    "start_seconds": 10000,
+    "end_seconds": 10200
+  },
+  "user_data": {
+    "position_seconds": 1325.5,
+    "duration_seconds": 10200,
+    "is_in_progress": true,
+    "watched_count": 0,
+    "unplayed_count": 0,
+    "in_progress_count": 0,
+    "played": false,
+    "last_file_id": "3"
+  },
+  "effective_subtitle_language": "eng"
+}
+
