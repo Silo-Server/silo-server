@@ -839,7 +839,7 @@
     {
       "name": "resolve_effective_settings_ok",
       "operation_id": "resolveEffectiveSettings",
-      "scenario": "Keys resolved under several content contexts in one request; each answer carries the context_id it was asked with and the source context.",
+      "scenario": "Keys resolved under several content contexts in one request; each answer carries the context_id it was asked with, and source_context is the winning row (here the profile), not the requested library or series.",
       "request": {
         "method": "POST",
         "path": "/api/v2/settings/values/effective",

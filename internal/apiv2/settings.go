@@ -782,14 +782,18 @@ type SettingConstraint struct {
 	Constraint  string `json:"constraint" doc:"How the policy narrows the value; one of the settings contract's constraint kinds" example:"ceiling"`
 }
 
-// SettingSourceContext locates the content context an effective value was
-// resolved for.
+// SettingSourceContext locates the stored row an effective value came from.
+// It is the winning row's identity, not the content context a batched
+// resolve was asked for: a value inherited from the profile scope answers a
+// library context with a source context naming only the profile. The same
+// members appear flat on EffectiveSettingValue next to scope; v1 carries both
+// and v2 keeps them so a client written against one keeps working.
 type SettingSourceContext struct {
-	ProfileID    ID     `json:"profile_id,omitempty" doc:"The profile resolved for" example:"1"`
-	ClientFamily string `json:"client_family,omitempty" doc:"The client family resolved for" example:"tv"`
-	DeviceID     string `json:"device_id,omitempty" doc:"The device resolved for" example:"iphone-1"`
-	LibraryID    ID     `json:"library_id,omitempty" doc:"The library resolved for" example:"3"`
-	SeriesID     string `json:"series_id,omitempty" doc:"The series resolved for" example:"tv:12345"`
+	ProfileID    ID     `json:"profile_id,omitempty" doc:"The profile of the winning row" example:"1"`
+	ClientFamily string `json:"client_family,omitempty" doc:"The client family of the winning row" example:"tv"`
+	DeviceID     string `json:"device_id,omitempty" doc:"The device of the winning row" example:"iphone-1"`
+	LibraryID    ID     `json:"library_id,omitempty" doc:"The library of the winning row" example:"3"`
+	SeriesID     string `json:"series_id,omitempty" doc:"The series of the winning row" example:"tv:12345"`
 }
 
 // EffectiveSettingValue is one key resolved through the contract's
@@ -808,7 +812,7 @@ type EffectiveSettingValue struct {
 	SuggestedValues    []string              `json:"suggested_values,omitempty" doc:"Advisory suggestions for an open setting; never a write allowlist" example:"[\"en\",\"fr\"]"`
 	DefinitionRevision int                   `json:"definition_revision" doc:"The contract revision that last changed this key's definition" example:"3"`
 	UpdatedAt          *Instant              `json:"updated_at,omitempty" doc:"When the winning stored row was last written; absent for a default" example:"2026-01-02T03:04:05.000Z"`
-	SourceContext      *SettingSourceContext `json:"source_context,omitempty" doc:"The content context the value was resolved for; absent outside a batched resolve"`
+	SourceContext      *SettingSourceContext `json:"source_context,omitempty" doc:"The identity of the winning stored row (the members scope through series_id, nested); absent for a default. Not the content context a batched resolve was asked for"`
 	Scope              string                `json:"scope,omitempty" doc:"The scope of the winning row, so a client can reset exactly that scope; absent for a default" example:"profile"`
 	ProfileID          ID                    `json:"profile_id,omitempty" doc:"The profile of the winning row" example:"1"`
 	ClientFamily       string                `json:"client_family,omitempty" doc:"The client family of the winning row" example:"tv"`

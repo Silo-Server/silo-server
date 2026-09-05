@@ -10,8 +10,7 @@
           "definition_revision": 3,
           "updated_at": "2026-01-02T03:04:05.678Z",
           "source_context": {
-            "profile_id": "p-owner",
-            "library_id": "3"
+            "profile_id": "p-owner"
           },
           "scope": "profile",
           "profile_id": "p-owner"
@@ -28,8 +27,7 @@
           "definition_revision": 3,
           "updated_at": "2026-01-02T03:04:05.678Z",
           "source_context": {
-            "profile_id": "p-owner",
-            "series_id": "tv:12345"
+            "profile_id": "p-owner"
           },
           "scope": "profile",
           "profile_id": "p-owner"

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"slices"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -600,6 +599,9 @@ func (f *fakeSettingValuesSeam) effective(q handlers.EffectiveSettingsQuery, key
 		row := handlers.SettingValueView{Key: key, Scope: "profile", ProfileID: profileID}
 		if stored, ok := f.values[settingRowKey(row)]; ok {
 			e.Value, e.Source, e.Scope, e.ProfileID, e.UpdatedAt = stored.Value, "profile", "profile", profileID, stored.UpdatedAt
+			// As the real seam: the source context is the winning row's
+			// identity, never the context a batched resolve asked for.
+			e.SourceContext = &handlers.EffectiveSourceContextView{ProfileID: profileID}
 		}
 		if key == "playback.preferred_quality" && string(e.Value) == `"2160p"` {
 			e.StoredValue, e.Value, e.Constrained, e.ConstraintKind = e.Value, json.RawMessage(`"1080p"`), true, "ceiling"
@@ -644,15 +646,6 @@ func (f *fakeSettingValuesSeam) ResolveEffectiveSettingContexts(_ context.Contex
 		views, apiErr := f.effective(q, q.Keys, "keys")
 		if apiErr != nil {
 			return nil, apiErr
-		}
-		for i := range views {
-			views[i].SourceContext = &handlers.EffectiveSourceContextView{ProfileID: q.ActiveProfileID, SeriesID: c.SeriesID}
-			if len(c.LibraryID) > 0 {
-				var text string
-				_ = json.Unmarshal(c.LibraryID, &text)
-				n, _ := strconv.Atoi(text)
-				views[i].SourceContext.LibraryID = n
-			}
 		}
 		out = append(out, handlers.EffectiveSettingContextView{ContextID: c.ContextID, Settings: views})
 	}

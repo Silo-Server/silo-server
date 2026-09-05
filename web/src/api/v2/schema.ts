@@ -617,7 +617,7 @@ export interface components {
        * @example profile
        */
       source: string;
-      /** @description The content context the value was resolved for; absent outside a batched resolve */
+      /** @description The identity of the winning stored row (the members scope through series_id, nested); absent for a default. Not the content context a batched resolve was asked for */
       source_context?: components["schemas"]["SettingSourceContext"];
       /** @description The authored value when policy narrowed it; absent otherwise */
       stored_value?: unknown;
@@ -1290,27 +1290,27 @@ export interface components {
     };
     SettingSourceContext: {
       /**
-       * @description The client family resolved for
+       * @description The client family of the winning row
        * @example tv
        */
       client_family?: string;
       /**
-       * @description The device resolved for
+       * @description The device of the winning row
        * @example iphone-1
        */
       device_id?: string;
       /**
-       * @description The library resolved for
+       * @description The library of the winning row
        * @example 3
        */
       library_id?: string;
       /**
-       * @description The profile resolved for
+       * @description The profile of the winning row
        * @example 1
        */
       profile_id?: string;
       /**
-       * @description The series resolved for
+       * @description The series of the winning row
        * @example tv:12345
        */
       series_id?: string;

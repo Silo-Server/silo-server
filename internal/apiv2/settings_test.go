@@ -434,7 +434,7 @@ func TestListEffectiveSettings(t *testing.T) {
 	}
 	// A constrained value reports the authored one and what is permitted;
 	// a default carries no scope members.
-	want := `{"items":[{"key":"playback.preferred_quality","value":"1080p","source":"profile","stored_value":"2160p","constrained":true,"constraint_kind":"ceiling","permitted_values":["auto","1080p"],"definition_revision":3,"updated_at":"2026-01-02T03:04:05.678Z","scope":"profile","profile_id":"p-owner"},{"key":"ui.theme","value":"midnight-cinema","source":"default","definition_revision":3}],"revision":8}` + "\n"
+	want := `{"items":[{"key":"playback.preferred_quality","value":"1080p","source":"profile","stored_value":"2160p","constrained":true,"constraint_kind":"ceiling","permitted_values":["auto","1080p"],"definition_revision":3,"updated_at":"2026-01-02T03:04:05.678Z","source_context":{"profile_id":"p-owner"},"scope":"profile","profile_id":"p-owner"},{"key":"ui.theme","value":"midnight-cinema","source":"default","definition_revision":3}],"revision":8}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -457,12 +457,19 @@ func TestListEffectiveSettings(t *testing.T) {
 
 func TestResolveEffectiveSettings(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
-	body := `{"keys":["ui.theme"],"contexts":[{"context_id":"a","library_id":"3"},{"context_id":"b","series_id":"tv:1"}]}`
+	if rec := do(t, h, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"cinema-light"}`, settingsOwner()); rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	body := `{"keys":["ui.theme","playback.preferred_quality"],"contexts":[{"context_id":"a","library_id":"3"},{"context_id":"b","series_id":"tv:1"}]}`
 	rec := do(t, h, http.MethodPost, "/api/v2/settings/values/effective", body, settingsOwner())
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"items":[{"context_id":"a","settings":[{"key":"ui.theme","value":"midnight-cinema","source":"default","definition_revision":3,"source_context":{"profile_id":"p-owner","library_id":"3"}}]},{"context_id":"b","settings":[{"key":"ui.theme","value":"midnight-cinema","source":"default","definition_revision":3,"source_context":{"profile_id":"p-owner","series_id":"tv:1"}}]}],"revision":8}` + "\n"
+	// source_context is the winning row's identity, as on the single resolve:
+	// a profile-scoped value answers a library or series context with the
+	// profile alone, and a contract default carries none. It is never the
+	// context the batch asked for; context_id is what ties an answer back.
+	want := `{"items":[{"context_id":"a","settings":[{"key":"ui.theme","value":"cinema-light","source":"profile","definition_revision":3,"updated_at":"2026-01-02T03:04:05.678Z","source_context":{"profile_id":"p-owner"},"scope":"profile","profile_id":"p-owner"},{"key":"playback.preferred_quality","value":"auto","source":"default","definition_revision":3}]},{"context_id":"b","settings":[{"key":"ui.theme","value":"cinema-light","source":"profile","definition_revision":3,"updated_at":"2026-01-02T03:04:05.678Z","source_context":{"profile_id":"p-owner"},"scope":"profile","profile_id":"p-owner"},{"key":"playback.preferred_quality","value":"auto","source":"default","definition_revision":3}]}],"revision":8}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}

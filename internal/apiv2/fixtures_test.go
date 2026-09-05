@@ -273,7 +273,7 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/settings/values/effective?keys=no.such", headers: profileOwner(),
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "resolve_effective_settings_ok", operationID: "resolveEffectiveSettings",
-			scenario: "Keys resolved under several content contexts in one request; each answer carries the context_id it was asked with and the source context.",
+			scenario: "Keys resolved under several content contexts in one request; each answer carries the context_id it was asked with, and source_context is the winning row (here the profile), not the requested library or series.",
 			method:   http.MethodPost, path: "/api/v2/settings/values/effective", headers: profileOwner(),
 			body:   `{"keys":["ui.theme"],"contexts":[{"context_id":"row-1","library_id":"3"},{"context_id":"row-2","series_id":"tv:12345"}]}`,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/EffectiveSettingContextCollection"},
