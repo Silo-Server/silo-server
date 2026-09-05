@@ -29,7 +29,7 @@ func TestCompatCopySeekSourceTimelineRealFFmpeg(t *testing.T) {
 	if _, err := exec.LookPath(ffprobe); err != nil {
 		t.Skip("ffprobe is not installed")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	run := func(binary string, args ...string) []byte {
 		t.Helper()

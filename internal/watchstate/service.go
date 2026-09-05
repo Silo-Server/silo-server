@@ -464,7 +464,11 @@ func (s *Service) recordMarkWatchedBatch(
 	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targetIDs))
 	entries := make([]userstore.WatchHistoryEntry, 0, len(targetIDs))
 	for _, targetID := range targetIDs {
-		batchTargets = append(batchTargets, userstore.MarkWatchedTarget{MediaItemID: targetID})
+		target := userstore.MarkWatchedTarget{MediaItemID: targetID}
+		if source == userstore.WatchHistorySourceJellycompat {
+			target.EventAt = new(watchedAt)
+		}
+		batchTargets = append(batchTargets, target)
 		entries = append(entries, userstore.WatchHistoryEntry{
 			ProfileID:   profileID,
 			MediaItemID: targetID,

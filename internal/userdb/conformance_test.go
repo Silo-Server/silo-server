@@ -77,3 +77,7 @@ func TestSQLiteAddFavoriteAtReportsInsertion(t *testing.T) {
 		t.Fatal("duplicate AddFavoriteAt reported an insertion")
 	}
 }
+
+func TestSQLiteDatedMarkWatchedBatchAtomic(t *testing.T) {
+	storetest.RunDatedMarkWatchedBatch(t, newConformanceStore(t))
+}

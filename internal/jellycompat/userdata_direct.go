@@ -362,24 +362,6 @@ func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *
 	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, ids, date); err != nil {
 		return err
 	}
-	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
-	if err != nil {
-		return err
-	}
-	writer, ok := store.(jellycompatProgressWriter)
-	if !ok {
-		return fmt.Errorf("explicit user progress updates unavailable")
-	}
-	progress, err := store.ListProgressByMediaItems(ctx, session.ProfileID, ids)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		duration := progress[id].DurationSeconds
-		if err := writer.SetJellycompatProgress(ctx, session.ProfileID, id, 0, duration, true, date); err != nil {
-			return err
-		}
-	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 	return nil
 }

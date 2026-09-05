@@ -3,6 +3,8 @@ package pgstore
 import (
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/userstore/storetest"
 )
 
 func TestJellycompatProgressExplicitHistoricalEdit(t *testing.T) {
@@ -68,4 +70,9 @@ func TestJellycompatProgressExplicitHistoricalEdit(t *testing.T) {
 		t.Fatal("explicit-date marker leaked into legacy write")
 	}
 
+}
+
+func TestDatedMarkWatchedBatchAtomic(t *testing.T) {
+	pool, userID := newConstraintTestUser(t)
+	storetest.RunDatedMarkWatchedBatch(t, newStore(pool, userID))
 }

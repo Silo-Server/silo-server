@@ -317,3 +317,38 @@ func TestConfigurationNullClearsPreferences(t *testing.T) {
 		t.Fatalf("stale canonical preferences: %+v", dto.Configuration)
 	}
 }
+
+// Expose only the existing atomic batch capability; a dated series mark must
+// not require a second pass through the individual progress-edit capability.
+type batchOnlyViewerStore struct {
+	userstore.UserStore
+	userstore.WatchedBatchWriter
+}
+
+func TestDatedPlayedBatchNeedsNoIndividualProgressRewrites(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	batch, ok := store.(userstore.WatchedBatchWriter)
+	if !ok {
+		t.Fatal("store does not support atomic watched batches")
+	}
+	provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: batchOnlyViewerStore{store, batch}}, &notifications.System{})
+	service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
+	date := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	ids := []string{"episode-1", "episode-2"}
+	if err := service.MarkPlayedBatchAt(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, ids, date); err != nil {
+		t.Fatal(err)
+	}
+	dates, err := jellycompatProgressDates(t.Context(), store, "profile-1", ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if dates[id] != date.Format(time.RFC3339) {
+			t.Fatalf("date for %s: %s", id, dates[id])
+		}
+	}
+	history, err := store.ListHistory(t.Context(), "profile-1", 10, 0)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("batch history: %+v %v", history, err)
+	}
+}

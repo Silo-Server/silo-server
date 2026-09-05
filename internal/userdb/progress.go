@@ -272,6 +272,13 @@ func MarkWatchedBatch(
 		); err != nil {
 			return nil, fmt.Errorf("marking watched batch: %w", err)
 		}
+		if target.EventAt != nil {
+			// Keep the explicit date separate from updated_at stamping, within this
+			// same transaction. This also preserves a repeated historical date.
+			if _, err := tx.ExecContext(ctx, "UPDATE watch_progress SET event_at = ? WHERE profile_id = ? AND media_item_id = ?", target.EventAt.UTC().Format(time.RFC3339Nano), profileID, mediaItemID); err != nil {
+				return nil, fmt.Errorf("setting batch progress date: %w", err)
+			}
+		}
 	}
 
 	written := make([]userstore.WatchHistoryEntry, 0, len(entries))
