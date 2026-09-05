@@ -60,6 +60,9 @@ type (
 	ExplicitSettingValueView    = explicitSettingValueResponse
 	EffectiveSettingValueView   = effectiveSettingValueResponse
 	EffectiveSettingContextView = effectiveContextResponse
+	// EffectiveSourceContextView locates the content context an effective
+	// value was resolved for.
+	EffectiveSourceContextView = effectiveSourceContextResponse
 	// EffectiveContextRequest is one content context of a batched resolve.
 	EffectiveContextRequest = effectiveContextRequest
 )

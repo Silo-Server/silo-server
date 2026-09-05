@@ -224,7 +224,7 @@ func TestGetPluginSettings(t *testing.T) {
 	}
 	// Values the account never set: an empty object, never null.
 	deps := pilotDeps(nil, nil)
-	_, _, plugins := settingsFakes()
+	_, _, plugins, _ := settingsFakes()
 	plugins.values = nil
 	deps.PluginSettings = plugins
 	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/settings/plugins/3", "", bearer(memberToken))
@@ -252,4 +252,269 @@ func TestPluginSettingsSchemaIsExtensionBag(t *testing.T) {
 		t.Fatalf("values are not typed as strings: %v", values)
 	}
 	var _ handlers.PluginUserSettingsDetailView
+}
+
+func TestUpdatePluginSettings(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{"region":"eu","lang":"fr"}}`, bearer(memberToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	// The write answers with the same document getPluginSettings serves.
+	var body struct {
+		Installation map[string]json.RawMessage `json:"installation"`
+		Values       map[string]string          `json:"values"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if string(body.Installation["id"]) != `"3"` || body.Values["region"] != "eu" || body.Values["lang"] != "fr" {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// An empty set clears; values is still emitted as {}.
+	rec = do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{}}`, bearer(memberToken))
+	if rec.Code != 200 || !bytes.Contains(rec.Body.Bytes(), []byte(`"values":{}`)) {
+		t.Fatalf("clear: %d %s", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/9", `{"values":{}}`, bearer(memberToken)), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/abc", `{"values":{}}`, bearer(memberToken)), TypeNotFound)
+	// The member is required and its values are strings; unknown members are refused.
+	p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{}`, bearer(memberToken)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.values" || p.Errors[0].Code != codeRequired {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{"region":1}}`, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{},"extra":1}`, bearer(memberToken)), TypeValidationFailed)
+	// The plugin's own schema refusal is rendered at body.values.
+	plugins := deps.PluginSettings.(*fakePluginSettingsSeam)
+	plugins.err = &handlers.APIError{Status: 400, Code: "bad_request", Message: "region must be one of us, eu", Field: "values"}
+	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{"region":"xx"}}`, bearer(memberToken)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.values" || p.Errors[0].Code != codeInvalid {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	plugins.err = nil
+	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{}}`, bearer(memberToken)), TypePermissionDenied)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{}}`, nil), TypeAuthenticationRequired)
+}
+
+func TestSettingValueRoundTrip(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	path := "/api/v2/settings/values/ui.theme?scope=profile"
+
+	// Nothing stored: a read is a 404, and a delete too.
+	requireProblem(t, do(t, h, http.MethodGet, path, "", settingsOwner()), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodDelete, path, "", settingsOwner()), TypeNotFound)
+
+	rec := do(t, h, http.MethodPut, path, `{"value":"cinema-light"}`, settingsOwner())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	want := `{"key":"ui.theme","scope":"profile","profile_id":"p-owner","value":"cinema-light","revision":1,"updated_at":"2026-01-02T03:04:05.678Z"}` + "\n"
+	if rec.Body.String() != want {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, path, "", settingsOwner())
+	if rec.Code != 200 || rec.Body.String() != want {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+	}
+	// The value's shape is the contract's, not this document's: any JSON
+	// is carried to the seam, which decides.
+	requireProblem(t, do(t, h, http.MethodPut, path, `{"value":7}`, settingsOwner()), TypeValidationFailed)
+
+	// Another profile sees nothing at its own row.
+	requireProblem(t, do(t, h, http.MethodGet, path, "", with(bearer(memberToken), "X-Profile-Id", "p-primary")), TypeNotFound)
+
+	rec = do(t, h, http.MethodDelete, path, "", settingsOwner())
+	if rec.Code != 204 || rec.Body.Len() != 0 {
+		t.Fatalf("delete: %d %q", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodGet, path, "", settingsOwner()), TypeNotFound)
+}
+
+func TestSettingValueScopes(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	// account scope carries no profile.
+	rec := do(t, h, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=account", `{"value":"cobalt-studio"}`, settingsOwner())
+	if rec.Code != 200 || bytes.Contains(rec.Body.Bytes(), []byte(`"profile_id"`)) {
+		t.Fatalf("account: %d %s", rec.Code, rec.Body.String())
+	}
+	// profile_device stores against the declared device header, or a named device.
+	rec = do(t, h, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_device", `{"value":"x"}`, with(settingsOwner(), "X-Silo-Device-Id", "iphone-1"))
+	if rec.Code != 200 || !bytes.Contains(rec.Body.Bytes(), []byte(`"device_id":"iphone-1"`)) {
+		t.Fatalf("device: %d %s", rec.Code, rec.Body.String())
+	}
+	// profile_library renders the library as a string ID.
+	rec = do(t, h, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_library&library_id=3", `{"value":"x"}`, settingsOwner())
+	if rec.Code != 200 || !bytes.Contains(rec.Body.Bytes(), []byte(`"library_id":"3"`)) {
+		t.Fatalf("library: %d %s", rec.Code, rec.Body.String())
+	}
+	// profile_client takes the family from the header.
+	rec = do(t, h, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_client", `{"value":"x"}`, with(settingsOwner(), "X-Silo-Client-Family", "tv"))
+	if rec.Code != 200 || !bytes.Contains(rec.Body.Bytes(), []byte(`"client_family":"tv"`)) {
+		t.Fatalf("client: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSettingValueValidation(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	cases := []struct {
+		name, method, path, body string
+		headers                  map[string]string
+		location, code           string
+	}{
+		{"scope required", http.MethodGet, "/api/v2/settings/values/ui.theme", "", settingsOwner(), "query.scope", codeRequired},
+		{"scope enum", http.MethodGet, "/api/v2/settings/values/ui.theme?scope=global", "", settingsOwner(), "query.scope", codeInvalidEnum},
+		{"unknown key is 422, not 404", http.MethodGet, "/api/v2/settings/values/no.such?scope=profile", "", settingsOwner(), "path.key", codeInvalid},
+		{"device header missing", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_device", `{"value":"x"}`, settingsOwner(), "header." + deviceIDHeader, codeInvalid},
+		{"client family missing", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_client", `{"value":"x"}`, settingsOwner(), "header." + clientFamilyHeader, codeInvalid},
+		{"client family enum", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_client", `{"value":"x"}`, with(settingsOwner(), "X-Silo-Client-Family", "toaster"), "header.X-Silo-Client-Family", codeInvalidEnum},
+		{"library id", http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile_library&library_id=9", "", settingsOwner(), "query.library_id", codeInvalid},
+		{"value required", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{}`, settingsOwner(), "body.value", codeRequired},
+		{"unknown member", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"x","mutation_id":"1"}`, settingsOwner(), "body.mutation_id", codeUnknownField},
+		{"nav.shortcuts whole-document write refused", http.MethodPut, "/api/v2/settings/values/nav.shortcuts?scope=profile", `{"value":{"items":[]}}`, settingsOwner(), "path.key", codeInvalid},
+		{"nav.shortcuts delete refused", http.MethodDelete, "/api/v2/settings/values/nav.shortcuts?scope=profile", "", settingsOwner(), "path.key", codeInvalid},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := requireProblem(t, do(t, h, c.method, c.path, c.body, c.headers), TypeValidationFailed)
+			if len(p.Errors) != 1 || p.Errors[0].Location != c.location || p.Errors[0].Code != c.code {
+				t.Fatalf("errors = %+v", p.Errors)
+			}
+		})
+	}
+	// A named profile: unknown is 404; naming another profile without the
+	// household verification is 403.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile&profile_id=p-nope", "", settingsOwner()), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile&profile_id=p-other", "", with(bearer(apiKeyToken), "X-Profile-Id", "p-locked")), TypePermissionDenied)
+	// Class denials.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", nil), TypeAuthenticationRequired)
+	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"x"}`, settingsOwner()), TypePermissionDenied)
+	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodDelete, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypePermissionDenied)
+	deps := pilotDeps(nil, nil)
+	deps.SettingValues = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypeDependencyUnavailable)
+}
+
+func TestListSettingValues(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	if rec := do(t, h, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"cinema-light"}`, settingsOwner()); rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	// Keys repeat the parameter; a comma is not a separator. Unset keys
+	// stay in the answer with is_set false.
+	rec := do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile&keys=ui.theme&keys=playback.preferred_quality", "", settingsOwner())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	want := `{"items":[{"key":"ui.theme","scope":"profile","profile_id":"p-owner","is_set":true,"value":"cinema-light","revision":1,"updated_at":"2026-01-02T03:04:05.678Z"},{"key":"playback.preferred_quality","scope":"profile","profile_id":"p-owner","is_set":false}],"revision":8}` + "\n"
+	if rec.Body.String() != want {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile&keys=ui.theme,playback.preferred_quality", "", settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.keys" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile", "", settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.keys" || p.Errors[0].Code != codeRequired {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile&keys=ui.theme", "", bearer(memberToken)), TypeValidationFailed)
+}
+
+func TestListEffectiveSettings(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	if rec := do(t, h, http.MethodPut, "/api/v2/settings/values/playback.preferred_quality?scope=profile", `{"value":"2160p"}`, settingsOwner()); rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	rec := do(t, h, http.MethodGet, "/api/v2/settings/values/effective?keys=playback.preferred_quality&keys=ui.theme", "", settingsOwner())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	// A constrained value reports the authored one and what is permitted;
+	// a default carries no scope members.
+	want := `{"items":[{"key":"playback.preferred_quality","value":"1080p","source":"profile","stored_value":"2160p","constrained":true,"constraint_kind":"ceiling","permitted_values":["auto","1080p"],"definition_revision":3,"updated_at":"2026-01-02T03:04:05.678Z","scope":"profile","profile_id":"p-owner"},{"key":"ui.theme","value":"midnight-cinema","source":"default","definition_revision":3}],"revision":8}` + "\n"
+	if rec.Body.String() != want {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// No keys resolves every server-stored setting.
+	rec = do(t, h, http.MethodGet, "/api/v2/settings/values/effective", "", settingsOwner())
+	if rec.Code != 200 || !bytes.Contains(rec.Body.Bytes(), []byte(`"key":"nav.shortcuts"`)) {
+		t.Fatalf("all: %d %s", rec.Code, rec.Body.String())
+	}
+	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective?keys=no.such", "", settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.keys" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective?library_ids=x", "", settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.library_ids" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective", "", bearer(expiredToken)), TypeSessionExpired)
+}
+
+func TestResolveEffectiveSettings(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	body := `{"keys":["ui.theme"],"contexts":[{"context_id":"a","library_id":"3"},{"context_id":"b","series_id":"tv:1"}]}`
+	rec := do(t, h, http.MethodPost, "/api/v2/settings/values/effective", body, settingsOwner())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	want := `{"items":[{"context_id":"a","settings":[{"key":"ui.theme","value":"midnight-cinema","source":"default","definition_revision":3,"source_context":{"profile_id":"p-owner","library_id":"3"}}]},{"context_id":"b","settings":[{"key":"ui.theme","value":"midnight-cinema","source":"default","definition_revision":3,"source_context":{"profile_id":"p-owner","series_id":"tv:1"}}]}],"revision":8}` + "\n"
+	if rec.Body.String() != want {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	cases := []struct{ name, body, location string }{
+		{"keys required", `{"contexts":[{"context_id":"a","library_id":"3"}]}`, "body.keys"},
+		{"keys empty", `{"keys":[],"contexts":[{"context_id":"a","library_id":"3"}]}`, "body.keys"},
+		{"unknown key", `{"keys":["no.such"],"contexts":[{"context_id":"a","library_id":"3"}]}`, "body.keys"},
+		{"contexts empty", `{"keys":["ui.theme"],"contexts":[]}`, "body.contexts"},
+		{"context id required", `{"keys":["ui.theme"],"contexts":[{"library_id":"3"}]}`, "body.contexts[0].context_id"},
+		{"context needs content", `{"keys":["ui.theme"],"contexts":[{"context_id":"a"}]}`, "body.contexts"},
+		{"duplicate context", `{"keys":["ui.theme"],"contexts":[{"context_id":"a","library_id":"3"},{"context_id":"a","library_id":"3"}]}`, "body.contexts"},
+		{"unknown member", `{"keys":["ui.theme"],"contexts":[{"context_id":"a","library_id":"3","item_id":"x"}]}`, "body.contexts[0].item_id"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/settings/values/effective", c.body, settingsOwner()), TypeValidationFailed)
+			if len(p.Errors) != 1 || p.Errors[0].Location != c.location {
+				t.Fatalf("errors = %+v", p.Errors)
+			}
+		})
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/settings/values/effective", body, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/settings/values/effective", body, nil), TypeAuthenticationRequired)
+}
+
+func TestUpdateNavigationShortcut(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	item := `{"type":"library","library_id":3,"label":"Movies"}`
+	rec := do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":true}`, settingsOwner())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	// The answer is the stored nav.shortcuts document, as a setting value.
+	want := `{"key":"nav.shortcuts","scope":"profile","profile_id":"p-owner","value":{"items":[{"type":"library","library_id":3,"label":"Movies"}]},"revision":1,"updated_at":"2026-01-02T03:04:05.678Z"}` + "\n"
+	if rec.Body.String() != want {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":false}`, settingsOwner())
+	if rec.Code != 200 || !bytes.Contains(rec.Body.Bytes(), []byte(`"value":{"items":[]}`)) {
+		t.Fatalf("remove: %d %s", rec.Code, rec.Body.String())
+	}
+	// present is required (v1 answered its absence the same way); the item
+	// is judged by the contract's schema and rendered at body.item.
+	p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`}`, settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.present" || p.Errors[0].Code != codeRequired {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":{"type":"library"},"present":true}`, settingsOwner()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.item" || p.Errors[0].Code != codeInvalid {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":"movies","present":true}`, settingsOwner()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":true}`, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":`+item+`,"present":true}`, settingsOwner()), TypePermissionDenied)
 }

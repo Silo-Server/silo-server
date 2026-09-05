@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -239,7 +241,7 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 			EffectivePolicy: handlers.EffectivePolicyView{Permissions: []string{"marker_edit", "metadata_curation"}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
-	deps.SettingsContract, deps.Settings, deps.PluginSettings = settingsFakes()
+	deps.SettingsContract, deps.Settings, deps.PluginSettings, deps.SettingValues = settingsFakes()
 	return deps
 }
 
@@ -354,7 +356,7 @@ func (f *fakePluginSettingsSeam) SetUserPluginSettings(_ context.Context, _ int,
 	return nil
 }
 
-func settingsFakes() (fakeSettingsContract, *fakeSettingsSeam, *fakePluginSettingsSeam) {
+func settingsFakes() (fakeSettingsContract, *fakeSettingsSeam, *fakePluginSettingsSeam, *fakeSettingValuesSeam) {
 	contract := fakeSettingsContract{view: handlers.SettingsCapabilitiesView{
 		APIVersion: 1, Revision: 12, ContractETag: `"etag-12"`, DefinitionCount: 40,
 		Scopes: []string{"account", "profile"}, ClientFamilies: []string{"tv", "web"},
@@ -374,5 +376,285 @@ func settingsFakes() (fakeSettingsContract, *fakeSettingsSeam, *fakePluginSettin
 		}},
 		values: map[int]map[string]string{3: {"region": "us"}},
 	}
-	return contract, settings, plugins
+	return contract, settings, plugins, newFakeSettingValuesSeam()
+}
+
+// fakeSettingValuesSeam is an in-memory stand-in for the settings values
+// core. It keeps the seam's error contract (an *handlers.APIError whose
+// Field names the request member) for the decisions the tests exercise:
+// unknown keys, missing scope or profile, the nav.shortcuts atomic rule, a
+// value the schema refuses, and reads of unset rows.
+type fakeSettingValuesSeam struct {
+	known    map[string]json.RawMessage // key -> contract default
+	values   map[string]handlers.SettingValueView
+	revision int64
+	err      error
+}
+
+func newFakeSettingValuesSeam() *fakeSettingValuesSeam {
+	return &fakeSettingValuesSeam{
+		known: map[string]json.RawMessage{
+			"ui.theme":                   json.RawMessage(`"midnight-cinema"`),
+			"playback.preferred_quality": json.RawMessage(`"auto"`),
+			"nav.shortcuts":              json.RawMessage(`{"items":[]}`),
+		},
+		values: map[string]handlers.SettingValueView{},
+	}
+}
+
+func (f *fakeSettingValuesSeam) ContractRevision() int { return 8 }
+
+func settingAPIError(status int, code, field, msg string) *handlers.APIError {
+	return &handlers.APIError{Status: status, Code: code, Message: msg, Field: field}
+}
+
+func (f *fakeSettingValuesSeam) identity(req handlers.SettingIdentityRequest) (handlers.SettingValueView, *handlers.APIError) {
+	if req.Key == "" {
+		return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "key", "A setting key is required")
+	}
+	if _, ok := f.known[req.Key]; !ok {
+		return handlers.SettingValueView{}, settingAPIError(404, "unknown_setting", "key", "No setting named "+req.Key+" exists in this server's contract")
+	}
+	if req.Scope == "" {
+		return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "scope", "A scope is required")
+	}
+	v := handlers.SettingValueView{Key: req.Key, Scope: req.Scope}
+	if req.Scope != "account" {
+		v.ProfileID = req.ActiveProfileID
+		if v.ProfileID == "" {
+			return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "profile_header", "X-Profile-Id header is required for this scope")
+		}
+		if req.ProfileID != "" && req.ProfileID != v.ProfileID {
+			if req.ProfileID != "p-other" {
+				return handlers.SettingValueView{}, settingAPIError(404, "not_found", "profile_id", "Profile not found")
+			}
+			if err := req.VerifyProfile(v.ProfileID); err != nil {
+				return handlers.SettingValueView{}, settingAPIError(403, "forbidden", "", "Profile verification required")
+			}
+			v.ProfileID = req.ProfileID
+		}
+	}
+	if req.Scope == "profile_device" {
+		v.DeviceID = req.DeviceID
+		if v.DeviceID == "" {
+			v.DeviceID = req.Device.DeviceID
+		}
+		if v.DeviceID == "" {
+			return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "device_header", "X-Silo-Device-Id header is required for a device override")
+		}
+	}
+	if req.Scope == "profile_client" {
+		if req.ClientFamily == "" {
+			return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "client_family", "X-Silo-Client-Family header must be one of tv, mobile, tablet, desktop or web")
+		}
+		v.ClientFamily = req.ClientFamily
+	}
+	if req.Scope == "profile_library" {
+		if req.LibraryID != "3" {
+			return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "library_id", "library_id must be a positive integer")
+		}
+		v.LibraryID = 3
+	}
+	return v, nil
+}
+
+func settingRowKey(v handlers.SettingValueView) string {
+	return v.Key + "|" + v.Scope + "|" + v.ProfileID + "|" + v.ClientFamily + "|" + v.DeviceID + "|" + fmt.Sprint(v.LibraryID) + "|" + v.SeriesID
+}
+
+func (f *fakeSettingValuesSeam) GetSettingValue(_ context.Context, _ int, req handlers.SettingIdentityRequest) (handlers.SettingValueView, error) {
+	if f.err != nil {
+		return handlers.SettingValueView{}, f.err
+	}
+	id, apiErr := f.identity(req)
+	if apiErr != nil {
+		return handlers.SettingValueView{}, apiErr
+	}
+	stored, ok := f.values[settingRowKey(id)]
+	if !ok {
+		return handlers.SettingValueView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No value is set at this scope"}
+	}
+	return stored, nil
+}
+
+func (f *fakeSettingValuesSeam) ListSettingValues(_ context.Context, _ int, keys []string, req handlers.SettingIdentityRequest) ([]handlers.ExplicitSettingValueView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(keys) == 0 {
+		return nil, settingAPIError(400, "bad_request", "keys", "Query parameter keys is required")
+	}
+	req.Key = keys[0]
+	id, apiErr := f.identity(req)
+	if apiErr != nil {
+		if apiErr.Field == "key" {
+			apiErr.Field = "keys"
+		}
+		return nil, apiErr
+	}
+	out := make([]handlers.ExplicitSettingValueView, 0, len(keys))
+	for _, key := range keys {
+		if _, ok := f.known[key]; !ok {
+			return nil, settingAPIError(404, "unknown_setting", "keys", "No setting named "+key+" exists in this server's contract")
+		}
+		row := id
+		row.Key = key
+		e := handlers.ExplicitSettingValueView{Key: key, Scope: row.Scope, ProfileID: row.ProfileID, ClientFamily: row.ClientFamily, DeviceID: row.DeviceID, LibraryID: row.LibraryID}
+		if stored, ok := f.values[settingRowKey(row)]; ok {
+			e.IsSet, e.Value, e.Revision, e.UpdatedAt = true, stored.Value, stored.Revision, stored.UpdatedAt
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func (f *fakeSettingValuesSeam) SetSettingValue(_ context.Context, _ int, req handlers.SettingIdentityRequest, value json.RawMessage) (handlers.SettingValueView, error) {
+	if f.err != nil {
+		return handlers.SettingValueView{}, f.err
+	}
+	id, apiErr := f.identity(req)
+	if apiErr != nil {
+		return handlers.SettingValueView{}, apiErr
+	}
+	if id.Key == "nav.shortcuts" {
+		return handlers.SettingValueView{}, settingAPIError(400, "atomic_update_required", "key", "nav.shortcuts is updated through the item route")
+	}
+	if len(value) == 0 {
+		return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "value", "value is required")
+	}
+	var s string
+	if err := json.Unmarshal(value, &s); err != nil || s == "" {
+		return handlers.SettingValueView{}, settingAPIError(400, "invalid_value", "value", "value must be a non-empty string")
+	}
+	f.revision++
+	id.Value, id.Revision, id.UpdatedAt = json.RawMessage(value), f.revision, fixedTime().Format(time.RFC3339Nano)
+	f.values[settingRowKey(id)] = id
+	return id, nil
+}
+
+func (f *fakeSettingValuesSeam) DeleteSettingValue(_ context.Context, _ int, req handlers.SettingIdentityRequest) error {
+	if f.err != nil {
+		return f.err
+	}
+	id, apiErr := f.identity(req)
+	if apiErr != nil {
+		return apiErr
+	}
+	if id.Key == "nav.shortcuts" {
+		return settingAPIError(400, "atomic_update_required", "key", "nav.shortcuts is updated through the item route")
+	}
+	if _, ok := f.values[settingRowKey(id)]; !ok {
+		return &handlers.APIError{Status: 404, Code: "not_found", Message: "No value is set at this scope"}
+	}
+	delete(f.values, settingRowKey(id))
+	return nil
+}
+
+func (f *fakeSettingValuesSeam) SetNavigationShortcut(_ context.Context, _ int, profileID string, item json.RawMessage, present bool) (handlers.SettingValueView, error) {
+	if f.err != nil {
+		return handlers.SettingValueView{}, f.err
+	}
+	if profileID == "" {
+		return handlers.SettingValueView{}, settingAPIError(400, "bad_request", "profile_header", "X-Profile-Id header is required")
+	}
+	var parsed struct {
+		Type  string `json:"type"`
+		Label string `json:"label"`
+	}
+	if err := json.Unmarshal(item, &parsed); err != nil || parsed.Type == "" || parsed.Label == "" {
+		return handlers.SettingValueView{}, settingAPIError(400, "invalid_value", "item", "shortcut requires type and label")
+	}
+	row := handlers.SettingValueView{Key: "nav.shortcuts", Scope: "profile", ProfileID: profileID}
+	items := []json.RawMessage{}
+	if present {
+		items = append(items, item)
+	}
+	doc, _ := json.Marshal(map[string]any{"items": items})
+	f.revision++
+	row.Value, row.Revision, row.UpdatedAt = doc, f.revision, fixedTime().Format(time.RFC3339Nano)
+	f.values[settingRowKey(row)] = row
+	return row, nil
+}
+
+func (f *fakeSettingValuesSeam) effective(q handlers.EffectiveSettingsQuery, keys []string, field string) ([]handlers.EffectiveSettingValueView, *handlers.APIError) {
+	if len(keys) == 0 {
+		keys = []string{"ui.theme", "playback.preferred_quality", "nav.shortcuts"}
+	}
+	profileID := q.ActiveProfileID
+	if q.ProfileID != "" && q.ProfileID != profileID {
+		if q.ProfileID != "p-other" {
+			return nil, settingAPIError(404, "not_found", "profile_id", "Profile not found")
+		}
+		if err := q.VerifyProfile(profileID); err != nil {
+			return nil, settingAPIError(403, "forbidden", "", "Profile verification required")
+		}
+		profileID = q.ProfileID
+	}
+	out := make([]handlers.EffectiveSettingValueView, 0, len(keys))
+	for _, key := range keys {
+		def, ok := f.known[key]
+		if !ok {
+			return nil, settingAPIError(404, "unknown_setting", field, "No setting named "+key+" exists in this server's contract")
+		}
+		e := handlers.EffectiveSettingValueView{Key: key, Value: def, Source: "default", DefinitionRevision: 3}
+		row := handlers.SettingValueView{Key: key, Scope: "profile", ProfileID: profileID}
+		if stored, ok := f.values[settingRowKey(row)]; ok {
+			e.Value, e.Source, e.Scope, e.ProfileID, e.UpdatedAt = stored.Value, "profile", "profile", profileID, stored.UpdatedAt
+		}
+		if key == "playback.preferred_quality" && string(e.Value) == `"2160p"` {
+			e.StoredValue, e.Value, e.Constrained, e.ConstraintKind = e.Value, json.RawMessage(`"1080p"`), true, "ceiling"
+			e.PermittedValues = []json.RawMessage{json.RawMessage(`"auto"`), json.RawMessage(`"1080p"`)}
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func (f *fakeSettingValuesSeam) ResolveEffectiveSettings(_ context.Context, _ int, q handlers.EffectiveSettingsQuery) ([]handlers.EffectiveSettingValueView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	views, apiErr := f.effective(q, q.Keys, "keys")
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	return views, nil
+}
+
+func (f *fakeSettingValuesSeam) ResolveEffectiveSettingContexts(_ context.Context, _ int, q handlers.EffectiveSettingsQuery, contexts []handlers.EffectiveContextRequest) ([]handlers.EffectiveSettingContextView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(q.Keys) == 0 {
+		return nil, settingAPIError(400, "bad_request", "keys", "keys must contain at least one setting")
+	}
+	if len(contexts) == 0 {
+		return nil, settingAPIError(400, "bad_request", "contexts", "contexts must contain at least one content context")
+	}
+	out := make([]handlers.EffectiveSettingContextView, 0, len(contexts))
+	seen := map[string]bool{}
+	for _, c := range contexts {
+		if seen[c.ContextID] {
+			return nil, settingAPIError(400, "bad_request", "contexts", "context_id values must be unique")
+		}
+		seen[c.ContextID] = true
+		if len(c.LibraryID) == 0 && c.SeriesID == "" {
+			return nil, settingAPIError(400, "bad_request", "contexts", "Every context requires library_id or series_id")
+		}
+		views, apiErr := f.effective(q, q.Keys, "keys")
+		if apiErr != nil {
+			return nil, apiErr
+		}
+		for i := range views {
+			views[i].SourceContext = &handlers.EffectiveSourceContextView{ProfileID: q.ActiveProfileID, SeriesID: c.SeriesID}
+			if len(c.LibraryID) > 0 {
+				var text string
+				_ = json.Unmarshal(c.LibraryID, &text)
+				n, _ := strconv.Atoi(text)
+				views[i].SourceContext.LibraryID = n
+			}
+		}
+		out = append(out, handlers.EffectiveSettingContextView{ContextID: c.ContextID, Settings: views})
+	}
+	return out, nil
 }

@@ -1903,6 +1903,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if settingValuesHandler != nil {
 		v2deps.SettingsContract = settingValuesHandler
+		v2deps.SettingValues = settingValuesHandler
 	}
 	if settingsHandler != nil {
 		v2deps.Settings = settingsHandler

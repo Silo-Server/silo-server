@@ -146,7 +146,9 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"listProgress": true, "listAdminUsers": true, "updateProfile": true,
 		"getSettingsContract": true, "getSettingsContractCapabilities": true, "getOverlayConfig": true,
 		"getEffectiveSubtitleAppearance": true, "updateSubtitleAppearanceDeviceOverride": true, "deleteSubtitleAppearanceDeviceOverride": true,
-		"listPluginSettings": true, "getPluginSettings": true,
+		"listPluginSettings": true, "getPluginSettings": true, "updatePluginSettings": true,
+		"listSettingValues": true, "listEffectiveSettings": true, "resolveEffectiveSettings": true, "updateNavigationShortcut": true,
+		"getSettingValue": true, "updateSettingValue": true, "deleteSettingValue": true,
 	}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {

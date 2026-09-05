@@ -3,6 +3,7 @@ package apiv2
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -101,6 +102,9 @@ type Dependencies struct {
 	// PluginSettings answers per-installation user plugin settings
 	// (*handlers.PluginHandler).
 	PluginSettings PluginSettingsService
+	// SettingValues answers the explicit and effective setting values of the
+	// settings contract (*handlers.SettingValuesHandler).
+	SettingValues SettingValuesService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -412,6 +416,19 @@ type PluginSettingsService interface {
 	ListUserPluginSettings(ctx context.Context) ([]handlers.PluginUserSettingsView, error)
 	GetUserPluginSettings(ctx context.Context, userID, installationID int) (handlers.PluginUserSettingsDetailView, error)
 	SetUserPluginSettings(ctx context.Context, userID, installationID int, values map[string]string) error
+}
+
+// SettingValuesService is the slice of *handlers.SettingValuesHandler the
+// setting value operations use: the request-free core of the v1 values API.
+type SettingValuesService interface {
+	ContractRevision() int
+	GetSettingValue(ctx context.Context, userID int, req handlers.SettingIdentityRequest) (handlers.SettingValueView, error)
+	ListSettingValues(ctx context.Context, userID int, keys []string, req handlers.SettingIdentityRequest) ([]handlers.ExplicitSettingValueView, error)
+	SetSettingValue(ctx context.Context, userID int, req handlers.SettingIdentityRequest, value json.RawMessage) (handlers.SettingValueView, error)
+	DeleteSettingValue(ctx context.Context, userID int, req handlers.SettingIdentityRequest) error
+	SetNavigationShortcut(ctx context.Context, userID int, profileID string, item json.RawMessage, present bool) (handlers.SettingValueView, error)
+	ResolveEffectiveSettings(ctx context.Context, userID int, q handlers.EffectiveSettingsQuery) ([]handlers.EffectiveSettingValueView, error)
+	ResolveEffectiveSettingContexts(ctx context.Context, userID int, q handlers.EffectiveSettingsQuery, contexts []handlers.EffectiveContextRequest) ([]handlers.EffectiveSettingContextView, error)
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

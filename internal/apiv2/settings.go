@@ -2,11 +2,14 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
@@ -305,6 +308,67 @@ func registerSettings(reg *Registry) {
 		ProfileOptional: true,
 		ServiceBacked:   true,
 	}, reg.getPluginSettings)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodPut, Prefix+"/settings/plugins/{installation_id}", "updatePluginSettings", "settings",
+			"Replace the account's values for a plugin installation's user settings."),
+		Class:           ClassProfileScoped,
+		ProfileOptional: true,
+		DemoRestricted:  true,
+		ServiceBacked:   true,
+	}, reg.updatePluginSettings)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/settings/values", "listSettingValues", "settings",
+			"Get the explicit values of several settings at one scope."),
+		Class:         ClassProfileScoped,
+		ServiceBacked: true,
+	}, reg.listSettingValues)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/settings/values/effective", "listEffectiveSettings", "settings",
+			"Resolve the effective values of settings for the acting profile."),
+		Class:         ClassProfileScoped,
+		ServiceBacked: true,
+	}, reg.listEffectiveSettings)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodPost, Prefix+"/settings/values/effective", "resolveEffectiveSettings", "settings",
+			"Resolve the effective values of settings under several content contexts at once."),
+		Class:         ClassProfileScoped,
+		ServiceBacked: true,
+	}, reg.resolveEffectiveSettings)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodPut, Prefix+"/settings/values/nav.shortcuts/item", "updateNavigationShortcut", "settings",
+			"Add or remove one navigation shortcut of the acting profile."),
+		Class:          ClassProfileScoped,
+		DemoRestricted: true,
+		ServiceBacked:  true,
+	}, reg.updateNavigationShortcut)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/settings/values/{key}", "getSettingValue", "settings",
+			"Get the explicit value of a setting at one scope."),
+		Class:         ClassProfileScoped,
+		ServiceBacked: true,
+	}, reg.getSettingValue)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodPut, Prefix+"/settings/values/{key}", "updateSettingValue", "settings",
+			"Replace the explicit value of a setting at one scope."),
+		Class:          ClassProfileScoped,
+		DemoRestricted: true,
+		ServiceBacked:  true,
+	}, reg.updateSettingValue)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodDelete, Prefix+"/settings/values/{key}", "deleteSettingValue", "settings",
+			"Remove the explicit value of a setting at one scope so it inherits again."),
+		Class:          ClassProfileScoped,
+		DemoRestricted: true,
+		ServiceBacked:  true,
+	}, reg.deleteSettingValue)
 }
 
 // getSettingsContract serves the canonical public manifest bytes with the
@@ -539,4 +603,574 @@ func pluginSettingsInstallationFromView(v handlers.PluginUserSettingsView) Plugi
 		Assets:           assets,
 		Category:         v.Category,
 	}
+}
+
+// --- Setting values: the explicit and effective values of the contract ------
+
+// clientFamilyHeader is the header v1 reads a profile_client scope's family
+// from; the same header names it here.
+const clientFamilyHeader = "X-Silo-Client-Family"
+
+// JSONValue is a setting value on the wire: any JSON document. The settings
+// contract's value_schema for the key fixes its shape, so this document does
+// not restate it.
+type JSONValue []byte
+
+func (v JSONValue) MarshalJSON() ([]byte, error) {
+	if len(v) == 0 {
+		return []byte("null"), nil
+	}
+	return v, nil
+}
+
+func (v *JSONValue) UnmarshalJSON(b []byte) error {
+	*v = append((*v)[:0], b...)
+	return nil
+}
+
+// Schema declares the value untyped: the key's value_schema in the settings
+// contract (getSettingsContract) is the authority on its shape.
+func (JSONValue) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{Description: "A JSON value whose shape is the setting's value_schema in the settings contract."}
+}
+
+// NavigationShortcutItem is one nav.shortcuts entry; its members are fixed by
+// the settings contract's navigation-shortcuts.json schema, not here. The
+// bytes are carried as sent so the seam normalizes what the client wrote.
+type NavigationShortcutItem []byte
+
+func (v NavigationShortcutItem) MarshalJSON() ([]byte, error) {
+	if len(v) == 0 {
+		return []byte("null"), nil
+	}
+	return v, nil
+}
+
+func (v *NavigationShortcutItem) UnmarshalJSON(b []byte) error {
+	*v = append((*v)[:0], b...)
+	return nil
+}
+
+// Schema declares the bag: the contract's object schema owns the members.
+func (NavigationShortcutItem) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{
+		Type:                 huma.TypeObject,
+		Description:          "One navigation shortcut, shaped by the settings contract's navigation-shortcuts.json item schema (type, label, and the library_id/section_id/collection_id the type needs).",
+		AdditionalProperties: true,
+		Extensions:           map[string]any{extExtensionBag: "navigation-shortcut-item"},
+	}
+}
+
+// SettingScopeQuery is everything a request says about which stored value
+// it addresses beyond the key: the scope and the identity members that
+// scope needs. The acting profile is the X-Profile-Id the gate verified.
+type SettingScopeQuery struct {
+	Scope          string `query:"scope" required:"true" enum:"account,profile,profile_client,profile_device,profile_library,profile_series" doc:"The scope the value is stored at" example:"profile"`
+	ProfileID      ID     `query:"profile_id" doc:"Another profile on the account to act for; only the household parent may name one" example:"2"`
+	DeviceID       string `query:"device_id" maxLength:"128" doc:"Another registered device of the profile whose profile_device value to address; absent means the declared device" example:"tv-1"`
+	LibraryID      ID     `query:"library_id" doc:"The library a profile_library value belongs to" example:"3"`
+	SeriesID       string `query:"series_id" maxLength:"128" doc:"The series a profile_series value belongs to" example:"tv:12345"`
+	ClientFamily   string `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family a profile_client value belongs to" example:"tv"`
+	DeviceHeader   string `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier; the profile_device scope stores against it when device_id is absent" example:"iphone-1"`
+	DeviceName     string `header:"X-Silo-Device-Name" maxLength:"120" doc:"Optional display name recorded on the device registry" example:"Living room"`
+	DevicePlatform string `header:"X-Silo-Device-Platform" maxLength:"40" doc:"Optional platform recorded on the device registry" example:"iOS"`
+}
+
+func (q SettingScopeQuery) identity(ctx context.Context, key string) handlers.SettingIdentityRequest {
+	return handlers.SettingIdentityRequest{
+		Key:             key,
+		Scope:           q.Scope,
+		ActiveProfileID: profileFrom(ctx),
+		ProfileID:       string(q.ProfileID),
+		DeviceID:        q.DeviceID,
+		Device:          handlers.NewDeviceMetadata(q.DeviceHeader, q.DeviceName, q.DevicePlatform),
+		ClientFamily:    q.ClientFamily,
+		LibraryID:       string(q.LibraryID),
+		SeriesID:        q.SeriesID,
+		VerifyProfile:   profileVerifier(ctx),
+	}
+}
+
+// profileVerifier answers whether the gate verified a PIN-locked profile for
+// this request, the same rule updateProfile applies.
+func profileVerifier(ctx context.Context) func(profileID string) error {
+	return func(profileID string) error {
+		if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
+			return nil
+		}
+		return access.ErrProfileUnverified
+	}
+}
+
+// SettingValue is one explicit value as stored: the key, the scope row it
+// lives in, and the value itself.
+type SettingValue struct {
+	Key          string    `json:"key" doc:"The setting key" example:"ui.theme"`
+	Scope        string    `json:"scope" doc:"The scope the value is stored at: account, profile, profile_client, profile_device, profile_library or profile_series" example:"profile"`
+	ProfileID    ID        `json:"profile_id,omitempty" doc:"The profile the value belongs to; absent at account scope" example:"1"`
+	ClientFamily string    `json:"client_family,omitempty" doc:"The client family of a profile_client value" example:"tv"`
+	DeviceID     string    `json:"device_id,omitempty" doc:"The device of a profile_device value" example:"iphone-1"`
+	LibraryID    ID        `json:"library_id,omitempty" doc:"The library of a profile_library value" example:"3"`
+	SeriesID     string    `json:"series_id,omitempty" doc:"The series of a profile_series value" example:"tv:12345"`
+	Value        JSONValue `json:"value" doc:"The stored value, normalized to the key's value_schema"`
+	Revision     int64     `json:"revision" doc:"The row's revision, incremented on every write" example:"4"`
+	UpdatedAt    *Instant  `json:"updated_at,omitempty" doc:"When the value was last written; absent when the store did not record it" example:"2026-01-02T03:04:05.000Z"`
+}
+
+// SettingValueOutput is the response of getSettingValue, updateSettingValue
+// and updateNavigationShortcut.
+type SettingValueOutput struct {
+	Body SettingValue
+}
+
+// SettingKeyInput names one setting at one scope.
+type SettingKeyInput struct {
+	Key string `path:"key" minLength:"1" maxLength:"128" doc:"The setting key, as defined in the settings contract" example:"ui.theme"`
+	SettingScopeQuery
+}
+
+// SettingValueWrite is the value an updateSettingValue request stores.
+type SettingValueWrite struct {
+	Value JSONValue `json:"value" required:"true" doc:"The value to store; validated and normalized against the key's value_schema"`
+}
+
+// SettingValueWriteInput is the updateSettingValue request.
+type SettingValueWriteInput struct {
+	SettingKeyInput
+	Body SettingValueWrite
+}
+
+// SettingValuesInput is the listSettingValues request: several keys at one
+// scope.
+type SettingValuesInput struct {
+	Keys []string `query:"keys,explode" required:"true" minItems:"1" maxItems:"200" doc:"The setting keys to read, one keys parameter per key" example:"[\"ui.theme\"]"`
+	SettingScopeQuery
+}
+
+// ExplicitSettingValue is one key's explicit value at the requested scope,
+// or the fact that none is stored there.
+type ExplicitSettingValue struct {
+	Key          string    `json:"key" doc:"The setting key" example:"ui.theme"`
+	Scope        string    `json:"scope" doc:"The scope that was read" example:"profile"`
+	ProfileID    ID        `json:"profile_id,omitempty" doc:"The profile the scope belongs to; absent at account scope" example:"1"`
+	ClientFamily string    `json:"client_family,omitempty" doc:"The client family of a profile_client scope" example:"tv"`
+	DeviceID     string    `json:"device_id,omitempty" doc:"The device of a profile_device scope" example:"iphone-1"`
+	LibraryID    ID        `json:"library_id,omitempty" doc:"The library of a profile_library scope" example:"3"`
+	SeriesID     string    `json:"series_id,omitempty" doc:"The series of a profile_series scope" example:"tv:12345"`
+	IsSet        bool      `json:"is_set" doc:"Whether a value is stored at this scope" example:"true"`
+	Value        JSONValue `json:"value,omitempty" doc:"The stored value; absent when is_set is false"`
+	Revision     int64     `json:"revision,omitempty" doc:"The row's revision; absent when is_set is false" example:"4"`
+	UpdatedAt    *Instant  `json:"updated_at,omitempty" doc:"When the value was last written; absent when unset or unrecorded" example:"2026-01-02T03:04:05.000Z"`
+}
+
+// SettingValueCollection is the listSettingValues response body: one entry
+// per requested key, in request order, plus the contract revision the
+// server resolved them against.
+type SettingValueCollection struct {
+	Collection[ExplicitSettingValue]
+	Revision int `json:"revision" doc:"The settings contract revision this server serves" example:"8"`
+}
+
+// SettingValueCollectionOutput is the listSettingValues response.
+type SettingValueCollectionOutput struct {
+	Body SettingValueCollection
+}
+
+// SettingConstraint names the policy input that narrowed an effective value.
+type SettingConstraint struct {
+	PolicyInput string `json:"policy_input" doc:"The access-policy input the constraint reads" example:"max_playback_quality"`
+	Constraint  string `json:"constraint" doc:"How the policy narrows the value; one of the settings contract's constraint kinds" example:"ceiling"`
+}
+
+// SettingSourceContext locates the content context an effective value was
+// resolved for.
+type SettingSourceContext struct {
+	ProfileID    ID     `json:"profile_id,omitempty" doc:"The profile resolved for" example:"1"`
+	ClientFamily string `json:"client_family,omitempty" doc:"The client family resolved for" example:"tv"`
+	DeviceID     string `json:"device_id,omitempty" doc:"The device resolved for" example:"iphone-1"`
+	LibraryID    ID     `json:"library_id,omitempty" doc:"The library resolved for" example:"3"`
+	SeriesID     string `json:"series_id,omitempty" doc:"The series resolved for" example:"tv:12345"`
+}
+
+// EffectiveSettingValue is one key resolved through the contract's
+// resolution order: the value that applies, where it came from, and how
+// policy narrowed it.
+type EffectiveSettingValue struct {
+	Key                string                `json:"key" doc:"The setting key" example:"ui.theme"`
+	Value              JSONValue             `json:"value" doc:"The value that applies after resolution and policy"`
+	Source             string                `json:"source" doc:"The scope the value came from, or default for the contract default" example:"profile"`
+	StoredValue        JSONValue             `json:"stored_value,omitempty" doc:"The authored value when policy narrowed it; absent otherwise"`
+	Constrained        bool                  `json:"constrained,omitempty" doc:"Whether policy narrowed the authored value" example:"false"`
+	ConstraintKind     string                `json:"constraint_kind,omitempty" doc:"How policy narrowed it; absent when unconstrained" example:"ceiling"`
+	RequestedValue     JSONValue             `json:"requested_value,omitempty" doc:"The value the profile asked for before the constraint; absent when unconstrained"`
+	ConstrainedBy      *SettingConstraint    `json:"constrained_by,omitempty" doc:"The policy input that narrowed it; absent when unconstrained"`
+	PermittedValues    []JSONValue           `json:"permitted_values,omitempty" doc:"The values policy still allows; absent when unconstrained"`
+	SuggestedValues    []string              `json:"suggested_values,omitempty" doc:"Advisory suggestions for an open setting; never a write allowlist" example:"[\"en\",\"fr\"]"`
+	DefinitionRevision int                   `json:"definition_revision" doc:"The contract revision that last changed this key's definition" example:"3"`
+	UpdatedAt          *Instant              `json:"updated_at,omitempty" doc:"When the winning stored row was last written; absent for a default" example:"2026-01-02T03:04:05.000Z"`
+	SourceContext      *SettingSourceContext `json:"source_context,omitempty" doc:"The content context the value was resolved for; absent outside a batched resolve"`
+	Scope              string                `json:"scope,omitempty" doc:"The scope of the winning row, so a client can reset exactly that scope; absent for a default" example:"profile"`
+	ProfileID          ID                    `json:"profile_id,omitempty" doc:"The profile of the winning row" example:"1"`
+	ClientFamily       string                `json:"client_family,omitempty" doc:"The client family of the winning row" example:"tv"`
+	DeviceID           string                `json:"device_id,omitempty" doc:"The device of the winning row" example:"iphone-1"`
+	LibraryID          ID                    `json:"library_id,omitempty" doc:"The library of the winning row" example:"3"`
+	SeriesID           string                `json:"series_id,omitempty" doc:"The series of the winning row" example:"tv:12345"`
+}
+
+// EffectiveSettingsQuery is what an effective resolution names beyond the
+// keys: the profile and device to resolve for and the content ids in play.
+type EffectiveSettingsQuery struct {
+	ProfileID      ID       `query:"profile_id" doc:"Another profile on the account to resolve for; only the household parent may name one" example:"2"`
+	DeviceID       string   `query:"device_id" maxLength:"128" doc:"Another registered device of the profile to resolve for; absent means the declared device" example:"tv-1"`
+	LibraryIDs     []ID     `query:"library_ids,explode" maxItems:"200" doc:"Libraries whose profile_library values take part, one library_ids parameter per id" example:"[\"3\"]"`
+	SeriesIDs      []string `query:"series_ids,explode" maxItems:"200" doc:"Series whose profile_series values take part, one series_ids parameter per id" example:"[\"tv:12345\"]"`
+	ClientFamily   string   `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; required when a requested key has that scope" example:"tv"`
+	DeviceHeader   string   `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier; its profile_device values take part" example:"iphone-1"`
+	DeviceName     string   `header:"X-Silo-Device-Name" maxLength:"120" doc:"Optional display name recorded on the device registry" example:"Living room"`
+	DevicePlatform string   `header:"X-Silo-Device-Platform" maxLength:"40" doc:"Optional platform recorded on the device registry" example:"iOS"`
+}
+
+func (q EffectiveSettingsQuery) query(ctx context.Context, keys []string) (handlers.EffectiveSettingsQuery, *Problem) {
+	libraries := make([]int, 0, len(q.LibraryIDs))
+	for _, id := range q.LibraryIDs {
+		n, err := intOfID(id)
+		if err != nil || n <= 0 {
+			return handlers.EffectiveSettingsQuery{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+				WithErrors(ProblemError{Location: "query.library_ids", Code: codeInvalid, Detail: "library_ids must name libraries by id"})
+		}
+		libraries = append(libraries, n)
+	}
+	return handlers.EffectiveSettingsQuery{
+		Keys:            keys,
+		ActiveProfileID: profileFrom(ctx),
+		ProfileID:       string(q.ProfileID),
+		DeviceID:        q.DeviceID,
+		Device:          handlers.NewDeviceMetadata(q.DeviceHeader, q.DeviceName, q.DevicePlatform),
+		ClientFamily:    q.ClientFamily,
+		LibraryIDs:      libraries,
+		SeriesIDs:       q.SeriesIDs,
+		VerifyProfile:   profileVerifier(ctx),
+	}, nil
+}
+
+// EffectiveSettingsInput is the listEffectiveSettings request.
+type EffectiveSettingsInput struct {
+	Keys []string `query:"keys,explode" maxItems:"200" doc:"The setting keys to resolve, one keys parameter per key; absent resolves every server-stored setting" example:"[\"ui.theme\"]"`
+	EffectiveSettingsQuery
+}
+
+// EffectiveSettingCollection is the listEffectiveSettings response body.
+type EffectiveSettingCollection struct {
+	Collection[EffectiveSettingValue]
+	Revision int `json:"revision" doc:"The settings contract revision this server serves" example:"8"`
+}
+
+// EffectiveSettingCollectionOutput is the listEffectiveSettings response.
+type EffectiveSettingCollectionOutput struct {
+	Body EffectiveSettingCollection
+}
+
+// SettingContextRequest is one content context of a batched resolve.
+type SettingContextRequest struct {
+	ContextID string `json:"context_id" required:"true" minLength:"1" maxLength:"128" doc:"Caller-chosen identifier echoed on the matching result; unique within the request" example:"row-1"`
+	LibraryID ID     `json:"library_id,omitempty" doc:"The library the context is in; this or series_id is required" example:"3"`
+	SeriesID  string `json:"series_id,omitempty" maxLength:"128" doc:"The series the context is in; this or library_id is required" example:"tv:12345"`
+}
+
+// EffectiveSettingsBatch is the resolveEffectiveSettings request body.
+type EffectiveSettingsBatch struct {
+	Keys     []string                `json:"keys" required:"true" minItems:"1" maxItems:"200" doc:"The setting keys to resolve under every context" example:"[\"playback.preferred_quality\"]"`
+	Contexts []SettingContextRequest `json:"contexts" required:"true" minItems:"1" maxItems:"200" doc:"The content contexts to resolve under"`
+}
+
+// EffectiveSettingsBatchInput is the resolveEffectiveSettings request.
+type EffectiveSettingsBatchInput struct {
+	EffectiveSettingsQuery
+	Body EffectiveSettingsBatch
+}
+
+// EffectiveSettingContext is one context's resolved settings.
+type EffectiveSettingContext struct {
+	ContextID string                  `json:"context_id" doc:"The context_id of the request entry this answers" example:"row-1"`
+	Settings  []EffectiveSettingValue `json:"settings" doc:"The requested keys resolved under this context, in request order"`
+}
+
+// EffectiveSettingContextCollection is the resolveEffectiveSettings
+// response body.
+type EffectiveSettingContextCollection struct {
+	Collection[EffectiveSettingContext]
+	Revision int `json:"revision" doc:"The settings contract revision this server serves" example:"8"`
+}
+
+// EffectiveSettingContextCollectionOutput is the resolveEffectiveSettings
+// response.
+type EffectiveSettingContextCollectionOutput struct {
+	Body EffectiveSettingContextCollection
+}
+
+// NavigationShortcutMutation is one desired-state edit of the acting
+// profile's nav.shortcuts document.
+type NavigationShortcutMutation struct {
+	Item    NavigationShortcutItem `json:"item" required:"true" doc:"The shortcut to add or remove; its destination identity, not its label, decides which entry it is"`
+	Present bool                   `json:"present" required:"true" doc:"true adds or relabels the shortcut, false removes it" example:"true"`
+}
+
+// NavigationShortcutMutationInput is the updateNavigationShortcut request.
+type NavigationShortcutMutationInput struct {
+	Body NavigationShortcutMutation
+}
+
+// PluginSettingsWrite is the values an updatePluginSettings request stores.
+type PluginSettingsWrite struct {
+	Values PluginSettingValues `json:"values" required:"true" doc:"The account's values, replacing the stored set; keys are the plugin's user_config_schema keys"`
+}
+
+// PluginSettingsWriteInput is the updatePluginSettings request.
+type PluginSettingsWriteInput struct {
+	InstallationID ID `path:"installation_id" doc:"The plugin installation" example:"3"`
+	Body           PluginSettingsWrite
+}
+
+// settingFieldLocations maps the seam's rejected-field names onto the
+// request locations the operations declare them at.
+var settingFieldLocations = map[string]string{
+	"key":            "path.key",
+	"keys":           "query.keys",
+	"scope":          "query.scope",
+	"profile_id":     "query.profile_id",
+	"profile_header": locationProfileHeader,
+	"device_id":      "query.device_id",
+	"device_header":  "header." + deviceIDHeader,
+	"client_family":  "header." + clientFamilyHeader,
+	"library_id":     "query.library_id",
+	"series_id":      "query.series_id",
+	"value":          "body.value",
+	"item":           "body.item",
+	"present":        "body.present",
+	"contexts":       "body.contexts",
+}
+
+// settingValueProblem renders the seam's decision. A rejected request
+// member is a validation failure at the location it was declared at; a key
+// the contract does not define is one too (v1 answers 404), since the key
+// is request input, not a resource. Everything else keeps its status.
+func settingValueProblem(err error, overrides map[string]string) *Problem {
+	var apiErr *handlers.APIError
+	if !errors.As(err, &apiErr) || apiErr.Field == "" || apiErr.Status >= 500 {
+		return serviceProblem(err)
+	}
+	unknownKey := apiErr.Status == http.StatusNotFound && (apiErr.Field == "key" || apiErr.Field == "keys")
+	if apiErr.Status != http.StatusBadRequest && !unknownKey {
+		return serviceProblem(err)
+	}
+	location, ok := overrides[apiErr.Field]
+	if !ok {
+		location = settingFieldLocations[apiErr.Field]
+	}
+	if location == "" {
+		location = locationBody
+	}
+	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+		WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: apiErr.Message})
+}
+
+func (reg *Registry) settingValuesReady(ctx context.Context) (int, *Problem) {
+	if reg.deps.SettingValues == nil {
+		return 0, unavailable("setting values")
+	}
+	claims := claimsFrom(ctx)
+	if claims == nil {
+		return 0, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	return claims.UserID, nil
+}
+
+func (reg *Registry) getSettingValue(ctx context.Context, in *SettingKeyInput) (*SettingValueOutput, error) {
+	userID, p := reg.settingValuesReady(ctx)
+	if p != nil {
+		return nil, p
+	}
+	view, err := reg.deps.SettingValues.GetSettingValue(ctx, userID, in.identity(ctx, in.Key))
+	if err != nil {
+		return nil, settingValueProblem(err, nil)
+	}
+	return &SettingValueOutput{Body: settingValueOf(view)}, nil
+}
+
+func (reg *Registry) updateSettingValue(ctx context.Context, in *SettingValueWriteInput) (*SettingValueOutput, error) {
+	userID, p := reg.settingValuesReady(ctx)
+	if p != nil {
+		return nil, p
+	}
+	view, err := reg.deps.SettingValues.SetSettingValue(ctx, userID, in.identity(ctx, in.Key), json.RawMessage(in.Body.Value))
+	if err != nil {
+		return nil, settingValueProblem(err, nil)
+	}
+	return &SettingValueOutput{Body: settingValueOf(view)}, nil
+}
+
+func (reg *Registry) deleteSettingValue(ctx context.Context, in *SettingKeyInput) (*struct{}, error) {
+	userID, p := reg.settingValuesReady(ctx)
+	if p != nil {
+		return nil, p
+	}
+	if err := reg.deps.SettingValues.DeleteSettingValue(ctx, userID, in.identity(ctx, in.Key)); err != nil {
+		return nil, settingValueProblem(err, nil)
+	}
+	return nil, nil
+}
+
+func (reg *Registry) listSettingValues(ctx context.Context, in *SettingValuesInput) (*SettingValueCollectionOutput, error) {
+	userID, p := reg.settingValuesReady(ctx)
+	if p != nil {
+		return nil, p
+	}
+	views, err := reg.deps.SettingValues.ListSettingValues(ctx, userID, in.Keys, in.identity(ctx, ""))
+	if err != nil {
+		return nil, settingValueProblem(err, map[string]string{"key": "query.keys"})
+	}
+	items := make([]ExplicitSettingValue, 0, len(views))
+	for _, v := range views {
+		items = append(items, ExplicitSettingValue{
+			Key: v.Key, Scope: v.Scope, ProfileID: ID(v.ProfileID), ClientFamily: v.ClientFamily, DeviceID: v.DeviceID,
+			LibraryID: optionalIntID(v.LibraryID), SeriesID: v.SeriesID, IsSet: v.IsSet, Value: JSONValue(v.Value),
+			Revision: v.Revision, UpdatedAt: storedInstant(v.UpdatedAt),
+		})
+	}
+	return &SettingValueCollectionOutput{Body: SettingValueCollection{
+		Collection: NewCollection(items), Revision: reg.deps.SettingValues.ContractRevision(),
+	}}, nil
+}
+
+func (reg *Registry) listEffectiveSettings(ctx context.Context, in *EffectiveSettingsInput) (*EffectiveSettingCollectionOutput, error) {
+	userID, p := reg.settingValuesReady(ctx)
+	if p != nil {
+		return nil, p
+	}
+	q, p := in.query(ctx, in.Keys)
+	if p != nil {
+		return nil, p
+	}
+	views, err := reg.deps.SettingValues.ResolveEffectiveSettings(ctx, userID, q)
+	if err != nil {
+		return nil, settingValueProblem(err, nil)
+	}
+	return &EffectiveSettingCollectionOutput{Body: EffectiveSettingCollection{
+		Collection: NewCollection(effectiveSettingValuesOf(views)), Revision: reg.deps.SettingValues.ContractRevision(),
+	}}, nil
+}
+
+func (reg *Registry) resolveEffectiveSettings(ctx context.Context, in *EffectiveSettingsBatchInput) (*EffectiveSettingContextCollectionOutput, error) {
+	userID, p := reg.settingValuesReady(ctx)
+	if p != nil {
+		return nil, p
+	}
+	q, p := in.query(ctx, in.Body.Keys)
+	if p != nil {
+		return nil, p
+	}
+	contexts := make([]handlers.EffectiveContextRequest, 0, len(in.Body.Contexts))
+	for _, c := range in.Body.Contexts {
+		req := handlers.EffectiveContextRequest{ContextID: c.ContextID, SeriesID: c.SeriesID}
+		if c.LibraryID != "" {
+			// The seam accepts a numeric string, which is what an ID is.
+			raw, _ := json.Marshal(string(c.LibraryID))
+			req.LibraryID = raw
+		}
+		contexts = append(contexts, req)
+	}
+	views, err := reg.deps.SettingValues.ResolveEffectiveSettingContexts(ctx, userID, q, contexts)
+	if err != nil {
+		return nil, settingValueProblem(err, map[string]string{"keys": "body.keys"})
+	}
+	items := make([]EffectiveSettingContext, 0, len(views))
+	for _, v := range views {
+		items = append(items, EffectiveSettingContext{ContextID: v.ContextID, Settings: effectiveSettingValuesOf(v.Settings)})
+	}
+	return &EffectiveSettingContextCollectionOutput{Body: EffectiveSettingContextCollection{
+		Collection: NewCollection(items), Revision: reg.deps.SettingValues.ContractRevision(),
+	}}, nil
+}
+
+func (reg *Registry) updateNavigationShortcut(ctx context.Context, in *NavigationShortcutMutationInput) (*SettingValueOutput, error) {
+	userID, p := reg.settingValuesReady(ctx)
+	if p != nil {
+		return nil, p
+	}
+	view, err := reg.deps.SettingValues.SetNavigationShortcut(ctx, userID, profileFrom(ctx), json.RawMessage(in.Body.Item), in.Body.Present)
+	if err != nil {
+		return nil, settingValueProblem(err, nil)
+	}
+	return &SettingValueOutput{Body: settingValueOf(view)}, nil
+}
+
+func (reg *Registry) updatePluginSettings(ctx context.Context, in *PluginSettingsWriteInput) (*PluginSettingsOutput, error) {
+	if reg.deps.PluginSettings == nil {
+		return nil, unavailable("plugin settings")
+	}
+	claims := claimsFrom(ctx)
+	if claims == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	id, err := intOfID(in.InstallationID)
+	if err != nil || id <= 0 {
+		return nil, NewProblem(TypeNotFound, "Plugin installation not found")
+	}
+	if err := reg.deps.PluginSettings.SetUserPluginSettings(ctx, claims.UserID, id, NonNilMap(map[string]string(in.Body.Values))); err != nil {
+		return nil, settingValueProblem(err, map[string]string{"values": "body.values"})
+	}
+	view, err := reg.deps.PluginSettings.GetUserPluginSettings(ctx, claims.UserID, id)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return &PluginSettingsOutput{Body: PluginSettings{
+		Installation: pluginSettingsInstallationFromView(view.Installation),
+		Values:       PluginSettingValues(NonNilMap(view.Values)),
+	}}, nil
+}
+
+func settingValueOf(v handlers.SettingValueView) SettingValue {
+	return SettingValue{
+		Key: v.Key, Scope: v.Scope, ProfileID: ID(v.ProfileID), ClientFamily: v.ClientFamily, DeviceID: v.DeviceID,
+		LibraryID: optionalIntID(v.LibraryID), SeriesID: v.SeriesID, Value: JSONValue(v.Value),
+		Revision: v.Revision, UpdatedAt: storedInstant(v.UpdatedAt),
+	}
+}
+
+func effectiveSettingValuesOf(views []handlers.EffectiveSettingValueView) []EffectiveSettingValue {
+	out := make([]EffectiveSettingValue, 0, len(views))
+	for _, v := range views {
+		e := EffectiveSettingValue{
+			Key: v.Key, Value: JSONValue(v.Value), Source: v.Source, StoredValue: JSONValue(v.StoredValue),
+			Constrained: v.Constrained, ConstraintKind: v.ConstraintKind, RequestedValue: JSONValue(v.RequestedValue),
+			SuggestedValues: v.SuggestedValues, DefinitionRevision: v.DefinitionRevision, UpdatedAt: storedInstant(v.UpdatedAt),
+			Scope: v.Scope, ProfileID: ID(v.ProfileID), ClientFamily: v.ClientFamily, DeviceID: v.DeviceID,
+			LibraryID: optionalIntID(v.LibraryID), SeriesID: v.SeriesID,
+		}
+		if v.ConstrainedBy != nil {
+			e.ConstrainedBy = &SettingConstraint{PolicyInput: v.ConstrainedBy.PolicyInput, Constraint: string(v.ConstrainedBy.Constraint)}
+		}
+		if len(v.PermittedValues) > 0 {
+			e.PermittedValues = make([]JSONValue, 0, len(v.PermittedValues))
+			for _, pv := range v.PermittedValues {
+				e.PermittedValues = append(e.PermittedValues, JSONValue(pv))
+			}
+		}
+		if v.SourceContext != nil {
+			e.SourceContext = &SettingSourceContext{
+				ProfileID: ID(v.SourceContext.ProfileID), ClientFamily: v.SourceContext.ClientFamily, DeviceID: v.SourceContext.DeviceID,
+				LibraryID: optionalIntID(v.SourceContext.LibraryID), SeriesID: v.SourceContext.SeriesID,
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// optionalIntID renders a v1 "0 means none" integer id as an absent ID.
+func optionalIntID(n int) ID {
+	if n == 0 {
+		return ""
+	}
+	return IDFromInt(int64(n))
 }
