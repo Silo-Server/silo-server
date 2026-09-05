@@ -939,6 +939,29 @@ stored ones, every string member of a profile is always emitted, ids are string 
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
+**Settings section (Phase 4).** Operations: `getSettingsContract` (serves both v1
+`/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (also v1
+`/settings/capability`), `getOverlayConfig`, `getEffectiveSubtitleAppearance`,
+`updateSubtitleAppearanceDeviceOverride`, `deleteSubtitleAppearanceDeviceOverride`,
+`listPluginSettings`, `getPluginSettings`, `updatePluginSettings`, `listSettingValues`,
+`getSettingValue`, `updateSettingValue`, `deleteSettingValue`, `listEffectiveSettings`,
+`resolveEffectiveSettings`, and `updateNavigationShortcut`. Every operation calls the
+request-free core of the v1 handlers; the manifest is the same canonical bytes and ETag v1
+serves, and the effective resolver keeps `internal/settingsresolve` semantics. Deliberate v1
+differences: a key the settings contract does not define is a `422` `validation_failed` at the
+key's declared location (v1: `404` `unknown_setting`), as are every other rejected request
+member and the nav.shortcuts whole-document refusal (v1: `400`); `keys`, `library_ids` and
+`series_ids` are repeated query parameters rather than comma-separated; the v1 `{values}`,
+`{settings}`, `{contexts}` and `{installations}` envelopes become the collection envelope
+`{items}` (unpaginated, bounded by the request); the device-override and plugin-settings
+writes answer `200` with the resolved document rather than `204`; plugin `values` and the
+shortcut `item` are declared extension bags because the plugin and the contract's object
+schema own their keys; `X-Silo-Device-Id` is a required declared header on device-override
+mutations; ids are string `ID`s and `updated_at` is an instant. Not carried here: the
+`If-None-Match` conditional manifest GET, the `X-Silo-Mutation-Id` idempotent replay, and the
+admin-only `admin_form` descriptor; the first two land with the foundation caching and
+mutation-retry work.
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;
