@@ -425,7 +425,7 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 	// proportional to the page size instead of the collection size. The
 	// explicit-sort case falls through to the browse allowlist path below, which
 	// re-sorts the whole membership.
-	if catalog.IsLiveQueryType(collection.CollectionType) && !query.sortExplicit {
+	if catalog.IsLiveQueryType(collection.CollectionType) && !query.sortExplicit && !query.hasIntersectingFilters() && !query.hasItemTypeFilter && query.searchTerm == "" && !query.isFavorite && query.isPlayed == nil && !query.isResumable {
 		routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
 		pageIDs, total, ok, pageErr := h.smartCollectionContentIDPage(
 			r.Context(), session, collection, query.startIndex, query.limit)
@@ -490,7 +490,7 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 
 	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
 
-	if query.sortExplicit {
+	if query.sortExplicit || query.hasIntersectingFilters() || query.hasItemTypeFilter || query.searchTerm != "" || query.isFavorite || query.isPlayed != nil || query.isResumable {
 		// Catalog handles ordering and paging; the member list acts as an
 		// access-filtered allowlist.
 		params := buildBrowseParams(query)
@@ -537,7 +537,7 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 		dto.ParentID = routeID
 		items = append(items, dto)
 	}
-	applyImageTypeLimit(items, query.imageTypeLimit)
+	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: total,

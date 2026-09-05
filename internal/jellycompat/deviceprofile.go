@@ -3,12 +3,14 @@ package jellycompat
 import (
 	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -27,8 +29,21 @@ type DeviceProfile struct {
 	MaxStreamingBitrate int64                `json:"MaxStreamingBitrate,omitempty"`
 	DirectPlayProfiles  []DirectPlayProfile  `json:"DirectPlayProfiles,omitempty"`
 	TranscodingProfiles []TranscodingProfile `json:"TranscodingProfiles,omitempty"`
+	ContainerProfiles   []ContainerProfile   `json:"ContainerProfiles,omitempty"`
+	SubtitleProfiles    []SubtitleProfile    `json:"SubtitleProfiles,omitempty"`
 	CodecProfiles       []CodecProfile       `json:"CodecProfiles,omitempty"`
 	SubtitleProfiles    []SubtitleProfile    `json:"SubtitleProfiles,omitempty"`
+}
+
+type ContainerProfile struct {
+	Type       string             `json:"Type,omitempty"`
+	Container  string             `json:"Container,omitempty"`
+	Conditions []ProfileCondition `json:"Conditions,omitempty"`
+}
+
+type SubtitleProfile struct {
+	Format string `json:"Format,omitempty"`
+	Method string `json:"Method,omitempty"`
 }
 
 type DirectPlayProfile struct {
@@ -39,12 +54,14 @@ type DirectPlayProfile struct {
 }
 
 type TranscodingProfile struct {
-	Type       string `json:"Type,omitempty"`
-	Container  string `json:"Container,omitempty"`
-	Protocol   string `json:"Protocol,omitempty"`
-	Context    string `json:"Context,omitempty"`
-	VideoCodec string `json:"VideoCodec,omitempty"`
-	AudioCodec string `json:"AudioCodec,omitempty"`
+	MaxAudioChannels string             `json:"MaxAudioChannels,omitempty"`
+	Conditions       []ProfileCondition `json:"Conditions,omitempty"`
+	Type             string             `json:"Type,omitempty"`
+	Container        string             `json:"Container,omitempty"`
+	Protocol         string             `json:"Protocol,omitempty"`
+	Context          string             `json:"Context,omitempty"`
+	VideoCodec       string             `json:"VideoCodec,omitempty"`
+	AudioCodec       string             `json:"AudioCodec,omitempty"`
 }
 
 type CodecProfile struct {
@@ -71,6 +88,7 @@ type ProfileCondition struct {
 
 // DeviceProfileStore keeps the last reported device profile per compat token.
 type DeviceProfileStore struct {
+	pool     *pgxpool.Pool
 	mu       sync.RWMutex
 	profiles map[string]storedDeviceProfile
 	ttl      time.Duration
@@ -139,48 +157,7 @@ func (p DeviceProfile) HasData() bool {
 		p.MaxStreamingBitrate > 0 ||
 		len(p.DirectPlayProfiles) > 0 ||
 		len(p.TranscodingProfiles) > 0 ||
-		len(p.CodecProfiles) > 0 ||
-		len(p.SubtitleProfiles) > 0
-}
-
-// ExternalSubtitleFormat returns the client-requested format for delivering an
-// extractable text subtitle separately from the video. Prefer an exact codec
-// match (preserving ASS styling), then the WebVTT conversion profile used by
-// Jellyfin Web and WebOS.
-func (p DeviceProfile) ExternalSubtitleFormat(codec string) (string, bool) {
-	codec = normalizeSubtitleProfileFormat(codec)
-	for _, profile := range p.SubtitleProfiles {
-		if !strings.EqualFold(strings.TrimSpace(profile.Method), "External") {
-			continue
-		}
-		format := normalizeSubtitleProfileFormat(profile.Format)
-		if format == codec {
-			return subtitleRouteFormat(format), true
-		}
-	}
-	for _, profile := range p.SubtitleProfiles {
-		if !strings.EqualFold(strings.TrimSpace(profile.Method), "External") {
-			continue
-		}
-		format := normalizeSubtitleProfileFormat(profile.Format)
-		if format == subtitleCodecVTT {
-			return subtitleCodecVTT, true
-		}
-	}
-	return "", false
-}
-
-func normalizeSubtitleProfileFormat(format string) string {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case subtitleCodecSubRip:
-		return subtitleCodecSRT
-	case subtitleCodecSSA:
-		return subtitleCodecASS
-	case subtitleCodecWebVTT:
-		return subtitleCodecVTT
-	default:
-		return strings.ToLower(strings.TrimSpace(format))
-	}
+		len(p.CodecProfiles) > 0 || len(p.SubtitleProfiles) > 0 || len(p.ContainerProfiles) > 0
 }
 
 // SupportsDirectPlay reports whether a version can be served as-is.
@@ -226,6 +203,29 @@ func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
 
 // SupportsTranscoding reports whether the client advertises HLS transcoding.
 func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
+	return p.supportsTranscodingOutput(version, 2, 0)
+}
+
+func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int) bool {
+	output := version
+	output.Container = "ts"
+	output.CodecVideo = compatTargetVideoCodec
+	output.CodecAudio = compatTargetAudioCodec
+	video := compatPrimaryVideoTrack(version)
+	video.Codec = compatTargetVideoCodec
+	video.Profile = ""
+	video.BitDepth = 8
+	if videoBitrateKbps > 0 {
+		video.Bitrate = videoBitrateKbps * 1000
+		output.Bitrate = videoBitrateKbps + 192
+	}
+	output.VideoTracks = []models.VideoTrack{video}
+	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Channels: channels, Bitrate: 192000}}
+	audioIndex := len(output.VideoTracks)
+	if !p.codecProfileCompatibility(output, &audioIndex).supportsDirectPlay() {
+		return false
+	}
+
 	if len(p.TranscodingProfiles) == 0 {
 		return true
 	}
@@ -236,10 +236,16 @@ func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
 		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
 			continue
 		}
-		if !matchesCSV(profile.VideoCodec, "h264") {
+		if maxChannels, _ := strconv.Atoi(profile.MaxAudioChannels); maxChannels > 0 && channels > maxChannels {
 			continue
 		}
-		if !matchesCSV(profile.AudioCodec, "aac") {
+		if !conditionsMatch(profile.Conditions, buildConditionValues(output, &audioIndex)) {
+			continue
+		}
+		if !matchesCSV(profile.VideoCodec, compatTargetVideoCodec) {
+			continue
+		}
+		if !matchesCSV(profile.AudioCodec, compatTargetAudioCodec) {
 			continue
 		}
 		if profile.Container != "" && !matchesCSV(profile.Container, "ts") && !matchesCSV(profile.Container, "mpegts") {
@@ -260,6 +266,12 @@ func (p DeviceProfile) SupportsHLSRemuxForAudioStream(version catalog.FileVersio
 	}
 	audioCodec := compatAudioCodec(version, audioStreamIndex)
 	for _, profile := range p.TranscodingProfiles {
+		if cap, _ := strconv.Atoi(profile.MaxAudioChannels); cap > 0 && (compatAudioTrack(version, audioStreamIndex).Channels <= 0 || compatAudioTrack(version, audioStreamIndex).Channels > cap) {
+			continue
+		}
+		if !conditionsMatch(profile.Conditions, buildConditionValues(version, audioStreamIndex)) {
+			continue
+		}
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
@@ -281,6 +293,9 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 		return false
 	}
 	for _, profile := range p.TranscodingProfiles {
+		if cap, _ := strconv.Atoi(profile.MaxAudioChannels); cap > 0 && cap < 2 {
+			continue
+		}
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
@@ -305,7 +320,7 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 		outputVersion.CodecAudio = compatTargetAudioCodec
 		outputVersion.AudioTracks = []models.AudioTrack{outputAudio}
 		outputAudioStreamIndex := len(outputVersion.VideoTracks)
-		return p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
+		return conditionsMatch(profile.Conditions, buildConditionValues(outputVersion, &outputAudioStreamIndex)) && p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
 	}
 	return false
 }

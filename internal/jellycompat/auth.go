@@ -217,9 +217,8 @@ func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *Ad
 	return nil, false
 }
 
-// PlaybackSessionAuth creates middleware that falls back to playback session
-// authentication for media stream endpoints where external players (e.g. libmpv)
-// don't forward auth headers or query parameters.
+// PlaybackSessionAuth accepts a login/API token or an unexpired PlaySessionId
+// scoped to the negotiated item and source. Catalog IDs are not credentials.
 func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +229,8 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 					serveWithSession(next, w, r, session)
 					return
 				}
+				writeError(w, http.StatusUnauthorized, "Unauthorized", "Invalid or expired authentication token")
+				return
 			}
 
 			// Follow-up HLS requests (master/segment) carry only PlaySessionId,
@@ -241,8 +242,8 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 			// builds its own direct-play URL with a lowercase "playSessionId"
 			// (and no api_key / auth header), so a case-sensitive match would
 			// miss it and 401 the stream — forcing a needless transcode fallback.
-			if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" {
-				if playSession, found := playbackStore.Get(playSessionID); found {
+			if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" && playbackStore != nil {
+				if playSession, found := playbackStore.Get(playSessionID); found && playbackGrantMatchesRequest(r, playSession) {
 					if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken); ok {
 						serveWithSession(next, w, r, session)
 						return
@@ -252,39 +253,29 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 				}
 			}
 
-			// Stock Jellyfin Android TV ignores the api_key-bearing DirectStreamUrl
-			// we return from PlaybackInfo and builds its own direct-play URL with no
-			// auth header, no api_key/ApiKey, and no PlaySessionId. Anchor auth on
-			// the PlaybackSession negotiated for this item: a successful PlaybackInfo
-			// already authenticated the user and registered a session holding the
-			// CompatToken. Scope this strictly to the direct-play video stream routes
-			// (NOT /Items/{id}/Download) via the chi route pattern, prefer matching
-			// on mediaSourceId when present, and require the matched session's
-			// RouteItemID to equal the requested item so a source id can't
-			// authorize a stream for a different item.
-			if playbackStore != nil {
-				switch chi.RouteContext(r.Context()).RoutePattern() {
-				case "/Videos/{id}/stream", "/Videos/{id}/stream.{container}":
-					routeItemID := chi.URLParam(r, "id")
-					if routeItemID != "" {
-						mediaSourceID := newCaseInsensitiveQuery(r.URL.Query()).Get("mediaSourceId")
-						lookupID := routeItemID
-						if mediaSourceID != "" {
-							lookupID = mediaSourceID
-						}
-						if playSession, _, found := playbackStore.FindByRoute("", lookupID); found && playSession.RouteItemID == routeItemID {
-							if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken); ok {
-								serveWithSession(next, w, r, session)
-								return
-							}
-						}
-					}
-				}
-			}
-
 			writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		})
 	}
+}
+
+func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool {
+	if session == nil || session.Terminal || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return false
+	}
+	itemID := firstNonEmpty(chi.URLParam(r, "id"), chi.URLParam(r, "routeItemId"))
+	if itemID == "" || itemID != session.RouteItemID {
+		return false
+	}
+	sourceID := firstNonEmpty(chi.URLParam(r, "routeMediaSourceId"), newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId"))
+	if sourceID == "" {
+		return true
+	}
+	for _, source := range session.MediaSources {
+		if source.ID == sourceID {
+			return true
+		}
+	}
+	return false
 }
 
 // SessionFromContext returns the authenticated compat session, if present.

@@ -1094,3 +1094,118 @@ func (r *EpisodeRepository) UpdateStillIfSourceMatches(ctx context.Context, cont
 	}
 	return tag.RowsAffected() > 0, nil
 }
+
+// ListUpcoming returns episodes premiered since the supplied UTC boundary,
+// including future metadata without a local file, within the viewer's scope.
+func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, seriesID, seasonID string, libraryID, limit, offset int, filter AccessFilter) ([]*models.Episode, int, error) {
+	conditions := []string{"mi.content_id = episodes.series_id", "mi.type = 'series'"}
+	args := []any{since}
+	index := 2
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
+	applyAccessFilter("mi", filter, &conditions, &args, &index)
+	if libraryID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = $%d)", index))
+		args = append(args, libraryID)
+		index++
+	}
+	where := "air_date >= $1 AND EXISTS (SELECT 1 FROM media_items mi WHERE " + strings.Join(conditions, " AND ") + ")"
+	if seriesID != "" {
+		where += fmt.Sprintf(" AND series_id = $%d", index)
+		args = append(args, seriesID)
+		index++
+	}
+	if seasonID != "" {
+		where += fmt.Sprintf(" AND season_id = $%d", index)
+		args = append(args, seasonID)
+		index++
+	}
+	var total int
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM episodes WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, min(max(limit, 0), 1000), max(offset, 0))
+	rows, err := r.pool.Query(ctx, "SELECT "+episodeColumns+" FROM episodes WHERE "+where+fmt.Sprintf(" ORDER BY air_date, LOWER(title), content_id LIMIT $%d OFFSET $%d", index, index+1), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	episodes, err := scanEpisodes(rows)
+	return episodes, total, err
+}
+
+// BrowseEpisodes applies catalog and profile predicates before counting and
+// paging, so a long series only hydrates the selected page.
+func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, seasonID string, seasonNumber *int, startItemID string, filters BrowseFilters, access AccessFilter) ([]*models.Episode, int, error) {
+	conditions := []string{"e.series_id = $1", "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)"}
+	args := []any{seriesID}
+	index := 2
+	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
+	applyAccessFilter("s", access, &conditions, &args, &index)
+	if seasonID != "" {
+		conditions = append(conditions, fmt.Sprintf("e.season_id = $%d", index))
+		args = append(args, seasonID)
+		index++
+	} else if seasonNumber != nil {
+		conditions = append(conditions, fmt.Sprintf("e.season_number = $%d", index))
+		args = append(args, *seasonNumber)
+		index++
+	}
+	extra := []string{}
+	filters.Type = browseTypeEpisode
+	appendCompatBrowsePredicates(filters, &extra, &args, &index)
+	rewrite := strings.NewReplacer("mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
+	for _, condition := range extra {
+		conditions = append(conditions, rewrite.Replace(condition))
+	}
+	if filters.Genre != "" {
+		conditions = append(conditions, fmt.Sprintf("s.genres @> ARRAY[$%d]::text[]", index))
+		args = append(args, filters.Genre)
+		index++
+	}
+	if filters.PersonID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM item_people ip WHERE ip.content_id=s.content_id AND ip.person_id=$%d)", index))
+		args = append(args, filters.PersonID)
+		index++
+	}
+	if filters.NamePrefix != "" {
+		conditions = append(conditions, fmt.Sprintf("LOWER(e.title) LIKE $%d ESCAPE '\\'", index))
+		args = append(args, likePrefixPattern(filters.NamePrefix))
+		index++
+	}
+	if filters.RequireBackdrop {
+		conditions = append(conditions, "COALESCE(s.backdrop_path,'') <> ''")
+	}
+	order := "e.season_number, e.episode_number, e.content_id"
+	switch filters.Sort {
+	case BrowseSortTitle:
+		order = "LOWER(e.title), e.content_id"
+	case BrowseSortReleaseDate:
+		order = "e.air_date, e.content_id"
+	case BrowseSortCreatedAt:
+		order = "e.created_at, e.content_id"
+	}
+	if filters.Order == BrowseOrderDescending {
+		order = strings.ReplaceAll(order, ",", " DESC,") + " DESC"
+	}
+	if startItemID != "" {
+		// StartItemId uses the natural episode queue. Other sorting still orders the
+		// surviving queue normally; absent IDs produce an empty page.
+		conditions = append(conditions, fmt.Sprintf("(e.season_number,e.episode_number) >= (SELECT start.season_number,start.episode_number FROM episodes start WHERE start.content_id=$%d AND start.series_id=e.series_id)", index))
+		args = append(args, startItemID)
+		index++
+	}
+	from := " FROM episodes e JOIN media_items s ON s.content_id=e.series_id WHERE " + strings.Join(conditions, " AND ")
+	var total int
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*)"+from, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, min(max(filters.Limit, 0), 1000), max(filters.Offset, 0))
+	query := "SELECT " + episodeColumns + " FROM (SELECT e.*" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page"
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	episodes, err := scanEpisodes(rows)
+	return episodes, total, err
+}

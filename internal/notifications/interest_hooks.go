@@ -329,6 +329,33 @@ func (s *interestTrackingStore) SetProgressAt(ctx context.Context, profileID, me
 	return err
 }
 
+// Jellycompat progress capabilities must survive the production decorator,
+// just like the existing optional watch-history and settings capabilities.
+func (s *interestTrackingStore) SetJellycompatProgress(ctx context.Context, profileID, itemID string, position, duration float64, completed bool, date time.Time) error {
+	writer, ok := s.UserStore.(interface {
+		SetJellycompatProgress(context.Context, string, string, float64, float64, bool, time.Time) error
+	})
+	if !ok {
+		return fmt.Errorf("explicit user progress updates unavailable")
+	}
+	before := s.currentProgressState(ctx, profileID, itemID)
+	if err := writer.SetJellycompatProgress(ctx, profileID, itemID, position, duration, completed, date); err != nil {
+		return err
+	}
+	s.queueOnTransition(profileID, itemID, before, progressState{exists: true, inProgress: !completed && position > 0, completed: completed})
+	return nil
+}
+
+func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context, profileID string, ids []string) (map[string]string, error) {
+	reader, ok := s.UserStore.(interface {
+		ListJellycompatProgressDates(context.Context, string, []string) (map[string]string, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return reader.ListJellycompatProgressDates(ctx, profileID, ids)
+}
+
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)

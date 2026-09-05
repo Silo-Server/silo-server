@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,8 +24,10 @@ const (
 // SubtitleFontAttachment is a font attached to a media container for ASS/SSA
 // subtitle rendering.
 type SubtitleFontAttachment struct {
-	Name string
-	Data []byte
+	// StreamIndex is the original container stream index used by attachment routes.
+	StreamIndex int
+	Name        string
+	Data        []byte
 }
 
 // SubtitleFontBundleItem is the JSON-safe representation sent to web players.
@@ -42,6 +45,41 @@ type attachmentProbeStream struct {
 	CodecName string            `json:"codec_name"`
 	CodecType string            `json:"codec_type"`
 	Tags      map[string]string `json:"tags"`
+}
+
+// SubtitleFontMetadata identifies an attached font without extracting its bytes.
+type SubtitleFontMetadata struct {
+	Index    int
+	Codec    string
+	FileName string
+	MimeType string
+}
+
+var subtitleFontProbeSlots = make(chan struct{}, 2)
+
+// ListAttachedSubtitleFonts bounds concurrent metadata probes and their duration.
+// Busy or unavailable probes return an error; callers can omit optional discovery.
+func ListAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string) ([]SubtitleFontMetadata, error) {
+	select {
+	case subtitleFontProbeSlots <- struct{}{}:
+		defer func() { <-subtitleFontProbeSlots }()
+	default:
+		return nil, errors.New("subtitle font probes busy")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	streams, err := probeFontAttachmentStreams(ctx, inputPath, ffprobePathFromFFmpeg(ffmpegPath))
+	if err != nil {
+		return nil, err
+	}
+	if len(streams) > maxSubtitleFontAttachments {
+		streams = streams[:maxSubtitleFontAttachments]
+	}
+	fonts := make([]SubtitleFontMetadata, 0, len(streams))
+	for i, stream := range streams {
+		fonts = append(fonts, SubtitleFontMetadata{Index: stream.Index, Codec: stream.CodecName, FileName: safeAttachmentDisplayName(stream, fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))), MimeType: stream.Tags["mimetype"]})
+	}
+	return fonts, nil
 }
 
 // ExtractAttachedSubtitleFonts extracts font attachments from a media file.
@@ -161,8 +199,9 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 			return nil, fmt.Errorf("subtitle fonts: read attachment %q: %w", fallbackName, err)
 		}
 		fonts = append(fonts, SubtitleFontAttachment{
-			Name: safeAttachmentDisplayName(stream, fallbackName),
-			Data: data,
+			StreamIndex: stream.Index,
+			Name:        safeAttachmentDisplayName(stream, fallbackName),
+			Data:        data,
 		})
 	}
 
@@ -235,8 +274,21 @@ func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePa
 		"-of", "json",
 		inputPath,
 	)
-	out, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	const maxProbeBytes = 1 << 20
+	out, readErr := io.ReadAll(io.LimitReader(stdout, maxProbeBytes+1))
+	if readErr != nil || len(out) > maxProbeBytes {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, errors.New("subtitle fonts: attachment metadata exceeds probe limit or could not be read")
+	}
+	if err := cmd.Wait(); err != nil {
 		return nil, fmt.Errorf("subtitle fonts: probe attachments: %w", err)
 	}
 

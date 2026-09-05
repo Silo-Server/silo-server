@@ -107,6 +107,12 @@ func (p DeviceProfile) codecProfileCompatibilityWithValues(
 	useSubContainer bool,
 ) codecProfileCompatibility {
 	compat := codecProfileCompatibility{VideoSupported: true, AudioSupported: true}
+	for _, profile := range p.ContainerProfiles {
+		if matchesVideoType(profile.Type) && matchesCSV(profile.Container, container) && !conditionsMatch(profile.Conditions, values) {
+			compat.VideoSupported = false
+			compat.AudioSupported = false
+		}
+	}
 	if len(p.CodecProfiles) == 0 {
 		return compat
 	}

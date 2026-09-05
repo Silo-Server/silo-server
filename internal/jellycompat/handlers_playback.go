@@ -47,17 +47,20 @@ const (
 )
 
 type playbackInfoRequest struct {
-	UserID               string          `json:"UserId"`
-	MediaSourceID        string          `json:"MediaSourceId"`
-	AudioStreamIndex     *compatIntValue `json:"AudioStreamIndex,omitempty"`
-	SubtitleStreamIndex  *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
-	StartTimeTicks       int64           `json:"StartTimeTicks"`
-	EnableDirectPlay     *bool           `json:"EnableDirectPlay"`
-	EnableDirectStream   *bool           `json:"EnableDirectStream"`
-	EnableTranscoding    *bool           `json:"EnableTranscoding"`
-	AllowVideoStreamCopy *bool           `json:"AllowVideoStreamCopy"`
-	AllowAudioStreamCopy *bool           `json:"AllowAudioStreamCopy"`
-	DeviceProfile        json.RawMessage `json:"DeviceProfile"`
+	UserID                              string          `json:"UserId"`
+	MediaSourceID                       string          `json:"MediaSourceId"`
+	AudioStreamIndex                    *compatIntValue `json:"AudioStreamIndex,omitempty"`
+	SubtitleStreamIndex                 *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
+	MaxStreamingBitrate                 int64           `json:"MaxStreamingBitrate"`
+	MaxAudioChannels                    int             `json:"MaxAudioChannels"`
+	AlwaysBurnInSubtitleWhenTranscoding bool            `json:"AlwaysBurnInSubtitleWhenTranscoding"`
+	StartTimeTicks                      int64           `json:"StartTimeTicks"`
+	EnableDirectPlay                    *bool           `json:"EnableDirectPlay"`
+	EnableDirectStream                  *bool           `json:"EnableDirectStream"`
+	EnableTranscoding                   *bool           `json:"EnableTranscoding"`
+	AllowVideoStreamCopy                *bool           `json:"AllowVideoStreamCopy"`
+	AllowAudioStreamCopy                *bool           `json:"AllowAudioStreamCopy"`
+	DeviceProfile                       json.RawMessage `json:"DeviceProfile"`
 }
 
 var compatLanguageNames = map[string]string{
@@ -1008,7 +1011,10 @@ func is4KResolution(res string) bool {
 // Jellyfin-compatible VideoToolbox tone maps. Those requests intentionally
 // preserve source dimensions, so leaving the bitrate unset would make the
 // encoder use its 1080p fallback even for 4K sources.
-func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe compatToneMapRecipe) int {
+func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe compatToneMapRecipe, clientBitrateKbps int) int {
+	if clientBitrateKbps > 0 {
+		return 0
+	}
 	if recipe.mode != tonemap.ModeHardware || recipe.hwAccel != tonemap.BackendVideoToolbox {
 		return 0
 	}
@@ -1505,6 +1511,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SourceVideoBitDepth: sourceVideoBitDepth,
 		SeekSeconds:         initialSeekSeconds,
 		StartSegmentNumber:  startSegmentNumber,
+		SubtitleBurnIn:      source.SubtitleBurnIn,
+		SubtitleTrackIndex:  source.SubtitleTrackIndex,
+		SubtitleCodec:       source.SubtitleCodec,
+		TargetBitrateKbps:   source.TargetBitrateKbps,
+		TargetAudioChannels: source.TargetAudioChannels,
 		TargetCodecVideo:    compatTargetVideoCodec,
 		TargetCodecAudio:    compatTargetAudioCodec,
 		SegmentDuration:     segmentDuration,
@@ -1535,8 +1546,8 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		reqBody.ToneMapDVRPUPresent = toneMapRecipe.dvRPUPresent
 		reqBody.HWAccel = toneMapRecipe.hwAccel
 	}
-	autoVideoToolboxBitrate := compatVideoToolboxToneMapBitrateKbps(source.Version, toneMapRecipe)
-	if autoVideoToolboxBitrate > 0 {
+	autoVideoToolboxBitrate := compatVideoToolboxToneMapBitrateKbps(source.Version, toneMapRecipe, source.TargetBitrateKbps)
+	if autoVideoToolboxBitrate > 0 && (reqBody.TargetBitrateKbps == 0 || autoVideoToolboxBitrate < reqBody.TargetBitrateKbps) {
 		reqBody.TargetBitrateKbps = autoVideoToolboxBitrate
 	}
 	if compatHLSCopiesVideo(source) {
@@ -1628,7 +1639,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		reqBody.ToneMapMode = toneMapRecipe.mode
 		reqBody.HWAccel = toneMapRecipe.hwAccel
 		if autoVideoToolboxBitrate > 0 {
-			reqBody.TargetBitrateKbps = 0
+			reqBody.TargetBitrateKbps = source.TargetBitrateKbps
 		}
 		nodeResponse, status, cleanupRequired, err = dispatch(reqBody)
 		validationErr = nil
@@ -1736,6 +1747,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		TargetCodecVideo:    reqBody.TargetCodecVideo,
 		TargetCodecAudio:    reqBody.TargetCodecAudio,
 		TargetResolution:    reqBody.TargetResolution,
+		SubtitleBurnIn:      reqBody.SubtitleBurnIn,
+		SubtitleTrackIndex:  reqBody.SubtitleTrackIndex,
+		SubtitleCodec:       reqBody.SubtitleCodec,
 		TargetBitrateKbps:   reqBody.TargetBitrateKbps,
 		VideoSampleEntry:    reqBody.VideoSampleEntry,
 		CopyVideoMPEGTS:     reqBody.CopyVideoMPEGTS,
@@ -1907,7 +1921,10 @@ func (h *PlaybackHandler) HandleCapabilitiesFull(w http.ResponseWriter, r *http.
 		return
 	}
 	if profile.HasData() {
-		h.deviceProfiles.Put(session.Token, profile)
+		if err := h.deviceProfiles.PutForDevice(r.Context(), session.Token, compatRequestDeviceID(r), profile); err != nil {
+			writeError(w, 503, "Unavailable", "Device profile storage unavailable")
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -1921,8 +1938,25 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 	// its bytes fall into Unattributed*.
 	attachCompatTransfer(r.Context(), SessionFromContext(r.Context()), 0)
 	w.Header().Set("Content-Type", "application/octet-stream")
+	size := 102400
+	if raw := firstQueryValue(r.URL.Query(), "Size"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100000000 {
+			writeError(w, http.StatusBadRequest, "BadRequest", "Size must be between 1 and 100000000")
+			return
+		}
+		size = value
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(size))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(make([]byte, 1024*1024))
+	block := make([]byte, min(size, 32768))
+	for size > 0 {
+		n, err := w.Write(block[:min(size, len(block))])
+		if err != nil || n == 0 {
+			return
+		}
+		size -= n
+	}
 }
 
 // HandlePlaybackInfo negotiates media sources for a Jellyfin item.
@@ -1941,6 +1975,10 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 
 	req, profile, err := h.parsePlaybackRequest(r, session.Token)
 	if err != nil {
+		if errors.Is(err, errDeviceProfileStore) {
+			writeError(w, 503, "Unavailable", "Device profile storage unavailable")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid playback request")
 		return
 	}
@@ -1963,6 +2001,8 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	playSessionID := h.codec.EncodeStringID(EncodedIDPlaySession, uuidNewString())
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
 	sourceDTOs := make([]mediaSourceDTO, 0, len(detail.Versions))
+	attachmentContext, cancelAttachmentProbe := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancelAttachmentProbe()
 
 	allow4KTranscode := h.allow4KVideoTranscode(r.Context())
 	toneMapPolicy := tonemap.PolicyNone
@@ -1993,6 +2033,35 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
 			continue
 		}
+
+		// Resolve the client's subtitle selection against both the
+		// embedded/external tracks and any downloaded subtitles before
+		// advertising the streams, so the chosen subtitle is marked default and
+		// starts with playback (mirrors the audio-selection plumbing).
+		var downloaded []subtitles.DownloadedSubtitle
+		downloadedKnown := true
+		if h.SubtitleRepo != nil {
+			var listErr error
+			downloaded, listErr = h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), source.Version.FileID)
+			if listErr != nil {
+				// Don't treat a lookup failure as "no downloaded subtitles": that
+				// would silently downgrade a valid downloaded selection to the
+				// media default. Resolution falls back to honoring the request.
+				downloaded = nil
+				downloadedKnown = false
+				slog.WarnContext(r.Context(), "jellycompat downloaded subtitle lookup failed", "component", "jellycompat",
+					"file_id", source.Version.FileID,
+					"error", listErr,
+				)
+			}
+		}
+		var requestedSubtitleIndex *int
+		if req.SubtitleStreamIndex != nil {
+			requestedSubtitleIndex = intPtr(int(*req.SubtitleStreamIndex))
+		}
+		source.SelectedSubtitleStreamIndex = resolveSelectedSubtitleStreamIndex(source.Version, len(downloaded), downloadedKnown, requestedSubtitleIndex, source.DefaultSubtitleStreamIndex)
+		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
+		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
 		if source.SupportsTranscoding && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(version) {
 			if !toneMapPolicyLoaded {
 				var policyErr error
@@ -2024,36 +2093,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			source = applyCompatToneMapAvailabilityWithPolicy(source, toneMapCapabilities, toneMapPolicy)
 		}
 
-		// Resolve the client's subtitle selection against both the
-		// embedded/external tracks and any downloaded subtitles before
-		// advertising the streams, so the chosen subtitle is marked default and
-		// starts with playback (mirrors the audio-selection plumbing).
-		var downloaded []subtitles.DownloadedSubtitle
-		downloadedKnown := true
-		if h.SubtitleRepo != nil {
-			var listErr error
-			downloaded, listErr = h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), source.Version.FileID)
-			if listErr != nil {
-				// Don't treat a lookup failure as "no downloaded subtitles": that
-				// would silently downgrade a valid downloaded selection to the
-				// media default. Resolution falls back to honoring the request.
-				downloaded = nil
-				downloadedKnown = false
-				slog.WarnContext(r.Context(), "jellycompat downloaded subtitle lookup failed", "component", "jellycompat",
-					"file_id", source.Version.FileID,
-					"error", listErr,
-				)
-			}
-		}
-		var requestedSubtitleIndex *int
-		if req.SubtitleStreamIndex != nil {
-			requestedSubtitleIndex = intPtr(int(*req.SubtitleStreamIndex))
-		}
-		source.SelectedSubtitleStreamIndex = resolveSelectedSubtitleStreamIndex(source.Version, len(downloaded), downloadedKnown, requestedSubtitleIndex, source.DefaultSubtitleStreamIndex)
-		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
-
 		sources = append(sources, source)
-		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source, profile)
+		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
+		dto.MediaAttachments = h.mediaAttachments(attachmentContext, routeItemID, playSessionID, source)
 
 		// Append downloaded subtitles to the media streams, honoring the selection.
 		if len(downloaded) > 0 {
@@ -2144,11 +2186,17 @@ func (h *PlaybackHandler) parsePlaybackRequest(r *http.Request, compatToken stri
 			return req, DeviceProfile{}, err
 		}
 		if profile.HasData() {
-			h.deviceProfiles.Put(compatToken, profile)
+			if err := h.deviceProfiles.PutForDevice(r.Context(), compatToken, compatRequestDeviceID(r), profile); err != nil {
+				return req, profile, err
+			}
 		}
 	}
 	if !profile.HasData() {
-		if stored, ok := h.deviceProfiles.Get(compatToken); ok {
+		stored, ok, err := h.deviceProfiles.GetForDevice(r.Context(), compatToken, compatRequestDeviceID(r))
+		if err != nil {
+			return req, profile, err
+		}
+		if ok {
 			profile = stored
 		} else {
 			profile = DefaultDeviceProfile()
@@ -2179,16 +2227,25 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	}
 
 	supportsDirectPlay := enableDirectPlay && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
-	audioSupported := profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
-	videoSupported := profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
+	maxBitrate := req.MaxStreamingBitrate
+	if profile.MaxStreamingBitrate > 0 && (maxBitrate <= 0 || profile.MaxStreamingBitrate < maxBitrate) {
+		maxBitrate = profile.MaxStreamingBitrate
+	}
+	// Unknown source rates cannot establish that a copy fits a client ceiling.
+	bitrateRequiresEncode := maxBitrate > 0 && (version.Bitrate <= 0 || int64(version.Bitrate)*1000 > maxBitrate)
+	audio := compatAudioTrack(version, selectedAudioIndex)
+	channelsRequireEncode := req.MaxAudioChannels > 0 && (audio.Channels <= 0 || audio.Channels > req.MaxAudioChannels)
+	supportsDirectPlay = supportsDirectPlay && !bitrateRequiresEncode && !channelsRequireEncode
+	audioSupported := !channelsRequireEncode && profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
+	videoSupported := !bitrateRequiresEncode && profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	enableTranscoding := boolDefault(req.EnableTranscoding, true)
-	hlsAudioCopy := enableTranscoding &&
+	hlsAudioCopy := !bitrateRequiresEncode && !channelsRequireEncode && enableTranscoding &&
 		enableDirectStream &&
 		allowVideoCopy &&
 		allowAudioCopy &&
 		!supportsDirectPlay &&
 		profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
-	hlsAudioTranscode := !hlsAudioCopy &&
+	hlsAudioTranscode := !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
 		(!allowAudioCopy || !audioSupported) &&
@@ -2229,7 +2286,26 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		supportsTranscoding = false
 	}
 
+	targetBitrateKbps := 0
+	if maxBitrate > 0 {
+		// Reserve audio and mux overhead; copied video is never used to satisfy a
+		// lower bandwidth setting. The durable source freezes the encoder ceiling.
+		targetBitrateKbps = int(maxBitrate*95/100/1000) - 192
+		if targetBitrateKbps < 64 {
+			supportsTranscoding = false
+		}
+	}
+	targetAudioChannels := 2
+	if req.MaxAudioChannels == 1 {
+		targetAudioChannels = 1
+	}
+	if supportsTranscoding && !hlsRemux {
+		supportsTranscoding = profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0))
+	}
 	return PlaybackMediaSource{
+		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= 64) && (allow4KTranscode || !is4KResolution(version.Resolution)) && profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0)),
+		TargetBitrateKbps:          max(targetBitrateKbps, 0),
+		TargetAudioChannels:        targetAudioChannels,
 		ID:                         sourceID,
 		FileID:                     version.FileID,
 		Version:                    version,
@@ -2306,13 +2382,27 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		DefaultSubtitleStreamIndex:          effectiveCompatSubtitleStreamIndex(source),
 		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, source.SelectedSubtitleStreamIndex, compatToken, playSessionID, profile),
 	}
+	for i := range dto.MediaStreams {
+		stream := &dto.MediaStreams[i]
+		if stream.Type == "Subtitle" && !source.SupportsDirectPlay {
+			if source.SubtitleBurnIn && source.SelectedSubtitleStreamIndex != nil && stream.Index == *source.SelectedSubtitleStreamIndex {
+				stream.DeliveryMethod = compatSubtitleEncode
+				stream.DeliveryURL = ""
+				continue
+			}
+			if stream.IsTextSubtitleStream {
+				stream.DeliveryMethod = "External"
+			} else {
+				stream.DeliveryMethod = compatSubtitleEncode
+			}
+		}
+	}
 	if source.SupportsDirectPlay || source.SupportsDirectStream {
-		// This URL is explicitly static=true, so HandleVideoStream always serves
-		// the source file directly. It never executes the versioned audio recipe.
+		// Only direct play serves the original file; direct stream executes remux.
 		basePath := compatVideoPath(routeItemID, false)
 		dto.DirectStreamURL = fmt.Sprintf(
-			"%s/stream?static=true&mediaSourceId=%s&api_key=%s&PlaySessionId=%s",
-			basePath,
+			"%s/stream?static=%t&mediaSourceId=%s&api_key=%s&PlaySessionId=%s",
+			basePath, source.SupportsDirectPlay,
 			url.QueryEscape(source.ID),
 			url.QueryEscape(compatToken),
 			url.QueryEscape(playSessionID),
@@ -2426,9 +2516,6 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 	}
 
 	for index, track := range version.SubtitleTracks {
-		if !subtitleTrackStreamable(track.Codec, track.External) {
-			continue
-		}
 		streamIndex := subtitleTrackIndex(version, track, index)
 		format := subtitleRouteFormat(track.Codec)
 		deliveryMethod := subtitleDeliveryMethod(track.External)
@@ -2462,11 +2549,11 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			IsExternal:             track.External,
 			IsForced:               track.Forced,
 			IsHearingImpaired:      track.HearingImpaired,
-			IsTextSubtitleStream:   true,
-			SupportsExternalStream: supportsExternalStream,
+			IsTextSubtitleStream:   !playback.NeedsBurnIn(track.Codec),
+			SupportsExternalStream: subtitleTrackStreamable(track.Codec, track.External),
 			AudioSpatialFormat:     "None",
-			DeliveryURL:            subtitleDeliveryURL(routeItemID, mediaSourceID, streamIndex, format, compatToken, playSessionID),
-			DeliveryMethod:         deliveryMethod,
+			DeliveryURL:            compatSubtitleExtractionURL(track, routeItemID, mediaSourceID, streamIndex, format, compatToken, playSessionID),
+			DeliveryMethod:         subtitleDeliveryMethod(track.External),
 			Path:                   subtitlePath(track, routeItemID, mediaSourceID, streamIndex, format),
 			IsExternalURL:          isExternalURL,
 		})
@@ -2692,9 +2779,6 @@ func defaultSubtitleStreamIndex(version catalog.FileVersion) *int {
 		return nil
 	}
 	for index, track := range version.SubtitleTracks {
-		if !subtitleTrackStreamable(track.Codec, track.External) {
-			continue
-		}
 		if track.Default {
 			value := subtitleTrackIndex(version, track, index)
 			return &value
@@ -2726,14 +2810,10 @@ func subtitleTrackStreamable(codec string, external bool) bool {
 }
 
 // isValidCompatSubtitleStreamIndex reports whether streamIndex addresses a
-// deliverable subtitle: either a streamable embedded/external track (bitmap
-// subs that require burn-in are excluded, matching buildMediaStreams) or one of
+// subtitle inventory entry: an embedded/external track or one of
 // the downloaded subtitles appended after the embedded streams.
 func isValidCompatSubtitleStreamIndex(version catalog.FileVersion, downloadedCount, streamIndex int) bool {
 	for index, track := range version.SubtitleTracks {
-		if !subtitleTrackStreamable(track.Codec, track.External) {
-			continue
-		}
 		if subtitleTrackIndex(version, track, index) == streamIndex {
 			return true
 		}
@@ -3193,6 +3273,18 @@ func boolPtr(value bool) *bool {
 }
 
 func applyPlaybackQueryOverrides(req *playbackInfoRequest, query url.Values) {
+	if value, err := strconv.ParseInt(firstQueryValue(query, "StartTimeTicks"), 10, 64); err == nil {
+		req.StartTimeTicks = value
+	}
+	if value, err := strconv.ParseInt(firstQueryValue(query, "MaxStreamingBitrate"), 10, 64); err == nil {
+		req.MaxStreamingBitrate = value
+	}
+	if value, ok := parseOptionalInt(firstQueryValue(query, "MaxAudioChannels")); ok {
+		req.MaxAudioChannels = value
+	}
+	if value, ok := parseOptionalBool(firstQueryValue(query, "AlwaysBurnInSubtitleWhenTranscoding")); ok {
+		req.AlwaysBurnInSubtitleWhenTranscoding = value
+	}
 	if value := firstQueryValue(query, "UserId"); value != "" {
 		req.UserID = value
 	}
@@ -3290,5 +3382,84 @@ func (h *PlaybackHandler) playbackUnavailable(w http.ResponseWriter, err error) 
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Authentication failed")
 	default:
 		writeCompatUpstreamError(w, err)
+	}
+}
+
+func compatSubtitleExtractionURL(track catalog.VersionSubtitleTrack, item, source string, index int, format, token, session string) string {
+	if !subtitleTrackStreamable(track.Codec, track.External) {
+		return ""
+	}
+	return subtitleDeliveryURL(item, source, index, format, token, session)
+}
+
+// Bitmap inventory remains available to native decoders. Selected subtitles
+// that need burning use the shared encoder recipe when a full encode is allowed.
+func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProfile, alwaysBurn bool) {
+	selected := effectiveCompatSubtitleStreamIndex(*source)
+	if selected == nil || *selected < 0 {
+		return
+	}
+	for index, track := range source.Version.SubtitleTracks {
+		if subtitleTrackIndex(source.Version, track, index) != *selected {
+			continue
+		}
+		embed, external := len(profile.SubtitleProfiles) == 0, len(profile.SubtitleProfiles) == 0
+		for _, sub := range profile.SubtitleProfiles {
+			if compatSubtitleProfileFormat(sub.Format) != compatSubtitleProfileFormat(track.Codec) {
+				continue
+			}
+			embed = embed || strings.EqualFold(sub.Method, "Embed")
+			external = external || strings.EqualFold(sub.Method, "External")
+		}
+		text := !playback.NeedsBurnIn(track.Codec)
+		if !embed && (!external || !text) {
+			source.SupportsDirectPlay = false
+		}
+		if !text || !external || alwaysBurn {
+			source.SupportsDirectStream = false
+			source.SupportsTranscoding = source.CanBurnSubtitle && !track.External
+			source.HLSRemux = false
+			source.HLSRemuxAudioStreamIndexes = nil
+			source.HLSRemuxMPEGTS = false
+			if source.SupportsTranscoding {
+				ordinal := 0
+				for preceding := 0; preceding < index; preceding++ {
+					if !source.Version.SubtitleTracks[preceding].External {
+						ordinal++
+					}
+				}
+				source.SubtitleBurnIn = true
+				source.SubtitleTrackIndex = ordinal
+				source.SubtitleCodec = track.Codec
+			}
+		}
+		return
+	}
+	if alwaysBurn {
+		source.SupportsDirectStream = false
+		source.SupportsTranscoding = false
+	}
+}
+
+func compatRequestDeviceID(r *http.Request) string {
+	return stripCompatNUL(firstNonEmpty(firstMediaBrowserAuthorizationValue(r, "DeviceId"), firstQueryValue(r.URL.Query(), "DeviceId")))
+}
+
+func compatSubtitleProfileFormat(codec string) string {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "hdmv_pgs_subtitle", "pgs", "pgssub":
+		return "pgssub"
+	case "dvd_subtitle", "dvdsub", "vobsub":
+		return "dvdsub"
+	case "dvb_subtitle", "dvbsub":
+		return "dvbsub"
+	case "subrip", "srt":
+		return "srt"
+	case "webvtt", "vtt":
+		return "vtt"
+	case "ssa", "ass":
+		return "ass"
+	default:
+		return strings.ToLower(strings.TrimSpace(codec))
 	}
 }

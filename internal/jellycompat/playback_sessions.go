@@ -80,6 +80,12 @@ type PlaybackSession struct {
 
 // PlaybackMediaSource stores one negotiated stream source within a compat play session.
 type PlaybackMediaSource struct {
+	SubtitleBurnIn       bool
+	SubtitleTrackIndex   int
+	SubtitleCodec        string
+	CanBurnSubtitle      bool
+	TargetBitrateKbps    int
+	TargetAudioChannels  int
 	ID                   string
 	FileID               int
 	Version              catalog.FileVersion

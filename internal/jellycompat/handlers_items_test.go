@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -719,31 +718,6 @@ func TestHandleUpcoming_Unauthorized(t *testing.T) {
 	}
 }
 
-// TestHandleUpcoming_MissingSeriesId_ReturnsEmptyNot404 pins the central
-// contract of this endpoint: when no SeriesId/ParentId is supplied we must
-// return 200 with an empty result. Returning 404 here re-triggers the
-// Android TV fallback to global /Shows/NextUp that this handler exists to
-// suppress (see error-report-2026-05-08.md §11).
-func TestHandleUpcoming_MissingSeriesId_ReturnsEmptyNot404(t *testing.T) {
-	codec := NewResourceIDCodec()
-	h := &ItemsHandler{codec: codec, mapper: newMapper(codec, &config.Config{})}
-
-	req := httptest.NewRequest("GET", "/Shows/Upcoming", nil)
-	ctx := context.WithValue(req.Context(), compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "profile-1"})
-	rec := httptest.NewRecorder()
-	h.HandleUpcoming(rec, req.WithContext(ctx))
-
-	if rec.Code != 200 {
-		t.Fatalf("expected 200 (not 404) when SeriesId missing; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"Items":[]`) {
-		t.Fatalf("expected empty Items array; got body=%s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"TotalRecordCount":0`) {
-		t.Fatalf("expected TotalRecordCount 0; got body=%s", rec.Body.String())
-	}
-}
-
 // TestHandleEpisodes_AuthoritativeSeasonID verifies that Swiftfin's call shape
 // GET /Shows/{seasonID}/Episodes?seasonId={seasonID} (where the path {id} segment
 // holds an EncodedIDSeason ID) treats seasonId as authoritative, resolves the owning
@@ -810,9 +784,8 @@ func TestHandleEpisodes_UnknownSeasonIDReturnsNotFound(t *testing.T) {
 	}
 }
 
-// TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404 — same contract for
-// undecodable IDs. Decode failure must NOT 404 for the same reason.
-func TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404(t *testing.T) {
+// Missing catalog infrastructure must not masquerade as an empty upcoming feed.
+func TestHandleUpcoming_UnavailableCatalogReturnsError(t *testing.T) {
 	codec := NewResourceIDCodec()
 	h := &ItemsHandler{codec: codec, mapper: newMapper(codec, &config.Config{})}
 
@@ -821,10 +794,8 @@ func TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.HandleUpcoming(rec, req.WithContext(ctx))
 
-	if rec.Code != 200 {
-		t.Fatalf("expected 200 (not 404) for undecodable SeriesId; got %d, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != 503 {
+		t.Fatalf("expected 503 for unavailable episode catalog; got %d, body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"Items":[]`) {
-		t.Fatalf("expected empty Items array; got body=%s", rec.Body.String())
-	}
+
 }

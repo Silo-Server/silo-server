@@ -58,7 +58,7 @@ func TestDisplayPreferencesRoundTripUsesDedicatedTable(t *testing.T) {
 	}
 
 	// The blob lands in the dedicated table under (id, client)...
-	stored, err := store.GetJellycompatDisplayPrefs(context.Background(), "usersettings", "emby")
+	stored, err := store.GetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "usersettings"), "emby")
 	if err != nil || stored == "" {
 		t.Fatalf("dedicated table holds (%q, %v), want the stored blob", stored, err)
 	}

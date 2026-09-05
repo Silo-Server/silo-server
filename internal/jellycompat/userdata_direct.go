@@ -245,9 +245,16 @@ func (s *directUserDataService) ListProgressByMediaItems(ctx context.Context, se
 		return nil, fmt.Errorf("list progress by media items: %w", err)
 	}
 
+	dates, err := jellycompatProgressDates(ctx, store, session.ProfileID, mediaItemIDs)
+	if err != nil {
+		return nil, err
+	}
 	result := make(map[string]*upstreamProgress, len(progressMap))
 	for contentID, progress := range progressMap {
 		entry := toUpstreamProgress(progress)
+		if date := dates[contentID]; date != "" {
+			entry.UpdatedAt = date
+		}
 		result[contentID] = &entry
 	}
 	return result, nil
@@ -268,6 +275,13 @@ func (s *directUserDataService) GetProgress(ctx context.Context, session *Sessio
 	}
 
 	entry := toUpstreamProgress(*progress)
+	dates, err := jellycompatProgressDates(ctx, store, session.ProfileID, []string{contentID})
+	if err != nil {
+		return nil, err
+	}
+	if date := dates[contentID]; date != "" {
+		entry.UpdatedAt = date
+	}
 	return &entry, nil
 }
 
@@ -339,4 +353,121 @@ func fromUpstreamProgress(entry upstreamProgress) userstore.WatchProgress {
 		Completed:       entry.Completed,
 		UpdatedAt:       entry.UpdatedAt,
 	}
+}
+
+func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *Session, ids []string, date time.Time) error {
+	if s.watchState == nil {
+		return fmt.Errorf("watch state service unavailable")
+	}
+	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, ids, date); err != nil {
+		return err
+	}
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return err
+	}
+	writer, ok := store.(jellycompatProgressWriter)
+	if !ok {
+		return fmt.Errorf("explicit user progress updates unavailable")
+	}
+	for _, id := range ids {
+		progress, err := store.GetProgress(ctx, session.ProfileID, id)
+		if err != nil {
+			return err
+		}
+		duration := float64(0)
+		if progress != nil {
+			duration = progress.DurationSeconds
+		}
+		if err := writer.SetJellycompatProgress(ctx, session.ProfileID, id, 0, duration, true, date); err != nil {
+			return err
+		}
+	}
+	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	return nil
+}
+
+func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Session, contentID string, duration float64, req updateUserDataRequest) error {
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return err
+	}
+	if req.PlayCount != nil && req.Played == nil {
+		req.Played = new(*req.PlayCount > 0)
+	}
+	if req.Played != nil || req.PlaybackPositionTicks != nil || req.PlayedPercentage != nil || req.LastPlayedDate != nil {
+		existing, err := s.GetProgress(ctx, session, contentID)
+		if err != nil {
+			return err
+		}
+		position, played := float64(0), false
+		if existing != nil {
+			position, played = existing.PositionSeconds, existing.Completed
+			if existing.DurationSeconds > 0 {
+				duration = existing.DurationSeconds
+			}
+		}
+		if req.PlayedPercentage != nil {
+			if duration <= 0 {
+				return &HTTPError{StatusCode: 400, Message: "Cannot set percentage without item duration"}
+			}
+			position = duration * *req.PlayedPercentage / 100
+		}
+		if req.PlaybackPositionTicks != nil {
+			position = float64(*req.PlaybackPositionTicks) / 10000000
+		}
+		date := time.Now().UTC()
+		if req.LastPlayedDate != nil {
+			date = *req.LastPlayedDate
+		}
+		if req.Played != nil {
+			played = *req.Played
+			if !played {
+				if err := s.MarkUnplayed(ctx, session, contentID); err != nil {
+					return err
+				}
+				if req.PlaybackPositionTicks == nil && req.PlayedPercentage == nil {
+					position = 0
+				}
+			}
+			if played {
+				if err := s.MarkPlayedBatchAt(ctx, session, []string{contentID}, date); err != nil {
+					return err
+				}
+			}
+		}
+		writer, ok := store.(jellycompatProgressWriter)
+		if !ok {
+			return fmt.Errorf("explicit user progress updates unavailable")
+		}
+		if err := writer.SetJellycompatProgress(ctx, session.ProfileID, contentID, position, duration, played, date); err != nil {
+			return err
+		}
+	}
+	if req.IsFavorite != nil {
+		if *req.IsFavorite {
+			err = store.AddFavorite(ctx, session.ProfileID, contentID)
+		} else {
+			err = store.RemoveFavorite(ctx, session.ProfileID, contentID)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	return nil
+}
+
+type jellycompatProgressWriter interface {
+	SetJellycompatProgress(context.Context, string, string, float64, float64, bool, time.Time) error
+}
+
+func jellycompatProgressDates(ctx context.Context, store userstore.UserStore, profile string, ids []string) (map[string]string, error) {
+	reader, ok := store.(interface {
+		ListJellycompatProgressDates(context.Context, string, []string) (map[string]string, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return reader.ListJellycompatProgressDates(ctx, profile, ids)
 }

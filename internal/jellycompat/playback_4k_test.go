@@ -89,7 +89,7 @@ func TestCompatVideoToolboxToneMapBitrateKbps(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := compatVideoToolboxToneMapBitrateKbps(test.version, test.recipe); got != test.want {
+			if got := compatVideoToolboxToneMapBitrateKbps(test.version, test.recipe, 0); got != test.want {
 				t.Fatalf("compatVideoToolboxToneMapBitrateKbps() = %d, want %d", got, test.want)
 			}
 		})
@@ -331,5 +331,16 @@ func TestStartRemoteTranscode4KGuard(t *testing.T) {
 	}
 	if err := h.startRemoteTranscode(context.Background(), "play", "session", source, nil, 0, "http://node"); !errors.Is(err, errTranscode4KDisallowed) {
 		t.Errorf("startRemoteTranscode() error = %v, want errTranscode4KDisallowed", err)
+	}
+}
+
+func TestVideoToolboxAutomaticBitratePreservesClientCeiling(t *testing.T) {
+	version := catalog.FileVersion{Resolution: "1080p"}
+	recipe := compatToneMapRecipe{mode: tonemap.ModeHardware, hwAccel: tonemap.BackendVideoToolbox}
+	if got := compatVideoToolboxToneMapBitrateKbps(version, recipe, 0); got <= 0 {
+		t.Fatal("fixture did not select automatic VideoToolbox bitrate")
+	}
+	if got := compatVideoToolboxToneMapBitrateKbps(version, recipe, 1708); got != 0 {
+		t.Fatalf("automatic bitrate %d overrides explicit client ceiling", got)
 	}
 }

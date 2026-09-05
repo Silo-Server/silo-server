@@ -74,7 +74,7 @@ func TestIsValidCompatSubtitleStreamIndex(t *testing.T) {
 		{"audio stream", 1, false},
 		{"embedded text subtitle", 2, true},
 		{"external text subtitle", 3, true},
-		{"bitmap subtitle (needs burn-in)", 4, false},
+		{"bitmap subtitle (native decoder)", 4, true},
 		{"downloaded subtitle", 5, true},
 		{"out of range", 6, false},
 		{"negative", -1, false},
@@ -88,10 +88,9 @@ func TestIsValidCompatSubtitleStreamIndex(t *testing.T) {
 	}
 }
 
-func TestIsValidCompatSubtitleStreamIndex_ExcludesBitmapSubtitle(t *testing.T) {
+func TestIsValidCompatSubtitleStreamIndex_IncludesBitmapSubtitle(t *testing.T) {
 	// A version whose only subtitle is bitmap (needs burn-in). Its computed
-	// stream index must not be selectable, because it is filtered out of the
-	// delivered streams.
+	// stream index remains selectable for original-file native decoders.
 	version := catalog.FileVersion{
 		FileID: 7,
 		VideoTracks: []models.VideoTrack{
@@ -105,8 +104,8 @@ func TestIsValidCompatSubtitleStreamIndex_ExcludesBitmapSubtitle(t *testing.T) {
 		},
 	}
 	// Bitmap track would otherwise compute to stream index 2.
-	if isValidCompatSubtitleStreamIndex(version, 0, 2) {
-		t.Fatal("bitmap subtitle stream index should not be selectable")
+	if !isValidCompatSubtitleStreamIndex(version, 0, 2) {
+		t.Fatal("bitmap subtitle stream index should remain selectable")
 	}
 }
 

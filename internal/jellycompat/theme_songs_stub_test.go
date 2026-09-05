@@ -13,9 +13,10 @@ import (
 // carries OwnerId: jellyfin-sdk-kotlin models it as non-nullable, so a plain
 // query-result envelope would fail client deserialization.
 func TestHandleThemeSongsStub_IncludesOwnerID(t *testing.T) {
-	h := &ItemsHandler{}
+	codec := NewResourceIDCodec()
+	h := &ItemsHandler{codec: codec, content: &countingContentService{}}
 
-	itemID := "f27caa37e5142225cceded48f6553502"
+	itemID := codec.EncodeStringID(EncodedIDItem, "movie")
 	req := httptest.NewRequest("GET", "/Items/"+itemID+"/ThemeSongs", nil)
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("id", itemID)

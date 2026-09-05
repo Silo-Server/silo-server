@@ -14,13 +14,28 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-const browseSortRecentlyAdded = "recently_added"
+const (
+	browseSortRecentlyAdded = "recently_added"
+	browseTypeEpisode       = "episode"
+	BrowseSortTitle         = "sort_title"
+	BrowseSortReleaseDate   = "release_date"
+	BrowseSortCreatedAt     = "created_at"
+	BrowseOrderDescending   = "desc"
+)
 
 // BrowseFilters represents all supported filter, sort, and pagination parameters
 // for the /items browse endpoint.
 type BrowseFilters struct {
-	Type               string   // single type ("movie") or comma-separated ("movie,series")
-	Genre              string   // single genre filter (GIN index)
+	Type               string // single type ("movie") or comma-separated ("movie,series")
+	Genre              string // single genre filter (GIN index)
+	UserID             int
+	ProfileID          string
+	IsFavorite         bool
+	IsPlayed           *bool
+	IsResumable        bool
+	Genres             []string // any matching genre
+	Years              []int    // exact release years
+	SearchTerm         string   // case-insensitive literal title substring
 	NamePrefix         string   // case-insensitive prefix filter on sort_title/title
 	ContentIDs         []string // optional allowlist of exact content IDs
 	LibraryID          int      // filter by specific library
@@ -409,6 +424,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	}
 
 	appendBrowseContentSource(filters, &conditions, &args, &argIdx)
+	appendCompatBrowsePredicates(filters, &conditions, &args, &argIdx)
 
 	// Genre filter (GIN array containment).
 	if filters.Genre != "" {
@@ -658,6 +674,7 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		argIdx++
 	}
 	appendBrowseContentSource(filters, &conditions, &args, &argIdx)
+	appendCompatBrowsePredicates(filters, &conditions, &args, &argIdx)
 
 	if filters.LibraryIDs != nil {
 		if len(filters.LibraryIDs) == 0 {
@@ -1637,4 +1654,76 @@ func splitTypes(s string) []string {
 		}
 	}
 	return result
+}
+
+func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, args *[]any, argIdx *int) {
+	add := func(sql string, value any) {
+		*conditions = append(*conditions, fmt.Sprintf(sql, *argIdx))
+		*args = append(*args, value)
+		*argIdx++
+	}
+	if len(filters.Genres) > 0 {
+		add("mi.genres && $%d::text[]", filters.Genres)
+	}
+	if len(filters.Years) > 0 {
+		add("mi.year = ANY($%d::int[])", filters.Years)
+	}
+	if filters.SearchTerm != "" {
+		add("mi.title ILIKE $%d ESCAPE '\\'", "%"+strings.TrimSuffix(likePrefixPattern(filters.SearchTerm), "%")+"%")
+	}
+	if !filters.IsFavorite && filters.IsPlayed == nil && !filters.IsResumable {
+		return
+	}
+	if filters.UserID <= 0 || filters.ProfileID == "" {
+		*conditions = append(*conditions, "FALSE")
+		return
+	}
+	userArg, profileArg := *argIdx, *argIdx+1
+	*args = append(*args, filters.UserID, filters.ProfileID)
+	*argIdx += 2
+	if filters.IsFavorite {
+		*conditions = append(*conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM user_favorites uf WHERE uf.user_id = $%d AND uf.profile_id = $%d AND uf.media_item_id = mi.content_id)", userArg, profileArg))
+	}
+	if filters.IsPlayed != nil {
+		builder := NewQueryBuilder("mi").WithUserScope(filters.UserID, filters.ProfileID)
+		builder.argIdx = *argIdx
+		builder.mediaScope = filters.Type
+		predicate := builder.userStateCompletionClause()
+		*args = append(*args, builder.args...)
+		*argIdx = builder.argIdx
+		if !*filters.IsPlayed {
+			predicate = "NOT (" + predicate + ")"
+		}
+		*conditions = append(*conditions, predicate)
+	}
+	if filters.IsResumable {
+		*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM user_watch_progress uwp WHERE uwp.user_id = $%d AND uwp.profile_id = $%d AND uwp.media_item_id = mi.content_id AND uwp.position_seconds > 0 AND NOT uwp.completed AND NOT EXISTS (SELECT 1 FROM user_history_hidden_items hhi WHERE hhi.user_id = uwp.user_id AND hhi.profile_id = uwp.profile_id AND hhi.media_item_id = uwp.media_item_id AND uwp.updated_at <= hhi.hidden_before))`, userArg, profileArg))
+	}
+}
+
+// ListYears returns release years from the same viewer-scoped facet relation.
+func (r *BrowseRepository) ListYears(ctx context.Context, filters BrowseFilters) ([]int, error) {
+	from, where, args, empty := filterWhereClauseForSource(filters, "media_items mi", "")
+	if empty {
+		return []int{}, nil
+	}
+	if where == "" {
+		where = "WHERE mi.year > 0"
+	} else {
+		where += " AND mi.year > 0"
+	}
+	rows, err := r.pool.Query(ctx, "SELECT DISTINCT mi.year FROM "+from+" "+where+fmt.Sprintf(" ORDER BY mi.year DESC LIMIT %d", catalogFacetMaxValues), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	years := []int{}
+	for rows.Next() {
+		var year int
+		if err := rows.Scan(&year); err != nil {
+			return nil, err
+		}
+		years = append(years, year)
+	}
+	return years, rows.Err()
 }

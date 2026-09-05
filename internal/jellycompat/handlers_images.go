@@ -14,9 +14,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
 )
 
 // ImagesHandler serves Jellyfin-compatible image routes.
+const compatImagePrimary = "Primary"
+
 type ImagesHandler struct {
 	content      ContentService
 	codec        *ResourceIDCodec
@@ -50,6 +53,7 @@ type imageItemRepository interface {
 
 type imagePersonRepository interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
+	EnsureAccessible(ctx context.Context, id int64, filter catalog.AccessFilter) error
 }
 
 type imageSeasonRepository interface {
@@ -121,6 +125,19 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Person IDs and the process-wide artwork cache are public identifiers, not
+	// authority. Headshots always require a currently visible credit; ordinary
+	// item images below retain their scoped signed-tag delivery path.
+	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
+		if session == nil && h.sessions != nil {
+			if token, ok := ExtractToken(r); ok {
+				session, _ = h.sessions.Get(token)
+			}
+		}
+		h.handlePersonImage(w, r, session, routeID, imageType, personID)
+		return
+	}
+
 	if tag != "" {
 		imageURL, ok, err := h.resolveItemImageURLFromTag(r.Context(), routeID, imageType, imageSize, tag)
 		if err != nil {
@@ -154,12 +171,6 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Try decoding as a person ID first.
-	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
-		h.handlePersonImage(w, r, routeID, imageType, personID)
-		return
-	}
-
 	contentID, err := decodeContentID(h.codec, routeID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
@@ -181,8 +192,8 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 }
 
 // handlePersonImage serves person photo images.
-func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request, routeID, imageType string, personID int64) {
-	if imageType != "Primary" {
+func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request, session *Session, routeID, imageType string, personID int64) {
+	if session == nil || imageType != compatImagePrimary {
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
@@ -190,12 +201,28 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
+	filter := catalog.AccessFilter{}
+	if h.accessFilter != nil {
+		filter = h.accessFilter(r.Context(), session.StreamAppUserID, session.ProfileID)
+	}
+	if err := h.personRepo.EnsureAccessible(r.Context(), personID, filter); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		writeError(w, http.StatusNotFound, "NotFound", "Person not found")
+		return
+	}
+	imageSize := compatRequestImageSize(r, imageType)
+	if imageURL, ok := h.images.LookupSized(routeID, imageType, "", imageSize); ok {
+		h.serveImageURL(w, r, imageURL)
+		return
+	}
 	person, err := h.personRepo.Get(r.Context(), personID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Person not found")
 		return
 	}
-	imageSize := compatRequestImageSize(r, imageType)
 	// Headshots ride the profile ladder ({500, 300}), not the poster ladder,
 	// which now carries a w780 rung. Resolving them as posters would name a
 	// profile/w780 key that is never generated — and the server-side ladder

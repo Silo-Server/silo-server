@@ -1244,3 +1244,59 @@ func scanItemPeople(rows pgx.Rows) ([]models.ItemPerson, error) {
 	}
 	return people, rows.Err()
 }
+
+// SearchVisible restricts both the page and total to people credited on visible
+// video items. A hidden library's credits never enter the result set.
+func (r *PersonRepository) SearchVisible(ctx context.Context, term string, exact bool, limit, offset int, filter AccessFilter) ([]models.Person, int, error) {
+	conditions := []string{"ip.person_id = p.id", "mi.type IN ('movie', 'series')"}
+	args := []any{term}
+	argIdx := 2
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", filter, &conditions, &args, &argIdx)
+	nameClause := "p.name ILIKE '%' || $1 || '%'"
+	if exact {
+		nameClause = "LOWER(p.name) = LOWER($1)"
+	}
+	where := nameClause + " AND EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id = ip.content_id WHERE " + strings.Join(conditions, " AND ") + ")"
+	var total int
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM people p WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, max(limit, 0), max(offset, 0))
+	query := `SELECT p.id, p.name, p.sort_name, p.bio, p.birth_date, p.death_date, p.birthplace, p.homepage,
+	p.photo_path, p.photo_source_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid, p.created_at, p.updated_at, p.metadata_refresh_attempted_at
+	FROM people p WHERE ` + where + fmt.Sprintf(" ORDER BY p.name, p.id LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	people := []models.Person{}
+	for rows.Next() {
+		var p models.Person
+		if err := rows.Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage, &p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt, &p.MetadataRefreshAttemptedAt); err != nil {
+			return nil, 0, err
+		}
+		people = append(people, p)
+	}
+	return people, total, rows.Err()
+}
+
+// EnsureAccessible requires a credit on a visible video item before serving
+// person metadata or image bytes, including already cached derivatives.
+func (r *PersonRepository) EnsureAccessible(ctx context.Context, id int64, filter AccessFilter) error {
+	conditions := []string{"ip.person_id = $1", "mi.type IN ('movie','series')"}
+	args := []any{id}
+	index := 2
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
+	applyAccessFilter("mi", filter, &conditions, &args, &index)
+	var exists bool
+	err := r.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id=ip.content_id WHERE "+strings.Join(conditions, " AND ")+")", args...).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
