@@ -430,9 +430,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (127
+  tier-1 ported mutation rows (218 distinct operations) are classified (126
   `natural_idempotent`, 28 `unique_constraint`, 15 `domain_identity`, 10 `coalescing`, 8
-  `durable_dispatch`, 30 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 31 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
@@ -452,12 +452,13 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   confirmation), a
   command that re-runs its side effect on every call (watch-together selection and
   suggestion promotion, which reset playback and clear member sessions each time;
-  metadata-match-queue retry, which schedules another run once the first is leased); each
+  metadata-match-queue retry, which schedules another run once the first is leased; node
+  capability reprobe, which holds the GPU gate through a multi-minute cold build); each
   note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
   (email-address verification; favorites, watchlist, and rating add and remove, and the
   taste seed, whose store converges but whose provider dispatch or recommendation refresh
   fires unconditionally) name the outbox or change-gated claim the v2 port must add before
-  their retry is safe. Twenty-eight rows carry a `DEFECT` note where v1 gates on
+  their retry is safe. Twenty-nine rows carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
   sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
@@ -469,7 +470,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   whose unique key resolves a retry but whose losing insert deletes the winner's S3
   object, transcode start, which replaces a live session under the same id, and media
   request creation, whose partial unique index stops covering a request once it reaches a
-  terminal state); their v2 port must move the gate
+  terminal state, and profile update, which bumps the account-wide access-policy revision
+  on field presence rather than on an effective change); their v2 port must move the gate
   to shared durable state, add the missing unique constraint or event time, gate the
   dispatch on a reported change, or make the repeat a no-op before the declared strategy
   holds.

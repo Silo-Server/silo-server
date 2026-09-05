@@ -10319,7 +10319,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Each call invalidates the probe caches and holds the node GPU gate through a cold capability build that can exceed two minutes, so a retry after a lost response rejects GPU work for that interval again. The v2 port must coalesce on a probe generation and return the active result."
     },
     {
       "listener": "api",
@@ -36868,7 +36869,8 @@
         "operation_id": "updateProfile"
       },
       "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Only max_playback_quality is a strict enum (no 4K/UHD aliases); quality_preference and subtitle_mode stay free-form (maxLength 32) until ratified (#135) because v1 never validated them and clients send 1080p/4k/2160p/720p and default/forced_only; every string member always emitted; read model does not constrain legacy stored enum values.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "DEFECT: the row converges, but updateProfile bumps the account-wide access_policy_revision whenever pin, is_child, rating, library, or quality fields are present, so an identical retry invalidates tokens minted in between across sibling profiles. The v2 port must bump only on an effective change."
     },
     {
       "listener": "api",
