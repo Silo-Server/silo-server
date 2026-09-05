@@ -15551,7 +15551,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; adminPlaybackControlHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Each call mints a fresh command id and dispatches unconditionally, so a delayed retry landing after the opposite command reverts the newer playback state. The v2 port must carry an ordered command identity the session applies once."
     },
     {
       "listener": "api",
@@ -15614,7 +15615,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; adminPlaybackControlHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Each call mints a fresh command id and dispatches unconditionally, so a delayed retry landing after the opposite command reverts the newer playback state. The v2 port must carry an ordered command identity the session applies once."
     },
     {
       "listener": "api",
@@ -38242,8 +38244,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Set semantics on favorites; repeating converges."
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: favorites converge, but the handler counts every nil AddFavorite as added and then marks the profile stale and requests a recommendation refresh whose dedup is process-local, so a retry repeats the work per API node. The v2 port must gate the refresh on rows actually inserted."
     },
     {
       "listener": "api",
@@ -42779,7 +42781,7 @@
       },
       "notes": "Conditionally registered: authMiddleware != nil; subtitleSearchHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
       "retry_safety": "unique_constraint",
-      "retry_safety_note": "Deterministic S3 key per file, language, provider, and content; StoreSubtitle returns the existing row and UNIQUE (s3_key) backs it."
+      "retry_safety_note": "DEFECT: UNIQUE (s3_key) resolves a retry to the existing row, but two overlapping calls across API nodes both see no row, both write the same key, and the insert that loses the race runs DeleteObject on the object the winning row references. The v2 port must claim the key durably before writing."
     },
     {
       "listener": "api",
@@ -43059,7 +43061,7 @@
       },
       "notes": "Conditionally registered: authMiddleware != nil; subtitleSearchHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
       "retry_safety": "unique_constraint",
-      "retry_safety_note": "Same deterministic S3 key and UNIQUE (s3_key) as download; a re-upload of the same bytes returns the existing row."
+      "retry_safety_note": "DEFECT: UNIQUE (s3_key) resolves a retry to the existing row, but two overlapping calls across API nodes both see no row, both write the same key, and the insert that loses the race runs DeleteObject on the object the winning row references. The v2 port must claim the key durably before writing."
     },
     {
       "listener": "api",
