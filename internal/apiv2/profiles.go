@@ -507,7 +507,7 @@ func (reg *Registry) verifyProfilePIN(ctx context.Context, in *ProfilePINCheckIn
 	}
 	if len(in.Body.PIN) > maxPINBytes {
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationPIN, Code: codeOutOfRange, Detail: "PIN must be at most 72 bytes"})
+			WithErrors(ProblemError{Location: locationPIN, Code: codeOutOfRange, Detail: detailPINTooLong})
 	}
 	result, err := reg.deps.Profiles.VerifyPIN(ctx, handlers.ProfileVerifyPINCommand{
 		UserID: claims.UserID, SessionID: claims.SessionID, ProfileID: string(in.ID), PIN: in.Body.PIN,
@@ -550,7 +550,7 @@ func (reg *Registry) uploadProfileAvatar(ctx context.Context, in *ProfileAvatarU
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: locationAvatarPart, Code: codeRequired, Detail: "The avatar part is required."})
 	}
-	defer form.Avatar.Close()
+	defer func() { _ = form.Avatar.Close() }()
 	view, err := reg.deps.Profiles.UploadAvatar(ctx, handlers.ProfileAvatarUpload{
 		UserID: claims.UserID, ProfileID: string(in.ID), ContentType: form.Avatar.ContentType, File: form.Avatar.File,
 	})
@@ -816,7 +816,10 @@ func profileProblem(err error) *Problem {
 }
 
 // maxPINBytes is bcrypt's input limit; a longer PIN fails to hash.
-const maxPINBytes = 72
+const (
+	maxPINBytes      = 72
+	detailPINTooLong = "PIN must be at most 72 bytes"
+)
 
 // validatePIN rejects a present, non-null PIN that would otherwise be lowered
 // to the "" clearing sentinel (only null clears) or overflow bcrypt. The
@@ -831,7 +834,7 @@ func validatePIN(p Patch[string]) *Problem {
 	case p.Value == "":
 		detail = "PIN must not be empty"
 	case len(p.Value) > maxPINBytes:
-		detail = "PIN must be at most 72 bytes"
+		detail = detailPINTooLong
 	default:
 		return nil
 	}
