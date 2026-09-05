@@ -19,6 +19,46 @@
       "body_file": "authentication_required.json"
     },
     {
+      "name": "deprecated_ok",
+      "operation_id": null,
+      "scenario": "A deprecated operation answers normally and carries the RFC 9745 Deprecation and Link headers, plus Sunset because a removal is planned (RFC 8594).",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/probe/deprecated"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json",
+        "Deprecation": "@1788265845",
+        "Link": "<https://siloserver.org/docs/api/v2/migration/probe>; rel=\"deprecation\"",
+        "Sunset": "Mon, 01 Mar 2027 00:00:00 GMT"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SetupStatus",
+      "body_file": "deprecated_ok.json"
+    },
+    {
+      "name": "deprecated_problem",
+      "operation_id": null,
+      "scenario": "A problem from a deprecated operation, here the auth gate's 401, carries Deprecation and Link too; this operation has no planned removal, so no Sunset.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/probe/deprecated-nosunset",
+        "body": "{\"name\":\"fixture\",\"cleared\":null}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json",
+        "Deprecation": "@1788265845",
+        "Link": "<https://siloserver.org/docs/api/v2/migration/probe>; rel=\"deprecation\""
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "deprecated_problem.json"
+    },
+    {
       "name": "get_current_user_ok",
       "operation_id": "getCurrentUser",
       "scenario": "The signed-in account with no profile selected; impersonation is absent outside an admin impersonation session.",

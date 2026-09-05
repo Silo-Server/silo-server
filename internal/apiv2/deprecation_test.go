@@ -9,9 +9,8 @@ import (
 )
 
 var (
-	deprecatedAt     = time.Date(2026, time.September, 1, 12, 30, 45, 987654321, time.UTC)
-	deprecatedSunset = time.Date(2027, time.March, 1, 0, 0, 0, 0, time.UTC)
-	deprecatedLink   = DocsOrigin + "api/v2/migration/probe"
+	deprecatedAt   = probeDeprecatedAt.Add(987654321 * time.Nanosecond)
+	deprecatedLink = probeDeprecatedLink
 )
 
 func TestFormatDeprecationIsWholeUnixSeconds(t *testing.T) {
@@ -117,4 +116,74 @@ func TestRegisterRefusesBadDeprecations(t *testing.T) {
 			}, func(context.Context, *struct{}) (*probeOutput, error) { return nil, nil })
 		}})
 	})
+}
+
+// wantDeprecated asserts the three headers of the deprecated probes; sunset
+// says whether the operation declared one.
+func wantDeprecated(t *testing.T, h http.Header, sunset bool) {
+	t.Helper()
+	if got := h.Get(DeprecationHeader); got != "@1788265845" {
+		t.Fatalf("Deprecation = %q", got)
+	}
+	if got := h.Get(LinkHeader); !strings.Contains(got, `<`+probeDeprecatedLink+`>; rel="deprecation"`) {
+		t.Fatalf("Link = %q", got)
+	}
+	got := h.Get(SunsetHeader)
+	switch {
+	case sunset && got != "Mon, 01 Mar 2027 00:00:00 GMT":
+		t.Fatalf("Sunset = %q", got)
+	case !sunset && got != "":
+		t.Fatalf("Sunset = %q on an operation with no planned removal", got)
+	}
+}
+
+func TestDeprecatedOperationHeaders(t *testing.T) {
+	h := newTestHandler(t, Dependencies{Auth: fakeAuth(nil)})
+	t.Run("200", func(t *testing.T) {
+		rec := do(t, h, http.MethodGet, "/api/v2/probe/deprecated", "", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+		}
+		wantDeprecated(t, rec.Header(), true)
+	})
+	t.Run("401 from the auth gate", func(t *testing.T) {
+		rec := do(t, h, http.MethodPost, "/api/v2/probe/deprecated-nosunset", `{"name":"x","cleared":null}`, nil)
+		requireProblem(t, rec, TypeAuthenticationRequired)
+		wantDeprecated(t, rec.Header(), false)
+	})
+	t.Run("422 from the query guard", func(t *testing.T) {
+		rec := do(t, h, http.MethodGet, "/api/v2/probe/deprecated?verbose=1", "", nil)
+		requireProblem(t, rec, TypeValidationFailed)
+		wantDeprecated(t, rec.Header(), true)
+	})
+	t.Run("not deprecated", func(t *testing.T) {
+		rec := do(t, h, http.MethodGet, "/api/v2/system/info", "", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d", rec.Code)
+		}
+		for _, name := range []string{DeprecationHeader, LinkHeader, SunsetHeader} {
+			if v := rec.Header().Get(name); v != "" {
+				t.Fatalf("%s = %q on a live operation", name, v)
+			}
+		}
+	})
+}
+
+// A Link value set by an earlier handler in the chain survives: the
+// deprecation link is appended to it.
+func TestDeprecatedOperationAppendsToExistingLink(t *testing.T) {
+	prior := `<https://siloserver.org/docs/api/v2/>; rel="service-doc"`
+	inner := newTestHandler(t, Dependencies{})
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(LinkHeader, prior)
+		inner.ServeHTTP(w, r)
+	})
+	rec := do(t, h, http.MethodGet, "/api/v2/probe/deprecated", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	got := rec.Header().Values(LinkHeader)
+	if len(got) != 1 || !strings.HasPrefix(got[0], prior+", <"+probeDeprecatedLink+">") {
+		t.Fatalf("Link = %q, want the prior value first and the deprecation link appended", got)
+	}
 }

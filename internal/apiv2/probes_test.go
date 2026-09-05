@@ -59,6 +59,14 @@ type probeItemInput struct {
 // ProbeSmallBodyLimit is the override the small-body probe declares.
 const ProbeSmallBodyLimit int64 = 256
 
+// The deprecated probes' fixed declaration: 2026-09-01T12:30:45Z, sunset
+// 2027-03-01T00:00:00Z.
+var (
+	probeDeprecatedAt     = time.Date(2026, time.September, 1, 12, 30, 45, 0, time.UTC)
+	probeDeprecatedSunset = time.Date(2027, time.March, 1, 0, 0, 0, 0, time.UTC)
+	probeDeprecatedLink   = DocsOrigin + "api/v2/migration/probe"
+)
+
 type probeCursor struct {
 	Offset int `json:"o"`
 }
@@ -153,6 +161,23 @@ func registerProbes(reg *Registry) {
 	}, func(context.Context, *struct{}) (*probeOutput, error) {
 		return nil, NewProblem(TypeDependencyUnavailable, "The database is unavailable.").WithRetryAfter(3)
 	})
+	// Deprecated operations: one public with a planned sunset, one
+	// authenticated without, so the headers are observed on a 200, on a gate
+	// denial, and on a guard problem.
+	sunset := probeDeprecatedSunset
+	Register(reg, Operation{
+		Operation:   humaOp(http.MethodGet, Prefix+"/probe/deprecated", "probeDeprecated", "probe", "deprecated"),
+		Class:       ClassPublic,
+		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink, Sunset: &sunset},
+	}, func(context.Context, *struct{}) (*SetupStatusOutput, error) {
+		// A committed schema, so the deprecated_ok fixture body validates.
+		return &SetupStatusOutput{Body: SetupStatus{NeedsSetup: false}}, nil
+	})
+	Register(reg, Operation{
+		Operation:   humaOp(http.MethodPost, Prefix+"/probe/deprecated-nosunset", "probeDeprecatedNoSunset", "probe", "deprecated, no sunset"),
+		Class:       ClassAuthenticated,
+		Deprecation: &Deprecation{At: probeDeprecatedAt, Link: probeDeprecatedLink},
+	}, probeHandler)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/probe/zero", "probeZeroInstant", "probe", "zero"),
 		Class:     ClassPublic,
