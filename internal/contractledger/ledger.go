@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -519,7 +520,9 @@ func retrySafetyRules(k Key, e Entry) []string {
 	case (e.RetrySafety == RetrySafetyIdempotencyKey || e.RetrySafety == RetrySafetyNonRetryable) && e.RetrySafetyNote == "":
 		out = append(out, fmt.Sprintf("retry_safety %s requires a retry_safety_note: %s", e.RetrySafety, k))
 	}
-	if len(e.RetrySafetyNote) > retrySafetyNoteMaxLen {
+	// Count code points, as JSON Schema's maxLength does, so the two
+	// validators agree on a non-ASCII note.
+	if utf8.RuneCountInString(e.RetrySafetyNote) > retrySafetyNoteMaxLen {
 		out = append(out, fmt.Sprintf("retry_safety_note longer than %d characters: %s", retrySafetyNoteMaxLen, k))
 	}
 	return out

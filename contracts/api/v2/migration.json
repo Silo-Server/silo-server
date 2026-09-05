@@ -19663,8 +19663,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
-      "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by device_code. Consumption is a state-gated update; a retry after the token-bearing response is lost sees status consumed without tokens and the device restarts pairing."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Consumption is state-gated by device_code, but the tokens travel only in the consumed response: a retry after that response is lost sees consumed without tokens, the device restarts pairing, and the first login session is orphaned. The v2 port must keep a replayable result per auth_session_id."
     },
     {
       "listener": "api",
@@ -19760,8 +19760,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
-      "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by device_code. Consumption is a state-gated update; a retry after the token-bearing response is lost sees status consumed without tokens and the device restarts pairing."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Consumption is state-gated by device_code, but the tokens travel only in the consumed response: a retry after that response is lost sees consumed without tokens, the device restarts pairing, and the first login session is orphaned. The v2 port must keep a replayable result per auth_session_id."
     },
     {
       "listener": "api",
@@ -20439,8 +20439,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; oauthHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by the one-shot completion code (get-and-delete); a retry after the token-bearing response is lost fails and the client restarts the OAuth flow."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "The completion code is get-and-delete, so a retry after the token-bearing response is lost is 401 and the client restarts OAuth, orphaning the first login session. The v2 port must keep a replayable completion result keyed by the code until it expires."
     },
     {
       "listener": "api",

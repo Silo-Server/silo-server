@@ -430,8 +430,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
   tier-1 ported mutation rows (218 distinct operations) are classified (144
-  `natural_idempotent`, 31 `unique_constraint`, 12 `domain_identity`, 10 `coalescing`, 1
-  `durable_dispatch`, 20 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `natural_idempotent`, 31 `unique_constraint`, 10 `domain_identity`, 10 `coalescing`, 1
+  `durable_dispatch`, 22 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
@@ -442,7 +442,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   than a named target (library scan cancel, metadata-match-queue cancel, task cancel by key,
   notifications read-all), a fresh server-side cutoff a retry would move (history remove,
   mark-unwatched), an external call made before any durable claim (provider device-auth
-  start), or
+  start), a one-shot token-bearing response that cannot be replayed (device-pairing poll,
+  OAuth completion), or
   a one-shot destructive allowance a retry would re-arm (empty-root cleanup confirmation), a
   command that re-runs its side effect on every call (watch-together selection and
   suggestion promotion, which reset playback and clear member sessions each time;
