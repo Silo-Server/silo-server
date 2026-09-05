@@ -2007,8 +2007,38 @@ func applyWorkSummaryValue(detail *ItemDetail, summary *WorkSummary) {
 
 // personCredits converts ItemPerson slice to PersonCredit slice with presigned URLs.
 func (s *DetailService) personCredits(ctx context.Context, people []models.ItemPerson, filter AccessFilter) []PersonCredit {
+	photoPaths := make([]string, len(people))
+	paths := make([]string, 0, len(people))
+	seen := make(map[string]struct{}, len(people))
+	variant := imagesize.PluginVariantFeatured
+	if filter.ImageSize != imagesize.Unset {
+		variant = sizeToVariant(string(filter.ImageSize))
+	}
+	for i, person := range people {
+		path := person.PhotoPath
+		if path == "" || path == "-" || strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+			continue
+		}
+		// An absent size preserves the stored key and historical plugin hint;
+		// explicit sizes use the same profile ladder as individual resolution.
+		if filter.ImageSize != imagesize.Unset {
+			path = cachedImageVariantPath(path, artworkkey.ImageProfile, string(filter.ImageSize))
+		}
+		photoPaths[i] = path
+		if _, ok := seen[path]; !ok {
+			seen[path] = struct{}{}
+			paths = append(paths, path)
+		}
+	}
+	photoURLs := s.PresignURLsWithExpiry(ctx, paths, variant)
+	for _, path := range paths {
+		if photoURLs[path].URL == "" {
+			// Partial batch implementations retain their individual fallback.
+			photoURLs[path] = s.PresignURLWithExpiry(ctx, path, variant)
+		}
+	}
 	credits := make([]PersonCredit, 0, len(people))
-	for _, p := range people {
+	for i, p := range people {
 		pc := PersonCredit{
 			PersonID:  p.ID,
 			Name:      p.Name,
@@ -2020,15 +2050,10 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 			TvdbID:    p.TvdbID,
 			PlexGUID:  p.PlexGUID,
 		}
-		if p.PhotoPath != "" && p.PhotoPath != "-" {
-			// Without an explicit size the stored key is presigned as-is, which
-			// is what this has always returned. An explicit size resolves the
-			// profile ladder instead, the same as every other image on the page.
-			if filter.ImageSize == imagesize.Unset {
-				pc.PhotoURL = s.PresignURL(ctx, p.PhotoPath, imagesize.PluginVariantFeatured)
-			} else {
-				pc.PhotoURL = s.PresignImageURL(ctx, p.PhotoPath, artworkkey.ImageProfile, string(filter.ImageSize))
-			}
+		if strings.HasPrefix(p.PhotoPath, "http://") || strings.HasPrefix(p.PhotoPath, "https://") {
+			pc.PhotoURL = p.PhotoPath
+		} else if photoPaths[i] != "" {
+			pc.PhotoURL = photoURLs[photoPaths[i]].URL
 		}
 		if p.PhotoThumbhash != "" && p.PhotoThumbhash != "-" {
 			pc.PhotoThumbhash = p.PhotoThumbhash
