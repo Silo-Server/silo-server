@@ -29130,13 +29130,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries",
+        "operation_id": "listLibraries"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Bare array became {items:[...]} (bounded, no page); ids are string IDs; instants are UTC ms; poster_url and scan warning members are omitted, not null, when absent."
     },
     {
       "listener": "api",
@@ -29191,13 +29191,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries",
+        "operation_id": "createLibrary"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). 201 with Location; paths/type/name required at the schema (422 with body.<member>); duplicate path 409 conflict."
     },
     {
       "listener": "api",
@@ -29252,13 +29252,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/metadata-match-queue",
+        "operation_id": "listMetadataMatchQueues"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Bare array became {items:[...]}; library_id is a string ID."
     },
     {
       "listener": "api",
@@ -29313,13 +29313,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/provider-defaults",
+        "operation_id": "getLibraryProviderDefaults"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). library_type is required (422); the levels map became a levels array of {content_level, entries} in level-name order; plugin_installation_id is a string ID."
     },
     {
       "listener": "api",
@@ -29374,13 +29374,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries/reorder",
+        "operation_id": "reorderLibraries"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). PUT became POST (a command, not a replacement); entry ids are string IDs; 204."
     },
     {
       "listener": "api",
@@ -29435,13 +29435,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/roots",
+        "operation_id": "listLibraryRoots"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). limit+offset became limit+opaque cursor (page.next_cursor, page.has_more); library_id is a string ID query; total kept for the admin UI; instants UTC ms. The web admin pages on demand (50 per page, first page when the Ambiguous Roots section opens). Follow-up: the handler reloads every root override and media_item_groups claim of the library on each page; scope those loads to the page's roots server-side."
     },
     {
       "listener": "api",
@@ -29496,13 +29496,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/libraries/roots/override",
+        "operation_id": "deleteRootOverride"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). The JSON body became library_id and root_path query parameters (a DELETE carries no body); 204."
     },
     {
       "listener": "api",
@@ -29557,13 +29557,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/libraries/roots/override",
+        "operation_id": "setRootOverride"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). library_id is a string ID; root_path required at the schema; 404 unknown root, 409 ambiguous root; 204."
     },
     {
       "listener": "api",
@@ -29618,13 +29618,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/skipped-roots",
+        "operation_id": "listSkippedRoots"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Bare array became {items:[...]}; library_id is a string ID; instants UTC ms."
     },
     {
       "listener": "api",
@@ -29679,13 +29679,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/stale-ids",
+        "operation_id": "listStaleIds"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Bare array became {items:[...]}; library_id is a string ID; first/last_seen_at are UTC ms instants instead of second-precision strings."
     },
     {
       "listener": "api",
@@ -29738,13 +29738,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries/stale-ids/{content_id}/rematch",
+        "operation_id": "rematchStaleId"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Path parameter renamed to content_id; 204 as before."
     },
     {
       "listener": "api",
@@ -29799,13 +29799,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/unmatched-items",
+        "operation_id": "listUnmatchedItems"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). limit+offset became limit+opaque cursor bound to q; total kept for the admin UI; library_id is a string ID."
     },
     {
       "listener": "api",
@@ -29860,13 +29860,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/libraries/{id}",
+        "operation_id": "deleteLibrary"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Still 202 with the queued job resource (created_by_user_id is a string ID, instants UTC ms, request/result payloads never null); an active deletion is 409 conflict without the v1 active_job echo (job-monitor contract deferred)."
     },
     {
       "listener": "api",
@@ -29919,13 +29919,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PATCH",
+        "path": "/api/v2/libraries/{id}",
+        "operation_id": "updateLibrary"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). PUT became PATCH: omitted=unchanged, no member nullable (null is 422); unknown members rejected; non-numeric id is 404."
     },
     {
       "listener": "api",
@@ -29980,13 +29980,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries/{id}/check-mount",
+        "operation_id": "checkLibraryMount"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 200 body; library_id is a string ID, checked_at UTC ms."
     },
     {
       "listener": "api",
@@ -30039,13 +30039,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries/{id}/confirm-empty-root-cleanup",
+        "operation_id": "confirmEmptyRootCleanup"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 200 {status,message} body; no job contract."
     },
     {
       "listener": "api",
@@ -30100,13 +30100,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/{id}/metadata-match-queue",
+        "operation_id": "getMetadataMatchQueue"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Offset paging became limit plus an opaque cursor (page.has_more) over the three lists in lockstep; limit/offset members dropped from the body; ids are string IDs, instants UTC ms. media_folder_id became library_id on the movie, series and raw backlog entries."
     },
     {
       "listener": "api",
@@ -30161,13 +30161,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries/{id}/metadata-match-queue/cancel",
+        "operation_id": "cancelMetadataMatchQueue"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 200 body; library_id is a string ID."
     },
     {
       "listener": "api",
@@ -30222,13 +30222,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries/{id}/metadata-match-queue/retry",
+        "operation_id": "retryMetadataMatchQueue"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 200 body; library_id is a string ID."
     },
     {
       "listener": "api",
@@ -30281,13 +30281,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/libraries/{id}/poster",
+        "operation_id": "deleteLibraryPoster"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 204."
     },
     {
       "listener": "api",
@@ -30340,13 +30340,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/libraries/{id}/poster",
+        "operation_id": "uploadLibraryPoster"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Multipart via Huma; a non-multipart body is 415, a wrong part media type or missing part 422 at body.poster, over 10 MiB 413 (v1 answered 400/413 with {error,message})."
     },
     {
       "listener": "api",
@@ -30401,13 +30401,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/libraries/{id}/providers",
+        "operation_id": "getLibraryProviders"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). The levels map became an ordered array of {content_level, entries}; plugin_installation_id is a string ID. Legacy unlevelled rows (content_level '', kept by SyncBuiltinProviderChains on an upgraded database) are not exposed on v2; v1 still returns them under the empty key."
     },
     {
       "listener": "api",
@@ -30460,13 +30460,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/libraries/{id}/providers",
+        "operation_id": "setLibraryProviders"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). The levels map became an array of {content_level, entries}; a repeated level or non-numeric plugin_installation_id is 422; same 204. content_level must be non-empty: the legacy unlevelled rows v2 does not expose are carried across a save unchanged rather than deleted."
     },
     {
       "listener": "api",
@@ -30519,13 +30519,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/libraries/{id}/refresh-metadata",
+        "operation_id": "refreshLibraryMetadata"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Same 202 job body; mode is a strict enum (quick, full) answered 422 at body.mode; an active refresh is a 409 problem without the v1 active_job echo."
     },
     {
       "listener": "api",
@@ -30809,13 +30809,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/library/{id}/collections",
+        "operation_id": "getLibraryCollections"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryCollectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (profile_scoped). One shape whether or not groups are configured (groups is empty rather than absent); ids are string IDs, timestamps UTC ms instants, empty JSON documents are null."
     },
     {
       "listener": "api",
@@ -30869,13 +30869,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/library/{id}/collections/{collection_id}/items",
+        "operation_id": "getLibraryCollectionItems"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryCollectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem; cursor pagination (limit, default 50, max 200; opaque cursor over the collection order) replaces the unbounded list and drops v1 total/total_exact/has_more; an unrunnable smart query is 422 at path.collection_id. The web client fetches the first page only for now."
     },
     {
       "listener": "api",
@@ -30930,13 +30930,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/library/{id}/layout",
+        "operation_id": "getLibraryLayout"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (profile_scoped). Same body."
     },
     {
       "listener": "api",
@@ -31011,13 +31011,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/library/{id}/sections",
+        "operation_id": "listLibrarySections"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem: progress_updated_at is a UTC ms instant; image_size is a declared enum answered 422; the device header is not read."
     },
     {
       "listener": "api",
@@ -31083,13 +31083,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/library/{id}/sections/{section_id}/items",
+        "operation_id": "getLibrarySectionItems"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (profile_scoped). Answers the section itself rather than a {section} wrapper; cards are the shared CatalogItem."
     },
     {
       "listener": "api",
@@ -31143,13 +31143,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/library/{id}/user-collections",
+        "operation_id": "listLibraryUserCollections"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; libraryCollectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-libraries (profile_scoped). Standard collection envelope ({items}) instead of {collections}; timestamps are UTC ms instants."
     },
     {
       "listener": "api",
@@ -37233,13 +37233,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/because-watched/{item_id}",
+        "operation_id": "listBecauseWatched"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of the shared card (bounded, no page); score, reason, reason_detail and media_item_id are not carried (no client reads them; the card carries content_id). limit is a declared query param (1..50, default 20); an unknown parameter is 422."
     },
     {
       "listener": "api",
@@ -37314,13 +37314,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/discover",
+        "operation_id": "getDiscover"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {rows:[...]} became {items:[RecommendationRow]}; a row is {type,title,kind,key,items:[CatalogItem]} where title was label and kind/key were section_kind/section_key. Cards are the shared CatalogItem (progress_updated_at is a UTC ms instant). Apple and Android consume this row shape: the four member renames are the only change."
     },
     {
       "listener": "api",
@@ -37375,13 +37375,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/main",
+        "operation_id": "getForYouMain"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {row:ForYouRow|null} became a bare RecommendationRow rendered as cards; a profile without a For You row yet gets the row with items:[] rather than null. limit is a declared query param (1..50, default 20)."
     },
     {
       "listener": "api",
@@ -37436,13 +37436,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/rows",
+        "operation_id": "listForYouRows"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {rows:[ForYouRow]} of scored ids became {items:[RecommendationRow]} of cards; rows with no visible card are dropped; cluster_index is carried as key on a cluster row. limit is a declared query param (1..50, default 20)."
     },
     {
       "listener": "api",
@@ -37497,13 +37497,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/popular",
+        "operation_id": "listPopular"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of the shared card; score and reason are not carried. days (>=1, default 30) and limit (1..50, default 20) are declared query params answered 422 out of range, where v1 silently fell back to the default."
     },
     {
       "listener": "api",
@@ -37558,13 +37558,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/recently-added",
+        "operation_id": "listRecentlyAdded"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of the shared card; score and reason are not carried. days (>=1, default 14) and limit (1..50, default 20) are declared query params answered 422 out of range, where v1 silently fell back to the default."
     },
     {
       "listener": "api",
@@ -37619,13 +37619,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/section/{kind}",
+        "operation_id": "getRecommendationSection"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). kind is a declared path enum (for-you-main, cluster, similar-users, popular, recently-added, top-rated, genre) answered 422; the response is a RecommendationRow ({type,title,kind,key,items:[CatalogItem]}, title was label). limit is 1..60, default 60. An unknown section stays 200 with items:[] as in v1."
     },
     {
       "listener": "api",
@@ -37680,13 +37680,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/section/{kind}",
+        "operation_id": "getRecommendationSection"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). Folded into getRecommendationSection: the key path segment became the ?key query parameter (required for cluster and genre, 422 query.key when absent) so a genre name with a slash or a dot is no longer a path-routing hazard."
     },
     {
       "listener": "api",
@@ -37741,13 +37741,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar-users",
+        "operation_id": "listSimilarUsersLiked"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of shared CatalogItem cards (no score/reason/media_item_id). limit declared 1..50 (default 20), 422 out of range; offset is unknown."
     },
     {
       "listener": "api",
@@ -37822,13 +37822,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar/{item_id}",
+        "operation_id": "listSimilar"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[ScoredItem]} became a CatalogItemCollection of shared CatalogItem cards (no score/reason/media_item_id; the card's content_id is the identifier). limit is declared (1..50, default 20) and answers 422 out of range where v1 clamped. Apple and Android consume this list: they read media_item_id today and must switch to content_id."
     },
     {
       "listener": "api",
@@ -37893,13 +37893,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/taste-profile",
+        "operation_id": "getTasteProfile"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). Same members as v1 (top_genres, favorite_directors, signal_counts); updated_at is a UTC ms instant and is absent, not \"\", until the profile has been computed. Apple and Android consume this body: updated_at is the only change."
     },
     {
       "listener": "api",
@@ -37954,13 +37954,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/recommendations/taste-seed",
+        "operation_id": "createTasteSeed"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). Command; {item_ids} with minItems 1 / maxItems 200 at the schema (422 with body.item_ids, where v1 answered 400); an empty identifier is 422 at body.item_ids[i] where v1 skipped it. Retry safety: naturally idempotent, favouriting is set membership so a retried submission converges on the same favourite set and reports added 0. Answers {added} as v1; an unwired user store is 503 dependency_unavailable."
     },
     {
       "listener": "api",
@@ -38015,13 +38015,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/taste-seed/items",
+        "operation_id": "listTasteSeedItems"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items, next_offset} became a cursor-paginated CatalogItemCollection ({items:[CatalogItem], page:{next_cursor, has_more}}); the cursor carries the same offset v1's next_offset did and is minted under the same full-window rule. limit declared 1..60 (default 30), 422 out of range; offset is unknown."
     },
     {
       "listener": "api",
@@ -38076,13 +38076,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight",
+        "operation_id": "getWatchTonight"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {items:[card + watch_tonight_source], is_cold} kept; each card is the shared CatalogItem with watch_tonight_source a strict enum (continue_watching, next_up, recommendation). limit declared 1..20 (default 5), 422 out of range where v1 silently fell back to 5."
     },
     {
       "listener": "api",
@@ -38137,13 +38137,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight/cards",
+        "operation_id": "listWatchTonightCards"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; recsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-recommendations (profile_scoped). {cards, has_more, is_cold} became {items:[WatchTonightCard], has_more, is_cold}; a card is the shared CatalogItem plus watch_tonight_source and cast (runtime is the card's own member). mode is a required strict enum (422, not 400 invalid_mode); genres[] and exclude_ids[] are the exploded genres and exclude_ids parameters; an unknown genre is 422 at query.genres[i] where v1 dropped it silently; more than 200 exclude_ids is 422 where v1 truncated. has_more stays a flag: paging is by exclusion, not cursor."
     },
     {
       "listener": "api",

@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "content_id": "movie:a",
+      "title": "Alpha",
+      "year": 2001,
+      "content_type": "movie",
+      "library_id": "1",
+      "library_name": "Movies",
+      "status": "unmatched"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7Im8iOjF9fQ.olXnZGieg6Bxkk_2GMC18w88f2hBd9nDw5mTQGQjo_4",
+    "has_more": true
+  },
+  "total": 3
+}
+

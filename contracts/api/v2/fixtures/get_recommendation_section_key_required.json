@@ -1,0 +1,15 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:000000000000000000000059",
+  "errors": [
+    {
+      "location": "query.key",
+      "code": "required",
+      "detail": "a cluster section needs a key"
+    }
+  ]
+}
+

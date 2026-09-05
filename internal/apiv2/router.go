@@ -16,11 +16,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -94,6 +98,18 @@ type Dependencies struct {
 	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
+	// LibraryAdmin manages libraries for administrators
+	// (*handlers.LibraryHandler).
+	LibraryAdmin LibraryAdminService
+	// LibrarySections answers a library's sections to viewers
+	// (*handlers.SectionHandler).
+	LibrarySections LibrarySectionService
+	// LibraryCollections answers a library's collections to viewers
+	// (*handlers.LibraryCollectionHandler).
+	LibraryCollections LibraryCollectionService
+	// Recommendations answers the profile-scoped recommendation reads
+	// (*handlers.RecommendationsHandler).
+	Recommendations RecommendationService
 	// ProfileSections reads and writes a profile's home-row overrides
 	// (*handlers.SectionHandler).
 	ProfileSections ProfileSectionService
@@ -436,6 +452,73 @@ type LibraryService interface {
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.
 type AdminUserService interface {
 	ListAdminUsersPage(ctx context.Context, afterID, limit int) ([]handlers.AdminUserView, bool, error)
+}
+
+// LibraryAdminService is the slice of *handlers.LibraryHandler the library
+// management operations use. Every method returns the view its v1 handler
+// writes and an *handlers.APIError on failure.
+type LibraryAdminService interface {
+	ListLibraries(ctx context.Context) ([]handlers.LibraryView, error)
+	CreateLibrary(ctx context.Context, req handlers.LibraryCreateRequest) (handlers.LibraryView, error)
+	UpdateLibrary(ctx context.Context, id, userID int, req handlers.LibraryUpdateRequest) (handlers.LibraryView, error)
+	DeleteLibrary(ctx context.Context, id, userID int) (*models.AdminJob, error)
+	CheckLibraryMount(ctx context.Context, id int) (handlers.LibraryMountCheckView, error)
+	ConfirmEmptyRootCleanup(ctx context.Context, id int) error
+	ListMetadataMatchQueues(ctx context.Context) ([]handlers.MetadataMatchQueueStatusView, error)
+	LibraryProviderDefaults(ctx context.Context, libraryType string) (map[string][]handlers.ChainLevelEntryView, error)
+	ReorderLibraries(ctx context.Context, entries []mediacatalog.FolderReorderEntry) error
+	ListLibraryRoots(ctx context.Context, libraryID int, state string, limit, offset int) ([]handlers.LibraryRootView, int, error)
+	SetRootOverride(ctx context.Context, userID int, req handlers.RootOverrideUpsertRequest) error
+	DeleteRootOverride(ctx context.Context, req handlers.RootOverrideDeleteRequest) error
+	ListSkippedRoots(ctx context.Context) ([]handlers.SkippedRootView, error)
+	ListStaleIDs(ctx context.Context) ([]handlers.StaleMediaIDView, error)
+	RematchStaleID(ctx context.Context, contentID string) error
+	ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
+	GetMetadataMatchQueue(ctx context.Context, id, limit, offset int) (handlers.MetadataMatchQueueDetailView, error)
+	RetryMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
+	CancelMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
+	RefreshLibraryMetadata(ctx context.Context, id, userID int, mode adminjob.LibraryRefreshMode) (*models.AdminJob, error)
+	UploadLibraryPoster(ctx context.Context, id int, contentType string, data []byte) (handlers.LibraryView, error)
+	DeleteLibraryPoster(ctx context.Context, id int) error
+	LibraryProviders(ctx context.Context, id int) (map[string][]handlers.ChainLevelEntryView, error)
+	SetLibraryProviders(ctx context.Context, id int, levels map[string][]handlers.ProviderChainEntryInput) error
+}
+
+// LibrarySectionService is the slice of *handlers.SectionHandler the
+// viewer-facing library section reads use.
+type LibrarySectionService interface {
+	LibraryLayout(ctx context.Context, libraryID int) (handlers.SectionLayoutView, error)
+	LibrarySections(ctx context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionsView, error)
+	LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error)
+}
+
+// LibraryCollectionService is the slice of *handlers.LibraryCollectionHandler
+// the viewer-facing library collection reads use.
+type LibraryCollectionService interface {
+	LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (handlers.LibraryCollectionTabView, error)
+	LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error)
+	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access mediacatalog.AccessFilter, page handlers.CollectionItemPage) ([]handlers.CollectionItemView, bool, error)
+}
+
+// RecommendationService is the slice of *handlers.RecommendationsHandler the
+// viewer-facing recommendation reads use. Every method returns the cards
+// (or rows of cards) the discover page renders and an *handlers.APIError on
+// failure.
+type RecommendationService interface {
+	BecauseWatchedCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter mediacatalog.AccessFilter) ([]handlers.SectionItemView, error)
+	PopularCards(ctx context.Context, userID int, profileID string, days, limit int, filter mediacatalog.AccessFilter) ([]handlers.SectionItemView, error)
+	RecentlyAddedCards(ctx context.Context, userID int, profileID string, days, limit int, filter mediacatalog.AccessFilter) ([]handlers.SectionItemView, error)
+	ForYouMainCards(ctx context.Context, userID int, profileID string, limit int, filter mediacatalog.AccessFilter) (handlers.DiscoverRowView, error)
+	ForYouRowCards(ctx context.Context, userID int, profileID string, limit int, filter mediacatalog.AccessFilter) ([]handlers.DiscoverRowView, error)
+	Discover(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter) (handlers.DiscoverView, error)
+	Section(ctx context.Context, userID int, profileID, kind, key string, limit int, filter mediacatalog.AccessFilter) (handlers.SectionDetailView, error)
+	SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter mediacatalog.AccessFilter) ([]handlers.SectionItemView, error)
+	SimilarUsersCards(ctx context.Context, userID int, profileID string, limit int, filter mediacatalog.AccessFilter) ([]handlers.SectionItemView, error)
+	TasteProfile(ctx context.Context, userID int, profileID string) recommendations.TasteProfileSummary
+	TasteSeedItems(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, limit, offset int) (items []handlers.SectionItemView, candidates int, err error)
+	SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string) (int, error)
+	WatchTonight(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, limit int) (handlers.WatchTonightView, error)
+	WatchTonightCards(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

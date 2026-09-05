@@ -226,7 +226,7 @@ func fromHumaError(requestID string, status int, msg string, errs []error, bodyL
 		p.Errors = append(p.Errors, ProblemError{
 			Location: validationLocation(detail),
 			Code:     validationCode(detail.Message),
-			Detail:   detail.Message,
+			Detail:   validationDetail(detail.Message),
 		})
 	}
 	return p
@@ -355,6 +355,17 @@ func validationCode(msg string) string {
 // validationLocation lifts the property a "required" message names into the
 // location, so a missing body.name is reported at body.name like every other
 // field-level failure rather than at its parent.
+// validationDetail keeps Huma's message except where it echoes the rejected
+// value: a multipart part's media type is restated without it.
+func validationDetail(msg string) string {
+	if strings.HasPrefix(msg, "Invalid mime type: ") {
+		if _, want, ok := strings.Cut(msg, ", expected "); ok {
+			return "expected a part of media type " + strings.ReplaceAll(want, ",", ", ")
+		}
+	}
+	return msg
+}
+
 func validationLocation(d *huma.ErrorDetail) string {
 	const prefix = "expected required property "
 	if strings.HasPrefix(d.Message, prefix) {

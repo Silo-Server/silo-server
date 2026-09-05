@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "content_id": "movie:heat-1995",
+      "type": "movie",
+      "title": "Heat",
+      "year": 1995,
+      "runtime": 170,
+      "genres": [
+        "Crime"
+      ],
+      "keywords": [],
+      "content_rating": "R",
+      "status": "matched",
+      "rating_imdb": 8.3,
+      "position_seconds": 1200.5,
+      "duration_seconds": 10200,
+      "progress_updated_at": "2026-01-02T03:04:05.000Z",
+      "poster_url": "https://s3.example.test/poster.jpg",
+      "overlay_summary": {
+        "resolution": "4K",
+        "hdr": "Dolby Vision"
+      },
+      "item_source": "next_up",
+      "user_state": {
+        "played": false,
+        "is_favorite": false,
+        "in_watchlist": true
+      },
+      "watch_tonight_source": "next_up"
+    }
+  ],
+  "is_cold": true
+}
+
