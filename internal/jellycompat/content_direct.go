@@ -201,17 +201,18 @@ type episodeListSource interface {
 
 // directContentService implements ContentService by calling catalog repos directly.
 type directContentService struct {
-	browseRepo      browseSource
-	itemRepo        itemAccessSource
-	searchProvider  catalog.CatalogSearchProvider
-	seasonRepo      seasonListSource
-	episodeRepo     episodeListSource
-	detailSvc       *catalog.DetailService
-	folderRepo      folderListSource
-	storeProvider   userstore.UserStoreProvider
-	accessFilter    AccessFilterResolver
-	posterPresigner LibraryPosterPresigner
-	presignTTL      time.Duration
+	catalogUserState bool
+	browseRepo       browseSource
+	itemRepo         itemAccessSource
+	searchProvider   catalog.CatalogSearchProvider
+	seasonRepo       seasonListSource
+	episodeRepo      episodeListSource
+	detailSvc        *catalog.DetailService
+	folderRepo       folderListSource
+	storeProvider    userstore.UserStoreProvider
+	accessFilter     AccessFilterResolver
+	posterPresigner  LibraryPosterPresigner
+	presignTTL       time.Duration
 }
 
 func newDirectContentService(
@@ -409,6 +410,38 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		MaxLimit:           compatBrowseMaxLimit,
 		Offset:             requestedOffset,
 		RequireBackdrop:    parseBool(params.Get("require_backdrop"), false),
+	}
+	if !s.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable || isPlayedFilter != "") {
+		if isPlayedFilter != "" {
+			filters.IsPlayed = new(parseBool(isPlayedFilter, false))
+		}
+		filters.Limit = requestedLimit
+		result, err := s.browseConfiguredUserState(ctx, session, filters, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+			result, err := s.browseRepo.BrowsePage(ctx, page, false)
+			if err != nil {
+				return nil, false, err
+			}
+			localized := result.Items
+			if s.detailSvc != nil {
+				if models, err := s.detailSvc.LocalizeItemModels(ctx, result.Items, filter); err == nil && models != nil {
+					localized = models
+				}
+			}
+			items := make([]upstreamListItem, 0, len(localized))
+			for _, item := range localized {
+				items = append(items, mediaItemToListItem(item))
+			}
+			return items, result.HasMore, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		presignCompatListItems(ctx, s.detailSvc, result.Items)
+		fillListItemDurations(ctx, s.detailSvc, result.Items)
+		if !includeTotal {
+			result.Total = 0
+		}
+		return result, nil
 	}
 
 	// A no-parentId recently_added browse (the /Items/Latest hot path) would

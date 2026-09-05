@@ -31,22 +31,23 @@ import (
 
 // ItemsHandler serves Jellyfin browse/search/item endpoints.
 type ItemsHandler struct {
-	content      ContentService
-	userData     UserDataService
-	codec        *ResourceIDCodec
-	mapper       *mapper
-	images       *ImageCache
-	nextUpRepo   *catalog.NextUpRepository
-	browseRepo   *catalog.BrowseRepository
-	personRepo   *catalog.PersonRepository
-	detailSvc    *catalog.DetailService
-	durationSrc  probedDurationSource
-	itemRepo     itemRepoForBatchLoader
-	episodeRepo  episodeRepoForBatchLoader
-	seasonRepo   imageSeasonRepository
-	accessFilter AccessFilterResolver
-	subtitleRepo subtitles.Repository
-	recommender  recommendations.Recommender
+	content          ContentService
+	userData         UserDataService
+	codec            *ResourceIDCodec
+	mapper           *mapper
+	images           *ImageCache
+	nextUpRepo       *catalog.NextUpRepository
+	browseRepo       *catalog.BrowseRepository
+	personRepo       *catalog.PersonRepository
+	detailSvc        *catalog.DetailService
+	durationSrc      probedDurationSource
+	itemRepo         itemRepoForBatchLoader
+	episodeRepo      episodeRepoForBatchLoader
+	catalogUserState bool
+	seasonRepo       imageSeasonRepository
+	accessFilter     AccessFilterResolver
+	subtitleRepo     subtitles.Repository
+	recommender      recommendations.Recommender
 	// collections is optional; when set, library collections are exposed as
 	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
 	collections collectionSource
@@ -1753,6 +1754,49 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 			order = query.order
 		}
 		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+		if !h.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable) {
+			content, ok := h.content.(interface {
+				browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
+			})
+			if !ok {
+				writeError(w, 503, "Unavailable", "Configured user store unavailable")
+				return
+			}
+			selected := map[string]*models.Episode{}
+			result, err := content.browseConfiguredUserState(r.Context(), session, filters, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+				episodes, total, err := repo.BrowseEpisodes(r.Context(), seriesID, requestedSeasonID, query.seasonNumber, startID, page, filter)
+				if err != nil {
+					return nil, false, err
+				}
+				items := make([]upstreamListItem, 0, len(episodes))
+				for _, ep := range episodes {
+					items = append(items, upstreamListItem{ContentID: ep.ContentID})
+				}
+				return items, page.Offset+len(items) < total, nil
+			})
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			episodes, err := h.episodeRepo.GetByIDs(r.Context(), contentIDsFromListItems(result.Items))
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			for _, ep := range episodes {
+				selected[ep.ContentID] = ep
+			}
+			episodes = nil
+			for _, item := range result.Items {
+				if ep := selected[item.ContentID]; ep != nil {
+					episodes = append(episodes, ep)
+				}
+			}
+			query.totalOverride = new(result.Total)
+			query.startItemID = ""
+			h.writeEpisodeModelsPage(w, r, session, query, seriesID, seasons, episodes, false)
+			return
+		}
 		episodes, total, err := repo.BrowseEpisodes(r.Context(), seriesID, requestedSeasonID, query.seasonNumber, startID, filters, filter)
 		if err != nil {
 			writeCompatUpstreamError(w, err)
@@ -2374,6 +2418,10 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 	// then-filter path that pulled up to 10,000 favorites into memory before
 	// applying browse filters (audit 2026-05-01 §3.6 / catalog SQL plan
 	// task 4.2).
+	if !h.catalogUserState && favoriteBrowseFiltersSupportedBySQL(query) {
+		h.handleBrowseItems(w, r, session, query)
+		return
+	}
 	if favoriteItemsNeedBrowseFilters(query) && h.browseRepo != nil && favoriteBrowseFiltersSupportedBySQL(query) {
 		access := h.resolveAccessFilter(r.Context(), session)
 		filters := catalog.BrowseFavoritesFilters{

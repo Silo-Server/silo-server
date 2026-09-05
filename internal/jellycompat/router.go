@@ -23,6 +23,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
+const sqliteUserStoreBackend = "sqlite"
+
 // NewRouter builds the Jellyfin-compatibility router.
 func NewRouter(deps Dependencies) chi.Router {
 	declareJellycompatMediaRoutes()
@@ -76,6 +78,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
+	itemsHandler.catalogUserState = deps.Config != nil && deps.Config.UserDB.Backend != sqliteUserStoreBackend
 	itemsHandler.recommender = deps.Recommender
 	if deps.DB != nil {
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
@@ -417,6 +420,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.AccessFilterFn,
 			deps.CatalogSearchProvider,
 		)
+		svc.catalogUserState = deps.Config != nil && deps.Config.UserDB.Backend != sqliteUserStoreBackend
 		if deps.PosterPresigner != nil {
 			svc.posterPresigner = deps.PosterPresigner
 			svc.presignTTL = deps.PresignTTL

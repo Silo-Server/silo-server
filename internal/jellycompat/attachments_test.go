@@ -33,7 +33,7 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 	if err := os.WriteFile(assPath, []byte("[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Liberation Sans,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:00.10,Default,,0,0,0,,Hello\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=size=16x16:duration=0.1", "-i", assPath, "-map", "0:v", "-map", "1:s", "-c:s", "ass", "-c:v", "ffv1", "-attach", fontPath, "-metadata:s:t", "mimetype=application/x-truetype-font", mediaPath)
+	cmd := exec.CommandContext(t.Context(), ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=size=16x16:duration=0.1", "-i", assPath, "-map", "0:v", "-map", "1:s", "-c:s", "ass", "-c:v", "ffv1", "-attach", fontPath, "-attach", fontPath, "-metadata:s:t", "mimetype=application/x-truetype-font", mediaPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("fixture: %v %s", err, output)
 	}
@@ -60,7 +60,7 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 	if err := json.Unmarshal(negotiated.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.MediaSources) != 1 || len(response.MediaSources[0].MediaAttachments) != 1 {
+	if len(response.MediaSources) != 1 || len(response.MediaSources[0].MediaAttachments) != 2 {
 		t.Fatalf("missing attachment: %s", negotiated.Body.String())
 	}
 	attachment := response.MediaSources[0].MediaAttachments[0]
@@ -71,6 +71,12 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 	router.ServeHTTP(delivered, httptest.NewRequest("GET", attachment["DeliveryUrl"].(string), nil))
 	if delivered.Code != 200 || !bytes.Equal(delivered.Body.Bytes(), font) {
 		t.Fatalf("discovered font: %d %d bytes", delivered.Code, delivered.Body.Len())
+	}
+	second := response.MediaSources[0].MediaAttachments[1]
+	delivered = httptest.NewRecorder()
+	router.ServeHTTP(delivered, httptest.NewRequest("GET", second["DeliveryUrl"].(string), nil))
+	if second["Index"] != float64(3) || delivered.Code != 200 || !bytes.Equal(delivered.Body.Bytes(), font) {
+		t.Fatalf("second discovered font: %d %d bytes", delivered.Code, delivered.Body.Len())
 	}
 
 	source := PlaybackMediaSource{ID: "source-42", FileID: 42}

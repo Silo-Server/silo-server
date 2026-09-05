@@ -125,6 +125,40 @@ JSON
 	}
 }
 
+func TestExtractAttachedSubtitleFontDumpsOnlyRequestedStream(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	writeExecutable(t, filepath.Join(dir, "ffprobe"), `#!/bin/sh
+printf '%s' '{"streams":[{"index":2,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"first.ttf"}},{"index":7,"codec_name":"otf","codec_type":"attachment"}]}'
+`)
+	writeExecutable(t, ffmpeg, `#!/bin/sh
+for arg do
+ case "$arg" in -dump_attachment:7) ;; -dump_attachment:*) exit 42;; esac
+done
+`+strings.TrimPrefix(fakeFFmpegDumping("selected-font"), "#!/bin/sh\n"))
+	font, err := ExtractAttachedSubtitleFont(t.Context(), "input.mkv", ffmpeg, 7)
+	if err != nil || font == nil || font.StreamIndex != 7 || font.Name != "attachment-1.otf" || string(font.Data) != "selected-font" {
+		t.Fatalf("selected font=%+v err=%v", font, err)
+	}
+	metadata, err := ListAttachedSubtitleFonts(t.Context(), "input.mkv", ffmpeg)
+	if err != nil || len(metadata) != 2 || metadata[1].FileName != font.Name {
+		t.Fatalf("selected fallback name differs from discovery: %+v %v", metadata, err)
+	}
+	writeExecutable(t, ffmpeg, "#!/bin/sh\nexit 42\n")
+	font, err = ExtractAttachedSubtitleFont(t.Context(), "input.mkv", ffmpeg, 99)
+	if err != nil || font != nil {
+		t.Fatalf("unknown stream started extraction: %+v %v", font, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := ExtractAttachedSubtitleFont(ctx, "input.mkv", ffmpeg, 7); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled single-font extraction: %v", err)
+	}
+}
+
 // A dump file ffmpeg never wrote (an attachment it could not stream-copy) must
 // be skipped rather than fail the whole bundle.
 func TestDumpFontAttachmentsSkipsMissingDumps(t *testing.T) {

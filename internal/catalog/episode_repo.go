@@ -1209,3 +1209,22 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	episodes, err := scanEpisodes(rows)
 	return episodes, total, err
 }
+
+// ListAvailableIDsBySeriesPage pages the same episode set used by completion
+// rollups without loading metadata or all episodes into memory.
+func (r *EpisodeRepository) ListAvailableIDsBySeriesPage(ctx context.Context, seriesID string, limit, offset int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT content_id FROM episodes WHERE series_id=$1 AND `+episodeAvailabilityPredicate+` ORDER BY content_id LIMIT $2 OFFSET $3`, seriesID, min(max(limit, 1), 1000), max(offset, 0))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

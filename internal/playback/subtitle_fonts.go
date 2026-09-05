@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -87,6 +88,20 @@ func ListAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string
 // loading them into JASSUB is the closest browser equivalent to libass on a
 // native player.
 func ExtractAttachedSubtitleFonts(ctx context.Context, inputPath string, ffmpegPath string) ([]SubtitleFontAttachment, error) {
+	return extractAttachedSubtitleFonts(ctx, inputPath, ffmpegPath, nil)
+}
+
+// ExtractAttachedSubtitleFont extracts only the requested container stream.
+// The same font validation, attachment count and byte limits apply as to bundles.
+func ExtractAttachedSubtitleFont(ctx context.Context, inputPath, ffmpegPath string, index int) (*SubtitleFontAttachment, error) {
+	fonts, err := extractAttachedSubtitleFonts(ctx, inputPath, ffmpegPath, &index)
+	if err != nil || len(fonts) == 0 {
+		return nil, err
+	}
+	return &fonts[0], nil
+}
+
+func extractAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string, index *int) ([]SubtitleFontAttachment, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if strings.TrimSpace(inputPath) == "" {
@@ -103,13 +118,26 @@ func ExtractAttachedSubtitleFonts(ctx context.Context, inputPath string, ffmpegP
 	if len(streams) > maxSubtitleFontAttachments {
 		streams = streams[:maxSubtitleFontAttachments]
 	}
+	selectedName := ""
+	if index != nil {
+		selected := slices.IndexFunc(streams, func(stream attachmentProbeStream) bool { return stream.Index == *index })
+		if selected < 0 {
+			return nil, nil
+		}
+		selectedName = safeAttachmentDisplayName(streams[selected], fmt.Sprintf("attachment-%d%s", selected, fontAttachmentExt(streams[selected])))
+		streams = streams[selected : selected+1]
+	}
 
 	bin := ffmpegPath
 	if strings.TrimSpace(bin) == "" {
 		bin = "ffmpeg"
 	}
 
-	return dumpFontAttachments(ctx, inputPath, bin, streams, maxSubtitleFontBytes)
+	fonts, err := dumpFontAttachments(ctx, inputPath, bin, streams, maxSubtitleFontBytes)
+	if selectedName != "" && len(fonts) > 0 {
+		fonts[0].Name = selectedName
+	}
+	return fonts, err
 }
 
 // EncodeSubtitleFontBundle converts raw font attachments to base64 JSON items.

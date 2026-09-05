@@ -193,7 +193,7 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 	codec := NewResourceIDCodec()
 	repo := &boundedEpisodeContractRepo{}
 	svc := &countingContentService{seasons: []upstreamSeason{{ContentID: "season2", SeasonNumber: 2, EpisodeCount: 20}}}
-	h := &ItemsHandler{content: svc, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now), accessFilter: func(context.Context, int, string) catalog.AccessFilter {
+	h := &ItemsHandler{catalogUserState: true, content: svc, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now), accessFilter: func(context.Context, int, string) catalog.AccessFilter {
 		return catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaxContentRating: "PG"}
 	}}
 	result := performItemsRequest(t, h, "/Items?ParentId="+codec.EncodeStringID(EncodedIDItem, "series")+"&IncludeItemTypes=Episode&Genres=Drama&Years=2024&IsFavorite=true&IsPlayed=false&StartIndex=3&Limit=1&Season=2")

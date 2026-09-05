@@ -192,6 +192,24 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 		}
 	}
 	episodes := NewEpisodeRepository(pool)
+	t.Run("available episode IDs are scoped and paged", func(t *testing.T) {
+		metadataID := prefix + "-metadata-only"
+		exec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,9,99,'Metadata only')`, metadataID, seriesID)
+		ids, err := episodes.ListAvailableIDsBySeriesPage(ctx, seriesID, 2, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) != 2 || ids[0] != episodeIDs[2] || ids[1] != episodeIDs[3] {
+			t.Fatalf("scoped ID page: %v", ids)
+		}
+		ids, err = episodes.ListAvailableIDsBySeriesPage(ctx, seriesID, 100, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) != 1 || ids[0] != episodeIDs[4] {
+			t.Fatalf("unavailable or foreign episode included: %v", ids)
+		}
+	})
 	access := AccessFilter{AllowedLibraryIDs: []int{libraryID}, DisabledLibraryIDs: []int{disabledID}, MaxContentRating: "PG"}
 	q := base
 	q.ContentIDs = nil

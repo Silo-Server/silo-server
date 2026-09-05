@@ -17,7 +17,7 @@ import (
 )
 
 // Keep the slot through delivery, bounding both extraction processes and font
-// buffers held by slow clients. Waiting and extraction share one deadline.
+// buffers held by slow clients. Waiting and extraction each have a bounded budget.
 var compatAttachmentSlots = make(chan struct{}, 2)
 
 // HandleAttachment serves a real font attachment by its original container
@@ -84,19 +84,18 @@ func (h *PlaybackHandler) HandleAttachment(w http.ResponseWriter, r *http.Reques
 		writeError(w, 503, "Unavailable", "Attachment extraction is busy")
 		return
 	}
-	fonts, err := playback.ExtractAttachedSubtitleFonts(ctx, file.FilePath, h.FFmpegPath)
+	// Queue time must not consume the extractor's own thirty-second budget.
+	cancel()
+	font, err := playback.ExtractAttachedSubtitleFont(r.Context(), file.FilePath, h.FFmpegPath, index)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		if errors.Is(err, context.DeadlineExceeded) || r.Context().Err() != nil {
 			writeError(w, 503, "Unavailable", "Attachment extraction timed out")
 			return
 		}
 		writeError(w, 500, "ServerError", "Failed to extract attachments")
 		return
 	}
-	for _, font := range fonts {
-		if font.StreamIndex != index {
-			continue
-		}
+	if font != nil {
 		typ := mime.TypeByExtension(filepath.Ext(font.Name))
 		if typ == "" {
 			typ = "application/octet-stream"
