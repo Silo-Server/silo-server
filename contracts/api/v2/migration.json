@@ -42958,13 +42958,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/sync/progress",
+        "operation_id": "syncProgress"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; progressHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-progress (profile_scoped). Same batch shape {items:[...]} answered 200 {results:[{media_item_id, status, error}]} in request order; member changes: position/duration (float seconds) are position_ms/duration_ms (integer milliseconds, minimum 0), media_item_id is a string ID (minLength 1), updated_at is a UTC-ms instant (a malformed one is 422 at body.items[i].updated_at rather than a per-item error), items minItems 1, unknown members rejected. Retry safety: natural_idempotent (a replayed write with the same updated_at merges last-write-wins to the same row; a live write re-applies the same position)."
     },
     {
       "listener": "api",

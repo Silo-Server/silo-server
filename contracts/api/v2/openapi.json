@@ -4420,6 +4420,129 @@
         ],
         "type": "object"
       },
+      "ProgressSyncInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "Writes to apply, in order",
+            "items": {
+              "$ref": "#/components/schemas/ProgressSyncItem"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProgressSyncItem": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_ms": {
+            "description": "Known runtime in milliseconds; 0 when unknown",
+            "examples": [
+              5400000
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "force_overwrite": {
+            "description": "Write the position as given instead of merging it with the stored one",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "media_item_id": {
+            "description": "The catalog item",
+            "examples": [
+              "movie-8f2c1a"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "position_ms": {
+            "description": "Playback position in milliseconds",
+            "examples": [
+              1325500
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated_at": {
+            "description": "Client event time of an offline-queued write; the server clamps it to now and merges last-write-wins on it",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_item_id",
+          "position_ms",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
+      "ProgressSyncOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "description": "One per item, in request order",
+            "items": {
+              "$ref": "#/components/schemas/ProgressSyncResult"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      },
+      "ProgressSyncResult": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "description": "Why the write was not applied",
+            "examples": [
+              "failed to update progress"
+            ],
+            "type": "string"
+          },
+          "media_item_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "movie-8f2c1a"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "description": "ok when the write was applied (or skipped as below a threshold); error when it was not",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "examples": [
+              "ok"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_item_id",
+          "status"
+        ],
+        "type": "object"
+      },
       "ProviderChainEntry": {
         "additionalProperties": false,
         "properties": {
@@ -14115,6 +14238,189 @@
           }
         ],
         "summary": "List the acting profile's watch progress, newest change first.",
+        "tags": [
+          "progress"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/sync/progress": {
+      "post": {
+        "operationId": "syncProgress",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressSyncInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressSyncOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Apply a batch of progress writes for the acting profile and answer one result per item; a replayed write with the same updated_at is a no-op.",
         "tags": [
           "progress"
         ],

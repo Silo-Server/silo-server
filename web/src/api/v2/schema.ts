@@ -672,6 +672,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/sync/progress": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Apply a batch of progress writes for the acting profile and answer one result per item; a replayed write with the same updated_at is a no-op. */
+    post: operations["syncProgress"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/system/info": {
     parameters: {
       query?: never;
@@ -2776,6 +2793,62 @@ export interface components {
        * @example 2026-01-02T03:04:05.000Z
        */
       updated_at: string;
+    };
+    ProgressSyncInputBody: {
+      /** @description Writes to apply, in order */
+      items: components["schemas"]["ProgressSyncItem"][];
+    };
+    ProgressSyncItem: {
+      /**
+       * Format: int64
+       * @description Known runtime in milliseconds; 0 when unknown
+       * @example 5400000
+       */
+      duration_ms: number;
+      /**
+       * @description Write the position as given instead of merging it with the stored one
+       * @example false
+       */
+      force_overwrite?: boolean;
+      /**
+       * @description The catalog item
+       * @example movie-8f2c1a
+       */
+      media_item_id: string;
+      /**
+       * Format: int64
+       * @description Playback position in milliseconds
+       * @example 1325500
+       */
+      position_ms: number;
+      /**
+       * Format: date-time
+       * @description Client event time of an offline-queued write; the server clamps it to now and merges last-write-wins on it
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      updated_at?: string;
+    };
+    ProgressSyncOutputBody: {
+      /** @description One per item, in request order */
+      results: components["schemas"]["ProgressSyncResult"][];
+    };
+    ProgressSyncResult: {
+      /**
+       * @description Why the write was not applied
+       * @example failed to update progress
+       */
+      error?: string;
+      /**
+       * @description Opaque identifier
+       * @example movie-8f2c1a
+       */
+      media_item_id: string;
+      /**
+       * @description ok when the write was applied (or skipped as below a threshold); error when it was not
+       * @example ok
+       * @enum {string}
+       */
+      status: "ok" | "error";
     };
     ProviderChainEntry: {
       /** @example tmdb */
@@ -9080,6 +9153,143 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  syncProgress: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProgressSyncInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProgressSyncOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

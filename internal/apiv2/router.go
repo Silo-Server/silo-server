@@ -408,9 +408,11 @@ type AccountService interface {
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
 }
 
-// ProgressService is the slice of *handlers.ProgressHandler listProgress uses.
+// ProgressService is the slice of *handlers.ProgressHandler the progress
+// operations use.
 type ProgressService interface {
 	ListProgressPage(ctx context.Context, userID int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error)
+	SyncProgress(ctx context.Context, userID int, profileID string, updates []handlers.ProgressSyncUpdate) ([]handlers.ProgressSyncResultView, error)
 }
 
 // ProfileService is the slice of *handlers.ProfileHandler the profile
