@@ -325,6 +325,18 @@ func (s *Service) recordMarkWatched(
 	if watchedAt.IsZero() {
 		watchedAt = time.Now().UTC()
 	}
+	// A mark is idempotent per leaf: a target the profile has already
+	// completed gets no new history row and no new outbound play, so a
+	// retried request (or a series mark over partly watched episodes)
+	// records each play once. An unmark clears the completed state, so the
+	// next mark records again.
+	targets, err = s.dropCompletedTargets(ctx, store, profileID, targets)
+	if err != nil {
+		return ManualMarkResult{}, err
+	}
+	if len(targets) == 0 {
+		return ManualMarkResult{}, nil
+	}
 	// Resolve every identity up front: one episode query plus one provider-ID
 	// query per distinct series, instead of two lookups per episode.
 	completedIDs := make([]string, 0, len(targets))
@@ -361,6 +373,31 @@ func (s *Service) recordMarkWatched(
 	}
 	s.notifyWatchedCompleted(ctx, userID, profileID, completedIDs)
 	return result, nil
+}
+
+// dropCompletedTargets returns the targets the profile has not yet completed,
+// in their original order. The progress lookup honors the hidden-history
+// watermark, so an unmarked item counts as not completed.
+func (s *Service) dropCompletedTargets(ctx context.Context, store userstore.UserStore, profileID string, targets []LeafWatchTarget) ([]LeafWatchTarget, error) {
+	if len(targets) == 0 {
+		return targets, nil
+	}
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, target.MediaItemID)
+	}
+	progress, err := store.ListProgressByMediaItems(ctx, profileID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("checking completed targets: %w", err)
+	}
+	remaining := make([]LeafWatchTarget, 0, len(targets))
+	for _, target := range targets {
+		if current, ok := progress[target.MediaItemID]; ok && current.Completed {
+			continue
+		}
+		remaining = append(remaining, target)
+	}
+	return remaining, nil
 }
 
 func (s *Service) recordMarkUnwatched(

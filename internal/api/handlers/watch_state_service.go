@@ -69,29 +69,9 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 	case h.watchState == nil:
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	case played:
-		leafTargets := make([]watchstate.LeafWatchTarget, 0, len(targets))
-		for _, target := range targets {
-			leafTargets = append(leafTargets, watchstate.LeafWatchTarget{
-				MediaItemID:     target.ContentID,
-				DurationSeconds: target.DurationSeconds,
-			})
-		}
-		updatedAt := time.Now().UTC()
-		var result watchstate.ManualMarkResult
-		result, err = h.watchState.RecordManualMarkWatchedWithResult(ctx, userID, profileID, leafTargets, updatedAt)
-		if err == nil {
-			h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedWatched, userID, profileID, result)
-		}
+		err = h.markLeafTargetsWatched(ctx, userID, profileID, targets)
 	default:
-		targetIDs := make([]string, 0, len(targets))
-		for _, target := range targets {
-			targetIDs = append(targetIDs, target.ContentID)
-		}
-		var result watchstate.ManualMarkResult
-		result, err = h.watchState.RecordManualMarkUnwatchedWithResult(ctx, userID, profileID, targetIDs)
-		if err == nil {
-			h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedUnwatched, userID, profileID, result)
-		}
+		err = h.markLeafTargetsUnwatched(ctx, userID, profileID, targets)
 	}
 	if err != nil {
 		if isNotFound(err) {
@@ -111,4 +91,39 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 		AffectedCount: len(targets),
 		Played:        played,
 	}, nil
+}
+
+// markLeafTargetsWatched records a manual play for every leaf target the
+// profile has not already completed and queues one outbound provider event
+// for the plays it recorded. A target already completed is a no-op: no
+// history row, no event, so a retried mark never double-counts a play.
+func (h *ItemsHandler) markLeafTargetsWatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget) error {
+	leafTargets := make([]watchstate.LeafWatchTarget, 0, len(targets))
+	for _, target := range targets {
+		leafTargets = append(leafTargets, watchstate.LeafWatchTarget{
+			MediaItemID:     target.ContentID,
+			DurationSeconds: target.DurationSeconds,
+		})
+	}
+	result, err := h.watchState.RecordManualMarkWatchedWithResult(ctx, userID, profileID, leafTargets, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedWatched, userID, profileID, result)
+	return nil
+}
+
+// markLeafTargetsUnwatched hides the targets' history and clears their
+// progress, then queues the removal of the manual plays that were visible.
+func (h *ItemsHandler) markLeafTargetsUnwatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget) error {
+	targetIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetIDs = append(targetIDs, target.ContentID)
+	}
+	result, err := h.watchState.RecordManualMarkUnwatchedWithResult(ctx, userID, profileID, targetIDs)
+	if err != nil {
+		return err
+	}
+	h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedUnwatched, userID, profileID, result)
+	return nil
 }
