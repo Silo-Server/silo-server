@@ -492,24 +492,10 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	detail, err := h.detailSvc.GetWatchDetail(r.Context(), id, filter)
+	detail, err := h.WatchDetail(r.Context(), apimw.GetUserID(r.Context()), requestProfileID(r), id, filter)
 	if err != nil {
-		switch {
-		case catalog.IsWatchTargetNotPlayable(err):
-			writeError(w, http.StatusBadRequest, "invalid_watch_target", "Content is not directly playable")
-			return
-		case isNotFound(err):
-			writeError(w, http.StatusNotFound, "not_found", "Watch target not found")
-			return
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get watch detail")
-			return
-		}
-	}
-
-	if detail.Type == "movie" || detail.Type == "episode" || detail.Type == "ebook" || detail.Type == "audiobook" {
-		detail.UserData = h.getLeafUserData(r, detail.ContentID, detail.Type)
-		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
+		writeAPIError(w, err)
+		return
 	}
 
 	writeJSON(w, http.StatusOK, detail)
@@ -803,71 +789,13 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	targetType, targets, err := h.resolveWatchedTargets(r.Context(), id, filter)
+	result, err := h.SetWatchedState(r.Context(), userID, profileID, id, played, filter)
 	if err != nil {
-		switch {
-		case isNotFound(err):
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update watched state")
-		}
+		writeAPIError(w, err)
 		return
 	}
 
-	switch {
-	case targetType == "ebook":
-		// Ebook read state lives in ebook_reader_progress, not in
-		// user_watch_progress/user_watch_history; watch providers do not sync
-		// books, so no local watch event is dispatched.
-		err = h.setEbookReadState(r.Context(), userID, profileID, id, played, filter)
-	case h.watchState == nil:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	case played:
-		leafTargets := make([]watchstate.LeafWatchTarget, 0, len(targets))
-		for _, target := range targets {
-			leafTargets = append(leafTargets, watchstate.LeafWatchTarget{
-				MediaItemID:     target.ContentID,
-				DurationSeconds: target.DurationSeconds,
-			})
-		}
-		updatedAt := time.Now().UTC()
-		var result watchstate.ManualMarkResult
-		result, err = h.watchState.RecordManualMarkWatchedWithResult(r.Context(), userID, profileID, leafTargets, updatedAt)
-		if err == nil {
-			h.dispatchLocalWatchEvent(r.Context(), watchsync.LocalWatchEventMarkedWatched, userID, profileID, result)
-		}
-	default:
-		targetIDs := make([]string, 0, len(targets))
-		for _, target := range targets {
-			targetIDs = append(targetIDs, target.ContentID)
-		}
-		var result watchstate.ManualMarkResult
-		result, err = h.watchState.RecordManualMarkUnwatchedWithResult(r.Context(), userID, profileID, targetIDs)
-		if err == nil {
-			h.dispatchLocalWatchEvent(r.Context(), watchsync.LocalWatchEventMarkedUnwatched, userID, profileID, result)
-		}
-	}
-	if err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update watched state")
-		return
-	}
-
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, id, "", "watched", userStateEventState{
-		Played: boolPtr(played),
-	})
-
-	writeJSON(w, http.StatusOK, watchedStateResponse{
-		ContentID:     id,
-		Type:          targetType,
-		AffectedCount: len(targets),
-		Played:        played,
-	})
+	writeJSON(w, http.StatusOK, result)
 }
 
 // HandleGetItemVersions handles GET /items/{id}/versions.
@@ -1913,16 +1841,26 @@ func (h *ItemsHandler) seasonResponseFromEpisodes(
 }
 
 func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string, itemType ...string) *catalog.SeasonUserData {
-	if len(itemType) > 0 && itemType[0] == "ebook" {
-		return h.getEbookLeafUserData(r, contentID)
+	kind := ""
+	if len(itemType) > 0 {
+		kind = itemType[0]
+	}
+	return h.leafUserData(r.Context(), apimw.GetUserID(r.Context()), requestProfileID(r), contentID, kind)
+}
+
+// leafUserData is getLeafUserData without the request: the viewer's progress
+// on one leaf item, nil when there is none or the store cannot be reached.
+func (h *ItemsHandler) leafUserData(ctx context.Context, userID int, profileID, contentID, itemType string) *catalog.SeasonUserData {
+	if itemType == "ebook" {
+		return h.ebookLeafUserData(ctx, userID, profileID, contentID)
 	}
 
-	store, profileID, ok := h.userStoreForRequest(r)
+	store, ok := h.userStoreFor(ctx, userID, profileID)
 	if !ok {
 		return nil
 	}
 
-	progress, err := userstore.GetProgressWithCompletedHistory(r.Context(), store, profileID, contentID)
+	progress, err := userstore.GetProgressWithCompletedHistory(ctx, store, profileID, contentID)
 	if err != nil {
 		return nil
 	}
@@ -1968,16 +1906,18 @@ func leafUserDataFromProgress(progress *userstore.WatchProgress) *catalog.Season
 }
 
 func (h *ItemsHandler) getEbookLeafUserData(r *http.Request, contentID string) *catalog.SeasonUserData {
+	return h.ebookLeafUserData(r.Context(), apimw.GetUserID(r.Context()), requestProfileID(r), contentID)
+}
+
+func (h *ItemsHandler) ebookLeafUserData(ctx context.Context, userID int, profileID, contentID string) *catalog.SeasonUserData {
 	if h == nil || h.ebookProgressStore == nil {
 		return nil
 	}
-	userID := apimw.GetUserID(r.Context())
-	profileID := requestProfileID(r)
 	if userID <= 0 || profileID == "" || contentID == "" {
 		return nil
 	}
 
-	progress, err := h.ebookProgressStore.ListByContentIDs(r.Context(), userID, profileID, []string{contentID})
+	progress, err := h.ebookProgressStore.ListByContentIDs(ctx, userID, profileID, []string{contentID})
 	if err != nil {
 		return nil
 	}
@@ -2096,26 +2036,25 @@ func requestProfileID(r *http.Request) string {
 }
 
 func (h *ItemsHandler) userStoreForRequest(r *http.Request) (userstore.UserStore, string, bool) {
-	if h.storeProvider == nil {
-		return nil, "", false
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		return nil, "", false
-	}
-
 	profileID := requestProfileID(r)
-	if profileID == "" {
+	store, ok := h.userStoreFor(r.Context(), apimw.GetUserID(r.Context()), profileID)
+	if !ok {
 		return nil, "", false
 	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil || store == nil {
-		return nil, "", false
-	}
-
 	return store, profileID, true
+}
+
+// userStoreFor opens the account's store for a profile; false when either
+// identity is missing or the store cannot be opened.
+func (h *ItemsHandler) userStoreFor(ctx context.Context, userID int, profileID string) (userstore.UserStore, bool) {
+	if h.storeProvider == nil || userID == 0 || profileID == "" {
+		return nil, false
+	}
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil || store == nil {
+		return nil, false
+	}
+	return store, true
 }
 
 // cardThumbnailPath converts an S3 image path from original to w300 for use in
@@ -2217,50 +2156,70 @@ func filterSortClause(sort, order string) string {
 // rather than fall back to an unrestricted filter (see accessFilterOrError and
 // accessFilterOrDeny).
 func (h *ItemsHandler) accessFilter(r *http.Request) (catalog.AccessFilter, error) {
-	deviceID := deviceMetadataFromRequest(r).DeviceID
-	selectedFileID := 0
+	opts := AccessFilterOptions{DeviceID: deviceMetadataFromRequest(r).DeviceID}
 	if fileIDRaw := strings.TrimSpace(r.URL.Query().Get("fileId")); fileIDRaw != "" {
 		if fileID, err := strconv.Atoi(fileIDRaw); err == nil && fileID > 0 {
-			selectedFileID = fileID
+			opts.SelectedFileID = fileID
 		}
 	}
-
-	var presentationLibraryID *int
 	if libraryIDRaw := strings.TrimSpace(r.URL.Query().Get("library_id")); libraryIDRaw != "" {
 		if libraryID, err := strconv.Atoi(libraryIDRaw); err == nil && libraryID > 0 {
-			presentationLibraryID = &libraryID
+			opts.PresentationLibraryID = &libraryID
 		}
 	}
+	return h.ContextAccessFilter(r.Context(), opts)
+}
 
-	if scope, ok := access.GetScope(r.Context()); ok {
+// AccessFilterOptions is what a caller adds to the viewer identity on the
+// context when it resolves an access filter through ContextAccessFilter.
+type AccessFilterOptions struct {
+	// DeviceID is the caller's declared device, "" when it declared none.
+	DeviceID string
+	// SelectedFileID pins the file a detail read prefers; 0 for none.
+	SelectedFileID int
+	// PresentationLibraryID scopes the read to one library; nil for none.
+	PresentationLibraryID *int
+	// ImageSize is the artwork variant to presign; Unset picks defaults.
+	ImageSize imagesize.Size
+}
+
+// ContextAccessFilter is the viewer's access filter from the identity on the
+// context plus the caller's options. With a resolved viewer scope the filter
+// carries the scope's policy and language preferences; without one it falls
+// back to the account's effective policy, and an account that cannot be
+// resolved is an error rather than an unrestricted filter. The v1 request
+// path and the v2 operations both go through it.
+func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilterOptions) (catalog.AccessFilter, error) {
+	if scope, ok := access.GetScope(ctx); ok {
 		return catalog.AccessFilter{
 			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
 			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
 			MaxContentRating:          scope.MaxContentRating,
 			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
-			PresentationLibraryID:     presentationLibraryID,
+			PresentationLibraryID:     opts.PresentationLibraryID,
 			ProfilePreferredLanguage:  scope.PreferredMetadataLanguage,
 			MetadataLanguageOverrides: scope.MetadataLanguageOverrides,
-			SelectedFileID:            selectedFileID,
-			UserID:                    apimw.GetUserID(r.Context()),
-			ProfileID:                 apimw.GetProfileID(r.Context()),
-			DeviceID:                  deviceID,
+			SelectedFileID:            opts.SelectedFileID,
+			ImageSize:                 opts.ImageSize,
+			UserID:                    apimw.GetUserID(ctx),
+			ProfileID:                 apimw.GetProfileID(ctx),
+			DeviceID:                  opts.DeviceID,
 		}, nil
 	}
 
 	var libraryIDs []int
 	var maxPlaybackQuality string
 	if h.UserRepo != nil {
-		userID := apimw.GetUserID(r.Context())
+		userID := apimw.GetUserID(ctx)
 		if userID != 0 {
-			user, userErr := h.UserRepo.GetByID(r.Context(), userID)
+			user, userErr := h.UserRepo.GetByID(ctx, userID)
 			if userErr != nil {
-				slog.ErrorContext(r.Context(), "looking up user for library access", "component", "api", "error", userErr)
+				slog.ErrorContext(ctx, "looking up user for library access", "component", "api", "error", userErr)
 				return catalog.AccessFilter{}, userErr
 			}
-			effective, policyErr := access.EffectivePolicyForUser(r.Context(), user, h.AccessGroups)
+			effective, policyErr := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
 			if policyErr != nil {
-				slog.ErrorContext(r.Context(), "resolving user policy for library access", "component", "api", "error", policyErr)
+				slog.ErrorContext(ctx, "resolving user policy for library access", "component", "api", "error", policyErr)
 				return catalog.AccessFilter{}, policyErr
 			}
 			if effective.LibraryIDs != nil {
@@ -2273,11 +2232,12 @@ func (h *ItemsHandler) accessFilter(r *http.Request) (catalog.AccessFilter, erro
 	return catalog.AccessFilter{
 		AllowedLibraryIDs:     libraryIDs,
 		MaxPlaybackQuality:    maxPlaybackQuality,
-		PresentationLibraryID: presentationLibraryID,
-		SelectedFileID:        selectedFileID,
-		UserID:                apimw.GetUserID(r.Context()),
-		ProfileID:             apimw.GetProfileID(r.Context()),
-		DeviceID:              deviceID,
+		PresentationLibraryID: opts.PresentationLibraryID,
+		SelectedFileID:        opts.SelectedFileID,
+		ImageSize:             opts.ImageSize,
+		UserID:                apimw.GetUserID(ctx),
+		ProfileID:             apimw.GetProfileID(ctx),
+		DeviceID:              opts.DeviceID,
 	}, nil
 }
 

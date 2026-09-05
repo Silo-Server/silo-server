@@ -723,6 +723,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/watch/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get what is needed to play an item: its versions, subtitles, markers and the acting profile's progress. */
+    get: operations["getWatchState"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/watched/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op. */
+    post: operations["markWatched"];
+    /** Mark an item unwatched for the acting profile; a season or series clears every episode. Clearing an unwatched item is a no-op. */
+    delete: operations["unmarkWatched"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3441,6 +3476,299 @@ export interface components {
       items: components["schemas"]["UserCollection"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+    };
+    WatchAudioTrack: {
+      /** Format: int64 */
+      bit_depth?: number;
+      /** Format: int64 */
+      bitrate?: number;
+      /** Format: int64 */
+      channels?: number;
+      /** @example eac3 */
+      codec?: string;
+      default: boolean;
+      embedded_title?: string;
+      /** @example eng */
+      language?: string;
+      layout?: string;
+      profile?: string;
+      /** Format: int64 */
+      sample_rate?: number;
+      title?: string;
+    };
+    WatchChapter: {
+      /** Format: double */
+      end_seconds: number;
+      /** Format: int64 */
+      index: number;
+      /** @description Where the chapter came from */
+      source: string;
+      /** Format: double */
+      start_seconds: number;
+      thumbnail_thumbhash?: string;
+      thumbnail_url?: string;
+      title: string;
+    };
+    WatchDetail: {
+      /** @example movie:heat-1995 */
+      content_id: string;
+      credits?: components["schemas"]["WatchMarker"];
+      effective_show_forced_subtitles?: boolean;
+      /** @description The subtitle language the profile's preferences resolve to */
+      effective_subtitle_language?: string;
+      effective_subtitle_mode?: string;
+      /** @description The subtitle track the profile last chose on this item */
+      effective_subtitle_track_signature?: components["schemas"]["WatchSubtitleSignature"];
+      effective_version_codec_video?: string;
+      effective_version_edition_key?: string;
+      effective_version_hdr?: boolean;
+      /** @description The version resolution the profile last played */
+      effective_version_resolution?: string;
+      /** Format: int64 */
+      episode_number?: number;
+      intro?: components["schemas"]["WatchMarker"];
+      overview?: string;
+      /** @description Logical watch choices, each spanning one or more ordered parts */
+      playback_variants?: components["schemas"]["WatchPlaybackVariant"][];
+      preview?: components["schemas"]["WatchMarker"];
+      recap?: components["schemas"]["WatchMarker"];
+      /** Format: int64 */
+      season_number?: number;
+      /** @description Owning series of an episode */
+      series_id?: string;
+      series_title?: string;
+      /** @description Empty, never null */
+      subtitles: components["schemas"]["WatchSubtitle"][];
+      /** @example Heat */
+      title: string;
+      /**
+       * @description movie, episode, audiobook, ebook
+       * @example movie
+       */
+      type: string;
+      /** @description The acting profile's progress; absent without a profile or progress */
+      user_data?: components["schemas"]["WatchUserData"];
+      /** @description Every playable file of the item; empty, never null */
+      versions: components["schemas"]["WatchFileVersion"][];
+      /**
+       * Format: int64
+       * @example 1995
+       */
+      year?: number;
+    };
+    WatchFileVersion: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      added_at: string;
+      audio_tracks?: components["schemas"]["WatchAudioTrack"][];
+      /**
+       * Format: int64
+       * @description Bits per second
+       */
+      bitrate: number;
+      chapters?: components["schemas"]["WatchChapter"][];
+      /** @example eac3 */
+      codec_audio: string;
+      /** @example h264 */
+      codec_video: string;
+      /** @example mkv */
+      container: string;
+      credits?: components["schemas"]["WatchMarker"];
+      /**
+       * Format: int64
+       * @example 10200
+       */
+      duration_seconds: number;
+      edition_key?: string;
+      edition_raw?: string;
+      effective_audio_language?: string;
+      /** Format: int64 */
+      effective_audio_track_index?: number;
+      /**
+       * @description Opaque identifier
+       * @example 42
+       */
+      file_id: string;
+      file_name?: string;
+      /** @description Only for accounts allowed to see paths */
+      file_path?: string;
+      /**
+       * Format: int64
+       * @description Bytes
+       */
+      file_size: number;
+      hdr: boolean;
+      intro?: components["schemas"]["WatchMarker"];
+      /** Format: int64 */
+      multi_episode_end?: number;
+      /** Format: int64 */
+      multi_episode_start?: number;
+      presentation_group_key?: string;
+      presentation_kind?: string;
+      /** Format: int64 */
+      presentation_part_index?: number;
+      /** Format: int64 */
+      presentation_part_total?: number;
+      preview?: components["schemas"]["WatchMarker"];
+      recap?: components["schemas"]["WatchMarker"];
+      /** @example 1080p */
+      resolution: string;
+      subtitle_tracks?: components["schemas"]["WatchSubtitleTrack"][];
+      video_tracks?: components["schemas"]["WatchVideoTrack"][];
+    };
+    WatchMarker: {
+      /**
+       * Format: double
+       * @example 90
+       */
+      end_seconds: number;
+      /**
+       * Format: double
+       * @example 0
+       */
+      start_seconds: number;
+    };
+    WatchPlaybackVariant: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      default_file_id?: string;
+      edition_key?: string;
+      edition_raw?: string;
+      /** Format: int64 */
+      part_count: number;
+      /** @description Ordered; empty, never null */
+      parts: components["schemas"]["WatchPlaybackVariantPart"][];
+      presentation_group_key?: string;
+      presentation_kind?: string;
+      /** Format: int64 */
+      total_duration_seconds?: number;
+      variant_id: string;
+    };
+    WatchPlaybackVariantPart: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      default_file_id?: string;
+      /** Format: int64 */
+      part_index: number;
+      /** Format: int64 */
+      total_duration_seconds?: number;
+      /** @description Empty, never null */
+      versions: components["schemas"]["WatchFileVersion"][];
+    };
+    WatchSubtitle: {
+      codec?: string;
+      forced: boolean;
+      hearing_impaired: boolean;
+      /** @example eng */
+      language: string;
+      /**
+       * @description embedded or external
+       * @example embedded
+       */
+      source: string;
+      title?: string;
+    };
+    WatchSubtitleSignature: {
+      codec?: string;
+      forced: boolean;
+      hearing_impaired: boolean;
+      label?: string;
+      language?: string;
+      source?: string;
+    };
+    WatchSubtitleTrack: {
+      codec?: string;
+      default: boolean;
+      embedded_title?: string;
+      external: boolean;
+      file_name?: string;
+      forced: boolean;
+      hearing_impaired: boolean;
+      /** Format: int64 */
+      index?: number;
+      /** @example eng */
+      language?: string;
+      resolution?: string;
+      title?: string;
+    };
+    WatchUserData: {
+      /**
+       * Format: double
+       * @example 10200
+       */
+      duration_seconds?: number;
+      /** Format: int64 */
+      in_progress_count: number;
+      is_in_progress?: boolean;
+      last_codec_video?: string;
+      last_edition_key?: string;
+      /**
+       * @description The version last played
+       * @example 1
+       */
+      last_file_id?: string;
+      last_hdr?: boolean;
+      last_resolution?: string;
+      played: boolean;
+      /**
+       * Format: double
+       * @example 1325.5
+       */
+      position_seconds?: number;
+      /** Format: int64 */
+      unplayed_count: number;
+      /** Format: int64 */
+      watched_count: number;
+    };
+    WatchVideoTrack: {
+      aspect_ratio?: string;
+      /** Format: int64 */
+      bit_depth?: number;
+      /** Format: int64 */
+      bitrate?: number;
+      /** @example hevc */
+      codec?: string;
+      color_primaries?: string;
+      color_range?: string;
+      color_space?: string;
+      color_transfer?: string;
+      dolby_vision?: string;
+      /** Format: int64 */
+      dv_bl_compat_id?: number;
+      dv_bl_compat_id_present: boolean;
+      dv_bl_present?: boolean;
+      dv_config_present: boolean;
+      dv_el_present?: boolean;
+      /** @description none, mel, fel, unknown */
+      dv_enhancement_layer?: string;
+      /** Format: int64 */
+      dv_level?: number;
+      /** Format: int64 */
+      dv_profile?: number;
+      dv_rpu_present?: boolean;
+      frame_rate?: string;
+      hdr10_plus?: boolean;
+      /** Format: int64 */
+      height?: number;
+      interlaced: boolean;
+      /** Format: int64 */
+      level?: number;
+      pixel_format?: string;
+      profile?: string;
+      /** Format: int64 */
+      reference_frames?: number;
+      title?: string;
+      video_range?: string;
+      video_range_type?: string;
+      /** Format: int64 */
+      width?: number;
     };
   };
   responses: never;
@@ -9430,6 +9758,336 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getWatchState: {
+    parameters: {
+      query?: {
+        /** @description Prefer this file when the item has several versions */
+        file_id?: string;
+        /** @description Artwork variant to presign; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description Present the item as a member of this library */
+        library_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description A movie, episode, audiobook or ebook; a series is not directly playable */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WatchDetail"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  markWatched: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description A movie, ebook, episode, season or series; a season or series expands to its episodes */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  unmarkWatched: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description A movie, ebook, episode, season or series; a season or series expands to its episodes */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
         headers: {
           [name: string]: unknown;
         };

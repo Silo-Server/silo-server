@@ -159,6 +159,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
 		"listHistory": true, "removeHistoryEntries": true,
 		"syncProgress": true,
+		"getWatchState": true, "markWatched": true, "unmarkWatched": true,
 	}
 	for _, id := range libraryOperationIDs {
 		profileToken[id] = true

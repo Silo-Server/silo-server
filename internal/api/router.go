@@ -1890,6 +1890,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if personalDataHandler != nil {
 		v2deps.History = personalDataHandler
 	}
+	if itemsHandler != nil {
+		v2deps.Watch = itemsHandler
+	}
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
 	}

@@ -5914,6 +5914,773 @@
           "items"
         ],
         "type": "object"
+      },
+      "WatchAudioTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "bit_depth": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bitrate": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "channels": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "codec": {
+            "examples": [
+              "eac3"
+            ],
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "embedded_title": {
+            "type": "string"
+          },
+          "language": {
+            "examples": [
+              "eng"
+            ],
+            "type": "string"
+          },
+          "layout": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "sample_rate": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "default"
+        ],
+        "type": "object"
+      },
+      "WatchChapter": {
+        "additionalProperties": false,
+        "properties": {
+          "end_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source": {
+            "description": "Where the chapter came from",
+            "type": "string"
+          },
+          "start_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "thumbnail_thumbhash": {
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "title",
+          "start_seconds",
+          "end_seconds",
+          "source"
+        ],
+        "type": "object"
+      },
+      "WatchDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "content_id": {
+            "examples": [
+              "movie:heat-1995"
+            ],
+            "type": "string"
+          },
+          "credits": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "effective_show_forced_subtitles": {
+            "type": "boolean"
+          },
+          "effective_subtitle_language": {
+            "description": "The subtitle language the profile's preferences resolve to",
+            "type": "string"
+          },
+          "effective_subtitle_mode": {
+            "type": "string"
+          },
+          "effective_subtitle_track_signature": {
+            "$ref": "#/components/schemas/WatchSubtitleSignature",
+            "description": "The subtitle track the profile last chose on this item"
+          },
+          "effective_version_codec_video": {
+            "type": "string"
+          },
+          "effective_version_edition_key": {
+            "type": "string"
+          },
+          "effective_version_hdr": {
+            "type": "boolean"
+          },
+          "effective_version_resolution": {
+            "description": "The version resolution the profile last played",
+            "type": "string"
+          },
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "intro": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "playback_variants": {
+            "description": "Logical watch choices, each spanning one or more ordered parts",
+            "items": {
+              "$ref": "#/components/schemas/WatchPlaybackVariant"
+            },
+            "type": "array"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "recap": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "season_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_id": {
+            "description": "Owning series of an episode",
+            "type": "string"
+          },
+          "series_title": {
+            "type": "string"
+          },
+          "subtitles": {
+            "description": "Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/WatchSubtitle"
+            },
+            "type": "array"
+          },
+          "title": {
+            "examples": [
+              "Heat"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "description": "movie, episode, audiobook, ebook",
+            "examples": [
+              "movie"
+            ],
+            "type": "string"
+          },
+          "user_data": {
+            "$ref": "#/components/schemas/WatchUserData",
+            "description": "The acting profile's progress; absent without a profile or progress"
+          },
+          "versions": {
+            "description": "Every playable file of the item; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/WatchFileVersion"
+            },
+            "type": "array"
+          },
+          "year": {
+            "examples": [
+              1995
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_id",
+          "type",
+          "title",
+          "versions",
+          "subtitles"
+        ],
+        "type": "object"
+      },
+      "WatchFileVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "added_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "audio_tracks": {
+            "items": {
+              "$ref": "#/components/schemas/WatchAudioTrack"
+            },
+            "type": "array"
+          },
+          "bitrate": {
+            "description": "Bits per second",
+            "format": "int64",
+            "type": "integer"
+          },
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/WatchChapter"
+            },
+            "type": "array"
+          },
+          "codec_audio": {
+            "examples": [
+              "eac3"
+            ],
+            "type": "string"
+          },
+          "codec_video": {
+            "examples": [
+              "h264"
+            ],
+            "type": "string"
+          },
+          "container": {
+            "examples": [
+              "mkv"
+            ],
+            "type": "string"
+          },
+          "credits": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "duration_seconds": {
+            "examples": [
+              10200
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "edition_key": {
+            "type": "string"
+          },
+          "edition_raw": {
+            "type": "string"
+          },
+          "effective_audio_language": {
+            "type": "string"
+          },
+          "effective_audio_track_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "42"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "file_path": {
+            "description": "Only for accounts allowed to see paths",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Bytes",
+            "format": "int64",
+            "type": "integer"
+          },
+          "hdr": {
+            "type": "boolean"
+          },
+          "intro": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "multi_episode_end": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "multi_episode_start": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "presentation_group_key": {
+            "type": "string"
+          },
+          "presentation_kind": {
+            "type": "string"
+          },
+          "presentation_part_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "presentation_part_total": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "recap": {
+            "$ref": "#/components/schemas/WatchMarker"
+          },
+          "resolution": {
+            "examples": [
+              "1080p"
+            ],
+            "type": "string"
+          },
+          "subtitle_tracks": {
+            "items": {
+              "$ref": "#/components/schemas/WatchSubtitleTrack"
+            },
+            "type": "array"
+          },
+          "video_tracks": {
+            "items": {
+              "$ref": "#/components/schemas/WatchVideoTrack"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "file_id",
+          "resolution",
+          "codec_video",
+          "codec_audio",
+          "hdr",
+          "container",
+          "file_size",
+          "duration_seconds",
+          "bitrate",
+          "added_at"
+        ],
+        "type": "object"
+      },
+      "WatchMarker": {
+        "additionalProperties": false,
+        "properties": {
+          "end_seconds": {
+            "examples": [
+              90
+            ],
+            "format": "double",
+            "type": "number"
+          },
+          "start_seconds": {
+            "examples": [
+              0
+            ],
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start_seconds",
+          "end_seconds"
+        ],
+        "type": "object"
+      },
+      "WatchPlaybackVariant": {
+        "additionalProperties": false,
+        "properties": {
+          "default_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "edition_key": {
+            "type": "string"
+          },
+          "edition_raw": {
+            "type": "string"
+          },
+          "part_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parts": {
+            "description": "Ordered; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/WatchPlaybackVariantPart"
+            },
+            "type": "array"
+          },
+          "presentation_group_key": {
+            "type": "string"
+          },
+          "presentation_kind": {
+            "type": "string"
+          },
+          "total_duration_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "variant_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "variant_id",
+          "part_count",
+          "parts"
+        ],
+        "type": "object"
+      },
+      "WatchPlaybackVariantPart": {
+        "additionalProperties": false,
+        "properties": {
+          "default_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "part_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total_duration_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/WatchFileVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "part_index",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "WatchSubtitle": {
+        "additionalProperties": false,
+        "properties": {
+          "codec": {
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "hearing_impaired": {
+            "type": "boolean"
+          },
+          "language": {
+            "examples": [
+              "eng"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "description": "embedded or external",
+            "examples": [
+              "embedded"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "language",
+          "forced",
+          "hearing_impaired"
+        ],
+        "type": "object"
+      },
+      "WatchSubtitleSignature": {
+        "additionalProperties": false,
+        "properties": {
+          "codec": {
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "hearing_impaired": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "forced",
+          "hearing_impaired"
+        ],
+        "type": "object"
+      },
+      "WatchSubtitleTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "codec": {
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "embedded_title": {
+            "type": "string"
+          },
+          "external": {
+            "type": "boolean"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "hearing_impaired": {
+            "type": "boolean"
+          },
+          "index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "language": {
+            "examples": [
+              "eng"
+            ],
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "forced",
+          "default",
+          "hearing_impaired",
+          "external"
+        ],
+        "type": "object"
+      },
+      "WatchUserData": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "examples": [
+              10200
+            ],
+            "format": "double",
+            "type": "number"
+          },
+          "in_progress_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_in_progress": {
+            "type": "boolean"
+          },
+          "last_codec_video": {
+            "type": "string"
+          },
+          "last_edition_key": {
+            "type": "string"
+          },
+          "last_file_id": {
+            "description": "The version last played",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_hdr": {
+            "type": "boolean"
+          },
+          "last_resolution": {
+            "type": "string"
+          },
+          "played": {
+            "type": "boolean"
+          },
+          "position_seconds": {
+            "examples": [
+              1325.5
+            ],
+            "format": "double",
+            "type": "number"
+          },
+          "unplayed_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "watched_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "watched_count",
+          "unplayed_count",
+          "in_progress_count",
+          "played"
+        ],
+        "type": "object"
+      },
+      "WatchVideoTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "type": "string"
+          },
+          "bit_depth": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bitrate": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "codec": {
+            "examples": [
+              "hevc"
+            ],
+            "type": "string"
+          },
+          "color_primaries": {
+            "type": "string"
+          },
+          "color_range": {
+            "type": "string"
+          },
+          "color_space": {
+            "type": "string"
+          },
+          "color_transfer": {
+            "type": "string"
+          },
+          "dolby_vision": {
+            "type": "string"
+          },
+          "dv_bl_compat_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dv_bl_compat_id_present": {
+            "type": "boolean"
+          },
+          "dv_bl_present": {
+            "type": "boolean"
+          },
+          "dv_config_present": {
+            "type": "boolean"
+          },
+          "dv_el_present": {
+            "type": "boolean"
+          },
+          "dv_enhancement_layer": {
+            "description": "none, mel, fel, unknown",
+            "type": "string"
+          },
+          "dv_level": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dv_profile": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dv_rpu_present": {
+            "type": "boolean"
+          },
+          "frame_rate": {
+            "type": "string"
+          },
+          "hdr10_plus": {
+            "type": "boolean"
+          },
+          "height": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "interlaced": {
+            "type": "boolean"
+          },
+          "level": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pixel_format": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "reference_frames": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "video_range": {
+            "type": "string"
+          },
+          "video_range_type": {
+            "type": "string"
+          },
+          "width": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dv_config_present",
+          "dv_bl_compat_id_present",
+          "interlaced"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -14567,6 +15334,507 @@
           "system"
         ],
         "x-silo-class": "public",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/watch/{id}": {
+      "get": {
+        "operationId": "getWatchState",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie, episode, audiobook or ebook; a series is not directly playable",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "A movie, episode, audiobook or ebook; a series is not directly playable",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Prefer this file when the item has several versions",
+            "explode": false,
+            "in": "query",
+            "name": "file_id",
+            "schema": {
+              "description": "Prefer this file when the item has several versions",
+              "examples": [
+                "42"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Present the item as a member of this library",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "Present the item as a member of this library",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artwork variant to presign; absent picks each surface's default",
+            "explode": false,
+            "in": "query",
+            "name": "image_size",
+            "schema": {
+              "description": "Artwork variant to presign; absent picks each surface's default",
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "original"
+              ],
+              "examples": [
+                "medium"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get what is needed to play an item: its versions, subtitles, markers and the acting profile's progress.",
+        "tags": [
+          "watch"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/watched/{id}": {
+      "delete": {
+        "operationId": "unmarkWatched",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mark an item unwatched for the acting profile; a season or series clears every episode. Clearing an unwatched item is a no-op.",
+        "tags": [
+          "watch"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      },
+      "post": {
+        "operationId": "markWatched",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "A movie, ebook, episode, season or series; a season or series expands to its episodes",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op.",
+        "tags": [
+          "watch"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     }

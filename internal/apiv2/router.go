@@ -92,6 +92,9 @@ type Dependencies struct {
 	// History lists and removes watch history
 	// (*handlers.PersonalDataHandler).
 	History HistoryService
+	// Watch answers watch detail and marks items watched
+	// (*handlers.ItemsHandler).
+	Watch WatchService
 	// Profiles applies profile updates (*handlers.ProfileHandler).
 	Profiles ProfileService
 	// Libraries answers which library identifiers exist
