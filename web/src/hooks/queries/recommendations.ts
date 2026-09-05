@@ -1,51 +1,40 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { DiscoverResponse, RecommendationSectionResponse, SectionItem } from "@/api/types";
+import type { DiscoverResponse, RecommendationSectionResponse } from "@/api/types";
+import { catalogItemFromV2, type CatalogCardItem } from "@/api/v2/catalog";
+import {
+  discoverFromV2,
+  discoverRowFromV2,
+  recommendationSectionFromV2,
+  swipeCardsPageFromV2,
+  watchTonightFromV2,
+} from "@/api/v2/recommendations";
+import { v2, type V2Result } from "@/api/v2/request";
 import { recKeys } from "./keys";
-
-interface ScoredItem {
-  media_item_id: string;
-  score: number;
-  reason: string;
-}
-
-interface RecommendationResponse {
-  items: ScoredItem[];
-}
 
 const SIMILAR_ITEMS_LIMIT = 12;
 
-interface ForYouRow {
-  type: string;
-  label: string;
-  cluster_index?: number;
-  items: ScoredItem[];
+/** A recommendation list: the recommended cards, best first. */
+export interface RecommendationResponse {
+  items: CatalogCardItem[];
 }
 
-interface ForYouResponse {
-  rows: ForYouRow[];
-}
+export type TasteProfileResponse = V2Result<"GET /api/v2/recommendations/taste-profile">;
 
-interface ForYouMainResponse {
-  row: ForYouRow | null;
+function cardList(body: {
+  items: Parameters<typeof catalogItemFromV2>[0][];
+}): RecommendationResponse {
+  return { items: body.items.map(catalogItemFromV2) };
 }
-
-interface TasteProfileResponse {
-  top_genres: string[];
-  favorite_directors: string[];
-  signal_counts: Record<string, number>;
-  updated_at: string;
-}
-
-export type { ScoredItem, ForYouRow, ForYouResponse };
 
 export function useSimilarItems(itemId: string) {
   return useQuery({
     queryKey: recKeys.similar(itemId),
-    queryFn: () =>
-      api<RecommendationResponse>(
-        `/recommendations/similar/${encodeURIComponent(itemId)}?limit=${SIMILAR_ITEMS_LIMIT}`,
-      ),
+    queryFn: ({ signal }): Promise<RecommendationResponse> =>
+      v2("GET /api/v2/recommendations/similar/{item_id}", {
+        path: { item_id: itemId },
+        query: { limit: SIMILAR_ITEMS_LIMIT },
+        signal,
+      }).then(cardList),
     staleTime: 3600_000,
     enabled: !!itemId,
   });
@@ -54,7 +43,8 @@ export function useSimilarItems(itemId: string) {
 export function useForYouMain(enabled = true) {
   return useQuery({
     queryKey: recKeys.forYouMain(),
-    queryFn: () => api<ForYouMainResponse>(`/recommendations/for-you/main`),
+    queryFn: ({ signal }) =>
+      v2("GET /api/v2/recommendations/for-you/main", { signal }).then(discoverRowFromV2),
     staleTime: 300_000,
     enabled,
   });
@@ -63,7 +53,8 @@ export function useForYouMain(enabled = true) {
 export function useForYouRows(enabled = true) {
   return useQuery({
     queryKey: recKeys.forYouRows(),
-    queryFn: () => api<ForYouResponse>(`/recommendations/for-you/rows`),
+    queryFn: ({ signal }): Promise<DiscoverResponse> =>
+      v2("GET /api/v2/recommendations/for-you/rows", { signal }).then(discoverFromV2),
     staleTime: 300_000,
     enabled,
   });
@@ -72,7 +63,11 @@ export function useForYouRows(enabled = true) {
 export function useBecauseWatched(itemId: string) {
   return useQuery({
     queryKey: recKeys.becauseWatched(itemId),
-    queryFn: () => api<RecommendationResponse>(`/recommendations/because-watched/${itemId}`),
+    queryFn: ({ signal }): Promise<RecommendationResponse> =>
+      v2("GET /api/v2/recommendations/because-watched/{item_id}", {
+        path: { item_id: itemId },
+        signal,
+      }).then(cardList),
     staleTime: 300_000,
     enabled: !!itemId,
   });
@@ -81,7 +76,8 @@ export function useBecauseWatched(itemId: string) {
 export function useSimilarUsers(enabled = true) {
   return useQuery({
     queryKey: recKeys.similarUsers(),
-    queryFn: () => api<RecommendationResponse>(`/recommendations/similar-users`),
+    queryFn: ({ signal }): Promise<RecommendationResponse> =>
+      v2("GET /api/v2/recommendations/similar-users", { signal }).then(cardList),
     staleTime: 300_000,
     enabled,
   });
@@ -90,16 +86,17 @@ export function useSimilarUsers(enabled = true) {
 export function useTasteProfile() {
   return useQuery({
     queryKey: recKeys.tasteProfile(),
-    queryFn: () => api<TasteProfileResponse>(`/recommendations/taste-profile`),
+    queryFn: ({ signal }): Promise<TasteProfileResponse> =>
+      v2("GET /api/v2/recommendations/taste-profile", { signal }),
     staleTime: 300_000,
   });
 }
 
 export function usePopular(days?: number) {
-  const params = days ? `?days=${days}` : "";
   return useQuery({
     queryKey: [...recKeys.all, "popular", days ?? 30],
-    queryFn: () => api<RecommendationResponse>(`/recommendations/popular${params}`),
+    queryFn: ({ signal }): Promise<RecommendationResponse> =>
+      v2("GET /api/v2/recommendations/popular", { query: { days }, signal }).then(cardList),
     staleTime: 600_000,
   });
 }
@@ -107,46 +104,44 @@ export function usePopular(days?: number) {
 export function useDiscover() {
   return useQuery({
     queryKey: recKeys.discover(),
-    queryFn: () => api<DiscoverResponse>("/recommendations/discover"),
+    queryFn: ({ signal }): Promise<DiscoverResponse> =>
+      v2("GET /api/v2/recommendations/discover", { signal }).then(discoverFromV2),
     staleTime: 300_000,
   });
 }
 
 export function useRecommendationSection(kind: string, key?: string) {
-  const path = key
-    ? `/recommendations/section/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`
-    : `/recommendations/section/${encodeURIComponent(kind)}`;
   return useQuery({
     queryKey: recKeys.section(kind, key),
-    queryFn: () => api<RecommendationSectionResponse>(path),
+    queryFn: ({ signal }): Promise<RecommendationSectionResponse> =>
+      v2("GET /api/v2/recommendations/section/{kind}", {
+        path: { kind },
+        query: { key },
+        signal,
+      }).then(recommendationSectionFromV2),
     staleTime: 300_000,
     enabled: !!kind,
   });
 }
 
-export interface WatchTonightItem extends SectionItem {
-  watch_tonight_source: "continue_watching" | "next_up" | "recommendation";
-}
-
-export interface WatchTonightResponse {
-  items: WatchTonightItem[];
-  is_cold: boolean;
-}
+export type WatchTonightResponse = ReturnType<typeof watchTonightFromV2>;
+export type WatchTonightItem = WatchTonightResponse["items"][number];
 
 export function useWatchTonight(enabled: boolean) {
   return useQuery({
     queryKey: recKeys.watchTonight(),
-    queryFn: () => api<WatchTonightResponse>("/recommendations/watch-tonight"),
+    queryFn: ({ signal }): Promise<WatchTonightResponse> =>
+      v2("GET /api/v2/recommendations/watch-tonight", { signal }).then(watchTonightFromV2),
     staleTime: 0,
     enabled,
   });
 }
 
 export function useRecentlyAdded(days?: number) {
-  const params = days ? `?days=${days}` : "";
   return useQuery({
     queryKey: [...recKeys.all, "recently-added", days ?? 14],
-    queryFn: () => api<RecommendationResponse>(`/recommendations/recently-added${params}`),
+    queryFn: ({ signal }): Promise<RecommendationResponse> =>
+      v2("GET /api/v2/recommendations/recently-added", { query: { days }, signal }).then(cardList),
     staleTime: 600_000,
   });
 }
@@ -155,32 +150,23 @@ export function useRecentlyAdded(days?: number) {
 
 export type SwipeMode = "continue" | "discover";
 
-export interface SwipeCardCastMember {
-  name: string;
-  character?: string;
-  photo_url?: string;
-}
-
-export interface SwipeCard extends WatchTonightItem {
-  runtime?: number;
-  cast: SwipeCardCastMember[];
-}
-
-export interface SwipeCardsPage {
-  cards: SwipeCard[];
-  has_more: boolean;
-  is_cold: boolean;
-}
+export type SwipeCardsPage = ReturnType<typeof swipeCardsPageFromV2>;
+export type SwipeCard = SwipeCardsPage["cards"][number];
+export type SwipeCardCastMember = SwipeCard["cast"][number];
 
 export function useSwipeCards(enabled: boolean, mode: SwipeMode, genres: string[]) {
   return useInfiniteQuery({
     queryKey: recKeys.watchTonightCards(mode, genres),
-    queryFn: ({ pageParam }: { pageParam: string[] }) => {
-      const params = new URLSearchParams({ mode, limit: "12" });
-      [...genres].sort().forEach((g) => params.append("genres[]", g));
-      pageParam.forEach((id) => params.append("exclude_ids[]", id));
-      return api<SwipeCardsPage>(`/recommendations/watch-tonight/cards?${params}`);
-    },
+    queryFn: ({ pageParam, signal }: { pageParam: string[]; signal?: AbortSignal }) =>
+      v2("GET /api/v2/recommendations/watch-tonight/cards", {
+        query: {
+          mode,
+          limit: 12,
+          genres: [...genres].sort(),
+          exclude_ids: pageParam,
+        },
+        signal,
+      }).then(swipeCardsPageFromV2),
     initialPageParam: [] as string[],
     getNextPageParam: (lastPage, allPages) => {
       if (!lastPage.has_more) return undefined;

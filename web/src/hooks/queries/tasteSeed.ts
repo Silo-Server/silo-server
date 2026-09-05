@@ -1,17 +1,13 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { SectionItem } from "@/api/types";
+import { catalogItemFromV2, type CatalogCardItem } from "@/api/v2/catalog";
+import { v2 } from "@/api/v2/request";
 import { recKeys, favoriteKeys } from "./keys";
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 export interface TasteSeedItemsPage {
-  items: SectionItem[];
-  next_offset?: number;
-}
-
-interface TasteSeedSubmitResponse {
-  added: number;
+  items: CatalogCardItem[];
+  next_cursor?: string;
 }
 
 const TASTE_SEED_PAGE_SIZE = 30;
@@ -25,12 +21,16 @@ const TASTE_SEED_PAGE_SIZE = 30;
 export function useTasteSeedItems(enabled = true) {
   return useInfiniteQuery({
     queryKey: recKeys.tasteSeedItems(),
-    queryFn: ({ pageParam }: { pageParam: number }) =>
-      api<TasteSeedItemsPage>(
-        `/recommendations/taste-seed/items?limit=${TASTE_SEED_PAGE_SIZE}&offset=${pageParam}`,
-      ),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage) => lastPage.next_offset ?? undefined,
+    queryFn: ({ pageParam, signal }): Promise<TasteSeedItemsPage> =>
+      v2("GET /api/v2/recommendations/taste-seed/items", {
+        query: { limit: TASTE_SEED_PAGE_SIZE, cursor: pageParam || undefined },
+        signal,
+      }).then((page) => ({
+        items: page.items.map(catalogItemFromV2),
+        next_cursor: page.page?.next_cursor,
+      })),
+    initialPageParam: "",
+    getNextPageParam: (lastPage) => lastPage.next_cursor || undefined,
     staleTime: 600_000,
     enabled,
   });
@@ -46,10 +46,7 @@ export function useSubmitTasteSeed() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (itemIds: string[]) =>
-      api<TasteSeedSubmitResponse>("/recommendations/taste-seed", {
-        method: "POST",
-        body: JSON.stringify({ item_ids: itemIds }),
-      }),
+      v2("POST /api/v2/recommendations/taste-seed", { body: { item_ids: itemIds } }),
     onSuccess: async () => {
       // Invalidate favorites and recommendation surfaces — the new favorites
       // should appear immediately; the For You / Discover rows will warm up

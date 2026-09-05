@@ -99,7 +99,7 @@ export type V2PathParams<K extends V2OperationKey> = PathParamsOf<OperationOf<K>
 // the whole options object is optional when nothing is required.
 // ---------------------------------------------------------------------------
 
-type QueryValue = string | number | boolean | null | undefined;
+type QueryValue = string | number | boolean | null | undefined | readonly string[];
 
 interface CommonOptions {
   signal?: AbortSignal;
@@ -210,6 +210,12 @@ function buildUrl(
   const search = new URLSearchParams();
   for (const [name, value] of Object.entries(query)) {
     if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      // An exploded array parameter: one key per member, as the contract
+      // declares slice query parameters.
+      for (const member of value) search.append(name, String(member));
+      continue;
+    }
     search.set(name, String(value));
   }
   const encoded = search.toString();

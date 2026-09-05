@@ -34,7 +34,7 @@ describe("RecommendationGrid", () => {
 
     const markup = renderToStaticMarkup(
       <MemoryRouter>
-        <RecommendationGrid items={[{ media_item_id: "ebook 1" }]} />
+        <RecommendationGrid items={[{ content_id: "ebook 1" }]} />
       </MemoryRouter>,
     );
 
@@ -66,7 +66,7 @@ describe("RecommendationGrid", () => {
             isUnavailable: false,
           }}
         >
-          <RecommendationGrid items={[{ media_item_id: "ebook 1" }]} />
+          <RecommendationGrid items={[{ content_id: "ebook 1" }]} />
         </UICustomizationContext.Provider>
       </MemoryRouter>,
     );
@@ -81,7 +81,7 @@ describe("RecommendationGrid", () => {
       data: { content_id: itemId, title: itemId, poster_url: "" },
     }));
     const items = Array.from({ length: 14 }, (_, index) => ({
-      media_item_id: `item-${index + 1}`,
+      content_id: `item-${index + 1}`,
     }));
 
     renderToStaticMarkup(
@@ -106,7 +106,7 @@ describe("RecommendationGrid", () => {
 
     const markup = renderToStaticMarkup(
       <MemoryRouter>
-        <RecommendationGrid items={[{ media_item_id: "series-1" }]} />
+        <RecommendationGrid items={[{ content_id: "series-1" }]} />
       </MemoryRouter>,
     );
 
