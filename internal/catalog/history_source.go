@@ -5,15 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 const (
 	historyDateViewedSort = "date_viewed"
 	historyAscendingOrder = "asc"
-	historySQLAscending   = "ASC"
-	historySQLDescending  = "DESC"
 )
 
 func historyDateViewedAscending(req CatalogRequest) bool {
@@ -120,25 +116,15 @@ func (r *CatalogResolver) buildHistoryPreviewPagePlan(req CatalogRequest, access
 	return build, nil
 }
 
-// Facet discovery still consumes the complete source ID set. Browse requests
-// use resolveHistoryQueryPage instead and hydrate only their requested page.
-func (r *CatalogResolver) loadHistorySourceIDs(ctx context.Context, req CatalogRequest, access AccessFilter) ([]string, error) {
+// Keep the full history scope inside each facet query, including profile,
+// hidden-event, snapshot, and episode/display identity constraints.
+func scopeHistoryFacetFilters(filters *BrowseFilters, req CatalogRequest, access AccessFilter) {
+	if req.SnapshotAt == nil {
+		req.SnapshotAt = new(time.Now().UTC())
+	}
 	baseQuery, args := buildHistoryDisplayBaseQuery(access, req.SnapshotAt, isEpisodeCatalogScope(req.Query.MediaScope))
-	direction := historySQLDescending
-	if historyDateViewedAscending(req) {
-		direction = historySQLAscending
-	}
-	query := fmt.Sprintf(`WITH history_display AS (%s)
-		SELECT display_id FROM history_display ORDER BY watched_at %s, display_id ASC`, baseQuery, direction)
-	rows, err := r.itemRepo.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("querying history source IDs: %w", err)
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, fmt.Errorf("collecting history source IDs: %w", err)
-	}
-	return ids, nil
+	filters.contentSourceSQL = "SELECT display_id FROM (" + baseQuery + ") history_source"
+	filters.contentSourceArgs = args
 }
 
 func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time, episodeScope bool) (string, []any) {

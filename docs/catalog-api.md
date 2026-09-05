@@ -18,8 +18,9 @@ library collection, user collection, Watchlist, or Favorites. The request is:
 Watchlist and Favorites. Saved personal-list preferences accept non-personalized sort
 fields; `added_at` means the date the item was
 added to the list. Personalized sorts (`progress`, `date_viewed`, and `plays`)
-are rejected for saved preferences. Explicit profile-scoped catalog requests
-may use these sorts. An empty `field` pins the profile to list
+are rejected for both saved preferences and Favorites/Watchlist browse. History
+accepts `date_viewed` with an active profile, but rejects mutable `progress` and
+`plays` sorts. An empty `field` pins the profile to list
 source order. `DELETE /api/v1/collections/sort-preference?collection_kind=watchlist`
 removes the saved preference. Collection kinds also require `collection_id` on
 DELETE.

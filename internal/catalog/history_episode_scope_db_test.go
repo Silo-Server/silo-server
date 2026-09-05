@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO media_items (content_id, type, title, status, genres)
-		VALUES ($1, 'series', 'HES Series', 'matched', '{}'::text[])`,
+		VALUES ($1, 'series', 'HES Series', 'matched', ARRAY['HES-Series'])`,
 		seriesID,
 	); err != nil {
 		t.Fatalf("seed series: %v", err)
@@ -148,7 +149,7 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 	// Candidate loading must deduplicate the full history before filtering.
 	olderMovieID := fmt.Sprintf("hes-older-%d", suffix)
 	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres)
-		VALUES ($1, 'movie', 'HES Earlier', 'matched', '{}'::text[])`, olderMovieID); err != nil {
+		VALUES ($1, 'movie', 'HES Earlier', 'matched', ARRAY['HES-Movie'])`, olderMovieID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -244,6 +245,30 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 			}
 			if len(withoutTotal.Items) != 1 || withoutTotal.HasMore || withoutTotal.TotalExact || withoutTotal.Total != 0 {
 				t.Fatalf("query cap lost without total: %+v", withoutTotal)
+			}
+		})
+	}
+
+	for _, scope := range []string{"", "episode"} {
+		t.Run("SQL facets scope="+scope, func(t *testing.T) {
+			req := CatalogRequest{Source: CatalogSourceHistory, Query: QueryDefinition{MediaScope: scope}}
+			filters, err := resolver.ListFiltersWithOptions(t.Context(), req, access, CatalogFilterOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"HES-Movie", "HES-Series"}
+			if scope == "episode" {
+				want = []string{"HES-Series"}
+			}
+			if !slices.Equal(filters.Genres, want) {
+				t.Fatalf("genres=%v, want %v", filters.Genres, want)
+			}
+			matches, err := resolver.SearchFacet(t.Context(), req, access, "genre", "HES-", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(matches.Matches, want) {
+				t.Fatalf("facet search=%v, want %v", matches.Matches, want)
 			}
 		})
 	}

@@ -1,3 +1,4 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import { useMemo, useState } from "react";
 
 import { createEmptyQueryDefinition, type QueryDefinition } from "@/api/types";
@@ -25,7 +26,7 @@ export interface CatalogFiltersPanelProps {
   allowLibrarySelection?: boolean;
   showMediaScopeSelector?: boolean;
   allowPersonalizedFilters?: boolean;
-  allowPersonalizedSorts?: boolean;
+  allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   resultCountLabel?: string;
   resultCountLoading?: boolean;
@@ -176,7 +177,7 @@ export function CatalogFilterSheetContainer({
   allowLibrarySelection: boolean;
   showMediaScopeSelector?: boolean;
   allowPersonalizedFilters: boolean;
-  allowPersonalizedSorts: boolean;
+  allowPersonalizedSorts: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   editorMode: "guided" | "advanced";
   onEditorModeChange: (mode: "guided" | "advanced") => void;

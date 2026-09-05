@@ -20,11 +20,10 @@ func TestValidateCatalogPersonalRequest_PersonalizedSorts(t *testing.T) {
 				},
 			}
 
-			// When allowPersonalizedSorts is true (e.g. active profile present)
-			if err := validateCatalogPersonalRequest(req, true); err != nil {
-				t.Errorf("validateCatalogPersonalRequest(source=%s, sort=%s, allow=true) unexpectedly failed: %v", source, sortField, err)
+			allowed := source == CatalogSourceHistory && sortField == "date_viewed"
+			if err := validateCatalogPersonalRequest(req, true); (err == nil) != allowed {
+				t.Errorf("source=%s sort=%s: allowed=%t, err=%v", source, sortField, allowed, err)
 			}
-
 			// When allowPersonalizedSorts is false
 			if err := validateCatalogPersonalRequest(req, false); err == nil {
 				t.Errorf("validateCatalogPersonalRequest(source=%s, sort=%s, allow=false) should fail for personalized sort %s", source, sortField, sortField)

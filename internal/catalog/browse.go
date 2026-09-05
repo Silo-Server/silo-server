@@ -39,6 +39,9 @@ type BrowseFilters struct {
 	Offset             int
 	SnapshotAt         *time.Time // pagination fence: exclude items created after this timestamp
 	RequireBackdrop    bool       // only return items with a non-empty backdrop_path (Jellyfin ImageTypes=Backdrop filter)
+	// Internal source scope stays in SQL instead of materializing an ID allowlist.
+	contentSourceSQL  string
+	contentSourceArgs []any
 }
 
 // BrowseResult contains the paginated result of a browse query.
@@ -405,6 +408,8 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		argIdx++
 	}
 
+	appendBrowseContentSource(filters, &conditions, &args, &argIdx)
+
 	// Genre filter (GIN array containment).
 	if filters.Genre != "" {
 		conditions = append(conditions, fmt.Sprintf("mi.genres @> ARRAY[$%d]::text[]", argIdx))
@@ -587,6 +592,15 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 // ListXxx distinct-value methods.  If the returned earlyEmpty flag is true the
 // caller should return an empty result immediately (e.g. when LibraryIDs is an
 // empty slice).
+func appendBrowseContentSource(filters BrowseFilters, conditions *[]string, args *[]any, argIdx *int) {
+	if filters.contentSourceSQL == "" {
+		return
+	}
+	*conditions = append(*conditions, "mi.content_id IN ("+rebindSQLPlaceholders(filters.contentSourceSQL, *argIdx-1)+")")
+	*args = append(*args, filters.contentSourceArgs...)
+	*argIdx += len(filters.contentSourceArgs)
+}
+
 func filterWhereClause(filters BrowseFilters) (fromClause, whereClause string, args []any, earlyEmpty bool) {
 	return filterWhereClauseForSource(filters, "media_items mi", "")
 }
@@ -643,6 +657,8 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		args = append(args, filters.ContentIDs)
 		argIdx++
 	}
+	appendBrowseContentSource(filters, &conditions, &args, &argIdx)
+
 	if filters.LibraryIDs != nil {
 		if len(filters.LibraryIDs) == 0 {
 			return "", "", nil, true

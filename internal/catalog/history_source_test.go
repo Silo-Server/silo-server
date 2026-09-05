@@ -59,7 +59,7 @@ func TestHistoryEpisodeIDsPreserveParentAccessChecks(t *testing.T) {
 func TestHistoryPreviewPagesAreBoundedAndBindEveryArgument(t *testing.T) {
 	r := &CatalogResolver{itemRepo: NewItemRepository(nil)}
 	for _, scope := range []string{"", "episode"} {
-		for _, sort := range []string{"date_viewed", "progress", "title"} {
+		for _, sort := range []string{"date_viewed", "rating_imdb", "title"} {
 			t.Run(scope+"/"+sort, func(t *testing.T) {
 				req := CatalogRequest{Source: CatalogSourceHistory, Limit: 2, Offset: 1, SnapshotAt: new(time.Now().UTC()), SearchQuery: "HES story", NamePrefix: "he", Query: QueryDefinition{MediaScope: scope, Sort: QuerySort{Field: sort, Order: "asc"}, Limit: new(3)}}
 				plan, err := r.buildHistoryPreviewPagePlan(req, AccessFilter{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{11}})
