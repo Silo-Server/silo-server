@@ -136,7 +136,12 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"listAdminUsers":     {http.StatusNotFound: true},
 		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
 	}
-	profileToken := map[string]bool{"listProgress": true, "listAdminUsers": true, "updateProfile": true}
+	profileToken := map[string]bool{
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true,
+		"getAudioPreference": true, "updateAudioPreference": true, "deleteAudioPreference": true,
+		"listLibraryPlaybackPreferences": true, "deleteLibraryPlaybackPreference": true, "updateLibraryPlaybackPreference": true,
+		"getSubtitlePreference": true, "updateSubtitlePreference": true, "deleteSubtitlePreference": true,
+	}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
 		for method, raw := range item.(map[string]any) {
