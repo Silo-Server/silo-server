@@ -156,11 +156,13 @@ func (h *SubtitlePrefHandler) SetSubtitlePreference(ctx context.Context, userID 
 // SetSubtitlePreferenceCanonical is the write behind v2
 // updateSubtitlePreference: SetSubtitlePreference, except that the forced
 // override an omitted show_forced_subtitles keeps is read from the canonical
-// profile_series row — inside the store transaction, after the Postgres
-// per-user advisory lock — and the legacy row's value is the fallback only
-// when no canonical row exists. PUT /settings/values writes the canonical row
-// without mirroring it into the legacy row, so the legacy row is not the
-// current state; v1 keeps its legacy-row lookup unchanged.
+// profile_series row alone — inside the store transaction, after the Postgres
+// per-user advisory lock. The legacy row is never consulted: PUT and DELETE
+// /settings/values change the canonical row without mirroring it into the
+// legacy row, so a stale legacy flag would resurrect an override a client
+// already cleared. An absent canonical row is "no override", and the merged
+// legacy row and the canonical write then carry no forced flag. v1 keeps its
+// legacy-row lookup unchanged.
 func (h *SubtitlePrefHandler) SetSubtitlePreferenceCanonical(ctx context.Context, userID int, pref userstore.SubtitlePreference) error {
 	return h.setSubtitlePreference(ctx, userID, pref, true)
 }
@@ -171,8 +173,10 @@ func (h *SubtitlePrefHandler) setSubtitlePreference(ctx context.Context, userID 
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
+	// v1 keeps the override the legacy row stores; the canonical path reads
+	// the canonical row inside the transaction below and consults nothing else.
 	bodyHasForced := pref.HasShowForcedSubtitles
-	if !bodyHasForced {
+	if !bodyHasForced && !mergeCanonical {
 		existing, getErr := store.GetSubtitlePreference(ctx, pref.ProfileID, pref.SeriesID)
 		if getErr != nil {
 			return apiError(http.StatusInternalServerError, "internal_error", "Failed to preserve subtitle preference")
@@ -203,7 +207,10 @@ func (h *SubtitlePrefHandler) setSubtitlePreference(ctx context.Context, userID 
 
 	// The canonical row is read inside the transaction so no writer can slip
 	// between the read and the rewrite; the forced flag is a bool, so the
-	// re-plan cannot fail on a value the plan above accepted.
+	// re-plan cannot fail on a value the plan above accepted. An absent row
+	// is no override: the legacy row is not consulted, so a flag it still
+	// holds after DELETE /settings/values cleared the canonical row cannot
+	// come back.
 	base := userstore.SettingIdentity{
 		Scope: settingscontract.ScopeProfileSeries, ProfileID: pref.ProfileID, SeriesID: pref.SeriesID,
 	}
@@ -213,8 +220,9 @@ func (h *SubtitlePrefHandler) setSubtitlePreference(ctx context.Context, userID 
 			if err := canonicalMember(ctx, tx, base, settingskeys.PlaybackShowForcedSubtitles, &forced); err != nil {
 				return nil, err
 			}
+			pref.HasShowForcedSubtitles = forced != nil
 			if forced != nil {
-				pref.ShowForcedSubtitles, pref.HasShowForcedSubtitles = *forced, true
+				pref.ShowForcedSubtitles = *forced
 			}
 			writes, err := planSeriesSubtitleSync(pref)
 			if err != nil {

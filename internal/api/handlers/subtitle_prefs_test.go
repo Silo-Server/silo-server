@@ -303,6 +303,45 @@ func TestSetSubtitlePreferenceCanonicalWithoutAnyOverrideClearsForced(t *testing
 	}
 }
 
+// TestSetSubtitlePreferenceCanonicalDoesNotResurrectClearedOverride replays
+// the review finding: DELETE /settings/values clears the canonical forced row
+// without touching the legacy row, so the legacy row still holds the old flag.
+// A v2 write that omits show_forced_subtitles must treat the absent canonical
+// row as "no override" and never read the legacy row, or the sync would
+// recreate the override the client just cleared.
+func TestSetSubtitlePreferenceCanonicalDoesNotResurrectClearedOverride(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	ctx := context.Background()
+	if err := store.SetSubtitlePreference(ctx, userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1",
+		SubtitleLanguage: "en", SubtitleTrackIndex: 1, SubtitleMode: "always",
+		ShowForcedSubtitles: true, HasShowForcedSubtitles: true,
+	}); err != nil {
+		t.Fatalf("seeding legacy row: %v", err)
+	}
+	if eff := resolveSeriesSubtitleSetting(t, store, settingskeys.PlaybackShowForcedSubtitles, "profile-1", "series-1"); eff.Source == settingscontract.ScopeProfileSeries {
+		t.Fatalf("canonical forced row before the write = %s from %q; want none", eff.Value, eff.Source)
+	}
+
+	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
+	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1",
+		SubtitleLanguage: "ja", SubtitleTrackIndex: 2, SubtitleMode: "always",
+	}); err != nil {
+		t.Fatalf("v2 write without show_forced_subtitles: %v", err)
+	}
+	if eff := resolveSeriesSubtitleSetting(t, store, settingskeys.PlaybackShowForcedSubtitles, "profile-1", "series-1"); eff.Source == settingscontract.ScopeProfileSeries {
+		t.Fatalf("cleared forced override resurrected: %s from %q", eff.Value, eff.Source)
+	}
+	legacy, err := store.GetSubtitlePreference(ctx, "profile-1", "series-1")
+	if err != nil || legacy == nil {
+		t.Fatalf("legacy row after the write = %+v, %v; want one", legacy, err)
+	}
+	if legacy.HasShowForcedSubtitles || legacy.SubtitleLanguage != "ja" || legacy.SubtitleTrackIndex != 2 {
+		t.Fatalf("legacy row after the write = %+v; want no forced override and the new track selection", legacy)
+	}
+}
+
 // TestSetSubtitlePreferenceCanonicalStampsUpdatedAtOnSQLite guards the v2
 // seam against the SQLite store: updateSubtitlePreference sends no UpdatedAt,
 // and a read after the write must carry a parseable timestamp, not the empty
