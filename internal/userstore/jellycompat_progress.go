@@ -21,3 +21,17 @@ type JellycompatProgressEdit struct {
 type JellycompatProgressEditor interface {
 	ApplyJellycompatProgress(context.Context, string, JellycompatProgressEdit) error
 }
+
+// JellycompatParentEdit commits a parent's favorite and its children's watch
+// state together. Targets and history use the existing batch-mark semantics.
+type JellycompatParentEdit struct {
+	MediaItemID string
+	IsFavorite  bool
+	Played      bool
+	Targets     []MarkWatchedTarget
+	History     []WatchHistoryEntry
+}
+
+type JellycompatParentEditor interface {
+	ApplyJellycompatParent(context.Context, string, JellycompatParentEdit) error
+}

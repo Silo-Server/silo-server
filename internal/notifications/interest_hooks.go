@@ -531,3 +531,18 @@ func (s *interestTrackingStore) ApplyJellycompatProgress(ctx context.Context, pr
 	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
 	return nil
 }
+
+// ApplyJellycompatParent queues parent and child interest changes only after
+// their shared transaction commits.
+func (s *interestTrackingStore) ApplyJellycompatParent(ctx context.Context, profileID string, edit userstore.JellycompatParentEdit) error {
+	writer, ok := s.UserStore.(userstore.JellycompatParentEditor)
+	if !ok {
+		return fmt.Errorf("atomic parent user data updates unavailable")
+	}
+	if err := writer.ApplyJellycompatParent(ctx, profileID, edit); err != nil {
+		return err
+	}
+	s.queueTargetMutations(profileID, edit.Targets)
+	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
+	return nil
+}

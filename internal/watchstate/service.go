@@ -460,24 +460,7 @@ func (s *Service) recordMarkWatchedBatch(
 	// still resolve per episode, now in a single bulk lookup. No durations are
 	// available here, and the store leaves a known duration in place when a
 	// target supplies zero.
-	identities := s.resolveStableIdentities(ctx, targetIDs)
-	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targetIDs))
-	entries := make([]userstore.WatchHistoryEntry, 0, len(targetIDs))
-	for _, targetID := range targetIDs {
-		target := userstore.MarkWatchedTarget{MediaItemID: targetID}
-		if source == userstore.WatchHistorySourceJellycompat {
-			target.EventAt = new(watchedAt)
-		}
-		batchTargets = append(batchTargets, target)
-		entries = append(entries, userstore.WatchHistoryEntry{
-			ProfileID:   profileID,
-			MediaItemID: targetID,
-			WatchedAt:   formatWatchedAt(watchedAt),
-			Completed:   true,
-			Source:      source,
-			Identity:    identities[targetID],
-		})
-	}
+	batchTargets, entries := s.markWatchedBatchEntries(ctx, profileID, targetIDs, watchedAt, source)
 	if _, err := userstore.MarkWatchedBatch(ctx, store, profileID, batchTargets, entries); err != nil {
 		return err
 	}
@@ -605,4 +588,26 @@ func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, pro
 		s.notifyWatchedCompleted(ctx, userID, profileID, []string{edit.MediaItemID})
 	}
 	return nil
+}
+
+func (s *Service) markWatchedBatchEntries(ctx context.Context, profileID string, targetIDs []string, watchedAt time.Time, source userstore.WatchHistorySource) ([]userstore.MarkWatchedTarget, []userstore.WatchHistoryEntry) {
+	identities := s.resolveStableIdentities(ctx, targetIDs)
+	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targetIDs))
+	entries := make([]userstore.WatchHistoryEntry, 0, len(targetIDs))
+	for _, targetID := range targetIDs {
+		target := userstore.MarkWatchedTarget{MediaItemID: targetID}
+		if source == userstore.WatchHistorySourceJellycompat {
+			target.EventAt = new(watchedAt)
+		}
+		batchTargets = append(batchTargets, target)
+		entries = append(entries, userstore.WatchHistoryEntry{
+			ProfileID:   profileID,
+			MediaItemID: targetID,
+			WatchedAt:   formatWatchedAt(watchedAt),
+			Completed:   true,
+			Source:      source,
+			Identity:    identities[targetID],
+		})
+	}
+	return batchTargets, entries
 }

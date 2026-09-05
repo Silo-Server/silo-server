@@ -359,6 +359,21 @@ func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Re
 				writeCompatUpstreamError(w, err)
 				return
 			}
+			if req.IsFavorite != nil {
+				writer, ok := h.userData.(interface {
+					UpdateParentUserData(context.Context, *Session, string, []string, bool, bool) error
+				})
+				if !ok {
+					writeError(w, 501, "NotImplemented", "Atomic parent user data updates unavailable")
+					return
+				}
+				if err := writer.UpdateParentUserData(r.Context(), session, detail.ContentID, targets, *req.Played, *req.IsFavorite); err != nil {
+					writeCompatUpstreamError(w, err)
+					return
+				}
+				h.HandleGetUserData(w, r)
+				return
+			}
 			if *req.Played {
 				err = h.userData.MarkPlayedBatch(r.Context(), session, targets)
 			} else {

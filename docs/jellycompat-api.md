@@ -25,8 +25,10 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
 Positional updates require a playable item; marking a series or season played
-uses its child episodes. Marking played or unplayed clears the resume position
-unless the request supplies an explicit position. Read-only echoed fields such
+uses its child episodes. A combined played/favorite update commits the child
+progress and history together with the series or season's favorite status; a
+storage failure rolls back the entire update. Marking played or unplayed clears
+the resume position unless the request supplies an explicit position. Read-only echoed fields such
 as `UnplayedItemCount`, `Key`, and `ItemId` are ignored. Ratings, likes, and play
 counts above 1 return 400. Inaccessible items and another profile's user ID are
 rejected before mutation.

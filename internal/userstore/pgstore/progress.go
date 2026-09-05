@@ -333,6 +333,32 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 	targets []userstore.MarkWatchedTarget,
 	entries []userstore.WatchHistoryEntry,
 ) ([]userstore.WatchHistoryEntry, error) {
+	hasTarget := false
+	for _, target := range targets {
+		if strings.TrimSpace(target.MediaItemID) != "" {
+			hasTarget = true
+			break
+		}
+	}
+	if !hasTarget {
+		return nil, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin mark watched batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	written, err := s.markWatchedBatchTx(ctx, tx, profileID, targets, entries)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit mark watched batch: %w", err)
+	}
+	return written, nil
+}
+
+func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, profileID string, targets []userstore.MarkWatchedTarget, entries []userstore.WatchHistoryEntry) ([]userstore.WatchHistoryEntry, error) {
 	if len(targets) == 0 {
 		return nil, nil
 	}
@@ -411,11 +437,6 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 		historySourceIndex = append(historySourceIndex, entryIndex)
 	}
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin mark watched batch: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	if explicitDates {
 		if _, err := tx.Exec(ctx, "SELECT set_config('silo.explicit_progress_event_time', 'on', true)"); err != nil {
 			return nil, fmt.Errorf("set explicit batch progress dates: %w", err)
@@ -523,9 +544,6 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit mark watched batch: %w", err)
-	}
 	return written, nil
 }
 

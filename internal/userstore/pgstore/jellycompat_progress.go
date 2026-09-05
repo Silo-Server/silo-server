@@ -65,14 +65,19 @@ func (s *PostgresUserStore) ApplyJellycompatProgress(ctx context.Context, profil
 		return err
 	}
 	if edit.IsFavorite != nil {
-		if *edit.IsFavorite {
-			_, err = tx.Exec(ctx, `INSERT INTO user_favorites (user_id, profile_id, media_item_id, added_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`, s.userID, profileID, edit.MediaItemID, time.Now().UTC())
-		} else {
-			_, err = tx.Exec(ctx, `DELETE FROM user_favorites WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`, s.userID, profileID, edit.MediaItemID)
-		}
-		if err != nil {
+		if err := s.setJellycompatFavorite(ctx, tx, profileID, edit.MediaItemID, *edit.IsFavorite); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func (s *PostgresUserStore) setJellycompatFavorite(ctx context.Context, tx pgx.Tx, profileID, itemID string, favorite bool) error {
+	var err error
+	if favorite {
+		_, err = tx.Exec(ctx, `INSERT INTO user_favorites (user_id, profile_id, media_item_id, added_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`, s.userID, profileID, itemID, time.Now().UTC())
+	} else {
+		_, err = tx.Exec(ctx, `DELETE FROM user_favorites WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`, s.userID, profileID, itemID)
+	}
+	return err
 }

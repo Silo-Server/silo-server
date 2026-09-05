@@ -436,3 +436,14 @@ func jellycompatProgressDates(ctx context.Context, store userstore.UserStore, pr
 	}
 	return reader.ListJellycompatProgressDates(ctx, profile, ids)
 }
+
+func (s *directUserDataService) UpdateParentUserData(ctx context.Context, session *Session, parentID string, targets []string, played, favorite bool) error {
+	if s.watchState == nil {
+		return fmt.Errorf("watch state service unavailable")
+	}
+	if err := s.watchState.RecordJellycompatParent(ctx, session.StreamAppUserID, session.ProfileID, parentID, targets, played, favorite); err != nil {
+		return err
+	}
+	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	return nil
+}
