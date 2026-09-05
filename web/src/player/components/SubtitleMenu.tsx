@@ -19,6 +19,7 @@ interface SubtitleMenuProps {
   onSelect: (index: number | null) => void;
   delayMs: number;
   onDelayChange: (ms: number) => void;
+  preferredSubtitleLanguage?: string | null;
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
@@ -48,6 +49,7 @@ export function SubtitleMenu({
   onSelect,
   delayMs,
   onDelayChange,
+  preferredSubtitleLanguage,
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
@@ -379,6 +381,7 @@ export function SubtitleMenu({
           mediaFileId={mediaFileId}
           playerConfig={playerConfig}
           tracks={tracks}
+          preferredSubtitleLanguage={preferredSubtitleLanguage}
           audioTracks={audioTracks}
           translateEnabled={aiEnabled}
           transcribeEnabled={aiTranscribeEnabled}

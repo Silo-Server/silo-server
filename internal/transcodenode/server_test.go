@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -50,11 +52,65 @@ type blockingSessionTracker struct {
 	removeHasDeadline bool
 }
 
+type recordingSessionTracker struct {
+	mu      sync.Mutex
+	tracked []nodesessions.SessionInfo
+	removed []string
+}
+
+func (t *recordingSessionTracker) Track(_ context.Context, info nodesessions.SessionInfo) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.tracked = append(t.tracked, info)
+}
+
+func (t *recordingSessionTracker) Remove(_ context.Context, sessionID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.removed = append(t.removed, sessionID)
+}
+
+func (*recordingSessionTracker) Cleanup(context.Context) {}
+func (*recordingSessionTracker) NodeURL() string         { return "http://node" }
+func (*recordingSessionTracker) NodeName() string        { return "node" }
+
 type blockingResponseWriter struct {
 	header       http.Header
 	writeStarted chan struct{}
 	releaseWrite chan struct{}
 	startOnce    sync.Once
+}
+
+type abortableBlockingResponseWriter struct {
+	header          http.Header
+	writeStarted    chan struct{}
+	deadlineExpired chan struct{}
+	startOnce       sync.Once
+	expireOnce      sync.Once
+}
+
+func newAbortableBlockingResponseWriter() *abortableBlockingResponseWriter {
+	return &abortableBlockingResponseWriter{
+		header:          make(http.Header),
+		writeStarted:    make(chan struct{}),
+		deadlineExpired: make(chan struct{}),
+	}
+}
+
+func (w *abortableBlockingResponseWriter) Header() http.Header { return w.header }
+func (*abortableBlockingResponseWriter) WriteHeader(int)       {}
+
+func (w *abortableBlockingResponseWriter) Write([]byte) (int, error) {
+	w.startOnce.Do(func() { close(w.writeStarted) })
+	<-w.deadlineExpired
+	return 0, os.ErrDeadlineExceeded
+}
+
+func (w *abortableBlockingResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.After(time.Now()) {
+		w.expireOnce.Do(func() { close(w.deadlineExpired) })
+	}
+	return nil
 }
 
 func newBlockingResponseWriter() *blockingResponseWriter {
@@ -120,12 +176,14 @@ func newTestServer(t *testing.T) *Server {
 	cfg.Download.ArtifactDir = filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
 	w.SetConfigForTest(cfg)
 	return &Server{
-		watcher:      w,
-		inputPaths:   allowInputPaths{},
-		transcodeDir: cfg.Playback.TranscodeDir,
-		artifactRoot: filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
-		sessions:     make(map[string]*playback.TranscodeSession),
-		lastAccess:   make(map[string]time.Time),
+		watcher:                   w,
+		inputPaths:                allowInputPaths{},
+		transcodeDir:              cfg.Playback.TranscodeDir,
+		artifactRoot:              filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
+		sessions:                  make(map[string]*playback.TranscodeSession),
+		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
+		stoppedProgressiveRemuxes: make(map[string]time.Time),
+		lastAccess:                make(map[string]time.Time),
 	}
 }
 
@@ -1822,6 +1880,841 @@ func signCard(t *testing.T, card playback.RecipeCard) string {
 	return tok
 }
 
+func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/remux/transport-1?seek=2", nil)
+	req.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleRemux(rr, req)
+
+	if rr.Code != http.StatusOK || rr.Body.String() != "node-remux-bytes" {
+		t.Fatalf("response = %d %q, want remux bytes", rr.Code, rr.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after response = %d, want 0", got)
+	}
+}
+
+func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegMarker := filepath.Join(t.TempDir(), "ffmpeg-ran")
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\ntouch \""+ffmpegMarker+"\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-head", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://registered-node", TranscodeTransportID: "transport-head",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodHead, "/remux/transport-head", nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-head")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	recorder := httptest.NewRecorder()
+
+	server.handleRemux(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "video/mp4" {
+		t.Fatalf("response = %d content-type %q", recorder.Code, recorder.Header().Get("Content-Type"))
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs = %d, want no FFmpeg start", got)
+	}
+	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
+		t.Fatalf("HEAD invoked ffmpeg: %v", err)
+	}
+
+	server.SetRecipeStore(&stubRecipeStore{})
+	stoppedRequest := httptest.NewRequest(http.MethodHead, "/remux/transport-head", nil)
+	stoppedRequest.Header.Set("X-Silo-Stream-Token", token)
+	stoppedRouteContext := chi.NewRouteContext()
+	stoppedRouteContext.URLParams.Add("session_id", "transport-head")
+	stoppedRequest = stoppedRequest.WithContext(context.WithValue(stoppedRequest.Context(), chi.RouteCtxKey, stoppedRouteContext))
+	stoppedRecorder := httptest.NewRecorder()
+
+	server.handleRemux(stoppedRecorder, stoppedRequest)
+
+	if stoppedRecorder.Code != http.StatusGone {
+		t.Fatalf("stopped HEAD status = %d, want 410", stoppedRecorder.Code)
+	}
+	if _, err := os.Stat(ffmpegMarker); !os.IsNotExist(err) {
+		t.Fatalf("stopped HEAD invoked ffmpeg: %v", err)
+	}
+}
+
+func TestProgressiveRemuxRunsOnThisNodeRejectsDifferentNodeID(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 12, true }
+
+	claims := &streamtoken.Claims{
+		TranscodeNode:          "http://same-node-url",
+		RoutingExecutionNodeID: 11,
+	}
+	if server.progressiveRemuxRunsOnThisNode(claims) {
+		t.Fatal("progressive remux accepted a token bound to a different node ID")
+	}
+	claims.RoutingExecutionNodeID = 0
+	if server.progressiveRemuxRunsOnThisNode(claims) {
+		t.Fatal("progressive remux accepted a token without a stable node ID")
+	}
+}
+
+func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegLog := filepath.Join(t.TempDir(), "ffmpeg.log")
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	ffmpegScript := "#!/bin/sh\n" +
+		"case \" $* \" in *\" -i " + mediaPath + " \"*) printf 'invoked\\n' >> \"" + ffmpegLog + "\";; esac\n" +
+		"printf node-remux-bytes\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-concurrent", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-concurrent",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	firstWriter := newBlockingResponseWriter()
+	released := false
+	defer func() {
+		if !released {
+			close(firstWriter.releaseWrite)
+		}
+	}()
+	firstDone := make(chan struct{})
+	go func() {
+		server.handleRemux(firstWriter, request.Clone(request.Context()))
+		close(firstDone)
+	}()
+	waitCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	select {
+	case <-firstWriter.writeStarted:
+	case <-waitCtx.Done():
+		t.Fatal("first remux did not reach its response")
+	}
+
+	recorder := httptest.NewRecorder()
+	server.handleRemux(recorder, request.Clone(request.Context()))
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs = %d, want only the first remux", got)
+	}
+	close(firstWriter.releaseWrite)
+	released = true
+	select {
+	case <-firstDone:
+	case <-waitCtx.Done():
+		t.Fatal("first remux did not finish after response release")
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after response = %d, want 0", got)
+	}
+	invocations, err := os.ReadFile(ffmpegLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(invocations), "invoked\n"); got != 1 {
+		t.Fatalf("ffmpeg invocations = %d, want 1; log = %q", got, invocations)
+	}
+}
+
+func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
+	server := newTestServer(t)
+	claims := streamtoken.Claims{
+		SessionID: "playback-1", MediaPath: "/media/movie.mkv", PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionProxy),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/remux/transport-1", nil)
+	req.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleRemux(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs = %d, want no FFmpeg start", got)
+	}
+}
+
+func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
+	server := newTestServer(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	server.activeJobs.Add(1)
+	server.progressiveRemuxes["transport-1"] = progressiveRemuxRequest{
+		id: 1, playbackSessionID: "playback-1", cancel: cancel, done: done,
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+	go func() {
+		<-ctx.Done()
+		<-releaseHandler
+		server.activeJobs.Add(-1)
+		server.mu.Lock()
+		delete(server.progressiveRemuxes, "transport-1")
+		server.mu.Unlock()
+		close(done)
+	}()
+	stopDone := make(chan struct{})
+	go func() {
+		server.handleStop(rr, req)
+		close(stopDone)
+	}()
+
+	select {
+	case <-ctx.Done():
+	case <-waitCtx.Done():
+		t.Fatal("progressive remux was not canceled")
+	}
+	server.mu.RLock()
+	_, retained := server.progressiveRemuxes["transport-1"]
+	server.mu.RUnlock()
+	if !retained {
+		t.Fatal("stop discarded the progressive remux completion handle before its handler exited")
+	}
+	select {
+	case <-stopDone:
+		t.Fatal("stop returned before the progressive remux handler exited")
+	default:
+	}
+	close(releaseHandler)
+	select {
+	case <-stopDone:
+	case <-waitCtx.Done():
+		t.Fatal("stop did not return after the progressive remux handler exited")
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after stop = %d, want 0", got)
+	}
+}
+
+func TestHandleStopReturnsUnavailableWhileProgressiveHandlerIsStuck(t *testing.T) {
+	server := newTestServer(t)
+	remuxCanceled := make(chan struct{})
+	done := make(chan struct{})
+	server.progressiveRemuxes["transport-stuck"] = progressiveRemuxRequest{
+		id: 1, playbackSessionID: "playback-stuck",
+		cancel: sync.OnceFunc(func() { close(remuxCanceled) }), done: done,
+	}
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-stuck", nil).WithContext(requestCtx)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-stuck")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+	stopDone := make(chan struct{})
+	go func() {
+		server.handleStop(rr, req)
+		close(stopDone)
+	}()
+
+	select {
+	case <-remuxCanceled:
+	case <-waitCtx.Done():
+		t.Fatal("stop did not cancel the progressive remux")
+	}
+	cancelRequest()
+	select {
+	case <-stopDone:
+	case <-waitCtx.Done():
+		t.Fatal("stop did not return after its shutdown wait was canceled")
+	}
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s; want retryable shutdown failure", rr.Code, rr.Body.String())
+	}
+	server.mu.Lock()
+	delete(server.progressiveRemuxes, "transport-stuck")
+	server.mu.Unlock()
+	close(done)
+}
+
+func TestHandleStopReturnsUnavailableWhenProgressiveAuthorityDeleteFails(t *testing.T) {
+	const transportID = "transport-delete-failure"
+	server := newTestServer(t)
+	server.SetRecipeStore(&stubRecipeStore{
+		card: &playback.RecipeCard{SessionID: "playback-1", TranscodeTransportID: transportID, PlayMethod: playback.PlayRemux},
+		ok:   true, delErr: errors.New("redis is down"),
+	})
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/"+transportID, nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", transportID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleStop(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s; want durable revocation failure", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	fenced := server.stoppedProgressiveRemuxes[transportID].After(time.Now())
+	server.mu.RUnlock()
+	if !fenced {
+		t.Fatal("failed durable revocation did not retain the process-local stop fence")
+	}
+}
+
+func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
+	const sessionID = "hls-session"
+	server := newTestServer(t)
+	server.sessions[sessionID] = &playback.TranscodeSession{}
+	server.activeJobs.Store(1)
+	server.SetRecipeStore(&stubRecipeStore{
+		card: &playback.RecipeCard{SessionID: sessionID, PlayMethod: playback.PlayTranscode},
+		ok:   true,
+	})
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/"+sessionID, nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", sessionID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleStop(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	_, fenced := server.stoppedProgressiveRemuxes[sessionID]
+	server.mu.RUnlock()
+	if fenced {
+		t.Fatal("ordinary HLS teardown was retained in the progressive-remux fence map")
+	}
+}
+
+func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegLog := filepath.Join(t.TempDir(), "ffmpeg.log")
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf invoked > \""+ffmpegLog+"\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claims := streamtoken.Claims{
+		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	store := &stubRecipeStore{card: &card, ok: true}
+	server.SetRecipeStore(store)
+	stopRequest := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
+	stopRouteContext := chi.NewRouteContext()
+	stopRouteContext.URLParams.Add("session_id", "transport-1")
+	stopRequest = stopRequest.WithContext(context.WithValue(stopRequest.Context(), chi.RouteCtxKey, stopRouteContext))
+	server.handleStop(httptest.NewRecorder(), stopRequest)
+
+	// A replacement process has no in-memory stop fence. The deleted durable
+	// authority must still reject the old token before FFmpeg can start.
+	restarted := newTestServer(t)
+	restarted.nodeRowID = func() (int, bool) { return 11, true }
+	restarted.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	restarted.SetRecipeStore(store)
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/transport-1", nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	recorder := httptest.NewRecorder()
+
+	restarted.handleRemux(recorder, request)
+
+	if recorder.Code != http.StatusGone {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := os.Stat(ffmpegLog); !os.IsNotExist(err) {
+		t.Fatalf("stopped transport invoked ffmpeg: %v", err)
+	}
+}
+
+func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
+	server := newTestServer(t)
+	tracker := &recordingSessionTracker{}
+	server.tracker = tracker
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-reload-gate", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-reload-gate",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	storeHit := make(chan struct{}, 1)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true, getHit: storeHit})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/transport-reload-gate", nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-reload-gate")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer waitCancel()
+
+	server.reloadMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			server.reloadMu.Unlock()
+		}
+	}()
+	go func() {
+		server.handleRemux(recorder, request)
+		close(done)
+	}()
+	select {
+	case <-storeHit:
+		t.Fatal("remux validated durable authority outside the force-reload gate")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case <-done:
+		t.Fatal("remux completed while force-reload gate was held")
+	default:
+	}
+	server.reloadMu.Unlock()
+	locked = false
+	select {
+	case <-storeHit:
+	case <-waitCtx.Done():
+		t.Fatal("remux did not validate durable authority after the force-reload gate opened")
+	}
+	select {
+	case <-done:
+	case <-waitCtx.Done():
+		t.Fatal("remux did not resume after force-reload gate was released")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after remux handler return = %d, want 0", got)
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[claims.TranscodeTransportID]
+	server.mu.RUnlock()
+	if active {
+		t.Fatal("completed remux handler remained registered")
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if len(tracker.tracked) != 1 || tracker.tracked[0].SessionID != claims.SessionID {
+		t.Fatalf("tracked sessions = %#v, want viewer session %q", tracker.tracked, claims.SessionID)
+	}
+	if len(tracker.removed) != 1 || tracker.removed[0] != claims.SessionID {
+		t.Fatalf("removed sessions = %v, want viewer session %q", tracker.removed, claims.SessionID)
+	}
+}
+
+func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
+	server := newTestServer(t)
+	server.tracker = newBlockingSessionTracker()
+	server.registeredNodeURL = func() (string, bool) { return "", false }
+	const transportID = "transport-force-reload"
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	server.activeJobs.Add(1)
+	server.progressiveRemuxes[transportID] = progressiveRemuxRequest{id: 1, cancel: cancel, done: done}
+	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: transportID}}
+	server.SetRecipeStore(store)
+	handlerExited := make(chan struct{})
+	go func() {
+		defer close(handlerExited)
+		<-ctx.Done()
+		<-releaseHandler
+		server.activeJobs.Add(-1)
+		server.mu.Lock()
+		delete(server.progressiveRemuxes, transportID)
+		server.mu.Unlock()
+		close(done)
+	}()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+	teardownResult := make(chan error, 1)
+	go func() {
+		teardownResult <- server.teardownForForceReload(waitCtx, "", 0)
+	}()
+
+	select {
+	case <-ctx.Done():
+	case <-waitCtx.Done():
+		t.Fatal("force reload did not cancel the progressive remux")
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs before handler exit = %d, want 1", got)
+	}
+	server.mu.RLock()
+	_, draining := server.progressiveRemuxes[transportID]
+	server.mu.RUnlock()
+	if !draining {
+		t.Fatal("force reload discarded the completion handle before the remux handler exited")
+	}
+	select {
+	case err := <-teardownResult:
+		t.Fatalf("force reload returned before the progressive remux handler exited: %v", err)
+	default:
+	}
+	close(releaseHandler)
+	select {
+	case err := <-teardownResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("force reload did not return after the progressive remux handler exited")
+	}
+	<-handlerExited
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after force reload = %d, want 0", got)
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[transportID]
+	fenced := server.stoppedProgressiveRemuxes[transportID].After(time.Now())
+	server.mu.RUnlock()
+	if active || !fenced {
+		t.Fatalf("force-reload state = active %t, fenced %t; want removed and fenced", active, fenced)
+	}
+	if len(store.deletes) != 1 || store.deletes[0] != transportID {
+		t.Fatalf("durable authority deletes = %v, want [%q]", store.deletes, transportID)
+	}
+	if len(store.revokedNodes) != 1 || store.revokedNodes[0] != server.tracker.NodeURL() {
+		t.Fatalf("node authority revocations = %v, want [%q]", store.revokedNodes, server.tracker.NodeURL())
+	}
+}
+
+func TestForceReloadTeardownRetainsUndrainedProgressiveRemuxForRetry(t *testing.T) {
+	server := newTestServer(t)
+	const transportID = "transport-force-reload-retry"
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	cancelCalls := make(chan struct{}, 2)
+	server.progressiveRemuxes[transportID] = progressiveRemuxRequest{
+		id: 2,
+		cancel: func() {
+			cancelRequest()
+			cancelCalls <- struct{}{}
+		},
+		done: done,
+	}
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
+	defer cancelWait()
+
+	firstCtx, cancelFirst := context.WithCancel(waitCtx)
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- server.teardownForForceReload(firstCtx, "", 0)
+	}()
+	select {
+	case <-cancelCalls:
+	case <-waitCtx.Done():
+		t.Fatal("first force reload did not cancel the remux")
+	}
+	cancelFirst()
+	select {
+	case err := <-firstResult:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("first force reload error = %v, want context canceled", err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("first force reload did not return after its wait was canceled")
+	}
+	server.mu.RLock()
+	_, retained := server.progressiveRemuxes[transportID]
+	server.mu.RUnlock()
+	if !retained {
+		t.Fatal("timed-out force reload discarded the remux completion handle")
+	}
+
+	retryResult := make(chan error, 1)
+	go func() {
+		retryResult <- server.teardownForForceReload(waitCtx, "", 0)
+	}()
+	select {
+	case <-cancelCalls:
+	case <-waitCtx.Done():
+		t.Fatal("force reload retry did not recapture the draining remux")
+	}
+	select {
+	case err := <-retryResult:
+		t.Fatalf("force reload retry returned before the remux drained: %v", err)
+	default:
+	}
+	server.mu.Lock()
+	delete(server.progressiveRemuxes, transportID)
+	server.mu.Unlock()
+	close(done)
+	select {
+	case err := <-retryResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("force reload retry did not return after the remux drained")
+	}
+	select {
+	case <-requestCtx.Done():
+	default:
+		t.Fatal("force reload never canceled the remux request")
+	}
+}
+
+func TestForceReloadTeardownDrainsRealProgressiveRemuxWithBlockedClient(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	ffmpegScript := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do\n" +
+		"  if [ \"$arg\" = \"pipe:1\" ]; then\n" +
+		"    while :; do printf node-remux-bytes; sleep 0.01; done\n" +
+		"  fi\n" +
+		"done\n" +
+		"exit 0\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-force-reload", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-force-reload-real",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	writer := newAbortableBlockingResponseWriter()
+	handlerDone := make(chan struct{})
+	go func() {
+		server.handleRemux(writer, request)
+		close(handlerDone)
+	}()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancelWait()
+	select {
+	case <-writer.writeStarted:
+	case <-waitCtx.Done():
+		t.Fatal("progressive remux did not reach the blocked client write")
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs before force reload = %d, want 1", got)
+	}
+
+	if err := server.teardownForForceReload(waitCtx, "http://node", 11); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handlerDone:
+	case <-waitCtx.Done():
+		t.Fatal("force reload returned without draining the progressive remux handler")
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after force reload = %d, want 0", got)
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[claims.TranscodeTransportID]
+	server.mu.RUnlock()
+	if active {
+		t.Fatal("force reload left the drained remux registered")
+	}
+}
+
+func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
+	server := newTestServer(t)
+	server.tracker = newBlockingSessionTracker()
+	server.nodeRowID = func() (int, bool) { return 84, true }
+	server.registeredNodeURL = func() (string, bool) { return "https://new-registered-node.example", true }
+	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: "dormant-transport"}}
+	server.SetRecipeStore(store)
+
+	if err := server.teardownForForceReload(t.Context(), "https://old-registered-node.example", 84); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(store.revokedNodeIDs, []int{84}) {
+		t.Fatalf("stable node authority revocations = %v, want [84]", store.revokedNodeIDs)
+	}
+
+	wantRevoked := []string{"https://old-registered-node.example", "https://new-registered-node.example"}
+	if !slices.Equal(store.revokedNodes, wantRevoked) {
+		t.Fatalf("node authority revocations = %v, want %v", store.revokedNodes, wantRevoked)
+	}
+	if len(store.deletes) != 0 {
+		t.Fatalf("dormant authority was unexpectedly enumerated: deletes = %v", store.deletes)
+	}
+}
+
+func TestForceReloadTeardownRetriesFailedPreviousURLRevocation(t *testing.T) {
+	server := newTestServer(t)
+	server.registeredNodeURL = func() (string, bool) { return "https://new-registered-node.example", true }
+	oldURL := "https://old-registered-node.example"
+	store := &stubRecipeStore{revokeErrs: map[string]error{oldURL: errors.New("redis unavailable")}}
+	server.SetRecipeStore(store)
+
+	if err := server.teardownForForceReload(t.Context(), oldURL, 0); err == nil {
+		t.Fatal("partial authority revocation unexpectedly succeeded")
+	}
+	delete(store.revokeErrs, oldURL)
+	if err := server.teardownForForceReload(t.Context(), "https://new-registered-node.example", 0); err != nil {
+		t.Fatalf("retry authority revocation: %v", err)
+	}
+
+	wantRevoked := []string{
+		oldURL, "https://new-registered-node.example",
+		oldURL, "https://new-registered-node.example",
+	}
+	if !slices.Equal(store.revokedNodes, wantRevoked) {
+		t.Fatalf("node authority revocations = %v, want %v", store.revokedNodes, wantRevoked)
+	}
+	if len(server.pendingAuthorityRevocations) != 0 {
+		t.Fatalf("pending authority revocations = %v, want none after retry", server.pendingAuthorityRevocations)
+	}
+}
+
+func TestForceReloadTeardownRetriesStableNodeIDAfterProcessRestart(t *testing.T) {
+	const nodeID = 84
+	store := &stubRecipeStore{revokeNodeIDErr: errors.New("redis unavailable")}
+	first := newTestServer(t)
+	first.nodeRowID = func() (int, bool) { return nodeID, true }
+	first.SetRecipeStore(store)
+
+	if err := first.teardownForForceReload(t.Context(), "", nodeID); err == nil {
+		t.Fatal("failed stable authority revocation unexpectedly succeeded")
+	}
+
+	// A replacement process has no pending in-memory revocations. Resolving the
+	// same stream_nodes row must nevertheless retry the durable generation.
+	store.revokeNodeIDErr = nil
+	restarted := newTestServer(t)
+	restarted.nodeRowID = func() (int, bool) { return nodeID, true }
+	restarted.SetRecipeStore(store)
+	if err := restarted.teardownForForceReload(t.Context(), "", nodeID); err != nil {
+		t.Fatalf("retry stable authority revocation after restart: %v", err)
+	}
+	if !slices.Equal(store.revokedNodeIDs, []int{nodeID, nodeID}) {
+		t.Fatalf("stable node authority revocations = %v, want [%d %d]", store.revokedNodeIDs, nodeID, nodeID)
+	}
+}
+
 func requestWithToken(sessionID, token string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/transcode/"+sessionID+"/master.m3u8", nil)
 	if token != "" {
@@ -1933,21 +2826,51 @@ func TestReconstructionEndpointsClassifyExecutorDiscoveryFailure(t *testing.T) {
 
 // stubRecipeStore is a recipeStore for the jellycompat node-restart fetch path.
 type stubRecipeStore struct {
-	card    *playback.RecipeCard
-	ok      bool
-	hits    int
-	deletes []string
-	delErr  error
+	card            *playback.RecipeCard
+	ok              bool
+	hits            int
+	deletes         []string
+	revokedNodes    []string
+	revokedNodeIDs  []int
+	delErr          error
+	revokeErr       error
+	revokeErrs      map[string]error
+	revokeNodeIDErr error
+	getHit          chan struct{}
 }
 
 func (s *stubRecipeStore) Get(context.Context, string) (*playback.RecipeCard, bool) {
 	s.hits++
+	if s.getHit != nil {
+		select {
+		case s.getHit <- struct{}{}:
+		default:
+		}
+	}
 	return s.card, s.ok
 }
 
 func (s *stubRecipeStore) Delete(_ context.Context, sessionID string) error {
 	s.deletes = append(s.deletes, sessionID)
-	return s.delErr
+	if s.delErr != nil {
+		return s.delErr
+	}
+	s.card = nil
+	s.ok = false
+	return nil
+}
+
+func (s *stubRecipeStore) RevokeNode(_ context.Context, nodeURL string) error {
+	s.revokedNodes = append(s.revokedNodes, nodeURL)
+	if err := s.revokeErrs[nodeURL]; err != nil {
+		return err
+	}
+	return s.revokeErr
+}
+
+func (s *stubRecipeStore) RevokeNodeID(_ context.Context, nodeID int) error {
+	s.revokedNodeIDs = append(s.revokedNodeIDs, nodeID)
+	return s.revokeNodeIDErr
 }
 
 // When the forwarded token is recipe-less (jellycompat), the node consults the

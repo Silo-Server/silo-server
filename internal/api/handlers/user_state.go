@@ -82,42 +82,59 @@ func resolveItemUserStatesWithOptions(
 	}
 
 	progressIDs := append([]string{}, contentIDs...)
-	seriesEpisodes := map[string][]*models.Episode{}
-	seasonEpisodes := map[string][]*models.Episode{}
+	seriesEpisodes := map[string][]string{}
+	seasonEpisodes := map[string][]string{}
+	var seriesCompletion, seasonCompletion map[string]bool
 	if episodeRepo != nil {
-		if len(seriesIDs) > 0 {
-			seriesEpisodes, err = episodeRepo.ListBySeriesIDs(ctx, seriesIDs)
+		if completionStore, ok := store.(userstore.EpisodeParentCompletionStore); ok {
+			// Keep the existing path for stores without SQL completion support,
+			// and preserve its degradation behavior if the optional query fails.
+			if len(seriesIDs) > 0 {
+				seriesCompletion, err = completionStore.SeriesCompletion(ctx, profileID, seriesIDs)
+				if err != nil {
+					seriesCompletion = nil
+				}
+			}
+			if len(seasonIDs) > 0 {
+				seasonCompletion, err = completionStore.SeasonCompletion(ctx, profileID, seasonIDs)
+				if err != nil {
+					seasonCompletion = nil
+				}
+			}
+		}
+		if len(seriesIDs) > 0 && seriesCompletion == nil {
+			seriesEpisodes, err = episodeRepo.ListIDsBySeriesIDs(ctx, seriesIDs)
 			if err != nil {
 				return nil, err
 			}
 			for _, episodes := range seriesEpisodes {
-				for _, episode := range episodes {
-					if episode == nil || episode.ContentID == "" {
+				for _, episodeID := range episodes {
+					if episodeID == "" {
 						continue
 					}
-					if _, ok := seenContent[episode.ContentID]; ok {
+					if _, ok := seenContent[episodeID]; ok {
 						continue
 					}
-					seenContent[episode.ContentID] = struct{}{}
-					progressIDs = append(progressIDs, episode.ContentID)
+					seenContent[episodeID] = struct{}{}
+					progressIDs = append(progressIDs, episodeID)
 				}
 			}
 		}
-		if len(seasonIDs) > 0 {
-			seasonEpisodes, err = episodeRepo.ListBySeasonIDs(ctx, seasonIDs)
+		if len(seasonIDs) > 0 && seasonCompletion == nil {
+			seasonEpisodes, err = episodeRepo.ListIDsBySeasonIDs(ctx, seasonIDs)
 			if err != nil {
 				return nil, err
 			}
 			for _, episodes := range seasonEpisodes {
-				for _, episode := range episodes {
-					if episode == nil || episode.ContentID == "" {
+				for _, episodeID := range episodes {
+					if episodeID == "" {
 						continue
 					}
-					if _, ok := seenContent[episode.ContentID]; ok {
+					if _, ok := seenContent[episodeID]; ok {
 						continue
 					}
-					seenContent[episode.ContentID] = struct{}{}
-					progressIDs = append(progressIDs, episode.ContentID)
+					seenContent[episodeID] = struct{}{}
+					progressIDs = append(progressIDs, episodeID)
 				}
 			}
 		}
@@ -143,8 +160,14 @@ func resolveItemUserStatesWithOptions(
 		switch item.Type {
 		case "series":
 			state.Played = allEpisodesCompleted(seriesEpisodes[item.ContentID], progressMap)
+			if seriesCompletion != nil {
+				state.Played = seriesCompletion[item.ContentID]
+			}
 		case "season":
 			state.Played = allEpisodesCompleted(seasonEpisodes[item.ContentID], progressMap)
+			if seasonCompletion != nil {
+				state.Played = seasonCompletion[item.ContentID]
+			}
 		case "ebook":
 			state.Played = ebookProgressMap[item.ContentID].Progress >= models.EbookFinishedProgressThreshold
 		default:
@@ -168,15 +191,15 @@ func resolveEbookProgressForUserStates(
 	return options.EbookProgressStore.ListByContentIDs(ctx, options.UserID, profileID, contentIDs)
 }
 
-func allEpisodesCompleted(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) bool {
+func allEpisodesCompleted(episodes []string, progressMap map[string]userstore.WatchProgress) bool {
 	if len(episodes) == 0 {
 		return false
 	}
-	for _, episode := range episodes {
-		if episode == nil || episode.ContentID == "" {
+	for _, episodeID := range episodes {
+		if episodeID == "" {
 			return false
 		}
-		progress, ok := progressMap[episode.ContentID]
+		progress, ok := progressMap[episodeID]
 		if !ok || !progress.Completed {
 			return false
 		}

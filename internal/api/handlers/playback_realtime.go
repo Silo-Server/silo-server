@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -20,6 +21,28 @@ type playbackCommandRecord struct {
 func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, userInitiated bool) error {
 	if h == nil || session == nil || session.ID == "" {
 		return playback.ErrSessionNotFound
+	}
+	// Replacement preparation holds this lifecycle lock until its new live
+	// session state and durable plan are committed (or rolled back). Wait for
+	// that boundary, then reload the route: callers commonly hold a copy taken
+	// before the replacement started, and deleting authority from that stale
+	// copy would leave the successor transport playable after a successful stop.
+	unlock := h.tm.LockSessionLifecycle(session.ID)
+	defer unlock()
+	current, err := h.sessionMgr.GetSession(session.ID)
+	if err != nil {
+		return err
+	}
+	session = current
+	if userInitiated {
+		if err := h.deleteRequiredProgressiveRemuxAuthorityV3(ctx, session); err != nil {
+			return fmt.Errorf("persist progressive remux stop: %w", err)
+		}
+		if requiresProgressiveRemuxAuthorityV3(session) {
+			if err := h.tm.CancelRemoteTranscode(ctx, remoteTransportID(session), session.TranscodeNodeURL); err != nil {
+				return fmt.Errorf("cancel progressive remux transport: %w", err)
+			}
+		}
 	}
 
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {

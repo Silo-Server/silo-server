@@ -74,6 +74,7 @@ func main() {
 	write(*out, "start_request.json", goldenStartRequest())
 	write(*out, "replan_request.json", goldenReplanRequest())
 	write(*out, "decision_response.json", goldenDecisionResponse())
+	write(*out, "native-decision_response.json", goldenNativeDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
 	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())
@@ -286,19 +287,41 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 	subtitleSource := goldenMediaFile()
 	file.ExternalSubtitles = subtitleSource.ExternalSubtitles
 	file.SubtitleTracks = subtitleSource.SubtitleTracks
+	return goldenDecisionForSource(file, goldenStartRequest(), goldenSubtitleAdditional())
+}
+
+func goldenNativeDecisionResponse() playback.DecisionResponseV3 {
+	file := conformanceFallbackFile()
+	file.ExternalSubtitles = goldenMediaFile().ExternalSubtitles
+	file.SubtitleTracks = []models.SubtitleTrack{
+		{Index: 3, ContainerTrackID: "4", Language: languageEnglish, Codec: "mov_text", Title: "English (embedded)"},
+	}
+	request := goldenStartRequest()
+	request.ClientFeatures = append(request.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3)
+	request.SubtitleTrackIndex = new(len(file.ExternalSubtitles))
+	request.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", *request.SubtitleTrackIndex)
+	delivery := request.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	delivery.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{
+		Container: containerMP4, Codecs: []string{"mov_text"}, TrackIdentity: "container_track_id",
+	}}
+	request.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = delivery
+	return goldenDecisionForSource(file, request, nil)
+}
+
+func goldenDecisionForSource(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3) playback.DecisionResponseV3 {
 	now, err := time.Parse(time.RFC3339, "2029-12-31T23:55:00Z")
 	if err != nil {
 		fail("parse golden planner time: %v", err)
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
-		Request:             goldenStartRequest(),
+		Request:             request,
 		RequestedFile:       file,
 		EffectiveFile:       file,
 		AudioTrackIndex:     0,
 		Settings:            playback.PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
 		Registry:            conformanceRegistry(),
 		Now:                 now,
-		AdditionalSubtitles: goldenSubtitleAdditional(),
+		AdditionalSubtitles: additional,
 	})
 	if result.Plan == nil {
 		fail("golden planner returned terminal: %#v", result.Terminal)
@@ -570,6 +593,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	audioFile := &models.MediaFile{ID: 77, BaseType: "audiobook", FilePath: "/media/audiobook.m4b", Container: containerMP4, CodecAudio: codecAAC, Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
 	audioRequest := conformanceStartRequest()
 	audioRequest.FileID = audioFile.ID
+	audioRequest.AudioTrackID = playback.TrackIDV3(audioFile.ID, "audio", *audioRequest.AudioTrackIndex)
 	audioRequest.PlaybackAttemptID = "attempt-audio-only"
 	audioRequest.Capabilities.Containers = []string{containerMP4}
 	planner = append(planner, makePlannerScenario("audio_only_original", "audio_only_planning", audioRequest, audioFile, nil, settings, registry))
@@ -696,6 +720,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	for _, deliveryClass := range []string{playback.DeliveryClassOriginalHTTPV3, playback.DeliveryClassProgressiveV3, playback.DeliveryClassHLSV3} {
 		delivery := assRequest.ClientPlaybackContext.Deliveries[deliveryClass]
 		delivery.Subtitles.EmbeddedText = true
+		delivery.Subtitles.SidecarText = true
 		delivery.Subtitles.ASSStyling = true
 		delivery.Subtitles.FontAttachments = true
 		assRequest.ClientPlaybackContext.Deliveries[deliveryClass] = delivery

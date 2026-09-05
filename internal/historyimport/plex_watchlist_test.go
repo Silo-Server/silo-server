@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,7 +173,9 @@ func TestFetchWatchlistWarnsWhenGuidResolutionFails(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/library/sections/watchlist/all":
-			_, _ = fmt.Fprint(w, `{"MediaContainer":{"totalSize":1,"Metadata":[
+			_, _ = fmt.Fprint(w, `{"MediaContainer":{"totalSize":2,"Metadata":[
+				{"ratingKey":"wl-resolved","type":"movie","title":"Arrival","year":2016,
+				 "Guid":[{"id":"tmdb://329865"}]},
 				{"ratingKey":"wl-1","type":"movie","title":"Dune: Part Two","year":2024}
 			]}}`)
 		default:
@@ -187,11 +190,11 @@ func TestFetchWatchlistWarnsWhenGuidResolutionFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchWatchlist: %v", err)
 	}
-	if len(items) != 1 || items[0].Title != "Dune: Part Two" {
+	if len(items) != 2 || items[1].Title != "Dune: Part Two" {
 		t.Fatalf("items = %+v, want the listing entry kept", items)
 	}
-	if len(warnings) != 1 {
-		t.Fatalf("warnings = %v, want exactly one unresolved-ids warning", warnings)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "1 of 1 items") {
+		t.Fatalf("warnings = %v, want one unresolved lookup out of one attempted lookup", warnings)
 	}
 }
 

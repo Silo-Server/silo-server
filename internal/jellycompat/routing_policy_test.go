@@ -108,6 +108,11 @@ func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 			wantDirectStream: true,
 		},
 		{
+			name:      "transcode preference does not rewrite the requested Jellyfin transport",
+			execution: config.PlaybackExecutionPreferTranscode, egress: config.PlaybackEgressPreferProxy,
+			wantDirectStream: true,
+		},
+		{
 			name:      "worker execution with API egress falls back to HLS",
 			execution: config.PlaybackExecutionWorkerOnly, egress: config.PlaybackEgressAPIOnly,
 			wantDirectStream: false,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -20,6 +21,15 @@ var (
 	ErrImpersonationNotAllowed = errors.New("impersonation not allowed")
 	ErrAlreadyImpersonating    = errors.New("already impersonating")
 	ErrNotImpersonating        = errors.New("not impersonating")
+	ErrPasswordLoginDisabled   = errors.New("local password login is disabled")
+	ErrCurrentPasswordInvalid  = errors.New("current password is invalid")
+	ErrPasswordTooShort        = errors.New("password is too short")
+	ErrPasswordTooLong         = errors.New("password is too long")
+)
+
+const (
+	MinimumPasswordLength = 8
+	MaximumPasswordBytes  = 72
 )
 
 // TokenPair holds the access and refresh tokens returned after login or refresh.
@@ -550,6 +560,51 @@ func (s *Service) GetCurrentUser(ctx context.Context, claims *Claims) (*models.U
 		return nil, fmt.Errorf("getting user: %w", err)
 	}
 	return user, nil
+}
+
+// PasswordChangeAvailable reports whether the account has a local password
+// that can be verified and replaced through the self-service password flow.
+// OAuth-only accounts keep their provider-managed credential boundary.
+func (s *Service) PasswordChangeAvailable(ctx context.Context, userID int) (bool, error) {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("getting user: %w", err)
+	}
+	return user.LocalPasswordLoginEnabled && user.PasswordHash != "", nil
+}
+
+// ChangePassword verifies the existing local credential before replacing it.
+// Profile authorization and impersonation checks belong to the HTTP boundary;
+// this method owns only the account credential transition.
+func (s *Service) ChangePassword(ctx context.Context, userID int, currentPassword, newPassword string) error {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("getting user: %w", err)
+	}
+	if err := validatePasswordChange(user, currentPassword, newPassword); err != nil {
+		return err
+	}
+
+	if err := s.users.CompareAndSwapPassword(ctx, userID, user.PasswordHash, newPassword); err != nil {
+		return fmt.Errorf("updating password: %w", err)
+	}
+	return nil
+}
+
+func validatePasswordChange(user *models.User, currentPassword, newPassword string) error {
+	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+		return ErrPasswordLoginDisabled
+	}
+	if !CheckPassword(user, currentPassword) {
+		return ErrCurrentPasswordInvalid
+	}
+	if utf8.RuneCountInString(newPassword) < MinimumPasswordLength {
+		return ErrPasswordTooShort
+	}
+	if len(newPassword) > MaximumPasswordBytes {
+		return ErrPasswordTooLong
+	}
+	return nil
 }
 
 // GetSessions returns all sessions for the given user ID.

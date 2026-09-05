@@ -91,9 +91,9 @@ var adminSettingDefaults = map[string]string{
 	"playback.hw_accel":                              "auto",
 	"playback.transcode_enabled":                     "true",
 	PlaybackRoutingDirectPlayEgressSettingKey:        string(PlaybackEgressPreferProxy),
-	PlaybackRoutingRemuxExecutionSettingKey:          string(PlaybackExecutionPreferWorker),
+	PlaybackRoutingRemuxExecutionSettingKey:          string(PlaybackExecutionPreferTranscode),
 	PlaybackRoutingRemuxEgressSettingKey:             string(PlaybackEgressPreferProxy),
-	PlaybackRoutingVideoTranscodeExecutionSettingKey: string(PlaybackExecutionPreferWorker),
+	PlaybackRoutingVideoTranscodeExecutionSettingKey: string(PlaybackExecutionPreferTranscode),
 	PlaybackRoutingVideoTranscodeEgressSettingKey:    string(PlaybackEgressPreferProxy),
 	"playback.chapter_thumbnail_workers":             "1",
 	"playback.chapter_thumbnail_execution":           "local",
@@ -461,7 +461,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "auto", "qsv", "vaapi", "nvenc", "videotoolbox", "none")
 	case PlaybackRoutingRemuxExecutionSettingKey, PlaybackRoutingVideoTranscodeExecutionSettingKey:
 		return normalizeAdminEnum(key, value,
-			string(PlaybackExecutionPreferWorker), string(PlaybackExecutionWorkerOnly),
+			string(PlaybackExecutionPreferWorker), string(PlaybackExecutionPreferTranscode),
+			string(PlaybackExecutionWorkerOnly),
 			string(PlaybackExecutionPreferAPI), string(PlaybackExecutionAPIOnly))
 	case PlaybackRoutingDirectPlayEgressSettingKey, PlaybackRoutingRemuxEgressSettingKey,
 		PlaybackRoutingVideoTranscodeEgressSettingKey:

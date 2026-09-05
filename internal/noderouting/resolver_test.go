@@ -64,6 +64,51 @@ func TestResolveUsesExactWorkerAPIRoute(t *testing.T) {
 	}
 }
 
+func TestResolveUsesTranscodeExecutorWithRelayOnlyProxy(t *testing.T) {
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{ID: 2, URL: "http://proxy", Enabled: true, Healthy: true}})
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{{ID: 1, URL: "http://transcode", Enabled: true, Healthy: true}})
+	planner := nodepool.NewPlanner(proxies, transcodes)
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+
+	decision, err := Resolve(planner, ResolveRequest{
+		Request:                Request{Workload: WorkloadRemux, Delivery: DeliveryProgressiveRemux, Policy: policy, ProxyAllowed: true},
+		SessionID:              "session-1",
+		TranscodeEligible:      func(node *nodepool.Node) bool { return node.URL == "http://transcode" },
+		ProxyExecutionEligible: func(*nodepool.Node) bool { return false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Shape.ID != "progressive_remux_transcode_proxy" ||
+		decision.Plan.TranscodeNode == nil || decision.Plan.ProxyNode == nil {
+		t.Fatalf("decision = %#v, want transcode execution with proxy egress", decision)
+	}
+}
+
+func TestResolveProxyExecutorDoesNotRequireRelayCapability(t *testing.T) {
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{ID: 2, URL: "http://proxy", Enabled: true, Healthy: true}})
+	planner := nodepool.NewPlanner(proxies, nodepool.NewTranscodePool())
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+
+	decision, err := Resolve(planner, ResolveRequest{
+		Request:           Request{Workload: WorkloadRemux, Delivery: DeliveryProgressiveRemux, Policy: policy, ProxyAllowed: true},
+		SessionID:         "session-1",
+		ProxyEligible:     func(*nodepool.Node) bool { return false },
+		TranscodeEligible: func(*nodepool.Node) bool { return false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Shape.ID != "progressive_remux_proxy" || decision.Plan.ProxyNode == nil {
+		t.Fatalf("decision = %#v, want proxy-executed remux", decision)
+	}
+}
+
 type reservingLegacyPlanner struct {
 	plan          nodepool.Plan
 	released      []string

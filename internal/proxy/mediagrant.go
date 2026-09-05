@@ -153,7 +153,14 @@ func (s *Server) handleGrantIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case card.PlayMethod == playback.PlayRemux:
-		s.serveRemuxClaims(w, r, &claims)
+		if remuxRunsOnTranscodeNodeV3(&claims) {
+			info := sessionInfo(s.tracker, &claims, "remux")
+			s.tracker.Track(r.Context(), info)
+			defer s.tracker.Remove(r.Context(), claims.SessionID)
+			s.relayGrantToTranscodeNode(w, r, &claims, "/remux/"+transcodeTransportIDFromClaims(&claims))
+		} else {
+			s.serveRemuxClaims(w, r, &claims)
+		}
 	case card.IsTranscodeRecipe():
 		writeGrantError(w, http.StatusBadRequest, "bad_request", "Transcode streams use manifest/segment endpoints")
 	default:

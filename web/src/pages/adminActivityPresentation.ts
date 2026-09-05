@@ -287,6 +287,76 @@ export function getSessionClientLabelFull(session: AdminSession): string {
   return session.client_label_full?.trim() || getSessionClientLabel(session);
 }
 
+export interface ActivityRouteNode {
+  key: string;
+  kind: "transcode" | "proxy" | "server" | "legacy";
+  label: "Transcode" | "Proxy" | "Server" | "Node";
+  name: string;
+}
+
+function namedRouteNode(
+  kind: "transcode" | "proxy",
+  name: string | undefined,
+  id: number | undefined,
+): ActivityRouteNode {
+  const label = kind === "transcode" ? "Transcode" : "Proxy";
+  const trimmedName = name?.trim();
+  return {
+    key: `${kind}:${id ?? trimmedName ?? "unknown"}`,
+    kind,
+    label,
+    name: trimmedName || (id !== undefined ? `Node #${id}` : `Unknown ${kind} node`),
+  };
+}
+
+function reportingServerRouteNode(session: AdminSession): ActivityRouteNode {
+  const reportedName = session.reporting_node?.trim();
+  if (!reportedName || reportedName.toLowerCase() === "local") {
+    return { key: "server:local", kind: "server", label: "Server", name: "Local server" };
+  }
+  return { key: `server:${reportedName}`, kind: "server", label: "Server", name: reportedName };
+}
+
+/**
+ * Return registered playback nodes in work-to-viewer order. Routes without a
+ * registered node retain the reporting API server's identity, while rows from
+ * older servers fall back to their legacy node fields.
+ */
+export function getSessionRouteNodes(session: AdminSession): ActivityRouteNode[] {
+  const execution = session.routing_execution?.trim();
+  const egress = session.routing_egress?.trim();
+  const hasResolvedRoute = Boolean(session.routing_workload?.trim() || execution || egress);
+
+  if (!hasResolvedRoute) {
+    const reportedName = session.node_display_name?.trim() || session.reporting_node?.trim();
+    const name =
+      !reportedName || reportedName.toLowerCase() === "local" ? "Local server" : reportedName;
+    return [{ key: `legacy:${name}`, kind: "legacy", label: "Node", name }];
+  }
+
+  const nodes: ActivityRouteNode[] = [];
+  const executionNodeName =
+    session.routing_execution_node_name?.trim() || session.node_display_name;
+  if (execution === "transcode") {
+    nodes.push(namedRouteNode("transcode", executionNodeName, session.routing_execution_node_id));
+  } else if (execution === "proxy") {
+    nodes.push(namedRouteNode("proxy", executionNodeName, session.routing_execution_node_id));
+  }
+
+  if (egress === "proxy") {
+    const egressNode = namedRouteNode(
+      "proxy",
+      session.routing_egress_node_name,
+      session.routing_egress_node_id,
+    );
+    if (!nodes.some((node) => node.key === egressNode.key)) {
+      nodes.push(egressNode);
+    }
+  }
+
+  return nodes.length > 0 ? nodes : [reportingServerRouteNode(session)];
+}
+
 export function formatSourceContainerSummary(session: AdminSession): string {
   return formatContainer(session.source_container) || "Unknown source";
 }

@@ -13,6 +13,7 @@ import (
 const (
 	ProtocolV3                   = 3
 	FeaturePlaybackPlanV3        = "playback_plan_v3"
+	FeatureEmbeddedSubtitlesV3   = "embedded_subtitles_v1"
 	FeatureNeutralContractV3     = "neutral_playback_v3_contract_v1"
 	FeatureLayoutPassthrough     = "layout_aware_passthrough"
 	FeatureClientVideoTransforms = "client_video_transformations_v1"
@@ -20,8 +21,16 @@ const (
 	FeatureDeviceQuirksV3        = "device_quirks_v1"
 	FeatureSeekReanchorV3        = "seek_reanchor_v1"
 	FeatureOutputChangeV3        = "output_change_v1"
-	FeatureDirectStreamResumeV3  = "direct_stream_resume_v1"
-	FeaturePlanSourceDurationV3  = "plan_source_duration_v1"
+	// FeatureOutputDisplayEvidenceV3 tells a client this server understands
+	// output.display and its hdr_evidence tier. A pre-feature server ignores
+	// the field and falls back from a missing output.hdr_details to the
+	// device-level HDR facts, so a client that sends output.display must
+	// always send output.hdr_details (decoder ∩ display) as well; it may
+	// rely on the evidence tier being honored only when this token is
+	// advertised.
+	FeatureOutputDisplayEvidenceV3 = "output_display_evidence_v1"
+	FeatureDirectStreamResumeV3    = "direct_stream_resume_v1"
+	FeaturePlanSourceDurationV3    = "plan_source_duration_v1"
 	// FeatureSoftwareVideoDecodeV3 lets a strict evidence-tier client opt into
 	// bounded hardware:false video_decode entries. Without the feature, exact
 	// and platform_attested retain their historical hardware-only direct-play
@@ -69,11 +78,28 @@ const (
 	// original bytes. Packaged server deliveries remain output-gated.
 	ClaimClientManagedDynamicRangeV3 = "client_managed_dynamic_range_v1"
 	ClaimClientSelectedAudioTrackV3  = "client_selected_audio_track_v1"
-	ClientDV8HDR10PlusSanitizerV3    = "client_dv8_hdr10plus_sanitizer_v1"
-	ClientNativeHLSPlaybackV3        = "native_hls_playback_v1"
-	ClientPostResumeRecoveryV3       = "client_post_resume_video_recovery_v1"
-	ClientSurfaceRecoveryV3          = "client_surface_recovery_v1"
-	DeviceQuirkRegistryRevisionV3    = "2026-07-13.1"
+	// ClaimClientDV8BaseLayerFallbackV3 is scoped to the original_http
+	// delivery. The executor decodes a single-layer Dolby Vision Profile 8
+	// stream through an ordinary HEVC decoder and presents its
+	// standards-compatible base layer when the active output lacks native
+	// Dolby Vision. It is deliberately narrower than
+	// ClaimClientManagedDynamicRangeV3: the server still decides which base
+	// range the plan promises (from dv_bl_compat_id), still requires the
+	// active output to carry that range, and never claims Dolby Vision output.
+	ClaimClientDV8BaseLayerFallbackV3 = "client_dv8_base_layer_fallback_v1"
+	ClientDV8HDR10PlusSanitizerV3     = "client_dv8_hdr10plus_sanitizer_v1"
+	ClientNativeHLSPlaybackV3         = "native_hls_playback_v1"
+	ClientPostResumeRecoveryV3        = "client_post_resume_video_recovery_v1"
+	ClientSurfaceRecoveryV3           = "client_surface_recovery_v1"
+	DeviceQuirkRegistryRevisionV3     = "2026-07-13.1"
+)
+
+// Worker transport features are protocol capabilities rather than media
+// transformations. They let route planning exclude an older worker before a
+// client is handed a URL that worker cannot serve.
+const (
+	TransportFeatureProgressiveRemuxExecutionV1 = "progressive_remux_execution_v1"
+	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
 )
 
 // Degradation warning codes reported by playback plans.
@@ -86,11 +112,13 @@ func ServerFeaturesV3() []string {
 	return []string{
 		FeaturePlaybackPlanV3,
 		FeatureNeutralContractV3,
+		FeatureEmbeddedSubtitlesV3,
 		FeatureLayoutPassthrough,
 		FeatureRouteDiagnostics,
 		FeatureDeviceQuirksV3,
 		FeatureSeekReanchorV3,
 		FeatureOutputChangeV3,
+		FeatureOutputDisplayEvidenceV3,
 		FeatureDirectStreamResumeV3,
 		FeatureHeaderAuthenticatedMediaV3,
 		FeatureAuthorizedMediaOriginsV3,
@@ -390,6 +418,13 @@ type OutputContextV3 struct {
 	AudioPassthrough *AudioPassthroughV3 `json:"audio_passthrough,omitempty"`
 	CurrentSink      string              `json:"current_sink,omitempty"`
 	SinkType         string              `json:"sink_type,omitempty"`
+	// Display carries the raw active-display HDR facts and how they were
+	// obtained. It is additive: HDRDetails above remains the native-output
+	// authority (decoder ∩ display) that older servers already read. When a
+	// client sends Display at all, the server never falls back from a missing
+	// output HDRDetails to the device-level capability, and an unknown
+	// evidence tier disables native HDR/DV output claims.
+	Display *OutputDisplayV3 `json:"display,omitempty"`
 	// OutputContextID is an optional opaque token identifying the current
 	// output route. The server only ever compares it for equality — in attempt
 	// keys and plan invalidation — so any stable platform-native identity
@@ -398,13 +433,44 @@ type OutputContextV3 struct {
 	OutputContextID string `json:"output_context_id,omitempty"`
 }
 
+// OutputDisplayV3 is the raw display probe with its evidence tier.
+type OutputDisplayV3 struct {
+	// HDREvidence is OutputHDREvidenceExactV3 for a successful probe (an
+	// empty HDRTypes then means a confirmed SDR panel) or
+	// OutputHDREvidenceUnknownV3 when the platform could not answer.
+	HDREvidence string             `json:"hdr_evidence"`
+	HDRTypes    *HDRCapabilitiesV3 `json:"hdr_types,omitempty"`
+	DisplayID   string             `json:"display_id,omitempty"`
+}
+
+const (
+	OutputHDREvidenceExactV3   = "exact"
+	OutputHDREvidenceUnknownV3 = "unknown"
+)
+
+const (
+	subtitleIdentityFFmpegV3    = "ffmpeg_stream_index"
+	subtitleIdentityContainerV3 = "container_track_id"
+)
+
+// NativeEmbeddedSubtitleCapabilityV3 attests native selection for one container
+// and codec set. Stream indexes and container track IDs are distinct namespaces.
+type NativeEmbeddedSubtitleCapabilityV3 struct {
+	Container       string   `json:"container"`
+	Codecs          []string `json:"codecs"`
+	TrackIdentity   string   `json:"track_identity"`
+	ASSStyling      bool     `json:"ass_styling"`
+	FontAttachments bool     `json:"font_attachments"`
+}
+
 type DeliverySubtitleCapabilitiesV3 struct {
-	EmbeddedText    bool `json:"embedded_text"`
-	SidecarText     bool `json:"sidecar_text"`
-	ASSStyling      bool `json:"ass_styling"`
-	EmbeddedBitmap  bool `json:"embedded_bitmap"`
-	SidecarBitmap   bool `json:"sidecar_bitmap"`
-	FontAttachments bool `json:"font_attachments"`
+	NativeEmbedded  []NativeEmbeddedSubtitleCapabilityV3 `json:"native_embedded,omitempty"`
+	EmbeddedText    bool                                 `json:"embedded_text"`
+	SidecarText     bool                                 `json:"sidecar_text"`
+	ASSStyling      bool                                 `json:"ass_styling"`
+	EmbeddedBitmap  bool                                 `json:"embedded_bitmap"`
+	SidecarBitmap   bool                                 `json:"sidecar_bitmap"`
+	FontAttachments bool                                 `json:"font_attachments"`
 }
 
 type DeliveryCapabilityV3 struct {
@@ -648,22 +714,27 @@ type SourceDescriptorV3 struct {
 	// inventing. A client must not substitute the playback engine's reported
 	// duration for it — on an HLS copy remux the engine reports the length
 	// produced so far, not the runtime.
-	DurationSeconds    *float64           `json:"duration_seconds,omitempty"`
-	Container          string             `json:"container,omitempty"`
-	VideoCodec         string             `json:"video_codec,omitempty"`
-	VideoProfile       string             `json:"video_profile,omitempty"`
-	VideoLevel         int                `json:"video_level,omitempty"`
-	BitDepth           int                `json:"bit_depth,omitempty"`
-	ColorRange         string             `json:"color_range,omitempty"`
-	Width              int                `json:"width,omitempty"`
-	Height             int                `json:"height,omitempty"`
-	FrameRate          float64            `json:"frame_rate,omitempty"`
-	BitrateKbps        int                `json:"bitrate_kbps,omitempty"`
-	DynamicRange       string             `json:"dynamic_range,omitempty"`
-	HDR10Plus          bool               `json:"hdr10_plus"`
-	DVProfile          int                `json:"dolby_vision_profile,omitempty"`
-	DVLevel            int                `json:"dolby_vision_level,omitempty"`
-	DVBLCompatID       int                `json:"dv_bl_compat_id,omitempty"`
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+	Container       string   `json:"container,omitempty"`
+	VideoCodec      string   `json:"video_codec,omitempty"`
+	VideoProfile    string   `json:"video_profile,omitempty"`
+	VideoLevel      int      `json:"video_level,omitempty"`
+	BitDepth        int      `json:"bit_depth,omitempty"`
+	ColorRange      string   `json:"color_range,omitempty"`
+	Width           int      `json:"width,omitempty"`
+	Height          int      `json:"height,omitempty"`
+	FrameRate       float64  `json:"frame_rate,omitempty"`
+	BitrateKbps     int      `json:"bitrate_kbps,omitempty"`
+	DynamicRange    string   `json:"dynamic_range,omitempty"`
+	HDR10Plus       bool     `json:"hdr10_plus"`
+	DVProfile       int      `json:"dolby_vision_profile,omitempty"`
+	DVLevel         int      `json:"dolby_vision_level,omitempty"`
+	DVBLCompatID    int      `json:"dv_bl_compat_id,omitempty"`
+	// DVBaseLayerProven is true only when the scan recorded a Dolby Vision
+	// configuration record, an explicit compatibility id, and a present base
+	// layer. A legacy or contradictory row keeps the numeric id but cannot
+	// prove a decodable compatible base signal.
+	DVBaseLayerProven  bool               `json:"dv_base_layer_proven,omitempty"`
 	DVEnhancementLayer EnhancementLayerV3 `json:"dv_enhancement_layer"`
 	AudioCodec         string             `json:"audio_codec,omitempty"`
 	AudioChannels      int                `json:"audio_channels,omitempty"`
@@ -710,10 +781,18 @@ type SubtitleArtifactV3 struct {
 	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
 }
 
+// EmbeddedSubtitleV3 selects a track in the unmodified media source. The
+// container identifier is canonical decimal when the probe supplies one.
+type EmbeddedSubtitleV3 struct {
+	StreamIndex      int    `json:"stream_index"`
+	ContainerTrackID string `json:"container_track_id,omitempty"`
+}
+
 type SubtitleDecisionV3 struct {
-	Mode    SubtitleModeV3 `json:"mode"`
-	TrackID string         `json:"track_id,omitempty"`
-	// Artifact is the single track the client draws. It exists only under
+	Embedded *EmbeddedSubtitleV3 `json:"embedded,omitempty"`
+	Mode     SubtitleModeV3      `json:"mode"`
+	TrackID  string              `json:"track_id,omitempty"`
+	// Artifact is the selected sidecar, mutually exclusive with Embedded. It exists only under
 	// SubtitleRenderV3 and SubtitleConvertV3; SubtitleOffV3 and
 	// SubtitleBurnInV3 have no client-fetchable artifact and must publish none,
 	// including on a plan derived from an earlier plan of the same session.
@@ -1061,6 +1140,52 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 			return err
 		}
 	}
+	if display := ctx.Output.Display; display != nil {
+		display.HDREvidence = strings.ToLower(strings.TrimSpace(display.HDREvidence))
+		switch display.HDREvidence {
+		case OutputHDREvidenceExactV3, OutputHDREvidenceUnknownV3:
+		default:
+			return errors.New("output display hdr_evidence must be exact or unknown")
+		}
+		if len(display.DisplayID) > 64 {
+			return errors.New("output display id exceeds supported size")
+		}
+		if err := validateHDRCapabilitiesV3(display.HDRTypes); err != nil {
+			return err
+		}
+		// An exact display record is the raw panel fact; output.hdr_details
+		// is supposed to be its intersection with the decoder. Reject a
+		// contradiction where hdr_details claims a range the panel does not
+		// carry rather than let planning pick whichever one it reads first.
+		if display.HDREvidence == OutputHDREvidenceExactV3 && ctx.Output.HDRDetails != nil {
+			panel := display.HDRTypes
+			if panel == nil {
+				panel = &HDRCapabilitiesV3{}
+			}
+			out := ctx.Output.HDRDetails
+			if out.HDR10 && !panel.HDR10 || out.HDR10Plus && !panel.HDR10Plus || out.HLG && !panel.HLG {
+				return errors.New("output hdr_details claims a range the exact display record does not carry")
+			}
+			for _, profile := range out.DolbyVisionProfiles {
+				if !containsIntV3(panel.DolbyVisionProfiles, profile) {
+					return errors.New("output hdr_details claims a dolby vision profile the exact display record does not carry")
+				}
+			}
+			// Numeric bounds are ceilings: hdr_details may be tighter than
+			// the panel (the decoder narrows it) but never looser.
+			if boundExceedsV3(out.HDR10MaxWidth, panel.HDR10MaxWidth) || boundExceedsV3(out.HDR10MaxHeight, panel.HDR10MaxHeight) ||
+				boundExceedsFloatV3(out.HDR10MaxFrameRate, panel.HDR10MaxFrameRate) || boundExceedsV3(out.HDR10MaxBitrateKbps, panel.HDR10MaxBitrateKbps) {
+				return errors.New("output hdr_details hdr10 limits exceed the exact display record")
+			}
+			for _, capability := range out.DolbyVisionProfileLevels {
+				for _, panelCapability := range panel.DolbyVisionProfileLevels {
+					if panelCapability.Profile == capability.Profile && capability.MaxLevel > panelCapability.MaxLevel {
+						return errors.New("output hdr_details dolby vision level exceeds the exact display record")
+					}
+				}
+			}
+		}
+	}
 	for name, delivery := range ctx.Deliveries {
 		if len(name) > 64 || len(delivery.Containers) > 64 || len(delivery.VideoCodecs) > 64 || len(delivery.AudioDecodeCodecs) > 64 || len(delivery.AudioPassthroughCodecs) > 64 || len(delivery.Features) > 64 || len(delivery.ValidatedClaims) > 64 || len(delivery.Transformations) > 16 {
 			return errors.New("delivery capability exceeds supported size")
@@ -1073,6 +1198,25 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				if len(value) > 64 {
 					return errors.New("delivery capability value exceeds supported size")
 				}
+			}
+		}
+		if len(delivery.Subtitles.NativeEmbedded) > 16 {
+			return errors.New("native subtitle capability list exceeds supported size")
+		}
+		for i := range delivery.Subtitles.NativeEmbedded {
+			native := &delivery.Subtitles.NativeEmbedded[i]
+			native.Container = strings.ToLower(strings.TrimSpace(native.Container))
+			if native.Container == "" || len(native.Container) > 32 || len(native.Codecs) == 0 || len(native.Codecs) > 32 {
+				return errors.New("invalid native subtitle capability")
+			}
+			if native.TrackIdentity != subtitleIdentityFFmpegV3 && native.TrackIdentity != subtitleIdentityContainerV3 {
+				return errors.New("invalid native subtitle track identity")
+			}
+			for j, codec := range native.Codecs {
+				if strings.TrimSpace(codec) == "" || len(codec) > 64 {
+					return errors.New("invalid native subtitle codec")
+				}
+				native.Codecs[j] = normalizeNativeSubtitleCodecV3(codec)
 			}
 		}
 		seenTransformations := make(map[string]struct{}, len(delivery.Transformations))
@@ -1244,3 +1388,13 @@ func NewTerminalResponseV3(reason, message string, retryable bool) DecisionRespo
 }
 
 func NewPlanExpiryV3(now time.Time) string { return now.Add(MaxTokenTTL).UTC().Format(time.RFC3339) }
+
+// boundExceedsV3 reports whether an output ceiling is looser than the panel's.
+// Zero means "no ceiling declared" on either side.
+func boundExceedsV3(output, panel int) bool {
+	return panel > 0 && (output == 0 || output > panel)
+}
+
+func boundExceedsFloatV3(output, panel float64) bool {
+	return panel > 0 && (output == 0 || output > panel)
+}

@@ -183,6 +183,8 @@ GET /api/v1/api-keys/	non-media
 POST /api/v1/api-keys/	non-media
 GET /api/v1/api-keys/scopes	non-media
 DELETE /api/v1/api-keys/{id}	non-media
+GET /api/v1/auth/account/capability	non-media
+POST /api/v1/auth/account/password	non-media
 GET /api/v1/auth/device	non-media
 POST /api/v1/auth/device/approve	non-media
 GET /api/v1/auth/device/capability	non-media

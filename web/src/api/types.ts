@@ -57,6 +57,14 @@ export interface RefreshResponse {
   expires_in: number;
 }
 
+export interface AccountPasswordCapability {
+  schema_version: number;
+  change_password: boolean;
+  requires_current_password: boolean;
+  minimum_password_length: number;
+  maximum_password_bytes: number;
+}
+
 export interface AuthProviderOption {
   id: string;
   display_name: string;
@@ -2559,6 +2567,16 @@ export interface AdminSession {
   effective_play_method?: string;
   /** Server-side identification of Jellyfin-ecosystem clients (the JF pill). */
   is_jellyfin_client?: boolean;
+  /** Resolved playback workload and route. Node IDs/names are omitted when
+   * that phase runs on the integrated API process (or direct play has no
+   * executor). */
+  routing_workload?: string;
+  routing_execution?: string;
+  routing_execution_node_id?: number;
+  routing_execution_node_name?: string;
+  routing_egress?: string;
+  routing_egress_node_id?: number;
+  routing_egress_node_name?: string;
 }
 
 export interface OperationalLogEntry {

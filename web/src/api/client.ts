@@ -11,7 +11,11 @@ export function onProfileUnverified(listener: ProfileUnverifiedListener | null) 
 
 let accessToken: string | null = null;
 let authContextVersion = 0;
-let refreshPromise: Promise<boolean> | null = null;
+let pendingRefresh: {
+  authContextVersion: number;
+  serverOrigin: string;
+  promise: Promise<boolean>;
+} | null = null;
 
 export function setAccessToken(token: string | null) {
   if (accessToken !== token) authContextVersion += 1;
@@ -204,6 +208,26 @@ function getDeviceHeaders(): Record<string, string> {
     // tablet, or desktop-native layouts.
     "X-Silo-Client-Family": "web",
   };
+}
+
+/** Share one token rotation across player and ordinary API requests. */
+export function refreshAuthentication(): Promise<boolean> {
+  const serverOrigin = currentServerOrigin();
+  if (
+    pendingRefresh?.authContextVersion === authContextVersion &&
+    pendingRefresh.serverOrigin === serverOrigin
+  ) {
+    return pendingRefresh.promise;
+  }
+  const promise = attemptRefresh().finally(() => {
+    if (pendingRefresh?.promise === promise) pendingRefresh = null;
+  });
+  pendingRefresh = { authContextVersion, serverOrigin, promise };
+  return promise;
+}
+
+export function getAuthContextVersion(): number {
+  return authContextVersion;
 }
 
 async function attemptRefresh(): Promise<boolean> {
@@ -504,12 +528,7 @@ async function apiResponseInternal(
     if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
       throw new StaleApiRequestContextError();
     }
-    if (!refreshPromise) {
-      refreshPromise = attemptRefresh().finally(() => {
-        refreshPromise = null;
-      });
-    }
-    const refreshed = await refreshPromise;
+    const refreshed = await refreshAuthentication();
     if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
       throw new StaleApiRequestContextError();
     }

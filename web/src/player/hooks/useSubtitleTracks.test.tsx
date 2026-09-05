@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSubtitleTracks } from "./useSubtitleTracks";
 import type { PlayerSubtitleInfo } from "../types";
@@ -190,7 +190,8 @@ describe("useSubtitleTracks", () => {
     });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=1398");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=1398&duration=600");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("token=abc");
   });
 
   it("resets and refetches on a forward seek past the covered window", async () => {
@@ -287,6 +288,50 @@ describe("useSubtitleTracks", () => {
     }
   });
 
+  it("backs off repeated failures, caps the delay, and resets after recovery", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchMock.mockRejectedValue(new Error("extractor unavailable"));
+    const { videoRef, unmount } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      let attempts = 1;
+      for (const delay of [5000, 10000, 20000, 40000, 60000, 60000]) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(delay - 1);
+          videoRef.current!.dispatchEvent(new Event("timeupdate"));
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(attempts);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(++attempts);
+      }
+      fetchMock.mockResolvedValueOnce(
+        vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nrecovered\n\n"),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(createdTracks[0]!.cues).toHaveLength(1);
+      await act(async () => {
+        videoRef.current!.currentTime = 580;
+        videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      });
+      const beforeRetry = fetchMock.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(beforeRetry + 1);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not treat a failed window as covered when prefetching later", async () => {
     let now = 1_000_000;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -319,6 +364,80 @@ describe("useSubtitleTracks", () => {
     } finally {
       nowSpy.mockRestore();
       errorSpy.mockRestore();
+    }
+  });
+});
+
+describe("subtitle loading recovery", () => {
+  it("aborts a pending window immediately on seek and ignores its late cues", async () => {
+    let finishOld!: (value: { done: boolean; value: Uint8Array }) => void;
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: () =>
+              new Promise((resolve) => {
+                finishOld = resolve;
+              }),
+          }),
+        },
+      })
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n23:20.000 --> 23:22.000\nnew\n\n"));
+    const { videoRef } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+    await waitFor(() => expect(finishOld).toBeDefined());
+    act(() => {
+      videoRef.current!.currentTime = 1400;
+      videoRef.current!.dispatchEvent(new Event("seeking"));
+    });
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(true);
+    await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["new"]));
+    await act(async () => {
+      finishOld({
+        done: false,
+        value: new TextEncoder().encode("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nold\n\n"),
+      });
+    });
+    expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["new"]);
+  });
+
+  it("retries while paused without media events and reports recovery", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const state = vi.fn();
+    const videoRef = makeVideoRef();
+    fetchMock
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nrecovered\n\n"));
+    const { unmount } = renderHook(() =>
+      useSubtitleTracks(
+        videoRef,
+        [srtTrack],
+        1,
+        0,
+        0,
+        { current: 7200 },
+        { current: 0 },
+        undefined,
+        null,
+        0,
+        state,
+      ),
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(state).toHaveBeenLastCalledWith("error");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(state).toHaveBeenLastCalledWith("ready");
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
     }
   });
 });

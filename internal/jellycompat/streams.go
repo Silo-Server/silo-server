@@ -1407,7 +1407,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeSubtitleResponse(w, requestedFormat, data)
 				return
 			}
-			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format)
+			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
 			if subErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 				return
@@ -1459,7 +1459,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				return
 			}
 
-			vttData, convErr := playback.ConvertToVTT(data, string(dl.Format))
+			vttData, convErr := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.FFmpegPath)
 			if convErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
 				return
@@ -1573,20 +1573,9 @@ func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
 }
 
 func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, filePath string, trackIndex int, format string) ([]byte, error) {
-	if data, ok := h.SubtitleCache.LookupText(filePath, trackIndex, format); ok {
-		slog.DebugContext(ctx, "embedded text subtitle served from cache", "component", "jellycompat",
-			"track", trackIndex, "format", format)
-		return data, nil
-	}
-	data, err := playback.ExtractSubtitleWithFormat(ctx, filePath, trackIndex, format, h.FFmpegPath)
-	if err != nil {
-		return nil, err
-	}
-	if cacheErr := h.SubtitleCache.StoreText(filePath, trackIndex, format, data); cacheErr != nil {
-		slog.WarnContext(ctx, "embedded text subtitle cache write failed", "component", "jellycompat",
-			"track", trackIndex, "format", format, "error", cacheErr)
-	}
-	return data, nil
+	return h.SubtitleCache.ExtractText(ctx, filePath, trackIndex, format, func(ctx context.Context) ([]byte, error) {
+		return playback.ExtractSubtitleWithFormat(ctx, filePath, trackIndex, format, h.FFmpegPath)
+	})
 }
 
 type jellyfinSubtitleTrackEvent struct {

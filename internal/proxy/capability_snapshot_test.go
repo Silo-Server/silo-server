@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -74,6 +75,9 @@ func TestProxyCapabilitiesPublishCapabilityHash(t *testing.T) {
 	}
 	if info.CapabilityHash == "" {
 		t.Fatal("served capability report carries no capability_hash")
+	}
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) {
+		t.Fatalf("transport features = %v, want progressive remux relay", info.TransportFeatures)
 	}
 	served := info
 	served.CapabilityHash = ""

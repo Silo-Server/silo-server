@@ -112,7 +112,7 @@ defines each tag and the SemVer contract.
 
 - [Documentation index](docs/wiki/index.md) — user and operator guides
 - [Development guide](DEVELOPMENT.md) — source setup, builds, tests, migrations
-- [Settings API](docs/settings-api.md) and [Downloads API](docs/downloads-api.md) — client contracts
+- [Settings API](docs/settings-api.md), [Downloads API](docs/downloads-api.md), and [Apple Push Display Token](docs/notifications-push-api.md) — client contracts
 
 ## Community and contributions
 
@@ -120,6 +120,11 @@ Questions and discussion: [Discord](https://discord.gg/siloserver).
 Bugs, install problems, and performance issues: the
 [GitHub issue forms](https://github.com/Silo-Server/silo-server/issues/new/choose),
 which ask for reproduction steps and raw logs.
+
+Native clients are developed in
+[`silo-apple`](https://github.com/Silo-Server/silo-apple) and
+[`silo-android`](https://github.com/Silo-Server/silo-android). Client-visible
+API, authentication, playback, or metadata changes should consider both.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Features,
 API changes, migrations, and behavior changes should start as an issue.

@@ -620,13 +620,19 @@ func (h *PlaybackHandler) resolveCompatIdentityRouteWithPolicy(
 		workload = noderouting.WorkloadRemux
 		delivery = noderouting.DeliveryProgressiveRemux
 	}
+	proxyEligible := h.compatProxyEligibility(ctx, requiresAudioBoost)
 	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery,
 			Policy: policy, ProxyAllowed: h.JWTSecret != "",
 		},
 		SessionID: sessionID, EstimatedBitrateKbps: bitrateKbps,
-		ProxyEligible: h.compatProxyEligibility(ctx, requiresAudioBoost),
+		ProxyEligible:          proxyEligible,
+		ProxyExecutionEligible: proxyEligible,
+		// The progressive transcode-to-proxy relay is a native-v3 token/grant
+		// contract. Compatibility redirects keep their existing proxy/API remux
+		// executor until that protocol can describe the two-node route.
+		ExcludedShapeIDs: map[string]struct{}{noderouting.ShapeProgressiveRemuxTranscodeProxy: {}},
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "compile Jellyfin-compatible playback route", "component", "noderouting", "error", err)
