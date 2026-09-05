@@ -603,10 +603,10 @@ export interface components {
        */
       poster_url: string;
       /**
-       * @description The profile playing; empty when the session carries none
+       * @description The profile playing; null when the session carries none
        * @example 1
        */
-      profile_id: string;
+      profile_id: string | null;
       /**
        * @description Empty when unknown
        * @example Laura

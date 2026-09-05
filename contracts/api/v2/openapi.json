@@ -715,12 +715,15 @@
             "type": "string"
           },
           "profile_id": {
-            "description": "The profile playing; empty when the session carries none",
+            "description": "The profile playing; null when the session carries none",
             "examples": [
               "1"
             ],
             "minLength": 1,
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "profile_name": {
             "description": "Empty when unknown",

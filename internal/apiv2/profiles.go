@@ -344,7 +344,7 @@ type PlaybackSession struct {
 	ID                       ID      `json:"id" doc:"The playback session" example:"ps_7f3a"`
 	UserID                   ID      `json:"user_id" example:"1"`
 	Username                 string  `json:"username" example:"laura"`
-	ProfileID                ID      `json:"profile_id" doc:"The profile playing; empty when the session carries none" example:"1"`
+	ProfileID                *ID     `json:"profile_id" nullable:"true" doc:"The profile playing; null when the session carries none" example:"1"`
 	ProfileName              string  `json:"profile_name" doc:"Empty when unknown" example:"Laura"`
 	MediaFileID              ID      `json:"media_file_id" example:"42"`
 	RequestedMediaFileID     ID      `json:"requested_media_file_id" doc:"The file the client asked for before any version substitution" example:"42"`
@@ -444,10 +444,19 @@ func (reg *Registry) listHouseholdSessions(ctx context.Context, _ *struct{}) (*P
 	return &PlaybackSessionCollectionOutput{Body: PlaybackSessionCollection{Collection: NewCollection(items)}}, nil
 }
 
+// optionalID renders an internal string key as an ID, or nil when it is empty.
+func optionalID(v string) *ID {
+	if v == "" {
+		return nil
+	}
+	id := ID(v)
+	return &id
+}
+
 func playbackSessionOf(v handlers.PlaybackSessionView) PlaybackSession {
 	return PlaybackSession{
 		ID: ID(v.SessionID), UserID: IDFromInt(int64(v.UserID)), Username: v.Username,
-		ProfileID: ID(v.ProfileID), ProfileName: v.ProfileName,
+		ProfileID: optionalID(v.ProfileID), ProfileName: v.ProfileName,
 		MediaFileID: IDFromInt(int64(v.MediaFileID)), RequestedMediaFileID: IDFromInt(int64(v.RequestedMediaFileID)),
 		ContentID: v.ContentID, MediaTitle: v.MediaTitle, MediaType: v.MediaType,
 		SeriesName: v.SeriesName, EpisodeName: v.EpisodeName, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,

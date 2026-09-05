@@ -280,6 +280,23 @@ type fakeUpload struct {
 	Size        int
 }
 
+// fixtureProfilelessSession is a live session the reporting node attributed to
+// the account but to no profile, as a Jellyfin-protocol client produces; the
+// fixture proves the null profile_id validates against the contract.
+func fixtureProfilelessSession() handlers.PlaybackSessionView {
+	duration := 8520
+	return handlers.PlaybackSessionView{
+		SessionID: "ps-9c1d", UserID: 1, Username: "laura",
+		MediaFileID: 7, RequestedMediaFileID: 7, ContentID: "tt0111161", MediaTitle: "The Shawshank Redemption", MediaType: "movie",
+		PosterURL: "/api/v1/images/poster/7", PlayMethod: "direct", ReportingNode: "api", EffectivePlayMethod: "direct",
+		FileDuration: &duration, StartedAt: fixedTime(), UpdatedAt: fixedTime().Add(2 * time.Minute),
+		PositionSeconds: 120, IsPaused: true, HasPlaybackControl: false,
+		ClientName: "Infuse", ClientVersion: "8.1", ClientLabel: "Infuse 8.1", ClientLabelFull: "Infuse 8.1", ClientUserAgent: "Infuse/8.1",
+		SourceContainer: "mkv", SourceVideoCodec: "h264", SourceVideoResolution: "1080p", SourceAudioCodec: "aac",
+		VideoDecision: "copy", AudioDecision: "copy", IsJellyfinClient: true,
+	}
+}
+
 // fixtureSession is one live session with every member set, so the fixture
 // shows the whole shape.
 func fixtureSession() handlers.PlaybackSessionView {
@@ -376,7 +393,7 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	}
 	deps.Progress = progress
 	if profiles == nil {
-		profiles = &fakeProfiles{view: fixtureProfileView(), sessions: []handlers.PlaybackSessionView{fixtureSession()}}
+		profiles = &fakeProfiles{view: fixtureProfileView(), sessions: []handlers.PlaybackSessionView{fixtureSession(), fixtureProfilelessSession()}}
 	}
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}

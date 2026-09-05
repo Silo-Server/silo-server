@@ -432,7 +432,7 @@ func TestListHouseholdSessions(t *testing.T) {
 	// Unknown members on the row are nullable, never omitted.
 	profiles.sessions = []handlers.PlaybackSessionView{{SessionID: "ps-bare", UserID: 1, StartedAt: fixedTime(), UpdatedAt: fixedTime()}}
 	body = do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-owner")).Body.String()
-	for _, want := range []string{`"season_number":null`, `"file_duration":null`, `"routing_egress_node_id":null`, `"profile_name":""`} {
+	for _, want := range []string{`"season_number":null`, `"file_duration":null`, `"routing_egress_node_id":null`, `"profile_id":null`, `"profile_name":""`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body lacks %s: %s", want, body)
 		}
