@@ -331,6 +331,34 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
 	})
 	Register(reg, Operation{
+		Operation: func() huma.Operation {
+			o := humaOp(http.MethodPatch, Prefix+"/docprobe/{id}", "patchDocProbe", "probe", "guarded bodyless")
+			// A hand-declared 204 that names a representation: the runtime
+			// never sends a 204 body, so the document must not promise one.
+			o.Responses = map[string]*huma.Response{"204": {
+				Description: "updated",
+				Content:     map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: huma.TypeObject}}},
+			}}
+			return o
+		}(),
+		Class:   ClassPublic,
+		Guarded: true,
+	}, func(_ context.Context, in *struct {
+		ID          string `path:"id"`
+		IfMatch     string `header:"If-Match"`
+		IfNoneMatch string `header:"If-None-Match"`
+		Body        probeBody
+	}) (*struct {
+		ETag string `header:"ETag"`
+	}, error) {
+		if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
+			return nil, p
+		}
+		return &struct {
+			ETag string `header:"ETag"`
+		}{ETag: current.String()}, nil
+	})
+	Register(reg, Operation{
 		Operation: humaOp(http.MethodDelete, Prefix+"/docprobe/{id}", "deleteDocProbe", "probe", "guarded delete"),
 		Class:     ClassPublic,
 		Guarded:   true,
@@ -415,6 +443,14 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	}
 	if put.Responses["200"].Headers["ETag"] == nil {
 		t.Fatalf("put 200 lacks the ETag header: %+v", put.Responses["200"])
+	}
+	patch := doc.Paths[Prefix+"/docprobe/{id}"]["patch"]
+	if r, ok := patch.Responses["204"]; !ok {
+		t.Fatalf("patch lacks its declared 204: %v", patch.Responses)
+	} else if len(r.Content) != 0 {
+		t.Fatalf("patch 204 documents content the runtime never sends: %v", r.Content)
+	} else if r.Headers["ETag"] == nil {
+		t.Fatalf("patch 204 lacks the ETag header: %+v", r)
 	}
 	ifNoneMatchOnPut := false
 	for _, p := range put.Parameters {

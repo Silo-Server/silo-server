@@ -260,6 +260,12 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 			}
 			continue
 		}
+		if code == http.StatusNoContent {
+			// A 204 is bodyless by contract and bufferResponse drops any
+			// body, so a predeclared representation would document what is
+			// never sent, whatever the method.
+			resp.Content = nil
+		}
 		switch {
 		case code == http.StatusNoContent && op.Guarded && op.Method == http.MethodDelete:
 			// A guarded DELETE's 204 has no representation to validate and
