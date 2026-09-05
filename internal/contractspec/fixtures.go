@@ -137,7 +137,7 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			if f.BodyFile != nil || f.Schema != nil || f.ResponseMediaType != nil {
 				fail("%s: a %d fixture has no representation: body_file, schema and response_media_type must be null", where, f.ExpectedStatus)
 			}
-			if f.ExpectedStatus == 304 && f.ResponseHeaders["ETag"] == "" {
+			if f.ExpectedStatus == 304 && headerValue(f.ResponseHeaders, "ETag") == "" {
 				fail("%s: a 304 fixture must record ETag", where)
 			}
 			// A guarded DELETE's 204 has no validator (Register refuses an
@@ -146,7 +146,7 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			// operation, so they fall back to the method-only reading the
 			// probes were written against.
 			guarded := f.OperationID == nil || ops[*f.OperationID].guarded
-			if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && guarded && f.ResponseHeaders["ETag"] != "" {
+			if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && guarded && headerValue(f.ResponseHeaders, "ETag") != "" {
 				fail("%s: a guarded 204 DELETE fixture records an ETag, but a deleted representation has no validator", where)
 			}
 			if f.OperationID != nil {
@@ -185,10 +185,10 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		if mediaType != wantMedia {
 			fail("%s: response_media_type %q, want %q for status %d", where, mediaType, wantMedia, f.ExpectedStatus)
 		}
-		if ct := f.ResponseHeaders["Content-Type"]; !strings.HasPrefix(ct, wantMedia) {
+		if ct := headerValue(f.ResponseHeaders, "Content-Type"); !strings.HasPrefix(ct, wantMedia) {
 			fail("%s: response_headers.Content-Type %q does not match the media type", where, ct)
 		}
-		if f.ExpectedStatus == 429 && f.ResponseHeaders["Retry-After"] == "" {
+		if f.ExpectedStatus == 429 && headerValue(f.ResponseHeaders, "Retry-After") == "" {
 			fail("%s: a 429 fixture must record Retry-After", where)
 		}
 		body, err := fs.ReadFile(fsys, path.Join(contracts.FixturesDir, bodyFile))
@@ -243,4 +243,16 @@ func addResource(c *jsonschema.Compiler, id string, raw []byte) error {
 		return fmt.Errorf("%s: %w", id, err)
 	}
 	return c.AddResource(id, v)
+}
+
+// headerValue reads a recorded response header regardless of how the fixture
+// spelled its name: HTTP header names are case-insensitive, and a fixture that
+// wrote "etag" carries the same validator as one that wrote "ETag".
+func headerValue(headers map[string]string, name string) string {
+	for k, v := range headers {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
 }

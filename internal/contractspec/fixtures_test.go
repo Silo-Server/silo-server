@@ -124,6 +124,16 @@ func TestFixtureValidationSeededFailures(t *testing.T) {
 				return f
 			})
 		}, "a guarded 204 DELETE fixture records an ETag"},
+		{"guarded 204 DELETE records a lowercase etag", func(t *testing.T, m fstest.MapFS) {
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "guarded_delete_ok" {
+						e["response_headers"].(map[string]any)["etag"] = `"stale"`
+					}
+				}
+				return f
+			})
+		}, "a guarded 204 DELETE fixture records an ETag"},
 		{"429 without Retry-After", func(t *testing.T, m fstest.MapFS) {
 			editIndex(t, m, func(f []map[string]any) []map[string]any {
 				for _, e := range f {
