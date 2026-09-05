@@ -83,8 +83,10 @@ const (
 	// dispatch of an external side effect.
 	RetrySafetyDurableDispatch RetrySafety = "durable_dispatch"
 	// RetrySafetyIdempotencyKey: a generic Idempotency-Key, allowed only for an
-	// operation that implements and documents its semantics. No operation
-	// declares it today; documentDeclaration refuses the header otherwise.
+	// operation that implements and documents its semantics. No durable
+	// replay store exists yet, so Register refuses the declaration outright:
+	// the store, the required header, and the replay contract land together
+	// with the first operation the inventory proves needs them.
 	RetrySafetyIdempotencyKey RetrySafety = "idempotency_key"
 	// RetrySafetyNonRetryable: an explicitly documented exception that clients
 	// never retry automatically after an uncertain response.
@@ -319,6 +321,8 @@ func checkOperation(op Operation) error {
 		return fmt.Errorf("retry safety is required on %s: declare how a duplicate submission or a retry after a lost response stays safe", op.Method)
 	case isMutatingMethod(op.Method) && !knownRetrySafety[op.RetrySafety]:
 		return fmt.Errorf("unknown retry safety %q", op.RetrySafety)
+	case op.RetrySafety == RetrySafetyIdempotencyKey:
+		return fmt.Errorf("retry safety %s is not implementable yet: no durable replay store exists, so the declaration would advertise a guarantee the server cannot keep", RetrySafetyIdempotencyKey)
 	case !isMutatingMethod(op.Method) && op.RetrySafety != "":
 		return fmt.Errorf("retry safety is for POST, PUT, PATCH and DELETE; %s has no durable effect to classify", op.Method)
 	}

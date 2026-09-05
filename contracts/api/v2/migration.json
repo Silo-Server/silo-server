@@ -6883,8 +6883,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; invitationService != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint",
-      "retry_safety_note": "invitations_one_pending_idx allows one pending invitation per email, so a duplicate resolves to the conflict. The email is sent inline from the request today; the v2 port must move it behind the durable row."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Create revokes the pending invitation for the address and inserts a fresh-token row, then mails inline; a retry after a lost response invalidates the first token and sends a second mail. The v2 port needs a client-supplied request identity behind a durable outbox."
     },
     {
       "listener": "api",
@@ -7008,8 +7008,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; invitationService != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint",
-      "retry_safety_note": "Re-issues through Send under the same one-pending-per-email index; the v2 port must move the email behind the durable row rather than send inline."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Resend runs the same Send path: each call supersedes the token and mails inline, so a retry invalidates the link the first call sent. The v2 port needs a client-supplied request identity behind a durable outbox."
     },
     {
       "listener": "api",
@@ -10002,8 +10002,8 @@
         "operation_id": null
       },
       "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Asks every node to reload its config; the node converges on its current config however many times it is asked."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Destructive: every node tears down its current sessions and recipes; a retry that lands after new sessions start terminates sessions the first request never touched. Clients must not retry automatically."
     },
     {
       "listener": "api",
@@ -10255,7 +10255,8 @@
         "operation_id": null
       },
       "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.NodeRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Destructive: the node tears down its current sessions and recipes (teardownForForceReload); a retry that lands after new sessions start terminates sessions the first request never touched. Clients must not retry automatically."
     },
     {
       "listener": "api",
@@ -34562,8 +34563,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by playback_attempt_id; the event is attributed to that attempt."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "DEFECT: playback_attempt_id attributes the event but does not dedup it; RecordRouteEvent is an unconditional insert on a non-unique attempt index, so a retry after a lost 202 records the event twice. The v2 port must give each event a stable id with a unique constraint."
     },
     {
       "listener": "api",

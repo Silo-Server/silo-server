@@ -826,7 +826,9 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 // TestIdempotencyKeyHeaderNeedsTheDeclaration pins the forward guard: an
 // input may bind Idempotency-Key only on an operation whose retry safety is
 // idempotency_key, so the document never advertises a field the server
-// ignores.
+// ignores; and that declaration is itself refused until a durable replay
+// store exists, so no operation can claim the strategy without the
+// mechanism.
 func TestIdempotencyKeyHeaderNeedsTheDeclaration(t *testing.T) {
 	type keyed struct {
 		IdempotencyKey string `header:"Idempotency-Key"`
@@ -850,7 +852,13 @@ func TestIdempotencyKeyHeaderNeedsTheDeclaration(t *testing.T) {
 		}()
 		register(RetrySafetyUniqueConstraint)
 	})
-	t.Run("accepted with idempotency_key", func(t *testing.T) {
+	t.Run("idempotency_key refused until a replay store exists", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil || !strings.Contains(r.(string), "replay store") {
+				t.Fatalf("recover = %v", r)
+			}
+		}()
 		register(RetrySafetyIdempotencyKey)
 	})
 }
