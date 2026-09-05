@@ -473,7 +473,7 @@ export interface components {
        */
       preferred_metadata_language: string;
       /**
-       * @description Canonical values: auto, original; empty when unset. Older profiles may carry other stored values
+       * @description Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset
        * @example auto
        */
       quality_preference: string;
@@ -485,7 +485,7 @@ export interface components {
        */
       subtitle_language: string;
       /**
-       * @description Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values
+       * @description Free-form until the vocabulary is ratified (#135). Canonical values today: auto, always, off, default, forced_only; empty when unset
        * @example auto
        */
       subtitle_mode: string;
@@ -554,10 +554,10 @@ export interface components {
        */
       preferred_metadata_language?: string | null;
       /**
+       * @description Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k
        * @example auto
-       * @enum {string}
        */
-      quality_preference?: "auto" | "original";
+      quality_preference?: string;
       /** @example false */
       show_forced_subtitles?: boolean;
       /**
@@ -566,10 +566,10 @@ export interface components {
        */
       subtitle_language?: string | null;
       /**
+       * @description Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, always, off, default, forced_only
        * @example auto
-       * @enum {string}
        */
-      subtitle_mode?: "auto" | "always" | "off";
+      subtitle_mode?: string;
     };
     ProgressCollection: {
       /** @description The page's items; empty, never null */

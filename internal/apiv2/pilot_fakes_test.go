@@ -145,7 +145,7 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 	}
 	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
 		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
-			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: "profile_management", Message: "Profile management requires verifying the primary profile PIN"}
+			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
 	return f.view, nil

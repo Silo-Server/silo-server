@@ -922,8 +922,11 @@ Two findings from the pilot are now settled for every later section:
   deployment, so it takes `limit` and a `cursor` bound to the operation and the acting
   account, keyed by account id ascending (unique, monotonic), and refuses `offset`.
 
-The pilot ledger rows record the remaining v1 divergences: request enums are strict (no `4K`/`UHD`
-aliases) while the profile read model documents canonical values without constraining legacy
+The pilot ledger rows record the remaining v1 divergences: `max_playback_quality` is a strict
+request enum (no `4K`/`UHD` aliases) because the server owns its constants, while
+`quality_preference` and `subtitle_mode` stay free-form (length-bounded) until their vocabulary is
+ratified (#135) since v1 never validated them and the clients already send values outside any
+inferred set; the profile read model documents canonical values without constraining legacy
 stored ones, every string member of a profile is always emitted, ids are string `ID`s, and instants
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.

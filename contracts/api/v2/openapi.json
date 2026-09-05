@@ -735,7 +735,7 @@
             "type": "string"
           },
           "quality_preference": {
-            "description": "Canonical values: auto, original; empty when unset. Older profiles may carry other stored values",
+            "description": "Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset",
             "examples": [
               "auto"
             ],
@@ -755,7 +755,7 @@
             "type": "string"
           },
           "subtitle_mode": {
-            "description": "Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values",
+            "description": "Free-form until the vocabulary is ratified (#135). Canonical values today: auto, always, off, default, forced_only; empty when unset",
             "examples": [
               "auto"
             ],
@@ -932,13 +932,11 @@
             ]
           },
           "quality_preference": {
-            "enum": [
-              "auto",
-              "original"
-            ],
+            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k",
             "examples": [
               "auto"
             ],
+            "maxLength": 32,
             "type": "string"
           },
           "show_forced_subtitles": {
@@ -958,14 +956,11 @@
             ]
           },
           "subtitle_mode": {
-            "enum": [
-              "auto",
-              "always",
-              "off"
-            ],
+            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, always, off, default, forced_only",
             "examples": [
               "auto"
             ],
+            "maxLength": 32,
             "type": "string"
           }
         },

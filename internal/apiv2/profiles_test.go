@@ -87,8 +87,12 @@ func TestUpdateProfileValidation(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
 	auth := bearer(memberToken)
 	for _, tc := range []struct{ body, location, code string }{
-		{`{"subtitle_mode":"loud"}`, "body.subtitle_mode", codeInvalidEnum},
-		{`{"quality_preference":"best"}`, "body.quality_preference", codeInvalidEnum},
+		// quality_preference and subtitle_mode are free-form until their
+		// vocabulary is ratified (#135): v1 never validated them and the
+		// clients send values outside any inferred enum, so only length is
+		// bounded. max_playback_quality has server constants and stays strict.
+		{`{"subtitle_mode":"` + strings.Repeat("s", 33) + `"}`, "body.subtitle_mode", codeOutOfRange},
+		{`{"quality_preference":"` + strings.Repeat("q", 33) + `"}`, "body.quality_preference", codeOutOfRange},
 		{`{"max_playback_quality":"4K"}`, "body.max_playback_quality", codeInvalidEnum},
 		{`{"nickname":"x"}`, "body.nickname", codeUnknownField},
 		{`{"name":""}`, "body.name", codeOutOfRange},
@@ -117,6 +121,13 @@ func TestUpdateProfileValidation(t *testing.T) {
 	// A 72-byte PIN is the longest bcrypt accepts and reaches the store intact.
 	profiles := &fakeProfiles{view: fixtureProfileView()}
 	h = newTestHandler(t, pilotDeps(nil, profiles))
+	// Values the clients send today (web onboarding, Android, Apple) reach
+	// the store unchanged.
+	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"quality_preference":"1080p","subtitle_mode":"forced_only"}`, auth); rec.Code != 200 {
+		t.Errorf("client vocabulary: %d %s", rec.Code, rec.Body.String())
+	} else if req := profiles.last.Request; req.QualityPreference == nil || *req.QualityPreference != "1080p" || req.SubtitleMode == nil || *req.SubtitleMode != "forced_only" {
+		t.Errorf("client vocabulary: request = %+v", req)
+	}
 	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"pin":"`+strings.Repeat("7", 72)+`"}`, auth); rec.Code != 200 || profiles.last.Request.PIN == nil || len(*profiles.last.Request.PIN) != 72 {
 		t.Errorf("72-byte pin: %d %s", rec.Code, rec.Body.String())
 	}
@@ -156,7 +167,7 @@ func TestUpdateProfileDecisions(t *testing.T) {
 		{&handlers.APIError{Status: 404, Code: TypeNotFound.ID, Message: "Profile not found"}, TypeNotFound},
 		{&handlers.APIError{Status: 409, Code: "name_conflict", Message: "A profile with this name already exists"}, TypeConflict},
 		{&handlers.APIError{Status: 403, Code: "forbidden", Message: "You can only update the active profile's playback preferences"}, TypePermissionDenied},
-		{&handlers.APIError{Status: 403, Code: "profile_management", Message: "Profile management requires verifying the primary profile PIN"}, TypeProfileVerificationRequired},
+		{&handlers.APIError{Status: 403, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}, TypeProfileVerificationRequired},
 		{&handlers.APIError{Status: 400, Code: "bad_request", Message: "Invalid max_playback_quality", Field: fieldMaxPlaybackQuality}, TypeValidationFailed},
 		{&handlers.APIError{Status: 500, Code: TypeInternalError.ID, Message: "Failed to store profile preferences"}, TypeInternalError},
 		{errStore, TypeInternalError},

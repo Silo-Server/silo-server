@@ -25,11 +25,11 @@ type Profile struct {
 	IsChild                    bool    `json:"is_child" example:"false"`
 	IsPrimary                  bool    `json:"is_primary" doc:"The household parent (not the server admin role)" example:"true"`
 	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none" example:"PG-13"`
-	QualityPreference          string  `json:"quality_preference" doc:"Canonical values: auto, original; empty when unset. Older profiles may carry other stored values" example:"auto"`
+	QualityPreference          string  `json:"quality_preference" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset" example:"auto"`
 	Language                   string  `json:"language" doc:"Preferred audio language (ISO 639-1); empty inherits" example:"en"`
 	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" doc:"Metadata language (ISO 639-1); empty inherits the library's" example:"en"`
 	SubtitleLanguage           string  `json:"subtitle_language" doc:"Preferred subtitle language (ISO 639-1); empty inherits" example:"en"`
-	SubtitleMode               string  `json:"subtitle_mode" doc:"Canonical values: auto, always, off; empty when unset. Older profiles may carry other stored values" example:"auto"`
+	SubtitleMode               string  `json:"subtitle_mode" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, always, off, default, forced_only; empty when unset" example:"auto"`
 	AutoSkipIntro              bool    `json:"auto_skip_intro" example:"true"`
 	AutoSkipCredits            bool    `json:"auto_skip_credits" example:"false"`
 	AutoSkipRecap              bool    `json:"auto_skip_recap" example:"false"`
@@ -50,11 +50,11 @@ type ProfileUpdate struct {
 	PIN                        Patch[string] `json:"pin,omitzero" minLength:"1" maxLength:"72" doc:"New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear" example:"1234"`
 	IsChild                    *bool         `json:"is_child,omitempty" nullable:"false" example:"false"`
 	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
-	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" enum:"auto,original" example:"auto"`
+	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
 	Language                   Patch[string] `json:"language,omitzero" doc:"Preferred audio language (ISO 639-1); null inherits" example:"en"`
 	PreferredMetadataLanguage  Patch[string] `json:"preferred_metadata_language,omitzero" doc:"Metadata language (ISO 639-1); null inherits the library's" example:"en"`
 	SubtitleLanguage           Patch[string] `json:"subtitle_language,omitzero" doc:"Preferred subtitle language (ISO 639-1); null inherits" example:"en"`
-	SubtitleMode               *string       `json:"subtitle_mode,omitempty" nullable:"false" enum:"auto,always,off" example:"auto"`
+	SubtitleMode               *string       `json:"subtitle_mode,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, always, off, default, forced_only" example:"auto"`
 	AutoSkipIntro              *bool         `json:"auto_skip_intro,omitempty" nullable:"false" example:"true"`
 	AutoSkipCredits            *bool         `json:"auto_skip_credits,omitempty" nullable:"false" example:"false"`
 	AutoSkipRecap              *bool         `json:"auto_skip_recap,omitempty" nullable:"false" example:"false"`
@@ -78,6 +78,10 @@ type ProfileUpdateInput struct {
 
 // fieldMaxPlaybackQuality is the member the v1 handler rejects by name.
 const fieldMaxPlaybackQuality = "max_playback_quality"
+
+// codeProfileManagement is the v1 error code for a household-management
+// check the caller did not pass (an unverified PIN-locked primary profile).
+const codeProfileManagement = "profile_management"
 
 // locationAllowedLibraryIDs is the problem location of the allowlist member.
 const (
@@ -228,7 +232,7 @@ func profileProblem(err error) *Problem {
 	case apiErr.Status == http.StatusBadRequest:
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
-	case apiErr.Status == http.StatusForbidden && apiErr.Code == "profile_management":
+	case apiErr.Status == http.StatusForbidden && apiErr.Code == codeProfileManagement:
 		return NewProblem(TypeProfileVerificationRequired, apiErr.Message)
 	}
 	return serviceProblem(err)

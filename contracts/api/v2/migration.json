@@ -35891,7 +35891,7 @@
         "path": "/api/v2/profiles/{id}",
         "operation_id": "updateProfile"
       },
-      "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Enums strict (no 4K/UHD aliases); every string member always emitted; read model does not constrain legacy stored enum values."
+      "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Only max_playback_quality is a strict enum (no 4K/UHD aliases); quality_preference and subtitle_mode stay free-form (maxLength 32) until ratified (#135) because v1 never validated them and clients send 1080p/4k/2160p/720p and default/forced_only; every string member always emitted; read model does not constrain legacy stored enum values."
     },
     {
       "listener": "api",
