@@ -262,7 +262,7 @@ func (h *LibraryPlaybackPrefHandler) PatchLibraryPlaybackPreference(ctx context.
 	}
 	err = applyPlannedLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, base,
 		func(tx userstore.PreferenceSettingsWriter) ([]profileSettingSync, error) {
-			merged, err := mergeLibraryPlaybackPatch(ctx, tx, base, patch)
+			merged, err := mergeLibraryPlaybackPatch(ctx, tx, base, patch, writes)
 			if err != nil {
 				return nil, err
 			}
@@ -283,10 +283,14 @@ func (h *LibraryPlaybackPrefHandler) PatchLibraryPlaybackPreference(ctx context.
 }
 
 // mergeLibraryPlaybackPatch is the row the patch leaves: each present member
-// as given, each omitted one as the canonical profile_library row currently
+// normalized by the canonical planner, each omitted one as the profile_library row currently
 // holds (nil when there is none). It reads through the transaction's writer.
-func mergeLibraryPlaybackPatch(ctx context.Context, tx userstore.PreferenceSettingsWriter, base userstore.SettingIdentity, patch LibraryPlaybackPrefPatch) (LibraryPlaybackPrefUpdate, error) {
+func mergeLibraryPlaybackPatch(ctx context.Context, tx userstore.PreferenceSettingsWriter, base userstore.SettingIdentity, patch LibraryPlaybackPrefPatch, writes []profileSettingSync) (LibraryPlaybackPrefUpdate, error) {
 	var merged LibraryPlaybackPrefUpdate
+	normalized := make(map[string]json.RawMessage, len(writes))
+	for _, write := range writes {
+		normalized[write.key] = write.value
+	}
 	for _, m := range []struct {
 		key   string
 		patch PrefPatch[string]
@@ -297,7 +301,11 @@ func mergeLibraryPlaybackPatch(ctx context.Context, tx userstore.PreferenceSetti
 		{settingskeys.PlaybackSubtitleMode, patch.SubtitleMode, &merged.SubtitleMode},
 	} {
 		if m.patch.Present {
-			*m.into = m.patch.Value
+			if raw := normalized[m.key]; len(raw) != 0 {
+				if err := json.Unmarshal(raw, m.into); err != nil {
+					return merged, fmt.Errorf("decoding normalized %s: %w", m.key, err)
+				}
+			}
 			continue
 		}
 		if err := canonicalMember(ctx, tx, base, m.key, m.into); err != nil {

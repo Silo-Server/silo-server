@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -708,4 +709,35 @@ func TestUpdateLibraryPlaybackPreferenceValidation(t *testing.T) {
 	demo := preferenceDeps(nil, nil)
 	demo.DemoSettings = fakeSettings{demo: true}
 	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPatch, "/api/v2/library-playback-prefs/1", `{}`, owner), TypePermissionDenied)
+}
+
+func TestGetPreferencesAcceptsMissingLegacyTimestamp(t *testing.T) {
+	for _, timestamp := range []string{"", "not-a-timestamp"} {
+		t.Run(timestamp, func(t *testing.T) {
+			deps := preferenceDeps(&fakeAudioPreferences{prefs: map[string]userstore.AudioPreference{
+				"p-owner/series-old": {ProfileID: "p-owner", SeriesID: "series-old", AudioTrackIndex: 2, UpdatedAt: timestamp},
+			}}, nil)
+			deps.SubtitlePreferences = &fakeSubtitlePreferences{prefs: map[string]userstore.SubtitlePreference{
+				"p-owner/series-old": {ProfileID: "p-owner", SeriesID: "series-old", SubtitleTrackIndex: 3, UpdatedAt: timestamp},
+			}}
+			h := newTestHandler(t, deps)
+			owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+			for _, route := range []string{"/api/v2/audio-prefs/series-old", "/api/v2/subtitle-prefs/series-old"} {
+				rec := do(t, h, http.MethodGet, route, "", owner)
+				if timestamp != "" {
+					requireProblem(t, rec, TypeInternalError)
+					continue
+				}
+				var body struct {
+					UpdatedAt string `json:"updated_at"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if rec.Code != http.StatusOK || body.UpdatedAt != "1970-01-01T00:00:00.000Z" {
+					t.Fatalf("%s: %d %s", route, rec.Code, rec.Body.String())
+				}
+			}
+		})
+	}
 }

@@ -388,3 +388,36 @@ func TestPatchLibraryPlaybackPreferenceConcurrentPatchesBothLand(t *testing.T) {
 		}
 	}
 }
+
+func TestPatchLibraryPlaybackPreferenceMirrorsNormalizedValues(t *testing.T) {
+	_, store := newValuesTestHandler(t)
+	handler := NewLibraryPlaybackPrefHandler(testUserStoreProvider{store: store})
+	for _, input := range []string{" EN-us ", "  "} {
+		if err := handler.PatchLibraryPlaybackPreference(t.Context(), 1, "profile-1", 7, LibraryPlaybackPrefPatch{
+			AudioLanguage:    PrefPatch[string]{Present: true, Value: new(input)},
+			SubtitleLanguage: PrefPatch[string]{Present: true, Value: new(input)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		legacy, err := handler.ListLibraryPlaybackPreferences(t.Context(), 1, "profile-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonical, err := handler.ListLibraryPlaybackPreferencesCanonical(t.Context(), 1, "profile-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if input == "  " {
+			if len(legacy) != 0 || len(canonical) != 0 {
+				t.Fatalf("cleared values: legacy=%+v canonical=%+v", legacy, canonical)
+			}
+			continue
+		}
+		if len(legacy) != 1 || len(canonical) != 1 {
+			t.Fatalf("rows: legacy=%+v canonical=%+v", legacy, canonical)
+		}
+		if legacy[0].AudioLanguage != "en-US" || legacy[0].SubtitleLanguage != "en-US" || canonical[0].AudioLanguage != "en-US" || canonical[0].SubtitleLanguage != "en-US" {
+			t.Fatalf("normalization diverged: legacy=%+v canonical=%+v", legacy, canonical)
+		}
+	}
+}

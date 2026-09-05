@@ -1063,7 +1063,11 @@ rows exist — and the members playback resolves canonically (`audio_language`;
 `subtitle_language`, `subtitle_mode`, `show_forced_subtitles`) are overlaid from the
 `profile_series` rows: a present row replaces the legacy member, an absent row means the member
 is unset (empty string, or absent for `show_forced_subtitles`), and `updated_at` is the newest
-of the rows read. This is the same rule the v2 subtitle `PUT` already applies to the forced
+of the rows read. Older SQLite track preferences can have no recorded timestamp; when none
+of the rows supplies one, v2 emits `1970-01-01T00:00:00.000Z` as an unknown-time sentinel.
+A nonempty malformed output timestamp still fails validation; v1 reads remain unchanged.
+The library patch normalizes present values once and mirrors those same values into the
+legacy composite row, including clearing whitespace-only language overrides. This is the same rule the v2 subtitle `PUT` already applies to the forced
 override: `PUT`/`DELETE /settings/values` change the canonical rows without mirroring into the
 legacy row, so a v2 read of the legacy copy would contradict playback. And
 a member the seam rejects

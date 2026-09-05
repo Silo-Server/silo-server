@@ -497,7 +497,7 @@ export interface components {
       track_signature?: components["schemas"]["AudioTrackSignature"];
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description Last update; Unix epoch when an older SQLite track preference has no recorded timestamp
        * @example 2026-01-02T03:04:05.000Z
        */
       updated_at: string;
@@ -1655,7 +1655,7 @@ export interface components {
       track_signature?: components["schemas"]["SubtitleTrackSignature"];
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description Last update; Unix epoch when an older SQLite track preference has no recorded timestamp
        * @example 2026-01-02T03:04:05.000Z
        */
       updated_at: string;

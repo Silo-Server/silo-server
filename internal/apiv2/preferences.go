@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -31,7 +32,7 @@ type AudioPreference struct {
 	AudioTrackIndex int                  `json:"audio_track_index" doc:"Zero-based index of the chosen track, or -1 for no track" example:"1"`
 	AudioLanguage   string               `json:"audio_language" doc:"Preferred audio language; empty means no language preference" example:"eng"`
 	TrackSignature  *AudioTrackSignature `json:"track_signature,omitempty" nullable:"false" doc:"Absent when the client stored none"`
-	UpdatedAt       Instant              `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
+	UpdatedAt       Instant              `json:"updated_at" doc:"Last update; Unix epoch when an older SQLite track preference has no recorded timestamp" example:"2026-01-02T03:04:05.000Z"`
 }
 
 // AudioPreferenceUpdate is the updateAudioPreference body. The whole
@@ -82,7 +83,7 @@ type SubtitlePreference struct {
 	SubtitleMode         string                  `json:"subtitle_mode" doc:"Subtitle mode. Canonical values: auto, always, off; empty means no mode preference" example:"always"`
 	TrackSignature       *SubtitleTrackSignature `json:"track_signature,omitempty" nullable:"false" doc:"Absent when the client stored none"`
 	ShowForcedSubtitles  *bool                   `json:"show_forced_subtitles,omitempty" nullable:"false" doc:"Forced-subtitle override; absent when the profile has none for the series" example:"true"`
-	UpdatedAt            Instant                 `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
+	UpdatedAt            Instant                 `json:"updated_at" doc:"Last update; Unix epoch when an older SQLite track preference has no recorded timestamp" example:"2026-01-02T03:04:05.000Z"`
 }
 
 // SubtitlePreferenceUpdate is the updateSubtitlePreference body. The
@@ -386,7 +387,7 @@ func preferenceProblem(err error) *Problem {
 }
 
 func audioPreferenceOf(p userstore.AudioPreference) (AudioPreference, *Problem) {
-	updated, problem := storeInstant(p.UpdatedAt)
+	updated, problem := preferenceInstant(p.UpdatedAt)
 	if problem != nil {
 		return AudioPreference{}, problem
 	}
@@ -559,7 +560,7 @@ func (reg *Registry) updateLibraryPlaybackPreference(ctx context.Context, in *Li
 }
 
 func subtitlePreferenceOf(p userstore.SubtitlePreference) (SubtitlePreference, *Problem) {
-	updated, problem := storeInstant(p.UpdatedAt)
+	updated, problem := preferenceInstant(p.UpdatedAt)
 	if problem != nil {
 		return SubtitlePreference{}, problem
 	}
@@ -582,4 +583,14 @@ func subtitlePreferenceOf(p userstore.SubtitlePreference) (SubtitlePreference, *
 		out.ShowForcedSubtitles = ptr(p.ShowForcedSubtitles)
 	}
 	return out, nil
+}
+
+// preferenceInstant represents the unknown timestamp on pre-upgrade SQLite
+// track preferences with the Unix epoch. The value is stable across reads;
+// existing nonempty timestamps still undergo the normal strict validation.
+func preferenceInstant(raw string) (Instant, *Problem) {
+	if raw == "" {
+		return NewInstant(time.Unix(0, 0)), nil
+	}
+	return storeInstant(raw)
 }
