@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"path"
 	"sort"
 	"strings"
@@ -153,7 +154,7 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			fail("%s: a 429 fixture must record Retry-After", where)
 		}
 		guarded := f.OperationID == nil || ops[*f.OperationID].guarded
-		if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && guarded && headerValue(f.ResponseHeaders, "ETag") != "" {
+		if f.ExpectedStatus == 204 && f.Request.Method == http.MethodDelete && guarded && headerValue(f.ResponseHeaders, "ETag") != "" {
 			fail("%s: a guarded 204 DELETE fixture records an ETag, but a deleted representation has no validator", where)
 		}
 		// Every fixture names a documented operation and status, or is a
@@ -171,7 +172,7 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		}
 		// A 204 or 304 has no representation, and a HEAD answer carries the
 		// headers of the GET it mirrors but no body whatever the status.
-		if f.ExpectedStatus == 204 || f.ExpectedStatus == 304 || f.Request.Method == "HEAD" {
+		if f.ExpectedStatus == 204 || f.ExpectedStatus == 304 || f.Request.Method == http.MethodHead {
 			if f.BodyFile != nil || f.Schema != nil || f.ResponseMediaType != nil {
 				fail("%s: a bodyless fixture (%s %d) has no representation: body_file, schema and response_media_type must be null", where, f.Request.Method, f.ExpectedStatus)
 			}
