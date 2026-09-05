@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
 import { v2 } from "@/api/v2/request";
 import { invalidateRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
@@ -13,10 +12,7 @@ export function useSetRating(itemId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (rating: number) =>
-      api(`/ratings/${itemId}`, {
-        method: "PUT",
-        body: JSON.stringify({ rating }),
-      }),
+      v2("PUT /api/v2/ratings/{item_id}", { path: { item_id: itemId }, body: { rating } }),
     onMutate: async (rating: number) => {
       await cancelItemDetailQueries(queryClient, itemId);
       const previous = queryClient.getQueriesData<ItemDetail>({
