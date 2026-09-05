@@ -25,8 +25,14 @@ type externalSubtitleDirCache struct {
 }
 
 type externalSubtitleDirListing struct {
-	entries []os.DirEntry
-	err     error
+	candidates []externalSubtitleCandidate
+	err        error
+}
+
+type externalSubtitleCandidate struct {
+	name string
+	base string
+	ext  string
 }
 
 func newExternalSubtitleDirCache() *externalSubtitleDirCache {
@@ -46,7 +52,7 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 	c.mu.Unlock()
 	if !ok {
 		entries, err := os.ReadDir(dir)
-		listing = externalSubtitleDirListing{entries: entries, err: err}
+		listing = externalSubtitleDirListing{candidates: externalSubtitleCandidates(entries), err: err}
 		c.mu.Lock()
 		if existing, found := c.dirs[dir]; found {
 			listing = existing
@@ -59,7 +65,7 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 		return nil, fmt.Errorf("subtitles: read dir %s: %w", dir, listing.err)
 	}
 
-	return externalSubtitlesFromEntries(mediaFilePath, listing.entries), nil
+	return externalSubtitlesFromCandidates(mediaFilePath, listing.candidates), nil
 }
 
 // DetectExternalSubtitles scans the directory containing the media file for
@@ -84,10 +90,11 @@ func DetectExternalSubtitles(mediaFilePath string) ([]ExternalSubtitleInfo, erro
 }
 
 func externalSubtitlesFromEntries(mediaFilePath string, entries []os.DirEntry) []ExternalSubtitleInfo {
-	dir := filepath.Dir(mediaFilePath)
-	mediaBase := stripExtension(filepath.Base(mediaFilePath))
-	var results []ExternalSubtitleInfo
+	return externalSubtitlesFromCandidates(mediaFilePath, externalSubtitleCandidates(entries))
+}
 
+func externalSubtitleCandidates(entries []os.DirEntry) []externalSubtitleCandidate {
+	var candidates []externalSubtitleCandidate
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -98,10 +105,24 @@ func externalSubtitlesFromEntries(mediaFilePath string, entries []os.DirEntry) [
 		if !subtitleExtensions[ext] {
 			continue
 		}
+		candidates = append(candidates, externalSubtitleCandidate{
+			name: name,
+			base: name[:len(name)-len(ext)],
+			ext:  ext,
+		})
+	}
+	return candidates
+}
 
+func externalSubtitlesFromCandidates(mediaFilePath string, candidates []externalSubtitleCandidate) []ExternalSubtitleInfo {
+	dir := filepath.Dir(mediaFilePath)
+	mediaBase := stripExtension(filepath.Base(mediaFilePath))
+	var results []ExternalSubtitleInfo
+
+	for _, candidate := range candidates {
 		// Check that the subtitle file starts with the media basename
 		// followed by either a dot separator or nothing (exact match).
-		nameWithoutExt := name[:len(name)-len(ext)]
+		nameWithoutExt := candidate.base
 		if !strings.HasPrefix(nameWithoutExt, mediaBase) {
 			continue
 		}
@@ -114,9 +135,9 @@ func externalSubtitlesFromEntries(mediaFilePath string, entries []os.DirEntry) [
 		}
 
 		info := ExternalSubtitleInfo{
-			Path:   filepath.Join(dir, name),
-			Format: strings.TrimPrefix(ext, "."),
-			Title:  name,
+			Path:   filepath.Join(dir, candidate.name),
+			Format: strings.TrimPrefix(candidate.ext, "."),
+			Title:  candidate.name,
 		}
 
 		parseSuffix(suffix, &info)
