@@ -260,6 +260,9 @@ func decisionToAccessScope(input ScopeInput, decision ScopeDecision) access.Scop
 		PreferredMetadataLanguage: decision.PreferredMetadataLanguage,
 		PolicyRevision:            decision.PolicyRevision,
 		ProfileVerified:           decision.ProfileVerified,
+		// The parity harness passes SkipPINVerification for every verified
+		// PIN-locked profile, so both resolvers must report the skip.
+		PINVerificationSkipped: decision.ProfileVerified && input.ProfileHasPIN && input.ProfilePresent,
 	}
 }
 
