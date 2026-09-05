@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "tour_id": "core-2026-07",
+  "steps": [
+    {
+      "id": "welcome",
+      "kind": "welcome",
+      "title": "Silo isn't quite like the others",
+      "body": "You've probably used Plex or Jellyfin. Most of this will feel familiar — but a handful of things work differently here, and they're worth two minutes.",
+      "illustration": "welcome",
+      "links": []
+    },
+    {
+      "id": "favorites-watchlist",
+      "kind": "feature_card",
+      "title": "Favorites teach, your Watchlist remembers",
+      "body": "Favorites tell Silo what you love and shape your recommendations. Your Watchlist is the get-to-it-eventually pile — and Silo tells you when something on it arrives. Both live in the sidebar under Your Stuff.",
+      "illustration": "watchlist",
+      "links": []
+    },
+    {
+      "id": "handoff-taste",
+      "kind": "handoff",
+      "title": "Pick a few favorites",
+      "body": "Choose a handful of titles you love so your recommendations aren't starting cold.",
+      "route": "/taste-seed",
+      "links": []
+    }
+  ]
+}
+

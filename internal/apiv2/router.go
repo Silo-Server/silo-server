@@ -20,6 +20,8 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -72,6 +74,11 @@ type Dependencies struct {
 	DemoSettings apimw.DemoSettingsReader
 	// RateLimit is the generic authenticated-route limiter.
 	RateLimit func(http.Handler) http.Handler
+	// BucketRateLimit builds the per-endpoint limiter an operation with a
+	// RateLimitBucket runs (v1's AuthEndpointHandler). It replaces RateLimit
+	// on that operation; nil leaves a public operation unlimited and a gated
+	// one on RateLimit.
+	BucketRateLimit func(bucket string) func(http.Handler) http.Handler
 	// CursorSecret keys pagination cursors. It must be shared by every replica
 	// (the JWT secret is); empty means a per-process random key.
 	CursorSecret []byte
@@ -94,6 +101,21 @@ type Dependencies struct {
 	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
+	// Devices drives the device-pairing state machine
+	// (*handlers.AuthHandler).
+	Devices DeviceLoginService
+	// Sessions opens and closes login sessions (*handlers.AuthHandler).
+	Sessions SessionService
+	// OAuth redeems browser OAuth completions and drives the browser
+	// handshake (*auth.OAuthHandler).
+	OAuth OAuthService
+	// Onboarding serves the first-run tour (*handlers.OnboardingHandler).
+	Onboarding OnboardingService
+	// Policy describes the policy engine (*handlers.PolicyHandler).
+	Policy PolicyService
+	// UserLibraries lists the libraries the caller may browse
+	// (*handlers.LibraryHandler).
+	UserLibraries UserLibraryService
 	// ProfileSections reads and writes a profile's home-row overrides
 	// (*handlers.SectionHandler).
 	ProfileSections ProfileSectionService
@@ -136,6 +158,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(observe)
 	r.Use(dropDelegationPattern)
 	r.Use(bufferResponse)
+	r.Use(withRequest)
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
@@ -143,6 +166,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	reg := &Registry{api: api, deps: deps}
 	registerAll(reg)
+	serveRawHandshakes(reg)
 	if deps.testRegister != nil {
 		deps.testRegister(reg)
 	}
@@ -391,6 +415,9 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 type AccountService interface {
 	NeedsSetup(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
+	AccountPasswordCapability(ctx context.Context, claims *auth.Claims, profileID string) (handlers.AccountPasswordCapabilityView, error)
+	AuthorizePasswordChange(ctx context.Context, claims *auth.Claims, profileID string) error
+	ChangePassword(ctx context.Context, claims *auth.Claims, currentPassword, newPassword string) error
 }
 
 // ProgressService is the slice of *handlers.ProgressHandler listProgress uses.
@@ -431,6 +458,62 @@ type SectionFlagService interface {
 type LibraryService interface {
 	// ExistingIDs returns the subset of ids that name a library.
 	ExistingIDs(ctx context.Context, ids []int) ([]int, error)
+}
+
+// OAuthService is the slice of *auth.OAuthHandler completeOAuthLogin uses.
+type OAuthService interface {
+	Complete(ctx context.Context, code string) (auth.OAuthCompletion, error)
+	CallbackURL(prefix string, installID int) string
+	Init(ctx context.Context, installID int, next, redirectURI string) (string, error)
+	Callback(ctx context.Context, in auth.OAuthCallbackInput) string
+}
+
+// SessionService is the slice of *handlers.AuthHandler the login-session
+// operations use.
+type SessionService interface {
+	Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error)
+	Logout(ctx context.Context, claims *auth.Claims) error
+	EndImpersonation(ctx context.Context, claims *auth.Claims) error
+	ListProviders() []auth.LoginProviderInfo
+	Refresh(ctx context.Context, refreshToken string) (handlers.RefreshedTokensView, error)
+	ListSessions(ctx context.Context, userID int) ([]*models.AuthSession, error)
+	RevokeSession(ctx context.Context, sessionID string, userID int) error
+	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	SignupEnabled(ctx context.Context) (bool, error)
+	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	PluginLaunchToken(claims *auth.Claims, profileID string) (string, error)
+}
+
+// OnboardingService is the slice of *handlers.OnboardingHandler the
+// onboarding operations use.
+type OnboardingService interface {
+	Flow(ctx context.Context, userID int, profileID, surface string) (onboarding.Flow, error)
+	State(ctx context.Context, userID int, profileID string) (handlers.OnboardingStateView, error)
+	RecordProgress(ctx context.Context, userID int, profileID string, in handlers.OnboardingProgressInput) error
+}
+
+// PolicyService is the slice of *handlers.PolicyHandler getPolicyCapability
+// uses.
+type PolicyService interface {
+	Capability() (handlers.PolicyCapabilityView, bool)
+}
+
+// UserLibraryService is the slice of *handlers.LibraryHandler
+// listUserLibraries uses.
+type UserLibraryService interface {
+	ListUserLibraries(ctx context.Context) ([]handlers.UserLibraryView, error)
+}
+
+// DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing
+// operations use.
+type DeviceLoginService interface {
+	DeviceLoginConfigured() bool
+	StartDeviceLogin(ctx context.Context, input auth.DeviceLoginStartInput) (*auth.DeviceLoginStartResult, error)
+	LookupDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput) (*auth.DeviceLoginInfo, error)
+	PollDeviceLogin(ctx context.Context, deviceCode string) (*handlers.DeviceLoginPollView, error)
+	ApproveDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
+	ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error)
+	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 }
 
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.

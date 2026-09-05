@@ -1,13 +1,20 @@
 import { refreshAccessToken } from "@/api/client";
-import type { User } from "@/api/types";
-import { decodeV2Response, V2_CLIENT_HEADERS, type V2Result } from "@/api/v2/request";
+import type { LoginResponse, User } from "@/api/types";
+import { decodeV2Response, V2_CLIENT_HEADERS } from "@/api/v2/request";
+import type { components } from "@/api/v2/schema";
+
+/** The account document as every v2 credential and account response carries it. */
+export type Account = components["schemas"]["Account"];
+
+/** The token pair login, setup, signup, and device approval answer with. */
+export type TokenPair = components["schemas"]["TokenPair"];
 
 /**
- * The account as the app still models it. Login answers on v1 with numeric
- * ids, so the one account state keeps that shape until that operation moves;
- * the v2 id is the same account id rendered as a string.
+ * The account as the app still models it: numeric ids, because the v1
+ * responses that remain (invitation accept, admin impersonate) answer with
+ * them; the v2 id is the same account id rendered as a string.
  */
-export function userFromAccount(account: V2Result<"GET /api/v2/account/me">): User {
+export function userFromAccount(account: Account): User {
   return {
     id: Number(account.id),
     username: account.username,
@@ -22,6 +29,20 @@ export function userFromAccount(account: V2Result<"GET /api/v2/account/me">): Us
           impersonator_username: account.impersonation.impersonator_username,
         }
       : null,
+  };
+}
+
+/**
+ * Projects a v2 token pair onto the session shape the auth provider applies,
+ * so a login, setup, signup, or device-approval answer and the v1 responses
+ * that still produce one flow through the same state update.
+ */
+export function sessionFromTokenPair(pair: TokenPair): LoginResponse {
+  return {
+    access_token: pair.access_token,
+    refresh_token: pair.refresh_token,
+    expires_in: pair.expires_in,
+    user: userFromAccount(pair.user),
   };
 }
 

@@ -1,0 +1,15 @@
+{
+  "device_code": "dev-1",
+  "user_code": "ABCD-1234",
+  "match_code": "42",
+  "verification_uri": "https://silo.example.test/link",
+  "verification_uri_complete": "https://silo.example.test/link?code=ABCD-1234",
+  "expires_at": "2026-01-02T03:14:05.678Z",
+  "expires_in": 600,
+  "interval": 5,
+  "device_name": "Living room TV",
+  "device_platform": "tvos",
+  "client_purpose": "device_login",
+  "temporary": false
+}
+

@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import QRCode from "react-qr-code";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
-import { api } from "@/api/client";
+import { sessionFromTokenPair } from "@/api/v2/account";
+import { v2, type V2Result } from "@/api/v2/request";
 import { listProfiles } from "@/hooks/queries/profiles";
-import type { DeviceLoginPollResponse, DeviceLoginStartResponse } from "@/api/types";
 import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -24,6 +24,8 @@ import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { toast } from "sonner";
+
+type DeviceLoginSession = V2Result<"POST /api/v2/auth/device/start">;
 
 function detectPlatform() {
   const ua = navigator.userAgent;
@@ -71,7 +73,7 @@ export default function Login() {
   const [provider, setProvider] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [startingDeviceLogin, setStartingDeviceLogin] = useState(false);
-  const [deviceSession, setDeviceSession] = useState<DeviceLoginStartResponse | null>(null);
+  const [deviceSession, setDeviceSession] = useState<DeviceLoginSession | null>(null);
   const [deviceStatusMessage, setDeviceStatusMessage] = useState("");
   const [devicePolling, setDevicePolling] = useState(false);
   const [showDeviceFallback, setShowDeviceFallback] = useState(false);
@@ -147,27 +149,16 @@ export default function Login() {
       let shouldPollAgain = true;
       try {
         setDevicePolling(true);
-        const result = await api<DeviceLoginPollResponse>("/auth/device/poll", {
-          method: "POST",
-          body: JSON.stringify({ device_code: currentSession.device_code }),
+        const result = await v2("POST /api/v2/auth/device/poll", {
+          body: { device_code: currentSession.device_code },
         });
         if (cancelled) {
           return;
         }
 
-        if (
-          result.status === "approved" &&
-          result.access_token &&
-          result.refresh_token &&
-          result.user
-        ) {
+        if (result.status === "approved" && result.tokens) {
           shouldPollAgain = false;
-          completeLogin({
-            access_token: result.access_token,
-            refresh_token: result.refresh_token,
-            expires_in: result.expires_in ?? 0,
-            user: result.user,
-          });
+          completeLogin(sessionFromTokenPair(result.tokens));
           setDeviceStatusMessage("Signed in. Loading profiles...");
           void navigateAfterLogin();
           return;
@@ -248,10 +239,7 @@ export default function Login() {
   async function handleStartDeviceLogin() {
     setStartingDeviceLogin(true);
     try {
-      const data = await api<DeviceLoginStartResponse>("/auth/device/start", {
-        method: "POST",
-        body: JSON.stringify(buildDevicePayload()),
-      });
+      const data = await v2("POST /api/v2/auth/device/start", { body: buildDevicePayload() });
       setDeviceSession(data);
       setDeviceStatusMessage("Waiting for approval on your phone...");
       setShowDeviceFallback(false);
@@ -287,7 +275,7 @@ export default function Login() {
                 <form
                   key={entry.id}
                   method="post"
-                  action={`/api/v1/auth/oauth/${entry.installation_id}/init${nextParam}`}
+                  action={`/api/v2/auth/oauth/${entry.installation_id}/init${nextParam}`}
                 >
                   <Button type="submit" variant="outline" className="w-full justify-start gap-3">
                     {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}

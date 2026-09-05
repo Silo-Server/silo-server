@@ -13,7 +13,13 @@
  * device headers) is the same machinery the v1 client uses, shared through
  * `fetchWithSession`. This module never touches `/api/v1`.
  */
-import { fetchWithSession, reportProfileUnverified } from "../client";
+import {
+  fetchWithSession,
+  isProfileRequestContextCurrent,
+  reportProfileUnverified,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "../client";
 import { v2Operations } from "./operations";
 import type { components, paths } from "./schema";
 
@@ -115,6 +121,14 @@ type QueryValue = string | number | boolean | null | undefined;
 
 interface CommonOptions {
   signal?: AbortSignal;
+  /**
+   * A captured account/profile authority for a queued write. The request
+   * carries the snapshot's bearer token and profile/PIN headers rather than
+   * whatever session is active when it is finally sent, and a stale snapshot
+   * (logout, account or server switch) is rejected before and after fetch,
+   * exactly as `apiWithProfileRequestContext` does for v1.
+   */
+  profileContext?: ProfileRequestContextSnapshot;
 }
 
 export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
@@ -274,11 +288,22 @@ export async function v2<K extends V2OperationKey>(
     }
     init.body = form;
   }
+  const snapshot = options.profileContext;
+  if (snapshot) {
+    // Explicit headers win over the active session inside fetchWithSession.
+    headers.Authorization = `Bearer ${snapshot.accessToken}`;
+    headers["X-Profile-Id"] = snapshot.profileId;
+    headers["X-Profile-Token"] = snapshot.profileToken ?? "";
+  }
 
   const { res, requestProfileId, requestProfileToken } = await fetchWithSession(
     buildUrl(route, options.path, options.query),
     init,
+    snapshot,
   );
+  if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
+    throw new StaleApiRequestContextError();
+  }
 
   try {
     return await decodeV2Response(key, res);
@@ -288,7 +313,7 @@ export async function v2<K extends V2OperationKey>(
       err.status === 403 &&
       err.problemType === "profile_verification_required"
     ) {
-      reportProfileUnverified(requestProfileId, requestProfileToken);
+      reportProfileUnverified(requestProfileId, requestProfileToken, snapshot);
     }
     throw err;
   }

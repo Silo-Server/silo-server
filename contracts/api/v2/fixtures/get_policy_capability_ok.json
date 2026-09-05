@@ -1,0 +1,14 @@
+{
+  "revision": "1",
+  "state": "available",
+  "editor_available": true,
+  "decision_types": [
+    "download",
+    "playback"
+  ],
+  "generation": 3,
+  "degraded": false,
+  "degraded_domains": [],
+  "eval_timeouts": 0
+}
+

@@ -47,7 +47,7 @@ describe("bootstrapAccessToken", () => {
   it("refreshes the access token before protected requests on startup", async () => {
     setRefreshToken("fake");
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
-      expect(String(input)).toBe("/api/v1/auth/refresh");
+      expect(String(input)).toBe("/api/v2/auth/refresh");
       return new Response(
         JSON.stringify({
           access_token: "dummy",
@@ -213,7 +213,7 @@ describe("api", () => {
     let protectedRequestCount = 0;
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const path = String(input);
-      if (path === "/api/v1/auth/refresh") {
+      if (path === "/api/v2/auth/refresh") {
         // Model a household profile switch while refresh is in flight.
         setProfileId("profile-new");
         setProfileToken("new");
@@ -247,7 +247,7 @@ describe("api", () => {
     ).rejects.toMatchObject({ status: 403, code: "profile_unverified" });
 
     const requestCalls = fetchMock.mock.calls.filter(
-      ([input]) => String(input) !== "/api/v1/auth/refresh",
+      ([input]) => String(input) !== "/api/v2/auth/refresh",
     );
     expect(requestCalls).toHaveLength(2);
     const firstHeaders = requestCalls[0]?.[1]?.headers as Record<string, string>;
@@ -349,7 +349,7 @@ describe("api", () => {
     expect(snapshot).not.toBeNull();
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
-      if (url === "/api/v1/auth/refresh") {
+      if (url === "/api/v2/auth/refresh") {
         expect(JSON.parse(String(init?.body))).toEqual({ refresh_token: "dummy" });
         return Response.json({
           access_token: "example",
@@ -498,7 +498,7 @@ describe("api", () => {
         resolveRefresh = resolve;
       });
       const fetchMock = vi.fn<typeof fetch>(async (input) => {
-        if (String(input) === "/api/v1/auth/refresh") return refreshResponse;
+        if (String(input) === "/api/v2/auth/refresh") return refreshResponse;
         return Response.json({ error: "unauthorized", message: "expired" }, { status: 401 });
       });
       vi.stubGlobal("fetch", fetchMock);

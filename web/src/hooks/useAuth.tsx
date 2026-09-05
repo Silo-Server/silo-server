@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
-  api,
   ApiClientError,
   bootstrapAccessToken,
   getAccessToken,
@@ -12,17 +11,10 @@ import {
   setRefreshToken,
 } from "@/api/client";
 import { storage } from "@/utils/storage";
-import type {
-  AuthProviderOption,
-  LoginResponse,
-  Profile,
-  SetupRequest,
-  SignupRequest,
-  User,
-} from "@/api/types";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import type { LoginResponse, Profile, User } from "@/api/types";
+import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hooks/queries/profiles";
-import { restoreUserSession, userFromAccount } from "@/api/v2/account";
+import { restoreUserSession, sessionFromTokenPair, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import {
   clearStoredImpersonationAdminSession,
@@ -30,6 +22,9 @@ import {
   saveStoredImpersonationAdminSession,
   type StoredImpersonationAdminSession,
 } from "@/lib/impersonationSession";
+
+/** One sign-in option the server offers, as the v2 listAuthProviders operation describes it. */
+export type AuthProviderOption = V2Result<"GET /api/v2/auth/providers">["items"][number];
 
 interface AuthState {
   user: User | null;
@@ -65,10 +60,12 @@ export function getBootstrapProfile(profiles: Profile[]): Profile | null {
 }
 
 function isRecoverableImpersonationAuthError(error: unknown): boolean {
-  // The current-user fetch runs over v2 and fails with a Problem; ending an
-  // impersonation still runs over v1 and fails with an ApiClientError.
+  // The current-user fetch and endImpersonation run over v2 and fail with a
+  // Problem: a stale session is 401, and a session the server no longer
+  // considers impersonating is 409 `conflict`. The ApiClientError branch keeps
+  // the v1 admin impersonate flow's answers recoverable.
   if (error instanceof V2ProblemError) {
-    return error.status === 401;
+    return error.status === 401 || (error.status === 409 && error.problemType === "conflict");
   }
 
   if (!(error instanceof ApiClientError)) {
@@ -313,7 +310,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const endImpersonation = useCallback(async () => {
     await endImpersonationWithRecovery({
-      endImpersonationRequest: () => api("/auth/impersonation/end", { method: "POST" }),
+      endImpersonationRequest: () => v2("POST /api/v2/auth/impersonation/end"),
       loadStoredImpersonationAdminSession,
       restoreAdminUser,
       clearAuthState,
@@ -324,7 +321,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     // Fire and forget the server logout
     if (getAccessToken()) {
-      api("/auth/logout", { method: "POST" }).catch(() => {});
+      v2("POST /api/v2/auth/logout").catch(() => {});
     }
     clearAuthState();
   }, [clearAuthState]);
@@ -361,16 +358,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function initialize() {
       try {
-        const providersRequest: Promise<AuthProviderOption[]> = api("/auth/providers");
         const [status, availableProviders] = await Promise.all([
           v2("GET /api/v2/system/setup"),
-          providersRequest,
+          v2("GET /api/v2/auth/providers"),
         ]);
         if (cancelled) {
           return;
         }
         setSetupRequired(status.needs_setup);
-        setProviders(availableProviders ?? []);
+        setProviders(availableProviders.items ?? []);
       } catch {
         if (!cancelled) {
           setSetupRequired(false);
@@ -470,46 +466,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string, provider?: string) => {
-      const data: LoginResponse = await api("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password, provider }),
+      const tokens = await v2("POST /api/v2/auth/login", {
+        body: { username, password, provider },
       });
-      applyAuthenticatedUser(data);
+      applyAuthenticatedUser(sessionFromTokenPair(tokens));
     },
     [applyAuthenticatedUser],
   );
 
   const setupInitialUser = useCallback(
     async (username: string, email: string, password: string) => {
-      const body: SetupRequest = {
-        username,
-        email,
-        password,
-        create_default_profile: true,
-      };
-      const data: LoginResponse = await api("/auth/setup", {
-        method: "POST",
-        body: JSON.stringify(body),
+      const tokens = await v2("POST /api/v2/auth/setup", {
+        body: { username, email, password, create_default_profile: true },
       });
-      applyAuthenticatedUser(data);
+      applyAuthenticatedUser(sessionFromTokenPair(tokens));
     },
     [applyAuthenticatedUser],
   );
 
   const signup = useCallback(
     async (username: string, email: string, password: string, inviteCode: string) => {
-      const body: SignupRequest = {
-        username,
-        email,
-        password,
-        invite_code: inviteCode,
-        create_default_profile: true,
-      };
-      const data: LoginResponse = await api("/auth/signup", {
-        method: "POST",
-        body: JSON.stringify(body),
+      const tokens = await v2("POST /api/v2/auth/signup", {
+        body: { username, email, password, invite_code: inviteCode, create_default_profile: true },
       });
-      applyAuthenticatedUser(data);
+      applyAuthenticatedUser(sessionFromTokenPair(tokens));
     },
     [applyAuthenticatedUser],
   );

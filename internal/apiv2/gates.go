@@ -33,7 +33,8 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		permission, _ := op.Metadata[metaPermission].(string)
 		demoRestricted, _ := op.Metadata[metaDemoRestricted].(bool)
 		profileOptional, _ := op.Metadata[metaProfileOptional].(bool)
-		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional)
+		bucket, _ := op.Metadata[metaRateLimitBucket].(string)
+		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional, bucket)
 		r, w := humachi.Unwrap(ctx)
 		if missing != "" {
 			// A gate the class needs is not wired. Fail closed with a typed
@@ -52,9 +53,17 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 // mode denies before the limiter so a refused request never spends
 // rate-limit budget, exactly as on v1. Viewer access runs for every class v1
 // runs it for, so a PIN-locked or unknown profile is judged the same way on
-// both surfaces. The second result names the first gate the wiring lacks.
-func gateChain(deps Dependencies, class Class, permission string, demoRestricted, profileOptional bool) ([]func(http.Handler) http.Handler, string) {
+// both surfaces. An operation naming a rate-limit bucket runs v1's
+// per-endpoint limiter (AuthEndpointHandler) in the limiter's slot; see
+// rateLimiter. The second result names the first gate the wiring lacks.
+func gateChain(deps Dependencies, class Class, permission string, demoRestricted, profileOptional bool, bucket string) ([]func(http.Handler) http.Handler, string) {
 	if class == ClassPublic {
+		// A public operation with a named budget runs the per-endpoint
+		// limiter and nothing else; a missing limiter leaves it unlimited,
+		// as on v1.
+		if bucket != "" && deps.BucketRateLimit != nil {
+			return []func(http.Handler) http.Handler{deps.BucketRateLimit(bucket)}, ""
+		}
 		return nil, ""
 	}
 	if deps.Auth == nil {
@@ -64,8 +73,8 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 	if demoRestricted {
 		chain = append(chain, demoGate(deps.DemoSettings))
 	}
-	if deps.RateLimit != nil {
-		chain = append(chain, deps.RateLimit)
+	if limiter := rateLimiter(deps, bucket); limiter != nil {
+		chain = append(chain, limiter)
 	}
 	if class == ClassAuthenticated {
 		// The v1 account-scoped groups (diagnostics, compat connect-info) stop
@@ -94,6 +103,22 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, gate)
 	}
 	return chain, ""
+}
+
+// rateLimiter is the limiter a gated operation runs: the per-endpoint budget
+// it names (v1's AuthEndpointHandler, which spends the shared per-IP counter
+// and then the endpoint's own, keyed by client IP), else the generic
+// authenticated limiter. An operation with a bucket never also runs the
+// generic limiter: v1 mounts one or the other on a route (POST
+// /auth/account/password runs only AuthEndpointHandler("password_change")),
+// and both spend the same per-IP counter, so stacking them would charge a
+// request twice. A bucket without a wired bucket limiter falls back to the
+// generic one rather than leaving the operation unlimited.
+func rateLimiter(deps Dependencies, bucket string) func(http.Handler) http.Handler {
+	if bucket != "" && deps.BucketRateLimit != nil {
+		return deps.BucketRateLimit(bucket)
+	}
+	return deps.RateLimit
 }
 
 // runChain runs chi-style middleware in front of the Huma continuation. A

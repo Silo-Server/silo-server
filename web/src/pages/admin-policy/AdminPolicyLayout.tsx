@@ -77,7 +77,7 @@ export default function AdminPolicyLayout() {
 
   const unavailable =
     capability.isError ||
-    capability.data?.enabled === false ||
+    (capability.data !== undefined && capability.data.state !== "available") ||
     capability.data?.editor_available === false;
 
   return (

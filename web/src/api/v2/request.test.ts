@@ -236,7 +236,7 @@ describe("v2 request boundary", () => {
     let protectedCalls = 0;
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
-      if (url === "/api/v1/auth/refresh") {
+      if (url === "/api/v2/auth/refresh") {
         return json({ access_token: "fresh", refresh_token: "refresh-2", expires_in: 3600 });
       }
       protectedCalls += 1;
@@ -249,7 +249,9 @@ describe("v2 request boundary", () => {
     const me = await v2("GET /api/v2/account/me");
     expect(me.username).toBe("laura");
 
-    const v2Calls = fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/v2/"));
+    const v2Calls = fetchMock.mock.calls.filter(
+      ([input]) => String(input) === "/api/v2/account/me",
+    );
     expect(v2Calls).toHaveLength(2);
     const first = v2Calls[0]?.[1]?.headers as Record<string, string>;
     const retry = v2Calls[1]?.[1]?.headers as Record<string, string>;

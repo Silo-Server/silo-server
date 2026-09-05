@@ -2,9 +2,8 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import { listProfiles } from "@/hooks/queries/profiles";
-import type { SignupStatusResponse } from "@/api/types";
 import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -31,7 +30,7 @@ export default function Signup() {
 
   const statusQuery = useQuery({
     queryKey: ["auth", "signup-status"],
-    queryFn: () => api<SignupStatusResponse>("/auth/signup"),
+    queryFn: () => v2("GET /api/v2/auth/signup"),
   });
 
   if (loading || statusQuery.isPending) {

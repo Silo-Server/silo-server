@@ -417,71 +417,83 @@ type userLibraryResponse struct {
 
 // --- Handler methods ---
 
-// HandleListUserLibraries handles GET /user/libraries.
-// It returns only enabled libraries the current user has access to, with
-// simplified fields (no paths, last scan metadata, etc.).
-func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.Request) {
+// UserLibraryView is one library the caller may browse.
+type UserLibraryView struct {
+	ID        int
+	Name      string
+	Type      string
+	SortOrder int
+	PosterURL string
+}
+
+// ListUserLibraries lists the enabled libraries the caller may see: the
+// viewer scope's allowlist when one is in context, else the account's
+// effective policy. v1 GET /user/libraries and v2 listUserLibraries both
+// call it; a failure is an *APIError.
+func (h *LibraryHandler) ListUserLibraries(ctx context.Context) ([]UserLibraryView, error) {
 	var folders []*models.MediaFolder
 	var err error
-	if scope, ok := access.GetScope(r.Context()); ok {
+	if scope, ok := access.GetScope(ctx); ok {
 		if scope.LibrariesRestricted {
-			folders, err = h.folderRepo.ListByIDs(r.Context(), scope.AllowedLibraryIDs)
+			folders, err = h.folderRepo.ListByIDs(ctx, scope.AllowedLibraryIDs)
 		} else {
-			folders, err = h.folderRepo.GetEnabled(r.Context())
+			folders, err = h.folderRepo.GetEnabled(ctx)
+		}
+	} else if h.userRepo != nil {
+		userID := apimw.GetUserID(ctx)
+		user, userErr := h.userRepo.GetByID(ctx, userID)
+		if userErr != nil {
+			slog.ErrorContext(ctx, "looking up user for library access", "component", "api", "error", userErr)
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to look up user")
+		}
+		effective, policyErr := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
+		if policyErr != nil {
+			slog.ErrorContext(ctx, "resolving user policy for library access", "component", "api", "error", policyErr)
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
+		}
+		if effective.LibraryIDs != nil {
+			folders, err = h.folderRepo.ListByIDs(ctx, effective.LibraryIDs)
+		} else {
+			folders, err = h.folderRepo.GetEnabled(ctx)
 		}
 	} else {
-		userID := apimw.GetUserID(r.Context())
-
-		if h.userRepo != nil {
-			user, userErr := h.userRepo.GetByID(r.Context(), userID)
-			if userErr != nil {
-				slog.ErrorContext(r.Context(), "looking up user for library access", "component", "api", "error", userErr)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to look up user")
-				return
-			}
-
-			effective, policyErr := access.EffectivePolicyForUser(r.Context(), user, h.AccessGroups)
-			if policyErr != nil {
-				slog.ErrorContext(r.Context(), "resolving user policy for library access", "component", "api", "error", policyErr)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
-				return
-			}
-			if effective.LibraryIDs != nil {
-				folders, err = h.folderRepo.ListByIDs(r.Context(), effective.LibraryIDs)
-			} else {
-				folders, err = h.folderRepo.GetEnabled(r.Context())
-			}
-		} else {
-			folders, err = h.folderRepo.GetEnabled(r.Context())
-		}
+		folders, err = h.folderRepo.GetEnabled(ctx)
 	}
-
 	if err != nil {
-		slog.ErrorContext(r.Context(), "listing user libraries", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list libraries")
-		return
+		slog.ErrorContext(ctx, "listing user libraries", "component", "api", "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list libraries")
 	}
 
-	resp := make([]userLibraryResponse, 0, len(folders))
+	out := make([]UserLibraryView, 0, len(folders))
 	for _, f := range folders {
-		entry := userLibraryResponse{
-			ID:        f.ID,
-			Name:      f.Name,
-			Type:      f.Type,
-			SortOrder: f.SortOrder,
-		}
+		entry := UserLibraryView{ID: f.ID, Name: f.Name, Type: f.Type, SortOrder: f.SortOrder}
 		if f.PosterPath != "" && h.S3Meta != nil {
 			ttl := h.PresignTTL
 			if ttl <= 0 {
 				ttl = 4 * time.Hour
 			}
-			if url, err := h.S3Meta.PresignGetURL(r.Context(), h.S3Meta.Bucket(), f.PosterPath, ttl); err == nil {
+			if url, err := h.S3Meta.PresignGetURL(ctx, h.S3Meta.Bucket(), f.PosterPath, ttl); err == nil {
 				entry.PosterURL = url
 			}
 		}
-		resp = append(resp, entry)
+		out = append(out, entry)
 	}
+	return out, nil
+}
 
+// HandleListUserLibraries handles GET /user/libraries.
+// It returns only enabled libraries the current user has access to, with
+// simplified fields (no paths, last scan metadata, etc.).
+func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.Request) {
+	libraries, err := h.ListUserLibraries(r.Context())
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	resp := make([]userLibraryResponse, 0, len(libraries))
+	for _, l := range libraries {
+		resp = append(resp, userLibraryResponse(l))
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

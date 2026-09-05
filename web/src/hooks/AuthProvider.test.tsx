@@ -2,8 +2,9 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AuthProviderOption, Profile } from "@/api/types";
+import type { Profile } from "@/api/types";
 import { v2Fixture } from "@/api/v2/testing";
+import listAuthProvidersOk from "../../../contracts/api/v2/fixtures/list_auth_providers_ok.json";
 import { storage } from "@/utils/storage";
 import { AuthProvider, useAuth } from "./useAuth";
 
@@ -117,44 +118,39 @@ describe("AuthProvider", () => {
       if (key === "GET /api/v2/system/setup") {
         return Promise.resolve(v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false }));
       }
+      if (key === "GET /api/v2/auth/providers") {
+        return Promise.resolve(v2Fixture<"GET /api/v2/auth/providers">({ items: [] }));
+      }
       return Promise.reject(new Error(`unexpected v2 call: ${key}`));
     });
   });
 
   it("preserves OAuth login providers returned by the auth providers endpoint", async () => {
-    const providers: AuthProviderOption[] = [
-      { id: "local", display_name: "Local", mode: "credentials", default: true },
-      {
-        id: "plugin:41:oidc",
-        display_name: "OIDC",
-        mode: "oauth",
-        default: false,
-        installation_id: 41,
-      },
-    ];
-
-    apiMock.mockImplementation((path: string): Promise<AuthProviderOption[]> => {
-      if (path === "/auth/providers") {
-        return Promise.resolve(providers);
+    v2Mock.mockImplementation((key: string) => {
+      if (key === "GET /api/v2/system/setup") {
+        return Promise.resolve(v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false }));
       }
-      return Promise.reject(new Error(`unexpected API call: ${path}`));
+      if (key === "GET /api/v2/auth/providers") {
+        return Promise.resolve(v2Fixture<"GET /api/v2/auth/providers">(listAuthProvidersOk));
+      }
+      return Promise.reject(new Error(`unexpected v2 call: ${key}`));
     });
+    apiMock.mockImplementation((path: string) =>
+      Promise.reject(new Error(`unexpected API call: ${path}`)),
+    );
 
     renderWithAuthProvider(<ProviderProbe />);
 
     await waitFor(() => {
       expect(screen.getByTestId("providers")).toHaveTextContent("local:credentials");
-      expect(screen.getByTestId("providers")).toHaveTextContent("plugin:41:oidc:oauth");
+      expect(screen.getByTestId("providers")).toHaveTextContent("plugin-3:oauth");
     });
   });
 
   it("clears cached profile-scoped data when the active profile changes", async () => {
-    apiMock.mockImplementation((path: string) => {
-      if (path === "/auth/providers") {
-        return Promise.resolve([]);
-      }
-      return Promise.reject(new Error(`unexpected API call: ${path}`));
-    });
+    apiMock.mockImplementation((path: string) =>
+      Promise.reject(new Error(`unexpected API call: ${path}`)),
+    );
 
     renderWithAuthProvider(<ProfileSelectionProbe />);
 
@@ -173,12 +169,9 @@ describe("AuthProvider", () => {
   });
 
   it("keeps cached data when updating the active profile without changing identity", async () => {
-    apiMock.mockImplementation((path: string) => {
-      if (path === "/auth/providers") {
-        return Promise.resolve([]);
-      }
-      return Promise.reject(new Error(`unexpected API call: ${path}`));
-    });
+    apiMock.mockImplementation((path: string) =>
+      Promise.reject(new Error(`unexpected API call: ${path}`)),
+    );
 
     renderWithAuthProvider(<ProfileSelectionProbe />);
 

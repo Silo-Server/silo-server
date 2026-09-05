@@ -2,97 +2,12 @@ import { getDefaultQuerySortOrder, normalizeQuerySortField } from "@/lib/querySo
 import type { SchemaOption } from "@/components/admin/plugins/schemaFormUtils";
 
 // Auth
-export interface LoginRequest {
-  username: string;
-  password: string;
-  provider?: string;
-}
 
 export interface LoginResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
   user: User;
-}
-
-export interface DeviceLoginStartResponse {
-  device_code: string;
-  user_code: string;
-  match_code: string;
-  verification_uri: string;
-  verification_uri_complete: string;
-  expires_at: string;
-  expires_in: number;
-  interval: number;
-  device_name: string;
-  device_platform: string;
-}
-
-export interface DeviceLoginLookupResponse {
-  status: "pending" | "approved" | "denied" | "expired" | "consumed";
-  user_code?: string;
-  match_code?: string;
-  device_name?: string;
-  device_platform?: string;
-  ip_address_hint?: string;
-  expires_at?: string;
-}
-
-export interface DeviceLoginPollResponse {
-  status: "pending" | "approved" | "denied" | "expired" | "consumed";
-  poll_after: number;
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-  user?: User;
-}
-
-export interface RefreshRequest {
-  refresh_token: string;
-}
-
-export interface RefreshResponse {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-}
-
-export interface AccountPasswordCapability {
-  schema_version: number;
-  change_password: boolean;
-  requires_current_password: boolean;
-  minimum_password_length: number;
-  maximum_password_bytes: number;
-}
-
-export interface AuthProviderOption {
-  id: string;
-  display_name: string;
-  mode: string;
-  default: boolean;
-  icon_url?: string;
-  installation_id?: number;
-}
-
-export interface SetupStatusResponse {
-  needs_setup: boolean;
-}
-
-export interface SetupRequest {
-  username: string;
-  email: string;
-  password: string;
-  create_default_profile?: boolean;
-  default_profile_name?: string;
-}
-
-export interface SignupRequest {
-  username: string;
-  email: string;
-  password: string;
-  invite_code: string;
-  create_default_profile?: boolean;
-  default_profile_name?: string;
 }
 
 export interface ImpersonationInfo {
@@ -109,15 +24,6 @@ export interface User {
   permissions: string[];
   download_allowed: boolean;
   impersonation?: ImpersonationInfo | null;
-}
-
-export interface AuthSession {
-  id: string;
-  device_name: string;
-  ip_address: string;
-  created_at: string;
-  expires_at: string;
-  revoked_at: string | null;
 }
 
 export type JellyfinCompatWebState =
@@ -4392,18 +4298,6 @@ export interface SidebarPin {
 
 export type SidebarPins = Record<string, SidebarPin[]>;
 
-// Signup
-export interface SignupRequest {
-  username: string;
-  email: string;
-  password: string;
-  invite_code: string;
-}
-
-export interface SignupStatusResponse {
-  enabled: boolean;
-}
-
 // Invite Codes
 export interface InviteCode {
   id: number;
@@ -4477,53 +4371,6 @@ export interface InvitationLookupResponse {
   server_name: string;
   expires_at: string;
   show_tour: boolean;
-}
-
-// Onboarding tour (server-driven manifest)
-export interface OnboardingSettingOption {
-  value: string;
-  label: string;
-}
-
-export interface OnboardingSettingSpec {
-  target: "profile_field" | "setting" | "device_setting";
-  key: string;
-  control: "segmented" | "toggle" | "select";
-  options?: OnboardingSettingOption[];
-  default?: string;
-  label?: string;
-}
-
-export interface OnboardingStepLink {
-  label: string;
-  url: string;
-}
-
-export interface OnboardingStep {
-  id: string;
-  // Open string: the client renders kinds it knows and skips the rest.
-  kind: string;
-  title?: string;
-  body?: string;
-  illustration?: string;
-  setting?: OnboardingSettingSpec;
-  route?: string;
-  action_label?: string;
-  links?: OnboardingStepLink[];
-}
-
-export interface OnboardingFlow {
-  version: number;
-  tour_id: string;
-  steps: OnboardingStep[];
-}
-
-export interface OnboardingState {
-  tour_id: string;
-  last_step?: string;
-  completed_at?: string;
-  skipped_at?: string;
-  done: boolean;
 }
 
 // API Keys
@@ -5176,13 +5023,6 @@ export interface FilesystemBrowseResponse {
 }
 
 // --- Policy Engine ---
-
-export interface PolicyCapability {
-  enabled: boolean;
-  editor_available: boolean;
-  decision_types: string[];
-  generation: number;
-}
 
 export interface PolicyVendorModule {
   path: string;

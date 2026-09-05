@@ -1,0 +1,9 @@
+{
+  "revision": "1",
+  "state": "available",
+  "remote_playback_handoff": true,
+  "protocol_versions": [
+    2
+  ]
+}
+

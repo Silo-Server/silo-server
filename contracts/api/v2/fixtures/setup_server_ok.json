@@ -1,0 +1,17 @@
+{
+  "access_token": "acc",
+  "refresh_token": "ref",
+  "expires_in": 3600,
+  "user": {
+    "id": "1",
+    "username": "admin",
+    "email": "admin@example.test",
+    "role": "admin",
+    "permissions": [
+      "marker_edit",
+      "metadata_curation"
+    ],
+    "download_allowed": true
+  }
+}
+

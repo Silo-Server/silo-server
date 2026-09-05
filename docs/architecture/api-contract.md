@@ -939,6 +939,36 @@ stored ones, every string member of a profile is always emitted, ids are string 
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
+**auth-core section (Phase 4).** The login, session, device-pairing and onboarding core:
+`login`, `logout`, `refreshSession`, `listSessions`, `deleteSession`, `endImpersonation`,
+`listAuthProviders`, `setupServer`, `getSignupStatus`, `signup`, `launchPlugin`,
+`completeOAuthLogin`, `startOAuthLogin`, `completeOAuthCallback`, `getDeviceLoginCapability`,
+`startDeviceLogin`, `getDeviceLogin`, `pollDeviceLogin`, `approveDeviceLogin`,
+`approveDeviceHandoff`, `denyDeviceLogin`, `getOnboardingFlow`, `getOnboardingState`,
+`recordOnboardingProgress`, `getPolicyCapability`, `listUserLibraries`,
+`getAccountPasswordCapability`, `changePassword` (plus the pilot `getSetupStatus` and
+`getCurrentUser`). Every v2 handler calls a seam extracted from its v1
+handler, so both surfaces run one code path. The two OAuth browser legs are the first entries in
+the manual registry: each is served on the listener's own chi router outside Huma, documented in
+`openapi.json` as an operation marked `x-silo-raw-handshake: redirect` with its parameters and
+statuses only, and reconciled in both directions like a Huma operation. Deliberate v1
+differences, all recorded on the ledger rows: every credential response is
+`Cache-Control: no-store`; a doubly registered v1 route (plain and rate limited) is one v2
+operation whose public rate-limit bucket is the class gate's, and a gated operation may name a
+bucket too (`changePassword` spends v1's `password_change` budget in place of the generic
+authenticated limiter, so a session holder cannot brute-force the current password); missing or
+blank members are `422`
+at the member where v1 answered a bare `400`; wrong credentials and a bad refresh token are `401`
+`invalid_token`, a revoked session is `401` `session_expired`; setup already completed,
+duplicate signup, a stale onboarding tour, and ending impersonation when not impersonating are
+`409` `conflict`; a rejected invite code is `422` at `body.invite_code`; a device-pairing lookup
+or decision naming neither code is `422` (v1 forwarded it as a `404`), an expired request is
+`410` `device_login_expired`, and the poll's token pair sits under `tokens`; bare v1 arrays
+(`providers`, `user/libraries`) and the `sessions` envelope are `{items}` collections with string
+ids and null-while-active `revoked_at`; `policy/capability` is a capability document whose
+unconfigured engine is state `not_configured` rather than a `503`; and the plugin launch cookie is
+issued on `/api/v2/plugins`, never `/api/v1` or `/`.
+
 The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
 `updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
 `verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides

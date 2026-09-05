@@ -86,6 +86,8 @@ const (
 	// cross accounts.
 	otherAdminToken = "tok-admin-other"
 	expiredToken    = "tok-expired"
+	// impersonatedToken is member 1's session opened by admin 2.
+	impersonatedToken = "tok-impersonated"
 	// apiKeyToken is an unscoped API key owned by the member account: no
 	// login session, exempt from profile PIN verification at the gate.
 	apiKeyToken = "sa_member"
@@ -103,13 +105,14 @@ func (f fakeAPIKeys) UpdateLastUsed(context.Context, int64) error { return nil }
 
 func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 	claims := map[string]*auth.Claims{
-		memberToken:     {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
-		adminToken:      {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
-		otherAdminToken: {UserID: 3, Role: "admin", SessionID: "s3", TokenType: auth.TokenTypeAccess},
-		expiredToken:    {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
+		memberToken:       {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
+		adminToken:        {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
+		otherAdminToken:   {UserID: 3, Role: "admin", SessionID: "s3", TokenType: auth.TokenTypeAccess},
+		expiredToken:      {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
+		impersonatedToken: {UserID: 1, Role: "user", SessionID: "s4", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: ptr(2)},
 	}
 	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}}}
-	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true, "s3": true}}, keys, fakeUsers{users})
+	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true, "s3": true, "s4": true}}, keys, fakeUsers{users})
 }
 
 func parityDeps(demo bool) Dependencies {
@@ -303,7 +306,7 @@ func TestGateOrderMatchesV1(t *testing.T) {
 		requireProblem(t, rec, TypePermissionDenied)
 	}
 	// The chain itself, so a reordering that the demo probe cannot see still fails.
-	chain, missing := gateChain(deps, ClassProfileScoped, "", true, false)
+	chain, missing := gateChain(deps, ClassProfileScoped, "", true, false, "")
 	if missing != "" || len(chain) != 5 {
 		t.Fatalf("profile-scoped chain = %d gates, missing %q; want auth, demo, rate limit, viewer access, profile", len(chain), missing)
 	}

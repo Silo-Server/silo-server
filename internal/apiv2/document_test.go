@@ -128,13 +128,21 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	doc := generatedDocument(t)
 	bodies := 0
 	expect := map[string]map[int]bool{
-		"getSetupStatus":                 {http.StatusServiceUnavailable: true},
-		"getSystemInfo":                  {http.StatusServiceUnavailable: false},
-		"getOpenAPIDocument":             {http.StatusServiceUnavailable: false},
-		"getCurrentUser":                 {http.StatusNotFound: false},
-		"listProgress":                   {http.StatusNotFound: true},
-		"listAdminUsers":                 {http.StatusNotFound: true},
-		"updateProfile":                  {http.StatusNotFound: true, http.StatusConflict: true},
+		"getSetupStatus":     {http.StatusServiceUnavailable: true},
+		"getSystemInfo":      {http.StatusServiceUnavailable: false},
+		"getOpenAPIDocument": {http.StatusServiceUnavailable: false},
+		"getCurrentUser":     {http.StatusNotFound: false},
+		"listProgress":       {http.StatusNotFound: true},
+		"listAdminUsers":     {http.StatusNotFound: true},
+		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
+		// Public lookups by code answer 404 without a path parameter; a
+		// decision on a finished request is 409, on an expired one 410.
+		"getDeviceLogin":                 {http.StatusNotFound: true, http.StatusServiceUnavailable: true},
+		"pollDeviceLogin":                {http.StatusNotFound: true},
+		"approveDeviceLogin":             {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
+		"approveDeviceHandoff":           {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
+		"denyDeviceLogin":                {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
+		"getDeviceLoginCapability":       {http.StatusServiceUnavailable: false},
 		"listProfiles":                   {http.StatusNotFound: true, http.StatusConflict: false},
 		"createProfile":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true, http.StatusOK: false},
 		"replaceProfileSectionOverrides": {http.StatusNoContent: true, http.StatusForbidden: true},
@@ -146,7 +154,10 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"listHouseholdSessions":          {http.StatusOK: true, http.StatusForbidden: true},
 	}
 	profileToken := map[string]bool{
-		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "approveDeviceHandoff": true,
+		"getOnboardingFlow": true, "getOnboardingState": true, "recordOnboardingProgress": true, "getPolicyCapability": true, "listUserLibraries": true, "launchPlugin": true,
+		"getAccountPasswordCapability": true, "changePassword": true,
+		"listProfiles": true, "createProfile": true,
 		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
 		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
 		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,

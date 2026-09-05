@@ -1,0 +1,7 @@
+{
+  "access_token": "acc",
+  "refresh_token": "ref",
+  "expires_in": 3600,
+  "next": "/me"
+}
+

@@ -1,0 +1,21 @@
+{
+  "status": "approved",
+  "poll_after": 5,
+  "tokens": {
+    "access_token": "acc",
+    "refresh_token": "ref",
+    "expires_in": 3600,
+    "user": {
+      "id": "1",
+      "username": "laura",
+      "email": "laura@example.test",
+      "role": "user",
+      "permissions": [],
+      "download_allowed": true
+    }
+  },
+  "profile_id": "",
+  "profile_token": "",
+  "temporary": false
+}
+

@@ -70,6 +70,26 @@ func TestLintSeededFailures(t *testing.T) {
 			},
 			want: "anonymous object schema",
 		},
+		"raw handshake without a redirect or success status": {
+			seed: func(doc map[string]any) {
+				delete(op(doc, "/api/v2/auth/oauth/{install_id}/init", "post")["responses"].(map[string]any), "302")
+			},
+			want: "no success or redirect status is documented",
+		},
+		"raw handshake with a request body": {
+			seed: func(doc map[string]any) {
+				op(doc, "/api/v2/auth/oauth/{install_id}/init", "post")["requestBody"] = map[string]any{"content": map[string]any{}}
+			},
+			want: "a raw handshake documents no request body",
+		},
+		"raw handshake on a gated class": {
+			seed: func(doc map[string]any) {
+				o := op(doc, "/api/v2/auth/oauth/{install_id}/init", "post")
+				o["x-silo-class"] = "authenticated"
+				o["security"] = []any{map[string]any{"bearerAuth": []any{}}}
+			},
+			want: "must be class public",
+		},
 		"undocumented implied status": {
 			seed: func(doc map[string]any) { delete(op(doc, info, "get")["responses"].(map[string]any), "406") },
 			want: "status 406 is implied by class public but not documented",
