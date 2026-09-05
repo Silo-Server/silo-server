@@ -310,7 +310,6 @@ type updateUserDataRequest struct {
 	PlayCount             *int       `json:"PlayCount"`
 	Rating                *float64   `json:"Rating"`
 	Likes                 *bool      `json:"Likes"`
-	UnplayedItemCount     *int       `json:"UnplayedItemCount"`
 }
 
 func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +326,7 @@ func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Re
 		writeError(w, 400, "BadRequest", "Invalid request body")
 		return
 	}
-	if req.Rating != nil || req.Likes != nil || req.UnplayedItemCount != nil || (req.PlayCount != nil && (*req.PlayCount < 0 || *req.PlayCount > 1)) {
+	if req.Rating != nil || req.Likes != nil || (req.PlayCount != nil && (*req.PlayCount < 0 || *req.PlayCount > 1)) {
 		writeError(w, 400, "BadRequest", "Unsupported user data field or play count (supported: 0 or 1)")
 		return
 	}

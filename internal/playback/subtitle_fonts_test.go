@@ -2,11 +2,13 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeFFmpegDumping returns a shell script that mimics ffmpeg's
@@ -196,5 +198,32 @@ func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestFontExtractionHonorsDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture requires Unix")
+	}
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	ffprobe := filepath.Join(dir, "ffprobe")
+	if err := os.WriteFile(ffprobe, []byte(`#!/bin/sh
+printf '%s' '{"streams":[{"index":1,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"font.ttf"}}]}'
+`), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nexec sleep 60\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := ExtractAttachedSubtitleFonts(ctx, "fixture.mkv", ffmpeg)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error %v", err)
+	}
+	if time.Since(started) > 5*time.Second {
+		t.Fatal("extraction did not stop at deadline")
 	}
 }

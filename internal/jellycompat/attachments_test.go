@@ -95,3 +95,33 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestAttachmentWaitIsCanceledWhenExtractionSlotsAreFull(t *testing.T) {
+	for range cap(compatAttachmentSlots) {
+		compatAttachmentSlots <- struct{}{}
+	}
+	defer func() {
+		for range cap(compatAttachmentSlots) {
+			<-compatAttachmentSlots
+		}
+	}()
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{ID: "ps", CompatToken: "token", RouteItemID: "item", ItemID: "movie", MediaSources: []PlaybackMediaSource{{ID: "source", FileID: 42}}})
+	h := &PlaybackHandler{playbackStore: store, fileResolver: testCompatFileResolver{file: &models.MediaFile{ID: 42, FilePath: "must-not-open"}}, content: &stubContentService{detail: &upstreamItemDetail{Versions: []catalog.FileVersion{{FileID: 42}}}}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", "item")
+	route.URLParams.Add("routeMediaSourceId", "source")
+	route.URLParams.Add("routeIndex", "1")
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, route)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token"})
+	rr := httptest.NewRecorder()
+	h.HandleAttachment(rr, httptest.NewRequest("GET", "/attachment?PlaySessionId=ps", nil).WithContext(ctx))
+	if rr.Code != 503 || !strings.Contains(rr.Body.String(), "busy") {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(compatAttachmentSlots) != cap(compatAttachmentSlots) {
+		t.Fatal("waiting request consumed an occupied extraction slot")
+	}
+}

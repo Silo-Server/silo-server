@@ -61,8 +61,10 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	for _, value := range values {
 		switch value.Key {
 		case settingskeys.PlaybackAudioLanguage:
+			dto.Configuration.AudioLanguagePreference = ""
 			_ = json.Unmarshal(value.Value, &dto.Configuration.AudioLanguagePreference)
 		case settingskeys.PlaybackSubtitleLanguage:
+			dto.Configuration.SubtitleLanguagePreference = ""
 			_ = json.Unmarshal(value.Value, &dto.Configuration.SubtitleLanguagePreference)
 		case settingskeys.PlaybackAutoPlayNext:
 			_ = json.Unmarshal(value.Value, &dto.Configuration.EnableNextEpisodeAutoPlay)
@@ -111,9 +113,15 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 		return
 	}
 	for field, value := range patch {
-		if string(value) == "null" && field != "AudioLanguagePreference" && field != "SubtitleLanguagePreference" && field != "CastReceiverId" {
-			writeError(w, 400, "BadRequest", "Configuration fields cannot be null")
-			return
+		if string(value) == "null" {
+			switch field {
+			case "AudioLanguagePreference", "SubtitleLanguagePreference", "CastReceiverId":
+				// Unmarshalling null into an existing string leaves it unchanged.
+				patch[field] = json.RawMessage(`""`)
+			default:
+				writeError(w, 400, "BadRequest", "Configuration fields cannot be null")
+				return
+			}
 		}
 	}
 	raw, _ := json.Marshal(patch)

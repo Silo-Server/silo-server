@@ -82,6 +82,9 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	if dto.CustomPrefs == nil {
+		dto.CustomPrefs = map[string]string{}
+	}
 	writeJSON(w, http.StatusOK, dto)
 }
 
@@ -105,6 +108,9 @@ func (h *DisplayPreferencesHandler) HandleUpdateDisplayPreferences(w http.Respon
 		return
 	}
 	dto.ID, dto.Client = id, client
+	if dto.CustomPrefs == nil {
+		dto.CustomPrefs = map[string]string{}
+	}
 	if h.storeProvider == nil {
 		writeCompatUpstreamError(w, fmt.Errorf("user store unavailable"))
 		return

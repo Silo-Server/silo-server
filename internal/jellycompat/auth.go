@@ -206,8 +206,10 @@ func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *Ad
 	if token == "" {
 		return nil, false
 	}
-	if session, ok := sessions.Get(token); ok {
-		return session, true
+	if sessions != nil {
+		if session, ok := sessions.Get(token); ok {
+			return session, true
+		}
 	}
 	if strings.HasPrefix(token, "sa_") {
 		if session, _, _ := keyAuth.resolveSession(ctx, token); session != nil {
@@ -263,7 +265,7 @@ func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool
 		return false
 	}
 	itemID := firstNonEmpty(chi.URLParam(r, "id"), chi.URLParam(r, "routeItemId"))
-	if itemID == "" || itemID != session.RouteItemID {
+	if itemID == "" || !mediaSourceIDsEqual(itemID, session.RouteItemID) {
 		return false
 	}
 	sourceID := firstNonEmpty(chi.URLParam(r, "routeMediaSourceId"), newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId"))
@@ -271,7 +273,7 @@ func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool
 		return true
 	}
 	for _, source := range session.MediaSources {
-		if source.ID == sourceID {
+		if mediaSourceIDsEqual(source.ID, sourceID) {
 			return true
 		}
 	}

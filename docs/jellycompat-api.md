@@ -25,7 +25,9 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
 Positional updates require a playable item; marking a series or season played
-uses its child episodes. Ratings, likes, aggregate unplayed counts, and play
+uses its child episodes. Marking played or unplayed clears the resume position
+unless the request supplies an explicit position. Read-only echoed fields such
+as `UnplayedItemCount`, `Key`, and `ItemId` are ignored. Ratings, likes, and play
 counts above 1 return 400. Inaccessible items and another profile's user ID are
 rejected before mutation.
 
@@ -117,7 +119,8 @@ available and its account/profile ownership matches; unavailable remote state
 is omitted.
 
 `POST /Sessions/Playing/Ping` touches the caller-owned playback activity without
-changing position or paused state. `/socket` uses the Jellyfin keepalive
+changing position or paused state. Pings do not extend the absolute playback-grant
+lifetime; expiry requires fresh playback negotiation. `/socket` uses the Jellyfin keepalive
 exchange: `ForceKeepAlive` with a 60-second timeout and `KeepAlive`
 acknowledgements. Connections are bounded and periodically revalidate login/API
 credentials. Remote-control capabilities are false; accepting a socket does not

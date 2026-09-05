@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2136,6 +2137,13 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if !slices.ContainsFunc(sources, func(source PlaybackMediaSource) bool {
+		return source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding
+	}) {
+		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "No media source supports the requested playback constraints")
+		return
+	}
+
 	clientDeviceID := firstNonEmpty(
 		firstMediaBrowserAuthorizationValue(r, "DeviceId"),
 		newCaseInsensitiveQuery(r.URL.Query()).Get("DeviceId"),
@@ -3435,8 +3443,10 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 		}
 		return
 	}
-	if alwaysBurn {
-		source.SupportsDirectStream = false
+	if alwaysBurn && !source.HLSRemux {
+		// Downloaded text is delivered externally. The burn-in flag applies only
+		// when encoding video, so direct play and video-copy remux remain valid.
+		// Full encoding cannot honor it until downloaded burn-in is implemented.
 		source.SupportsTranscoding = false
 	}
 }

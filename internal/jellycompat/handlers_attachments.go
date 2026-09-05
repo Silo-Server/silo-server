@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
@@ -14,6 +15,10 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+// Keep the slot through delivery, bounding both extraction processes and font
+// buffers held by slow clients. Waiting and extraction share one deadline.
+var compatAttachmentSlots = make(chan struct{}, 2)
 
 // HandleAttachment serves a real font attachment by its original container
 // stream index. It shares subtitle authorization, source resolution, extraction
@@ -70,8 +75,21 @@ func (h *PlaybackHandler) HandleAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	attachCompatStream(r.Context(), session, negotiated, source.FileID)
-	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), file.FilePath, h.FFmpegPath)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	select {
+	case compatAttachmentSlots <- struct{}{}:
+		defer func() { <-compatAttachmentSlots }()
+	case <-ctx.Done():
+		writeError(w, 503, "Unavailable", "Attachment extraction is busy")
+		return
+	}
+	fonts, err := playback.ExtractAttachedSubtitleFonts(ctx, file.FilePath, h.FFmpegPath)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			writeError(w, 503, "Unavailable", "Attachment extraction timed out")
+			return
+		}
 		writeError(w, 500, "ServerError", "Failed to extract attachments")
 		return
 	}

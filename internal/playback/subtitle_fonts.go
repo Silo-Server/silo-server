@@ -87,6 +87,8 @@ func ListAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string
 // loading them into JASSUB is the closest browser equivalent to libass on a
 // native player.
 func ExtractAttachedSubtitleFonts(ctx context.Context, inputPath string, ffmpegPath string) ([]SubtitleFontAttachment, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	if strings.TrimSpace(inputPath) == "" {
 		return nil, fmt.Errorf("subtitle fonts: input path is required")
 	}
@@ -289,6 +291,9 @@ func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePa
 		return nil, errors.New("subtitle fonts: attachment metadata exceeds probe limit or could not be read")
 	}
 	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("subtitle fonts: probe attachments: %w", err)
 	}
 

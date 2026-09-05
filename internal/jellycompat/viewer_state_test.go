@@ -58,10 +58,28 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 	if dto.IsFavorite || dto.PlaybackPositionTicks != 1230000000 {
 		t.Fatalf("partial update overwrote progress: %+v", dto)
 	}
-	run(`{"Played":true}`)
+	dto = run(`{"Played":true,"UnplayedItemCount":0}`)
+	if !dto.Played || dto.PlaybackPositionTicks != 0 {
+		t.Fatalf("mark played retained resume position: %+v", dto)
+	}
+	dto = run(`{"Played":true,"PlaybackPositionTicks":70000000}`)
+	if dto.PlaybackPositionTicks != 70000000 {
+		t.Fatalf("explicit rewatch position lost: %+v", dto)
+	}
 	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00Z"}`)
 	if dto.Played || dto.PlaybackPositionTicks != 50000000 || dto.LastPlayedDate != "2024-01-01T00:00:00Z" {
 		t.Fatalf("historical edit suppressed: %+v", dto)
+	}
+	for _, body := range []string{`{"Rating":5,"IsFavorite":true}`, `{"Likes":true,"IsFavorite":true}`} {
+		rec := httptest.NewRecorder()
+		h.HandleUpdateUserData(rec, viewerRequest("POST", "/", body, "itemId", id, session))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("unsupported writable field: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	dto = run(`{"UnplayedItemCount":10,"Key":"echo","ItemId":"echo"}`)
+	if dto.IsFavorite || dto.PlaybackPositionTicks != 50000000 {
+		t.Fatalf("echoed read-only fields changed state: %+v", dto)
 	}
 	other, err := store.GetProgress(t.Context(), "profile-2", "movie-1")
 	if err != nil || other != nil {
@@ -241,5 +259,61 @@ func TestConfigurationFailureAndForeignProfile(t *testing.T) {
 	h.HandleUpdateConfiguration(rec, viewerRequest("POST", "/", `{"SubtitleMode":"Always"}`, "userId", uuid.NewString(), session))
 	if rec.Code != 404 {
 		t.Fatalf("foreign profile status %d", rec.Code)
+	}
+}
+
+func TestDisplayPreferencesCustomPrefsObject(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	h := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	for _, body := range []string{`{}`, `{"CustomPrefs":null}`} {
+		rec := httptest.NewRecorder()
+		h.HandleUpdateDisplayPreferences(rec, viewerRequest("POST", "/?client=web", body, "displayPreferencesId", "home", session))
+		if rec.Code != 204 {
+			t.Fatal(rec.Code, rec.Body.String())
+		}
+		raw, err := store.GetJellycompatDisplayPrefs(t.Context(), profilePreferencesID(session.ProfileID, "home"), "web")
+		if err != nil || !strings.Contains(raw, `"CustomPrefs":{}`) {
+			t.Fatalf("stored prefs %s: %v", raw, err)
+		}
+	}
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID(session.ProfileID, "home"), "web", `{"CustomPrefs":null}`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=web", "", "displayPreferencesId", "home", session))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"CustomPrefs":{}`) {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+}
+
+func TestConfigurationNullClearsPreferences(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	h := NewAuthHandler(func() *config.Config { return &config.Config{} }, nil, nil).WithUserStore(compatTestUserStoreProvider{store: store})
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	for _, body := range []string{`{"AudioLanguagePreference":"fr","SubtitleLanguagePreference":"en","CastReceiverId":"receiver"}`, `{"AudioLanguagePreference":null,"SubtitleLanguagePreference":null,"CastReceiverId":null}`} {
+		rec := httptest.NewRecorder()
+		h.HandleUpdateConfiguration(rec, viewerRequest("POST", "/", body, "", "", session))
+		if rec.Code != 204 {
+			t.Fatal(rec.Code, rec.Body.String())
+		}
+	}
+	dto, err := h.resolvedUserDTO(t.Context(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto.Configuration.AudioLanguagePreference != "" || dto.Configuration.SubtitleLanguagePreference != "" || dto.Configuration.CastReceiverID != "" {
+		t.Fatalf("stale cleared preferences: %+v", dto.Configuration)
+	}
+	// A native settings reset must override a stale compatibility blob too.
+	if err := store.SetSetting(t.Context(), configurationKey(session.ProfileID), `{"AudioLanguagePreference":"fr","SubtitleLanguagePreference":"en"}`); err != nil {
+		t.Fatal(err)
+	}
+	dto, err = h.resolvedUserDTO(t.Context(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto.Configuration.AudioLanguagePreference != "" || dto.Configuration.SubtitleLanguagePreference != "" {
+		t.Fatalf("stale canonical preferences: %+v", dto.Configuration)
 	}
 }

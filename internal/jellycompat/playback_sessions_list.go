@@ -54,6 +54,8 @@ func (d *DurableCompatPlaybackStore) ListActiveForToken(ctx context.Context, tok
 
 // TouchActiveForToken persists a keepalive before acknowledging it; a database
 // outage must not turn this endpoint into a successful process-local no-op.
+// It refreshes activity, not the absolute grant lifetime shared with stream
+// tokens. Playback must negotiate a new grant once that lifetime ends.
 func (s *PlaybackSessionStore) TouchActiveForToken(ctx context.Context, id, token string) error {
 	if err := ctx.Err(); err != nil {
 		return err

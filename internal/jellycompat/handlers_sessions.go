@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -107,11 +108,10 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 		}
 		if h.content != nil {
 			detail, err := h.content.GetItemDetail(r.Context(), session, play.ItemID, nil)
-			if err != nil {
-				continue
+			if err == nil && detail != nil {
+				item := newMapper(h.codec, h.cfg).itemFromDetail(*detail, false, nil)
+				dto.NowPlayingItem = &item
 			}
-			item := newMapper(h.codec, h.cfg).itemFromDetail(*detail, false, nil)
-			dto.NowPlayingItem = &item
 		}
 		result = append(result, dto)
 	}
@@ -147,6 +147,10 @@ func (h *PlaybackHandler) HandleSessionPlayingPing(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := toucher.TouchActiveForToken(r.Context(), play.ID, session.Token); err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+			return
+		}
 		writeCompatUpstreamError(w, err)
 		return
 	}

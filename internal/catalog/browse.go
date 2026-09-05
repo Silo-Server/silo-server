@@ -1679,8 +1679,10 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 		return
 	}
 	userArg, profileArg := *argIdx, *argIdx+1
-	*args = append(*args, filters.UserID, filters.ProfileID)
-	*argIdx += 2
+	if filters.IsFavorite || filters.IsResumable {
+		*args = append(*args, filters.UserID, filters.ProfileID)
+		*argIdx += 2
+	}
 	if filters.IsFavorite {
 		*conditions = append(*conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM user_favorites uf WHERE uf.user_id = $%d AND uf.profile_id = $%d AND uf.media_item_id = mi.content_id)", userArg, profileArg))
 	}

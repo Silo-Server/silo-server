@@ -379,7 +379,7 @@ func slicePage[T any](items []T, startIndex, limit int) []T {
 		startIndex = 0
 	}
 	if startIndex >= len(items) {
-		return nil
+		return []T{}
 	}
 	if limit <= 0 {
 		limit = len(items)

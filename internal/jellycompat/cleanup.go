@@ -34,7 +34,7 @@ func StartSessionCleanup(ctx context.Context, repo *SessionRepository, interval 
 }
 
 // StartSessionCleanupWithPlaybackStore also sweeps expired durable playback
-// negotiation rows and a bounded batch of expired device registrations.
+// negotiation rows and batches of expired device registrations within each tick's deadline.
 func StartSessionCleanupWithPlaybackStore(ctx context.Context, repo *SessionRepository, playbackStore CompatPlaybackStore, deviceProfiles *DeviceProfileStore, interval time.Duration) {
 	playbackExpirer, _ := playbackStore.(playbackSessionExpirer)
 	if repo == nil && playbackExpirer == nil && deviceProfiles == nil {
@@ -53,7 +53,7 @@ func StartSessionCleanupWithPlaybackStore(ctx context.Context, repo *SessionRepo
 				var profilesDeleted int64
 				if deviceProfiles != nil {
 					var profileErr error
-					profilesDeleted, profileErr = deviceProfiles.DeleteExpired(cleanupCtx)
+					profilesDeleted, profileErr = cleanupExpiredDeviceProfiles(cleanupCtx, deviceProfiles)
 					err = errors.Join(err, profileErr)
 				}
 				cancel()
@@ -67,4 +67,18 @@ func StartSessionCleanupWithPlaybackStore(ctx context.Context, repo *SessionRepo
 			}
 		}
 	}()
+}
+
+func cleanupExpiredDeviceProfiles(ctx context.Context, store playbackSessionExpirer) (int64, error) {
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		deleted, err := store.DeleteExpired(ctx)
+		total += deleted
+		if err != nil || deleted < deviceProfileExpiryBatchSize {
+			return total, err
+		}
+	}
 }

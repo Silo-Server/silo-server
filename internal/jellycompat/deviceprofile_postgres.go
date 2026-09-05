@@ -65,11 +65,12 @@ func (s *DeviceProfileStore) GetForDevice(ctx context.Context, token, deviceID s
 	return profile, true, nil
 }
 
-// DeleteExpired removes at most 1,000 expired registrations per hourly compat
-// cleanup tick. SKIP LOCKED lets API nodes share the work without contending
+const deviceProfileExpiryBatchSize = 1000
+
+// DeleteExpired removes at most 1,000 expired registrations per call.
+// SKIP LOCKED lets API nodes share the work without contending
 // with one another or a client refreshing its registration.
 func (s *DeviceProfileStore) DeleteExpired(ctx context.Context) (int64, error) {
-	const batchSize = 1000
 	now := s.now()
 	if s.pool == nil {
 		if err := ctx.Err(); err != nil {
@@ -82,7 +83,7 @@ func (s *DeviceProfileStore) DeleteExpired(ctx context.Context) (int64, error) {
 			if !profile.expiresAt.After(now) {
 				delete(s.profiles, key)
 				deleted++
-				if deleted == batchSize {
+				if deleted == deviceProfileExpiryBatchSize {
 					break
 				}
 			}
@@ -94,7 +95,7 @@ func (s *DeviceProfileStore) DeleteExpired(ctx context.Context) (int64, error) {
  WHERE expires_at <= $1 ORDER BY expires_at
  LIMIT $2 FOR UPDATE SKIP LOCKED
  ) DELETE FROM jellycompat_device_profiles AS profile USING expired
- WHERE profile.token_hash = expired.token_hash AND profile.device_id = expired.device_id`, now, batchSize)
+ WHERE profile.token_hash = expired.token_hash AND profile.device_id = expired.device_id`, now, deviceProfileExpiryBatchSize)
 	if err != nil {
 		return 0, fmt.Errorf("expire device profiles: %w", err)
 	}

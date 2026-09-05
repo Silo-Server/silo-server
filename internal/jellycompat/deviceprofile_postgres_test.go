@@ -66,8 +66,16 @@ func TestDeviceProfileExpirationCleanup(t *testing.T) {
 	if _, ok, err := store.GetForDevice(t.Context(), token, "expired"); err != nil || ok {
 		t.Fatalf("expired profile visible: %v %v", ok, err)
 	}
-	if _, err := store.DeleteExpired(t.Context()); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO jellycompat_device_profiles(token_hash,device_id,profile,expires_at)
+ SELECT $1,'backlog-' || i,'{}'::jsonb,$2 FROM generate_series(1,2501) AS i`, deviceProfileTokenHash(token), now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
+	}
+	if deleted, err := cleanupExpiredDeviceProfiles(t.Context(), store); err != nil || deleted < 2502 {
+		t.Fatalf("backlog deleted=%d err=%v", deleted, err)
+	}
+	var remaining int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM jellycompat_device_profiles WHERE token_hash=$1 AND expires_at<=$2`, deviceProfileTokenHash(token), now).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("expired remaining=%d err=%v", remaining, err)
 	}
 	var exists bool
 	if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM jellycompat_device_profiles WHERE token_hash=$1 AND device_id='expired')`, deviceProfileTokenHash(token)).Scan(&exists); err != nil {

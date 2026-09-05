@@ -320,7 +320,9 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 		outputVersion.CodecAudio = compatTargetAudioCodec
 		outputVersion.AudioTracks = []models.AudioTrack{outputAudio}
 		outputAudioStreamIndex := len(outputVersion.VideoTracks)
-		return conditionsMatch(profile.Conditions, buildConditionValues(outputVersion, &outputAudioStreamIndex)) && p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
+		if conditionsMatch(profile.Conditions, buildConditionValues(outputVersion, &outputAudioStreamIndex)) && p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay() {
+			return true
+		}
 	}
 	return false
 }

@@ -24,6 +24,7 @@ type ImagesHandler struct {
 	content      ContentService
 	codec        *ResourceIDCodec
 	sessions     *SessionStore
+	keyAuth      *AdminAPIKeyAuthenticator
 	images       *ImageCache
 	personRepo   imagePersonRepository
 	detailSvc    *catalog.DetailService
@@ -129,9 +130,9 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	// authority. Headshots always require a currently visible credit; ordinary
 	// item images below retain their scoped signed-tag delivery path.
 	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
-		if session == nil && h.sessions != nil {
+		if session == nil {
 			if token, ok := ExtractToken(r); ok {
-				session, _ = h.sessions.Get(token)
+				session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
 			}
 		}
 		h.handlePersonImage(w, r, session, routeID, imageType, personID)
@@ -158,9 +159,9 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if session == nil && h.sessions != nil {
+	if session == nil {
 		if token, ok := ExtractToken(r); ok {
-			session, _ = h.sessions.Get(token)
+			session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
 		}
 	}
 	if session == nil {

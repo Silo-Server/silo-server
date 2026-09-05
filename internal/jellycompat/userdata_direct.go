@@ -370,15 +370,12 @@ func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *
 	if !ok {
 		return fmt.Errorf("explicit user progress updates unavailable")
 	}
+	progress, err := store.ListProgressByMediaItems(ctx, session.ProfileID, ids)
+	if err != nil {
+		return err
+	}
 	for _, id := range ids {
-		progress, err := store.GetProgress(ctx, session.ProfileID, id)
-		if err != nil {
-			return err
-		}
-		duration := float64(0)
-		if progress != nil {
-			duration = progress.DurationSeconds
-		}
+		duration := progress[id].DurationSeconds
 		if err := writer.SetJellycompatProgress(ctx, session.ProfileID, id, 0, duration, true, date); err != nil {
 			return err
 		}
@@ -422,12 +419,12 @@ func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Ses
 		}
 		if req.Played != nil {
 			played = *req.Played
+			if req.PlaybackPositionTicks == nil && req.PlayedPercentage == nil {
+				position = 0
+			}
 			if !played {
 				if err := s.MarkUnplayed(ctx, session, contentID); err != nil {
 					return err
-				}
-				if req.PlaybackPositionTicks == nil && req.PlayedPercentage == nil {
-					position = 0
 				}
 			}
 			if played {

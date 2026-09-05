@@ -458,3 +458,62 @@ func TestHandlePlaybackInfo_SubtitlesOff(t *testing.T) {
 		t.Fatalf("expected no default subtitle stream, got index %d", index)
 	}
 }
+
+func TestDownloadedSubtitleAlwaysBurnTransportConstraints(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"direct original remains available", `{"SubtitleStreamIndex":5,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
+		{"progressive video copy remains available", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
+		{"bitrate ceiling cannot retain direct stream", `{"SubtitleStreamIndex":5,"MaxStreamingBitrate":4000000,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 400},
+		{"unsupported source video cannot retain direct stream", `{"SubtitleStreamIndex":5,"AlwaysBurnInSubtitleWhenTranscoding":true,"DeviceProfile":{"DirectPlayProfiles":[{"Type":"Video","VideoCodec":"hevc","AudioCodec":"aac"}],"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac"}]}}`, 400},
+		{"external text during ordinary full encode", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AllowVideoStreamCopy":false}`, 200},
+		{"mandatory burn cannot use downloaded text in full encode", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AllowVideoStreamCopy":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 400},
+		{"video copy remux needs no burn", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AlwaysBurnInSubtitleWhenTranscoding":true,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"mp4","VideoCodec":"h264","AudioCodec":"aac"}]}}`, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, item := newSubtitleSelectionHandler(t)
+			detail := h.content.(*stubContentService).detail
+			detail.Versions[0].CodecVideo = "h264"
+			detail.Versions[0].CodecAudio = "aac"
+			req := httptest.NewRequest("POST", "/Items/"+item+"/PlaybackInfo", strings.NewReader(tc.body))
+			route := chi.NewRouteContext()
+			route.URLParams.Add("id", item)
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, route)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"})
+			rr := httptest.NewRecorder()
+			h.HandlePlaybackInfo(rr, req.WithContext(ctx))
+			if rr.Code != tc.status {
+				t.Fatalf("status %d want %d: %s", rr.Code, tc.status, rr.Body.String())
+			}
+			if tc.status == 400 {
+				if !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
+					t.Fatalf("error: %s", rr.Body.String())
+				}
+				if _, _, ok := h.playbackStore.FindByRoute("token-1", item); ok {
+					t.Fatal("stored unplayable negotiation")
+				}
+				return
+			}
+			var response playbackInfoResponseDTO
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			source := response.MediaSources[0]
+			if tc.name == "progressive video copy remains available" {
+				session, ok := h.playbackStore.Get(response.PlaySessionID)
+				if !ok || session.MediaSources[0].HLSRemux || !source.SupportsDirectStream || source.SupportsTranscoding || !strings.Contains(source.DirectStreamURL, "static=false") {
+					t.Fatalf("progressive copy: %+v", source)
+				}
+			}
+			if source.DirectStreamURL == "" && source.TranscodingURL == "" {
+				t.Fatalf("no transport: %+v", source)
+			}
+			index, found := defaultSubtitleStreamFromResponse(t, response)
+			if !found || index != 5 {
+				t.Fatalf("selection %d %v", index, found)
+			}
+		})
+	}
+}

@@ -40,8 +40,8 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 	searchTerm := strings.TrimSpace(q.Get("SearchTerm"))
-	// Person search hits PostgreSQL directly (it is not in the Meilisearch
-	// index), so it is gated: short terms never run and results are capped.
+	// Person queries use PostgreSQL directly and cap the returned page. The
+	// optional SearchTerm accepts short names; an empty term lists visible people.
 	limit := clampAuxSearchLimit(parsePositiveInt(q.Get("Limit"), auxSearchMaxResults))
 
 	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{}}
