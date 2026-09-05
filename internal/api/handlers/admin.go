@@ -52,6 +52,8 @@ type AdminMetadataRefresher interface {
 // UserRepository defines the operations the AdminHandler needs on users.
 type UserRepository interface {
 	List(ctx context.Context) ([]*models.User, error)
+	// ListPage returns up to limit users with id above afterID, in id order.
+	ListPage(ctx context.Context, afterID, limit int) ([]*models.User, error)
 	Create(ctx context.Context, input models.CreateUserInput) (*models.User, error)
 	Update(ctx context.Context, id int, input models.UpdateUserInput) error
 	Delete(ctx context.Context, id int) error
@@ -694,13 +696,37 @@ func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListAdminUsers builds the administrator's view of every account. v1 GET
-// /admin/users and v2 listAdminUsers both call it; a failure is an *APIError.
+// /admin/users calls it; a failure is an *APIError.
 func (h *AdminHandler) ListAdminUsers(ctx context.Context) ([]AdminUserView, error) {
 	users, err := h.userRepo.List(ctx)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list users")
 	}
+	return h.adminUserViews(ctx, users)
+}
 
+// ListAdminUsersPage is the keyset page v2 listAdminUsers uses: up to limit
+// accounts with id above afterID, in id order, enriched the same way as
+// ListAdminUsers, plus whether more accounts follow.
+func (h *AdminHandler) ListAdminUsersPage(ctx context.Context, afterID, limit int) ([]AdminUserView, bool, error) {
+	users, err := h.userRepo.ListPage(ctx, afterID, limit+1)
+	if err != nil {
+		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to list users")
+	}
+	hasMore := len(users) > limit
+	if hasMore {
+		users = users[:limit]
+	}
+	views, err := h.adminUserViews(ctx, users)
+	if err != nil {
+		return nil, false, err
+	}
+	return views, hasMore, nil
+}
+
+// adminUserViews resolves the effective policy and last activity for a batch
+// of accounts, in the batch's order.
+func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User) ([]AdminUserView, error) {
 	policies, err := h.groupPolicies(ctx)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")

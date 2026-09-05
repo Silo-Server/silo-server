@@ -34,6 +34,10 @@ func (r testAdminUserRepo) List(context.Context) ([]*models.User, error) {
 	return out, nil
 }
 
+func (r testAdminUserRepo) ListPage(context.Context, int, int) ([]*models.User, error) {
+	return nil, nil
+}
+
 func (r testAdminUserRepo) Create(context.Context, models.CreateUserInput) (*models.User, error) {
 	panic("unexpected Create call")
 }
