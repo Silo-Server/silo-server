@@ -296,3 +296,11 @@ func idsOfInts(ints []int) []ID {
 	}
 	return out
 }
+
+// instantPtr renders an optional time as an optional Instant.
+func instantPtr(t *time.Time) *Instant {
+	if t == nil {
+		return nil
+	}
+	return ptr(NewInstant(*t))
+}
