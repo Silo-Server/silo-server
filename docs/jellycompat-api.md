@@ -80,6 +80,30 @@ Unknown or excessive source bitrate prevents copying under a client ceiling.
 An automatic VideoToolbox bitrate must not override an explicit client cap.
 Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.
 
+The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
+`PlaybackInfo`. For a copied-video HLS source, the response echoes
+`SiloSeekReanchor=true`. The client can seek locally only within the available
+media range and at or after the current generation's requested start position.
+Otherwise it requests fresh `PlaybackInfo` with `StartTimeTicks` and uses the
+new playback-session URL. This applies to forward seeks, backward seeks, and
+initial resume. Video remains copied; audio conversion follows the negotiated
+profile.
+
+An opted-in nonzero start resolves the actual copied-video keyframe before
+starting HLS. The source-aligned playlist uses that origin and actual fragment
+durations; any preceding gap entries represent unavailable media, not playable
+fragments. Client positions and progress remain source-relative Jellyfin ticks.
+Clients that omit the extension retain the existing source-zero HLS bootstrap.
+Unmodified clients still cannot seek beyond a growing copied-video playlist
+without renegotiating; this extension does not claim a complete copy-HLS VOD
+index.
+
+Deploying the server change requires reinstalling the managed Jellyfin Web
+component to enable its seek handling. The installer applies the source patch
+before building and records `silo-seek-reanchor-v1` in the component provenance.
+If upstream source no longer matches the patch, installation fails while the
+previous active bundle remains available.
+
 `POST /Sessions/Capabilities` and `/Sessions/Capabilities/Full` persist device
 profiles in PostgreSQL when available, keyed by a hash of the login/API token
 and the client device ID. A request without a device ID uses the legacy empty

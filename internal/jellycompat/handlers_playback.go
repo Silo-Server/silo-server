@@ -48,6 +48,7 @@ const (
 )
 
 type playbackInfoRequest struct {
+	SiloSeekReanchor                    bool            `json:"SiloSeekReanchor"`
 	UserID                              string          `json:"UserId"`
 	MediaSourceID                       string          `json:"MediaSourceId"`
 	AudioStreamIndex                    *compatIntValue `json:"AudioStreamIndex,omitempty"`
@@ -1450,6 +1451,15 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	if initialSeekSeconds > 0 && segmentDuration > 0 {
 		startSegmentNumber = int(initialSeekSeconds / float64(segmentDuration))
 	}
+	streamOriginSeconds := 0.0
+	copySeekAnchorResolved := source.SiloSeekReanchor && compatHLSCopiesVideo(source)
+	if copySeekAnchorResolved {
+		var seekErr error
+		streamOriginSeconds, startSegmentNumber, seekErr = playback.ResolveCopySeekAnchor(ctx, h.FFmpegPath, file.FilePath, initialSeekSeconds, segmentDuration)
+		if seekErr != nil {
+			return fmt.Errorf("resolve compatibility seek anchor: %w", seekErr)
+		}
+	}
 	sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth := playback.SourceVideoTranscodeFacts(file)
 	toneMapRecipe := compatToneMapRecipe{}
 	var toneMapCapabilities tonemap.Capabilities
@@ -1505,27 +1515,28 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 
 	reqBody := transcodenode.TranscodeStartRequest{
-		SessionID:           upstreamSessionID,
-		InputPath:           file.FilePath,
-		SourceVideoCodec:    sourceVideoCodec,
-		SourceVideoProfile:  sourceVideoProfile,
-		SourceVideoBitDepth: sourceVideoBitDepth,
-		SeekSeconds:         initialSeekSeconds,
-		StartSegmentNumber:  startSegmentNumber,
-		SubtitleBurnIn:      source.SubtitleBurnIn,
-		SubtitleTrackIndex:  source.SubtitleTrackIndex,
-		SubtitleCodec:       source.SubtitleCodec,
-		TargetBitrateKbps:   source.TargetBitrateKbps,
-		TargetAudioChannels: source.TargetAudioChannels,
-		TargetCodecVideo:    compatTargetVideoCodec,
-		TargetCodecAudio:    compatTargetAudioCodec,
-		SegmentDuration:     segmentDuration,
-		HWAccel:             h.remoteDispatchHWAccel(transcodeNodeURL),
-		AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
-		SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
-		TotalDuration:       float64(source.Version.Duration),
-		RequireReady:        toneMapRecipe.mode != "",
-		ThrottleSeconds:     playback.ConfiguredTranscodeThrottleSeconds(ctx, h.SettingsRepo),
+		SessionID:              upstreamSessionID,
+		InputPath:              file.FilePath,
+		SourceVideoCodec:       sourceVideoCodec,
+		SourceVideoProfile:     sourceVideoProfile,
+		SourceVideoBitDepth:    sourceVideoBitDepth,
+		SeekSeconds:            initialSeekSeconds,
+		StreamOriginSeconds:    streamOriginSeconds,
+		CopySeekAnchorResolved: copySeekAnchorResolved,
+		StartSegmentNumber:     startSegmentNumber,
+		SubtitleBurnIn:         source.SubtitleBurnIn,
+		SubtitleTrackIndex:     source.SubtitleTrackIndex,
+		SubtitleCodec:          source.SubtitleCodec,
+		TargetBitrateKbps:      source.TargetBitrateKbps,
+		TargetAudioChannels:    source.TargetAudioChannels,
+		TargetCodecVideo:       compatTargetVideoCodec,
+		TargetCodecAudio:       compatTargetAudioCodec,
+		SegmentDuration:        segmentDuration,
+		HWAccel:                h.remoteDispatchHWAccel(transcodeNodeURL),
+		AudioTrackIndex:        compatAudioTrackIndexOrDefault(source),
+		SourceAudioChannels:    compatHLSRecipeSourceAudioChannels(source),
+		TotalDuration:          float64(source.Version.Duration),
+		RequireReady:           toneMapRecipe.mode != "",
 	}
 	if playback.IsAudioToAACStereoDownmixV3(reqBody.SourceAudioChannels, reqBody.TargetCodecAudio, reqBody.TargetAudioChannels) {
 		reqBody.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3
@@ -1738,28 +1749,29 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	// token of their own, so without a persisted recipe a node or central restart
 	// cannot rebuild ffmpeg and segment serves 404.
 	opts := playback.TranscodeOpts{
-		SessionID:           upstreamSessionID,
-		InputPath:           reqBody.InputPath,
-		SourceVideoCodec:    reqBody.SourceVideoCodec,
-		SourceVideoProfile:  reqBody.SourceVideoProfile,
-		SourceVideoBitDepth: reqBody.SourceVideoBitDepth,
-		SeekSeconds:         reqBody.SeekSeconds,
-		StartSegmentNumber:  reqBody.StartSegmentNumber,
-		TargetCodecVideo:    reqBody.TargetCodecVideo,
-		TargetCodecAudio:    reqBody.TargetCodecAudio,
-		TargetResolution:    reqBody.TargetResolution,
-		SubtitleBurnIn:      reqBody.SubtitleBurnIn,
-		SubtitleTrackIndex:  reqBody.SubtitleTrackIndex,
-		SubtitleCodec:       reqBody.SubtitleCodec,
-		TargetBitrateKbps:   reqBody.TargetBitrateKbps,
-		VideoSampleEntry:    reqBody.VideoSampleEntry,
-		CopyVideoMPEGTS:     reqBody.CopyVideoMPEGTS,
-		SegmentDuration:     reqBody.SegmentDuration,
-		AudioTrackIndex:     reqBody.AudioTrackIndex,
-		SourceAudioChannels: reqBody.SourceAudioChannels,
-		TargetAudioChannels: reqBody.TargetAudioChannels,
-		TotalDuration:       reqBody.TotalDuration,
-		ThrottleSeconds:     reqBody.ThrottleSeconds,
+		SessionID:              upstreamSessionID,
+		InputPath:              reqBody.InputPath,
+		SourceVideoCodec:       reqBody.SourceVideoCodec,
+		SourceVideoProfile:     reqBody.SourceVideoProfile,
+		SourceVideoBitDepth:    reqBody.SourceVideoBitDepth,
+		SeekSeconds:            reqBody.SeekSeconds,
+		StreamOriginSeconds:    reqBody.StreamOriginSeconds,
+		CopySeekAnchorResolved: reqBody.CopySeekAnchorResolved,
+		StartSegmentNumber:     reqBody.StartSegmentNumber,
+		TargetCodecVideo:       reqBody.TargetCodecVideo,
+		TargetCodecAudio:       reqBody.TargetCodecAudio,
+		TargetResolution:       reqBody.TargetResolution,
+		SubtitleBurnIn:         reqBody.SubtitleBurnIn,
+		SubtitleTrackIndex:     reqBody.SubtitleTrackIndex,
+		SubtitleCodec:          reqBody.SubtitleCodec,
+		TargetBitrateKbps:      reqBody.TargetBitrateKbps,
+		VideoSampleEntry:       reqBody.VideoSampleEntry,
+		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
+		SegmentDuration:        reqBody.SegmentDuration,
+		AudioTrackIndex:        reqBody.AudioTrackIndex,
+		SourceAudioChannels:    reqBody.SourceAudioChannels,
+		TargetAudioChannels:    reqBody.TargetAudioChannels,
+		TotalDuration:          reqBody.TotalDuration,
 	}
 	toneMapRecipe.apply(&opts)
 	opts.HWAccel = strings.TrimSpace(nodeResponse.HWAccel)
@@ -2094,6 +2106,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			source = applyCompatToneMapAvailabilityWithPolicy(source, toneMapCapabilities, toneMapPolicy)
 		}
 
+		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
 		dto.MediaAttachments = h.mediaAttachments(attachmentContext, routeItemID, playSessionID, source)
@@ -2357,6 +2370,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		profile = profiles[0]
 	}
 	dto := mediaSourceDTO{
+		SiloSeekReanchor:                    source.SiloSeekReanchor,
 		Protocol:                            "File",
 		ID:                                  source.ID,
 		Path:                                compatMediaPath(source.Version),
@@ -3289,6 +3303,9 @@ func applyPlaybackQueryOverrides(req *playbackInfoRequest, query url.Values) {
 	}
 	if value, ok := parseOptionalInt(firstQueryValue(query, "MaxAudioChannels")); ok {
 		req.MaxAudioChannels = value
+	}
+	if value, ok := parseOptionalBool(firstQueryValue(query, "SiloSeekReanchor")); ok {
+		req.SiloSeekReanchor = value
 	}
 	if value, ok := parseOptionalBool(firstQueryValue(query, "AlwaysBurnInSubtitleWhenTranscoding")); ok {
 		req.AlwaysBurnInSubtitleWhenTranscoding = value

@@ -2557,28 +2557,39 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		)
 	}
 
+	streamOriginSeconds := 0.0
+	copySeekAnchorResolved := source.SiloSeekReanchor && compatHLSCopiesVideo(source)
+	if copySeekAnchorResolved {
+		streamOriginSeconds, startSegmentNumber, err = playback.ResolveCopySeekAnchor(ctx, h.FFmpegPath, file.FilePath, initialSeekSeconds, h.compatSegmentDuration())
+		if err != nil {
+			return nil, fmt.Errorf("resolve compatibility seek anchor: %w", err)
+		}
+	}
+
 	opts := playback.TranscodeOpts{
-		SessionID:           upstreamSessionID,
-		InputPath:           file.FilePath,
-		SourceVideoCodec:    sourceVideoCodec,
-		SourceVideoProfile:  sourceVideoProfile,
-		SourceVideoBitDepth: sourceVideoBitDepth,
-		OutputDir:           filepath.Join(h.TranscodeDir, upstreamSessionID),
-		SeekSeconds:         initialSeekSeconds,
-		StartSegmentNumber:  startSegmentNumber,
-		SubtitleBurnIn:      source.SubtitleBurnIn,
-		SubtitleTrackIndex:  source.SubtitleTrackIndex,
-		SubtitleCodec:       source.SubtitleCodec,
-		TargetBitrateKbps:   source.TargetBitrateKbps,
-		TargetAudioChannels: source.TargetAudioChannels,
-		TargetCodecVideo:    compatTargetVideoCodec,
-		TargetCodecAudio:    compatTargetAudioCodec,
-		FFmpegPath:          h.FFmpegPath,
-		HWAccel:             h.HWAccel,
-		AudioTrackIndex:     audioTrackIndex,
-		SourceAudioChannels: sourceAudioChannels,
-		TotalDuration:       float64(source.Version.Duration),
-		FastStart:           true,
+		SessionID:              upstreamSessionID,
+		InputPath:              file.FilePath,
+		SourceVideoCodec:       sourceVideoCodec,
+		SourceVideoProfile:     sourceVideoProfile,
+		SourceVideoBitDepth:    sourceVideoBitDepth,
+		OutputDir:              filepath.Join(h.TranscodeDir, upstreamSessionID),
+		SeekSeconds:            initialSeekSeconds,
+		StreamOriginSeconds:    streamOriginSeconds,
+		CopySeekAnchorResolved: copySeekAnchorResolved,
+		StartSegmentNumber:     startSegmentNumber,
+		SubtitleBurnIn:         source.SubtitleBurnIn,
+		SubtitleTrackIndex:     source.SubtitleTrackIndex,
+		SubtitleCodec:          source.SubtitleCodec,
+		TargetBitrateKbps:      source.TargetBitrateKbps,
+		TargetAudioChannels:    source.TargetAudioChannels,
+		TargetCodecVideo:       compatTargetVideoCodec,
+		TargetCodecAudio:       compatTargetAudioCodec,
+		FFmpegPath:             h.FFmpegPath,
+		HWAccel:                h.HWAccel,
+		AudioTrackIndex:        audioTrackIndex,
+		SourceAudioChannels:    sourceAudioChannels,
+		TotalDuration:          float64(source.Version.Duration),
+		FastStart:              true,
 	}
 	opts.SegmentRetentionSeconds = h.segmentRetentionSeconds()
 	if sourceAudioChannels > 0 && opts.TargetAudioChannels == 0 {
@@ -2785,13 +2796,17 @@ func shouldGenerateCompatFullManifest(source PlaybackMediaSource, segmentDuratio
 	return playback.CanGenerateSyntheticManifest(float64(source.Version.Duration), segmentDuration)
 }
 
-// compatInitialTranscodePosition starts Jellyfin-compatible HLS at source zero.
+// compatInitialTranscodePosition starts legacy Jellyfin-compatible HLS at source zero.
 // Jellyfin 10.11's native webOS player must load init.mp4 and the beginning of
 // the source-aligned media playlist before it applies its own resume seek. A
 // pre-seeked process advertises segments 0..K-1 that can never exist and makes
 // the player's initial segment-zero request fail. Later segment-K requests use
-// the normal on-demand restart path.
-func compatInitialTranscodePosition(_ PlaybackMediaSource, _ int, _ float64) (float64, int) {
+// the normal on-demand restart path. Clients opting into SiloSeekReanchor instead
+// receive a fresh generation anchored at their explicit source-time request.
+func compatInitialTranscodePosition(source PlaybackMediaSource, _ int, requested float64) (float64, int) {
+	if source.SiloSeekReanchor && compatHLSCopiesVideo(source) {
+		return math.Max(0, requested), 0 // Segment numbering is resolved from the actual anchor before start.
+	}
 	return 0, 0
 }
 

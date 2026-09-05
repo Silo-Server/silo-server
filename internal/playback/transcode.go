@@ -2050,14 +2050,37 @@ func AlignRealManifestToSourceTimeline(manifest []byte, opts TranscodeOpts, gapU
 	firstSegment := timeline.entries[0].number
 	advancedSegments := max(0, firstSegment-opts.StartSegmentNumber)
 	gapDuration := opts.SeekSeconds + float64(advancedSegments*segmentDuration)
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
+		// A copied stream begins at the demuxer-selected keyframe, which can
+		// precede the requested seek. Its fragment timestamps must use that origin.
+		if advancedSegments > 0 {
+			return nil, fmt.Errorf("cannot align an evicted copy manifest without its original fragment timeline")
+		}
+		gapDuration = opts.StreamOriginSeconds
+	}
+	// BuildPlaybackManifest's generation-relative start (0.001) must not point
+	// into the unavailable prefix after source-time alignment. Keep this hint
+	// at the requested source position on every reload/remount, including a
+	// seek whose copied keyframe is at source zero and needs no gap.
+	lines := bytes.Split(manifest, []byte("\n"))
+	startTag := []byte(fmt.Sprintf("#EXT-X-START:TIME-OFFSET=%.6f,PRECISE=YES", opts.SeekSeconds))
+	foundStart := false
+	for i, line := range lines {
+		if bytes.HasPrefix(bytes.TrimSpace(line), []byte("#EXT-X-START:")) {
+			lines[i] = startTag
+			foundStart = true
+		}
+	}
+	if !foundStart {
+		lines = append(lines[:1], append([][]byte{startTag}, lines[1:]...)...)
+	}
 	if gapDuration <= 0 {
-		return manifest, nil
+		return bytes.Join(lines, []byte("\n")), nil
 	}
 	if gapURI == "" {
 		gapURI = "source_timeline_gap" + hlsSegmentExtension(opts)
 	}
 
-	lines := bytes.Split(manifest, []byte("\n"))
 	targetDuration := segmentDuration
 	for _, line := range lines {
 		trimmed := bytes.TrimSpace(line)

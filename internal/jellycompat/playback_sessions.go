@@ -80,6 +80,9 @@ type PlaybackSession struct {
 
 // PlaybackMediaSource stores one negotiated stream source within a compat play session.
 type PlaybackMediaSource struct {
+	// SiloSeekReanchor opts into source-time copy-HLS startup for clients that
+	// renegotiate seeks outside the produced playlist window.
+	SiloSeekReanchor     bool
 	SubtitleBurnIn       bool
 	SubtitleTrackIndex   int
 	SubtitleCodec        string
