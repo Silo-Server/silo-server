@@ -432,9 +432,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (103
+  tier-1 ported mutation rows (219 distinct operations) are classified (101
   `natural_idempotent`, 26 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 10
-  `durable_dispatch`, 56 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 58 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
@@ -761,7 +761,9 @@ V2 does not impose a global mandatory `Idempotency-Key` mechanism. Every durable
 records its duplicate-submission and connection-loss behavior in the endpoint ledger and selects
 the smallest mechanism that supplies a real guarantee:
 
-- naturally idempotent `PUT` or `DELETE` semantics that converge on one resource state;
+- naturally idempotent semantics: repeating the same request converges on one resource state
+  without duplicating durable state or side effects, regardless of HTTP method (including
+  absolute-assignment `PATCH` and read-only `POST`);
 - a natural key or client-supplied resource identity enforced by a database uniqueness constraint;
 - a durable domain operation identity such as a playback attempt, upload, job, or webhook delivery
   ID;
