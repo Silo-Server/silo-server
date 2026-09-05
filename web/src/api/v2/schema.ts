@@ -131,11 +131,64 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    delete?: never;
+    /** Delete a household profile; the primary profile cannot be deleted. */
+    delete: operations["deleteProfile"];
     options?: never;
     head?: never;
     /** Update a household profile; omitted members are unchanged. */
     patch: operations["updateProfile"];
+    trace?: never;
+  };
+  "/api/v2/profiles/{id}/avatar": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB). */
+    put: operations["uploadProfileAvatar"];
+    post?: never;
+    /** Remove a profile's uploaded avatar; a preset avatar is left as is. */
+    delete: operations["deleteProfileAvatar"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profiles/{id}/verify-pin": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Check a profile's PIN; a match issues the X-Profile-Token that unlocks the profile for this login session. */
+    post: operations["verifyProfilePIN"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profiles/household/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the live playback sessions on the signed-in account, for a household manager. */
+    get: operations["listHouseholdSessions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v2/progress": {
@@ -389,6 +442,13 @@ export interface components {
       /** @example true */
       transcode_allowed: boolean;
     };
+    FormFile: {
+      ContentType: string;
+      Filename: string;
+      IsSet: boolean;
+      /** Format: int64 */
+      Size: number;
+    };
     Impersonation: {
       /**
        * @description Always true when the object is present
@@ -417,6 +477,329 @@ export interface components {
        * @example eyJvZmZzZXQiOjUwfQ
        */
       next_cursor?: string;
+    };
+    PlaybackSession: {
+      /**
+       * @description Empty when unknown
+       * @example copy
+       */
+      audio_decision: string;
+      /**
+       * Format: int64
+       * @example 0
+       */
+      audio_track_index: number;
+      /**
+       * @description Empty when unknown
+       * @example 1400
+       */
+      client_build: string;
+      /**
+       * @description Empty when unknown
+       * @example release
+       */
+      client_channel: string;
+      /**
+       * @description Empty when unknown
+       * @example 192.0.2.10
+       */
+      client_ip: string;
+      /**
+       * @description Display label derived from the client name and version; empty when unknown
+       * @example Silo for Apple TV 1.4
+       */
+      client_label: string;
+      /**
+       * @description Display label with the exact build; empty when unknown
+       * @example Silo for Apple TV 1.4.0 (1400)
+       */
+      client_label_full: string;
+      /**
+       * @description Empty when unknown
+       * @example Silo for Apple TV
+       */
+      client_name: string;
+      /**
+       * @description Empty when unknown
+       * @example
+       */
+      client_user_agent: string;
+      /**
+       * @description Empty when unknown
+       * @example 1.4.0
+       */
+      client_version: string;
+      /**
+       * @description Catalog content id of the playing item; empty when unknown
+       * @example tt0111161
+       */
+      content_id: string;
+      /**
+       * @description Bucketed method: direct, remux, transcode or audio; empty when unknown
+       * @example direct
+       */
+      effective_play_method: string;
+      /**
+       * @description Empty unless an episode
+       * @example
+       */
+      episode_name: string;
+      /**
+       * Format: int64
+       * @description null unless an episode
+       * @example 1
+       */
+      episode_number: number | null;
+      /**
+       * Format: int64
+       * @description Seconds; null when unknown
+       * @example 8520
+       */
+      file_duration: number | null;
+      /**
+       * @description Whether the serving node accepts remote control of this session
+       * @example true
+       */
+      has_playback_control: boolean;
+      /**
+       * @description The playback session
+       * @example ps_7f3a
+       */
+      id: string;
+      /** @example false */
+      is_jellyfin_client: boolean;
+      /** @example false */
+      is_paused: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 42
+       */
+      media_file_id: string;
+      /** @example The Shawshank Redemption */
+      media_title: string;
+      /**
+       * @description Catalog item type; empty when unknown
+       * @example movie
+       */
+      media_type: string;
+      /**
+       * @description Empty when the node has no display name
+       * @example
+       */
+      node_display_name: string;
+      /**
+       * @description The negotiated method as the node reported it
+       * @example direct
+       */
+      play_method: string;
+      /**
+       * Format: double
+       * @example 1234.5
+       */
+      position_seconds: number;
+      /**
+       * @description Where to fetch the poster; empty when there is none
+       * @example /api/v1/images/poster/42
+       */
+      poster_url: string;
+      /**
+       * @description The profile playing; empty when the session carries none
+       * @example 1
+       */
+      profile_id: string;
+      /**
+       * @description Empty when unknown
+       * @example Laura
+       */
+      profile_name: string;
+      /**
+       * @description Identifier of the node serving the stream
+       * @example api
+       */
+      reporting_node: string;
+      /**
+       * @description The file the client asked for before any version substitution
+       * @example 42
+       */
+      requested_media_file_id: string;
+      /**
+       * @description Empty when the client did not ask for one
+       * @example
+       */
+      requested_video_codec: string;
+      /**
+       * @description Empty when the client did not ask for one
+       * @example
+       */
+      requested_video_resolution: string;
+      /**
+       * @description Empty when routing is unresolved
+       * @example
+       */
+      routing_egress: string;
+      /**
+       * @description null when routing is unresolved
+       * @example 3
+       */
+      routing_egress_node_id: string | null;
+      /**
+       * @description Empty when routing is unresolved
+       * @example
+       */
+      routing_egress_node_name: string;
+      /**
+       * @description Empty when routing is unresolved
+       * @example
+       */
+      routing_execution: string;
+      /**
+       * @description null when routing is unresolved
+       * @example 3
+       */
+      routing_execution_node_id: string | null;
+      /**
+       * @description Empty when routing is unresolved
+       * @example
+       */
+      routing_execution_node_name: string;
+      /**
+       * @description Empty when routing is unresolved
+       * @example
+       */
+      routing_workload: string;
+      /**
+       * Format: int64
+       * @description null unless an episode
+       * @example 1
+       */
+      season_number: number | null;
+      /**
+       * @description Empty unless an episode
+       * @example
+       */
+      series_name: string;
+      /**
+       * Format: int64
+       * @description null when unknown
+       * @example 8
+       */
+      source_audio_channels: number | null;
+      /**
+       * @description Empty when unknown
+       * @example truehd
+       */
+      source_audio_codec: string;
+      /**
+       * @description Empty when unknown
+       * @example eng
+       */
+      source_audio_language: string;
+      /**
+       * @description Empty when unknown
+       * @example 7.1
+       */
+      source_audio_layout: string;
+      /**
+       * @description Empty when unknown
+       * @example
+       */
+      source_audio_title: string;
+      /**
+       * Format: int64
+       * @description null when unknown
+       * @example 24000
+       */
+      source_bitrate_kbps: number | null;
+      /**
+       * @description Empty when unknown
+       * @example mkv
+       */
+      source_container: string;
+      /**
+       * @description Empty when unknown
+       * @example hevc
+       */
+      source_video_codec: string;
+      /**
+       * @description Empty when unknown
+       * @example 2160p
+       */
+      source_video_resolution: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      started_at: string;
+      /**
+       * Format: int64
+       * @description null when unknown
+       * @example 12000
+       */
+      stream_bitrate_kbps: number | null;
+      /**
+       * Format: int64
+       * @description Channels the transcode encodes; null when the reporting node did not know
+       * @example 6
+       */
+      target_audio_channels: number | null;
+      /**
+       * @description Empty when not transcoding
+       * @example
+       */
+      target_audio_codec: string;
+      /**
+       * Format: int64
+       * @description null when not transcoding
+       * @example 8000
+       */
+      target_bitrate_kbps: number | null;
+      /**
+       * @description Empty when not transcoding
+       * @example
+       */
+      target_resolution: string;
+      /**
+       * @description Empty when not transcoding
+       * @example
+       */
+      target_video_codec: string;
+      /**
+       * @description Confirmed tone-map executor; empty when none
+       * @example
+       */
+      tone_map_mode: string;
+      /** @example false */
+      transcode_audio: boolean;
+      /**
+       * @description Confirmed transcode executor; empty when not transcoding
+       * @example
+       */
+      transcode_hw_accel: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      updated_at: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      /** @example laura */
+      username: string;
+      /**
+       * @description Empty when unknown
+       * @example copy
+       */
+      video_decision: string;
+    };
+    PlaybackSessionCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["PlaybackSession"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
     };
     Problem: {
       /**
@@ -567,6 +950,13 @@ export interface components {
        */
       updated_at: string;
     };
+    ProfileAvatarForm: {
+      /**
+       * Format: binary
+       * @description The image; resized server-side to the avatar variants
+       */
+      avatar: string;
+    };
     ProfileCollection: {
       /**
        * @description Whether this server accepts avatar uploads (an avatar store is configured)
@@ -655,6 +1045,13 @@ export interface components {
        * @example auto
        */
       subtitle_mode?: string;
+    };
+    ProfilePINCheck: {
+      /**
+       * @description The PIN to check
+       * @example 1234
+       */
+      pin: string;
     };
     ProfileSectionFlags: {
       /**
@@ -785,6 +1182,24 @@ export interface components {
        * @example auto
        */
       subtitle_mode?: string;
+    };
+    ProfileVerification: {
+      /**
+       * Format: date-time
+       * @description When the token stops being accepted; null when no token was issued or it does not expire
+       * @example 2026-01-02T15:04:05.000Z
+       */
+      expires_at: string | null;
+      /**
+       * @description Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session. Absent when the PIN did not match
+       * @example pvt_5f3a9c1e7b2d4e8fa0c6
+       */
+      profile_token?: string;
+      /**
+       * @description Whether the PIN matched
+       * @example true
+       */
+      valid: boolean;
     };
     ProgressCollection: {
       /** @description The page's items; empty, never null */
@@ -2109,6 +2524,122 @@ export interface operations {
       };
     };
   };
+  deleteProfile: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The profile */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   updateProfile: {
     parameters: {
       query?: never;
@@ -2213,6 +2744,499 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  uploadProfileAvatar: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The profile */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["ProfileAvatarForm"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Profile"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteProfileAvatar: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The profile */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  verifyProfilePIN: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The profile whose PIN is checked */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProfilePINCheck"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileVerification"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listHouseholdSessions: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlaybackSessionCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };

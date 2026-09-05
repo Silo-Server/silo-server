@@ -353,3 +353,238 @@ func TestCreateProfileDenied(t *testing.T) {
 	unwired.Profiles = nil
 	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, bearer(memberToken)), TypeDependencyUnavailable)
 }
+
+func TestDeleteProfile(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView()}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	auth := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	rec := do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", auth)
+	if rec.Code != 204 || rec.Body.Len() != 0 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	cmd := profiles.lastDelete
+	if cmd == nil || cmd.UserID != 1 || cmd.ProfileID != "p-owner" || cmd.ActiveProfileID != "p-owner" {
+		t.Fatalf("command = %+v", cmd)
+	}
+	if err := cmd.VerifyProfile("p-owner"); err != nil {
+		t.Fatalf("verified profile rejected: %v", err)
+	}
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-primary", "", auth), TypeConflict)
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-missing", "", auth), TypeNotFound)
+	// A PIN-locked primary profile manages the household only once the
+	// gate verified it by X-Profile-Token.
+	locked := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
+	h = newTestHandler(t, pilotDeps(nil, locked))
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
+	if rec := do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", with(with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "t")); rec.Code != 204 {
+		t.Fatalf("verified: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, tc := range []struct {
+		err  error
+		want ProblemType
+	}{
+		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
+		{errors.New("boom"), TypeInternalError},
+	} {
+		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", auth), tc.want)
+	}
+}
+
+func TestDeleteProfileDenied(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", nil), TypeAuthenticationRequired)
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
+	demo := pilotDeps(nil, nil)
+	demo.DemoSettings = fakeSettings{demo: true}
+	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/profiles/p-owner", "", bearer(memberToken)), TypePermissionDenied)
+	unwired := pilotDeps(nil, nil)
+	unwired.Profiles = nil
+	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodDelete, "/api/v2/profiles/p-owner", "", bearer(memberToken)), TypeDependencyUnavailable)
+}
+
+func TestListHouseholdSessions(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView(), sessions: []handlers.PlaybackSessionView{fixtureSession()}}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	rec := do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-owner"))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"items":[{"id":"ps-7f3a","user_id":"1","username":"laura","profile_id":"p-owner"`,
+		`"season_number":1,"episode_number":3`, `"file_duration":2640,"started_at":"2026-01-02T03:04:05.678Z"`,
+		`"routing_execution_node_id":"3"`, `"is_jellyfin_client":false`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %s: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `"page"`) || strings.Contains(body, "compat") {
+		t.Fatalf("body = %s", body)
+	}
+	q := profiles.lastSessions
+	if q == nil || q.UserID != 1 || q.ActiveProfileID != "p-owner" {
+		t.Fatalf("query = %+v", q)
+	}
+	// Unknown members on the row are nullable, never omitted.
+	profiles.sessions = []handlers.PlaybackSessionView{{SessionID: "ps-bare", UserID: 1, StartedAt: fixedTime(), UpdatedAt: fixedTime()}}
+	body = do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-owner")).Body.String()
+	for _, want := range []string{`"season_number":null`, `"file_duration":null`, `"routing_egress_node_id":null`, `"profile_name":""`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %s: %s", want, body)
+		}
+	}
+	profiles.sessions = nil
+	if body := do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", bearer(memberToken)).Body.String(); body != `{"items":[]}`+"\n" {
+		t.Fatalf("empty = %s", body)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions?offset=1", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", nil), TypeAuthenticationRequired)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
+	locked := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
+	h = newTestHandler(t, pilotDeps(nil, locked))
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
+	for _, tc := range []struct {
+		err  error
+		want ProblemType
+	}{
+		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
+		{&handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Playback sessions are not configured"}, TypeInternalError},
+	} {
+		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", bearer(memberToken)), tc.want)
+	}
+	unwired := pilotDeps(nil, nil)
+	unwired.Profiles = nil
+	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodGet, "/api/v2/profiles/household/sessions", "", bearer(memberToken)), TypeDependencyUnavailable)
+}
+
+func TestVerifyProfilePIN(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView()}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	rec := do(t, h, http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, bearer(memberToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if want := `{"valid":true,"profile_token":"pvt_fixture","expires_at":"2026-01-02T15:04:05.678Z"}` + "\n"; rec.Body.String() != want {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("Cache-Control = %q", cc)
+	}
+	cmd := profiles.lastVerify
+	if cmd == nil || cmd.UserID != 1 || cmd.ProfileID != "p-owner" || cmd.PIN != "1234" || cmd.SessionID == "" {
+		t.Fatalf("command = %+v", cmd)
+	}
+	// A wrong PIN is an answer, not an error; nothing is issued.
+	if body := do(t, h, http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"0000"}`, bearer(memberToken)).Body.String(); body != `{"valid":false,"expires_at":null}`+"\n" {
+		t.Fatalf("wrong = %s", body)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles/p-missing/verify-pin", `{"pin":"1234"}`, bearer(memberToken)), TypeNotFound)
+	for _, tc := range []struct{ body, location, code string }{
+		{`{}`, locationPIN, codeRequired},
+		{`{"pin":""}`, locationPIN, codeOutOfRange},
+		{`{"pin":null}`, locationPIN, codeInvalidType},
+		{`{"pin":"` + strings.Repeat("é", 37) + `"}`, locationPIN, codeOutOfRange},
+		{`{"pin":"1234","remember":true}`, "body.remember", codeUnknownField},
+	} {
+		p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", tc.body, bearer(memberToken)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
+			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, nil), TypeAuthenticationRequired)
+	// A declared locked profile is judged even though the header is optional.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
+	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: errors.New("boom")})), http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, bearer(memberToken)), TypeInternalError)
+	unwired := pilotDeps(nil, nil)
+	unwired.Profiles = nil
+	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, bearer(memberToken)), TypeDependencyUnavailable)
+}
+
+func avatarForm(contentType, data string) (string, string) {
+	return fixtureMultipart("avatar", "me.img", contentType, data), fixtureMultipartType
+}
+
+func TestUploadProfileAvatar(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView(), avatarStore: true}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	body, ct := avatarForm("image/png", "png-bytes")
+	rec := do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"avatar":"upload:avatars/1/p-owner/original","avatar_url":"https://s3.example.test/avatars/1/p-owner/256.jpg","avatar_source":"upload"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if up := profiles.lastUpload; up == nil || up.ProfileID != "p-owner" || up.ContentType != "image/png" || up.Size != len("png-bytes") {
+		t.Fatalf("upload = %+v", up)
+	}
+	// The part's media type is judged by the framework against the declared
+	// list; the service's own rejection of an undecodable image lands at the
+	// same location.
+	gif, _ := avatarForm("image/gif", "gif-bytes")
+	p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", gif, with(bearer(memberToken), "Content-Type", ct)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationAvatarPart {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	bad, _ := avatarForm("image/png", "not-an-image")
+	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", bad, with(bearer(memberToken), "Content-Type", ct)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationAvatarPart || p.Errors[0].Code != codeInvalid {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// A form without the part, and a form field of another name.
+	empty := "--silo-fixture-boundary--\r\n"
+	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", empty, with(bearer(memberToken), "Content-Type", ct)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationAvatarPart || p.Errors[0].Code != codeRequired {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// JSON and a bare multipart type without a boundary are refused before
+	// the operation.
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", `{"avatar":"x"}`, bearer(memberToken)), TypeUnsupportedMediaType)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", "", bearer(memberToken)), TypeUnsupportedMediaType)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", "multipart/form-data")), TypeMalformedRequest)
+	// The request limit is the avatar limit plus framing: a form over it is
+	// refused before parsing, one under it with a file over the avatar
+	// limit is the service's own 413.
+	huge, _ := avatarForm("image/png", strings.Repeat("x", maxAvatarFormBytes))
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", huge, with(bearer(memberToken), "Content-Type", ct)), TypePayloadTooLarge)
+	large, _ := avatarForm("image/png", strings.Repeat("x", maxAvatarBytes+1))
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", large, with(bearer(memberToken), "Content-Type", ct)), TypePayloadTooLarge)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-missing/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeNotFound)
+	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{view: fixtureProfileView(), noAvatarStore: true})), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeDependencyUnavailable)
+	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: errors.New("boom")})), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeInternalError)
+}
+
+func TestUploadProfileAvatarDenied(t *testing.T) {
+	body, ct := avatarForm("image/png", "png-bytes")
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, map[string]string{"Content-Type": ct}), TypeAuthenticationRequired)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(with(bearer(memberToken), "X-Profile-Id", "p-locked"), "Content-Type", ct)), TypeProfileVerificationRequired)
+	demo := pilotDeps(nil, nil)
+	demo.DemoSettings = fakeSettings{demo: true}
+	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypePermissionDenied)
+	unwired := pilotDeps(nil, nil)
+	unwired.Profiles = nil
+	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeDependencyUnavailable)
+}
+
+func TestDeleteProfileAvatar(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView()}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	rec := do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner/avatar", "", bearer(memberToken))
+	if rec.Code != 204 || rec.Body.Len() != 0 || profiles.lastAvatarDelete != "p-owner" {
+		t.Fatalf("%d %s %q", rec.Code, rec.Body.String(), profiles.lastAvatarDelete)
+	}
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-missing/avatar", "", bearer(memberToken)), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner/avatar", "", nil), TypeAuthenticationRequired)
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner/avatar", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
+	demo := pilotDeps(nil, nil)
+	demo.DemoSettings = fakeSettings{demo: true}
+	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/profiles/p-owner/avatar", "", bearer(memberToken)), TypePermissionDenied)
+	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: errors.New("boom")})), http.MethodDelete, "/api/v2/profiles/p-owner/avatar", "", bearer(memberToken)), TypeInternalError)
+	unwired := pilotDeps(nil, nil)
+	unwired.Profiles = nil
+	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodDelete, "/api/v2/profiles/p-owner/avatar", "", bearer(memberToken)), TypeDependencyUnavailable)
+}
