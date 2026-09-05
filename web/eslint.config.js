@@ -41,10 +41,17 @@ export default tseslint.config(
     files: [
       "src/api/v2/**/*.{ts,tsx}",
       "src/hooks/useAuth.tsx",
+      "src/hooks/queries/libraries.ts",
+      "src/hooks/queries/onboarding.ts",
       "src/hooks/queries/progress.ts",
       "src/hooks/queries/profiles.ts",
+      "src/hooks/queries/policy.ts",
       "src/hooks/queries/admin/users.ts",
+      "src/lib/buildPluginHref.ts",
+      "src/pages/ActivateDevice.tsx",
+      "src/pages/Login.tsx",
       "src/pages/OAuthComplete.tsx",
+      "src/pages/Signup.tsx",
     ],
     rules: {
       "no-restricted-syntax": [

@@ -183,7 +183,7 @@ describe("impersonationSession", () => {
         authorization: "Bearer expired-admin-access",
       },
       {
-        url: "/api/v1/auth/refresh",
+        url: "/api/v2/auth/refresh",
         authorization: null,
       },
       {

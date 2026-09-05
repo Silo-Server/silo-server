@@ -4,7 +4,6 @@ import type { QueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type {
   PolicyActivateVersionResult,
-  PolicyCapability,
   PolicyCompileIssue,
   PolicyCreateVersionResult,
   PolicyDecisionEntry,
@@ -19,6 +18,11 @@ import type {
   PolicyVersionSummary,
 } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
+
+// The capability read is a profile-scoped v2 operation and lives with the
+// other non-admin policy reads; it is re-exported here so the admin screens
+// keep importing every policy hook from one module.
+export { usePolicyCapability } from "@/hooks/queries/policy";
 
 export interface PolicyDecisionFilters {
   decision_name?: string;
@@ -67,14 +71,6 @@ function invalidatePolicyDocuments(queryClient: QueryClient, id?: number) {
     );
   }
   return Promise.all(invalidations);
-}
-
-export function usePolicyCapability() {
-  return useQuery({
-    queryKey: adminKeys.policyCapability(),
-    queryFn: () => api<PolicyCapability>("/policy/capability"),
-    staleTime: 30_000,
-  });
 }
 
 export function usePolicyVendor() {

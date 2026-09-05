@@ -300,6 +300,37 @@ describe("endImpersonationWithRecovery", () => {
     expect(clearActiveAuthState).not.toHaveBeenCalled();
   });
 
+  it("restores the preserved admin session when the v2 endImpersonation answers 409 conflict", async () => {
+    const endImpersonationRequest = vi.fn<() => Promise<void>>().mockRejectedValue(
+      new V2ProblemError("endImpersonation", {
+        type: "https://siloserver.org/docs/api/v2/problems/conflict",
+        title: "Conflict",
+        status: 409,
+        detail: "No active impersonation session.",
+        instance: "urn:silo:request:000000000000000000000027",
+      }),
+    );
+    const loadStoredImpersonationAdminSession = vi.fn().mockReturnValue({
+      accessToken: "admin-access",
+      refreshToken: "admin-refresh",
+      returnPath: "/admin/users/42",
+    });
+    const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const clearAuthState = vi.fn();
+    const clearActiveAuthState = vi.fn();
+
+    await endImpersonationWithRecovery({
+      endImpersonationRequest,
+      loadStoredImpersonationAdminSession,
+      restoreAdminUser,
+      clearAuthState,
+      clearActiveAuthState,
+    });
+
+    expect(restoreAdminUser).toHaveBeenCalledTimes(1);
+    expect(clearAuthState).not.toHaveBeenCalled();
+  });
+
   it("keeps non-auth failures surfaced instead of restoring the admin session", async () => {
     const error = new ApiClientError(500, "server_error", "boom");
     const endImpersonationRequest = vi.fn<() => Promise<void>>().mockRejectedValue(error);

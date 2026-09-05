@@ -15,7 +15,11 @@ import {
   Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { OnboardingFlow, OnboardingStep, OnboardingStepLink } from "@/api/types";
+import type {
+  OnboardingFlow,
+  OnboardingStep,
+  OnboardingStepLink,
+} from "@/hooks/queries/onboarding";
 import { getProfileToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";

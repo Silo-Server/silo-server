@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import type { UserLibrary } from "@/api/types";
+import { v2, type V2Result } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { libraryKeys } from "./keys";
@@ -65,12 +65,29 @@ export function filterVisibleLibraries(libraries: UserLibrary[], disabledLibrary
   return libraries.filter((library) => !disabled.has(library.id));
 }
 
+/**
+ * Projects a v2 user library onto the `UserLibrary` shape the profile editor,
+ * the settings screens, and the display-preference ids still model with
+ * numeric ids. The v2 id is the same library id rendered as a string.
+ */
+export function userLibraryFromV2(
+  library: V2Result<"GET /api/v2/user/libraries">["items"][number],
+): UserLibrary {
+  return {
+    id: Number(library.id),
+    name: library.name,
+    type: library.type,
+    sort_order: library.sort_order,
+    poster_url: library.poster_url,
+  };
+}
+
 export function useAvailableUserLibraries() {
   const { profile } = useAuth();
 
   return useQuery({
     queryKey: libraryKeys.user(profile?.id),
-    queryFn: () => api<UserLibrary[]>("/user/libraries"),
+    queryFn: async () => (await v2("GET /api/v2/user/libraries")).items.map(userLibraryFromV2),
     staleTime: 5 * 60 * 1000,
   });
 }

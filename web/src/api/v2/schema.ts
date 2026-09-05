@@ -203,6 +203,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/oauth/{install_id}/callback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Provider redirect target: finish the OAuth login and send the browser to the completion page.
+     * @description The provider redirects the browser here with code and state. The response is a 302 to the SPA's completion page carrying a one-time code for completeOAuthLogin, or to /login?error=oauth_failed&reason=<reason> when the handshake fails. Tokens never appear in the redirect.
+     */
+    get: operations["completeOAuthCallback"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/oauth/{install_id}/init": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a browser OAuth login: redirect the browser to the provider.
+     * @description A browser form POST. The response is a 302 to the provider's authorize URL; the OAuth state is bound to this server's callback under the same API prefix. A failure is a plain-text status.
+     */
+    post: operations["startOAuthLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/oauth/complete": {
     parameters: {
       query?: never;
@@ -220,6 +260,177 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/plugin-launch": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Issue the short-lived HttpOnly cookie plugin pages authenticate with. */
+    post: operations["launchPlugin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the sign-in providers a client may offer. */
+    get: operations["listAuthProviders"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/refresh": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Exchange a refresh token for a new token pair. */
+    post: operations["refreshSession"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the caller's login sessions, active and revoked. */
+    get: operations["listSessions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/sessions/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Revoke one of the caller's login sessions. */
+    delete: operations["deleteSession"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/setup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create the first administrator account and open its session. */
+    post: operations["setupServer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/signup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Report whether public invited signup is enabled. */
+    get: operations["getSignupStatus"];
+    put?: never;
+    /** Create an account from an invite code and open its session. */
+    post: operations["signup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/onboarding/flow": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the first-run tour for the acting profile on one surface. */
+    get: operations["getOnboardingFlow"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/onboarding/progress": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record the acting profile's progress through the current tour. */
+    post: operations["recordOnboardingProgress"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/onboarding/state": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the acting profile's progress through the current tour. */
+    get: operations["getOnboardingState"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/openapi.json": {
     parameters: {
       query?: never;
@@ -229,6 +440,23 @@ export interface paths {
     };
     /** Get the committed OpenAPI document this server was built from. */
     get: operations["getOpenAPIDocument"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/policy/capability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe the policy engine. */
+    get: operations["getPolicyCapability"];
     put?: never;
     post?: never;
     delete?: never;
@@ -297,6 +525,23 @@ export interface paths {
     };
     /** Report whether the server still needs its first administrator. */
     get: operations["getSetupStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/user/libraries": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the libraries the acting principal may browse. */
+    get: operations["listUserLibraries"];
     put?: never;
     post?: never;
     delete?: never;
@@ -458,6 +703,44 @@ export interface components {
     AdminUserCollection: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminUser"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    AuthProvider: {
+      /**
+       * @description Whether this is the provider login uses when none is named
+       * @example true
+       */
+      default: boolean;
+      /**
+       * @description Label for the sign-in button
+       * @example Silo account
+       */
+      display_name: string;
+      /**
+       * @description Icon shown next to the button; absent when the provider ships none
+       * @example https://plugins.example.test/icon.svg
+       */
+      icon_url?: string;
+      /**
+       * @description Provider id; the value login takes as provider
+       * @example local
+       */
+      id: string;
+      /**
+       * @description Plugin installation backing the provider; absent for the built-in provider
+       * @example 3
+       */
+      installation_id?: string;
+      /**
+       * @description How the provider authenticates: credentials (login) or oauth (the OAuth handshake)
+       * @example credentials
+       */
+      mode: string;
+    };
+    AuthProviderCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AuthProvider"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -740,6 +1023,47 @@ export interface components {
        */
       username: string;
     };
+    LoginSession: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      created_at: string;
+      /**
+       * @description User-Agent recorded at login; empty when none was sent
+       * @example Silo/1.0 (tvOS)
+       */
+      device_name: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-02-01T03:04:05.678Z
+       */
+      expires_at: string;
+      /**
+       * @description Session identifier; the value deleteSession takes
+       * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
+       */
+      id: string;
+      /**
+       * @description Client address recorded at login; empty when unknown
+       * @example 203.0.113.7
+       */
+      ip_address: string;
+      /**
+       * Format: date-time
+       * @description When the session was revoked; null while it is active
+       * @example 2026-01-03T03:04:05.678Z
+       */
+      revoked_at: string | null;
+    };
+    LoginSessionCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["LoginSession"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
     OAuthCompletion: {
       /**
        * @description Bearer access token
@@ -763,6 +1087,158 @@ export interface components {
        */
       refresh_token: string;
     };
+    OnboardingFlow: {
+      /** @description Ordered steps for the surface and profile */
+      steps: components["schemas"]["OnboardingStep"][];
+      /**
+       * @description The current tour; progress is recorded against it
+       * @example core-2026-07
+       */
+      tour_id: string;
+      /**
+       * Format: int64
+       * @description Flow format version
+       * @example 1
+       */
+      version: number;
+    };
+    OnboardingProgressInputBody: {
+      /**
+       * @description Mark the tour completed
+       * @example false
+       */
+      completed?: boolean;
+      /**
+       * @description The step the profile reached
+       * @example playback-quality
+       */
+      last_step?: string;
+      /**
+       * @description Mark the tour skipped
+       * @example false
+       */
+      skipped?: boolean;
+      /**
+       * @description The tour the progress belongs to; a tour other than the current one is refused
+       * @example core-2026-07
+       */
+      tour_id?: string;
+    };
+    OnboardingSetting: {
+      /**
+       * @description Control kind: segmented, toggle, or select
+       * @example segmented
+       */
+      control: string;
+      /**
+       * @description Preselected value
+       * @example auto
+       */
+      default?: string;
+      /**
+       * @description The profile member or setting key written
+       * @example quality_preference
+       */
+      key: string;
+      /**
+       * @description Annotation of a toggle control
+       * @example Show subtitles
+       */
+      label?: string;
+      /** @description Choices; empty for a toggle */
+      options: components["schemas"]["OnboardingSettingOption"][];
+      /**
+       * @description Which API the choice writes through: profile_field (updateProfile), setting, or device_setting
+       * @example profile_field
+       */
+      target: string;
+    };
+    OnboardingSettingOption: {
+      /**
+       * @description Display label
+       * @example Automatic
+       */
+      label: string;
+      /**
+       * @description The value written when chosen
+       * @example auto
+       */
+      value: string;
+    };
+    OnboardingState: {
+      /**
+       * @description RFC 3339 instant the tour was completed; absent otherwise
+       * @example 2026-01-02T03:04:05Z
+       */
+      completed_at?: string;
+      /**
+       * @description True once the tour was completed or skipped: do not show it again
+       * @example false
+       */
+      done: boolean;
+      /**
+       * @description The last step the profile reached; absent before the tour starts
+       * @example playback-quality
+       */
+      last_step?: string;
+      /**
+       * @description RFC 3339 instant the tour was skipped; absent otherwise
+       * @example 2026-01-02T03:04:05Z
+       */
+      skipped_at?: string;
+      /**
+       * @description The current tour
+       * @example core-2026-07
+       */
+      tour_id: string;
+    };
+    OnboardingStep: {
+      /**
+       * @description Label of the optional feature_card action
+       * @example Browse requests
+       */
+      action_label?: string;
+      /** @example A quick tour of what you can do. */
+      body?: string;
+      /**
+       * @description Stable step id; the value recordOnboardingProgress takes as last_step
+       * @example welcome
+       */
+      id: string;
+      /**
+       * @description Client-side asset key; never a URL
+       * @example welcome
+       */
+      illustration?: string;
+      /**
+       * @description Step kind: welcome, feature_card, setting_choice, or handoff; clients skip unknown kinds
+       * @example welcome
+       */
+      kind: string;
+      /** @description Outbound links; empty when none */
+      links: components["schemas"]["OnboardingStepLink"][];
+      /**
+       * @description Client route for a feature_card action or a handoff
+       * @example /requests
+       */
+      route?: string;
+      /** @description Present on setting_choice steps */
+      setting?: components["schemas"]["OnboardingSetting"];
+      /** @example Welcome to Silo */
+      title?: string;
+    };
+    OnboardingStepLink: {
+      /**
+       * @description Button label
+       * @example App Store
+       */
+      label: string;
+      /**
+       * @description External URL
+       * @example https://apps.apple.com/app/silo
+       */
+      url: string;
+    };
     PageInfo: {
       /**
        * @description Whether a next page exists
@@ -774,6 +1250,65 @@ export interface components {
        * @example eyJvZmZzZXQiOjUwfQ
        */
       next_cursor?: string;
+    };
+    PluginLaunch: {
+      /**
+       * Format: int64
+       * @description Cookie lifetime in seconds
+       * @example 300
+       */
+      expires_in: number;
+    };
+    PolicyCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed?: boolean;
+      /**
+       * @description The policy domains the engine decides
+       * @example [
+       *       "playback",
+       *       "download"
+       *     ]
+       */
+      decision_types: string[];
+      /**
+       * @description True when the engine runs without part of its configured policy
+       * @example false
+       */
+      degraded: boolean;
+      /**
+       * @description Domains whose custom policy was dropped; empty when none
+       * @example []
+       */
+      degraded_domains: string[];
+      /**
+       * @description Why the engine is degraded; absent when it is not
+       * @example policy store unavailable
+       */
+      degraded_reason?: string;
+      /**
+       * @description Whether the policy editor is enabled for administrators
+       * @example false
+       */
+      editor_available: boolean;
+      /**
+       * Format: int64
+       * @description Evaluations that hit the time budget since start
+       * @example 0
+       */
+      eval_timeouts: number;
+      /**
+       * Format: int64
+       * @description Monotonic generation of the loaded policy bundle
+       * @example 3
+       */
+      generation: number;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     PollDeviceLoginInputBody: {
       /**
@@ -1042,12 +1577,103 @@ export interface components {
        */
       updated_at: string;
     };
+    RefreshedTokens: {
+      /**
+       * @description Bearer access token
+       * @example eyJhbGciOi...
+       */
+      access_token: string;
+      /**
+       * Format: int64
+       * @description Access token lifetime in seconds
+       * @example 3600
+       */
+      expires_in: number;
+      /**
+       * @description Refresh token for the next refreshSession
+       * @example eyJhbGciOi...
+       */
+      refresh_token: string;
+    };
+    RefreshSessionInputBody: {
+      /**
+       * @description The refresh token of the session to extend
+       * @example eyJhbGciOi...
+       */
+      refresh_token: string;
+    };
+    SetupServerInputBody: {
+      /**
+       * @description Also create the household's first profile
+       * @example true
+       */
+      create_default_profile?: boolean;
+      /**
+       * @description Name of that profile; the username when empty
+       * @example Alice
+       */
+      default_profile_name?: string;
+      /**
+       * @description Contact email of the administrator
+       * @example admin@example.test
+       */
+      email: string;
+      /**
+       * @description Account password
+       * @example correct horse battery staple
+       */
+      password: string;
+      /**
+       * @description Login name of the administrator
+       * @example admin
+       */
+      username: string;
+    };
     SetupStatus: {
       /**
        * @description True until the first administrator account exists
        * @example false
        */
       needs_setup: boolean;
+    };
+    SignupInputBody: {
+      /**
+       * @description Also create the household's first profile
+       * @example true
+       */
+      create_default_profile?: boolean;
+      /**
+       * @description Name of that profile; the username when empty
+       * @example Alice
+       */
+      default_profile_name?: string;
+      /**
+       * @description Contact email
+       * @example alice@example.test
+       */
+      email: string;
+      /**
+       * @description An active invite code
+       * @example WELCOME-2026
+       */
+      invite_code: string;
+      /**
+       * @description Account password
+       * @example correct horse battery staple
+       */
+      password: string;
+      /**
+       * @description Login name
+       * @example alice
+       */
+      username: string;
+    };
+    SignupStatus: {
+      /**
+       * @description True when signup accepts invite codes
+       * @example false
+       */
+      enabled: boolean;
     };
     StartDeviceLoginInputBody: {
       /**
@@ -1123,6 +1749,37 @@ export interface components {
       refresh_token: string;
       /** @description The account the tokens authenticate */
       user: components["schemas"]["Account"];
+    };
+    UserLibrary: {
+      /**
+       * @description Library identifier
+       * @example 1
+       */
+      id: string;
+      /** @example Movies */
+      name: string;
+      /**
+       * @description Short-lived signed URL of the library poster; absent when none is set
+       * @example https://s3.example.test/silo/posters/1.jpg?X-Amz-Signature=...
+       */
+      poster_url?: string;
+      /**
+       * Format: int64
+       * @description Administrator-chosen display order
+       * @example 0
+       */
+      sort_order: number;
+      /**
+       * @description Library kind as stored (movies, series, ...)
+       * @example movies
+       */
+      type: string;
+    };
+    UserLibraryCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["UserLibrary"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
     };
   };
   responses: never;
@@ -2395,6 +3052,98 @@ export interface operations {
       };
     };
   };
+  completeOAuthCallback: {
+    parameters: {
+      query: {
+        /** @description The provider's authorization code */
+        code: string;
+        /** @description The signed state init issued */
+        state: string;
+      };
+      header?: never;
+      path: {
+        /** @description The auth plugin installation providing the OAuth flow */
+        install_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Redirect to the completion page (success) or to the login page with a reason (failure) */
+      302: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description install_id is not a positive integer, or code or state is missing (text/plain) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description OAuth login is not configured on this server */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  startOAuthLogin: {
+    parameters: {
+      query?: {
+        /** @description Site-relative path to return the browser to after login; / when absent or not site-relative */
+        next?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The auth plugin installation providing the OAuth flow */
+        install_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Redirect to the provider's authorize URL */
+      302: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description install_id is not a positive integer (text/plain) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The OAuth session could not be recorded (text/plain) */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The auth plugin is unavailable or refused to start the flow (text/plain) */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description OAuth login is not configured on this server */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   completeOAuthLogin: {
     parameters: {
       query?: never;
@@ -2500,6 +3249,1079 @@ export interface operations {
       };
     };
   };
+  launchPlugin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginLaunch"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAuthProviders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthProviderCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  refreshSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RefreshSessionInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RefreshedTokens"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listSessions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LoginSessionCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The session to revoke; it must belong to the caller's account */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  setupServer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetupServerInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenPair"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getSignupStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignupStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  signup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignupInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenPair"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getOnboardingFlow: {
+    parameters: {
+      query?: {
+        /** @description The client surface; web when absent */
+        surface?: "web" | "phone" | "tv";
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OnboardingFlow"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  recordOnboardingProgress: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OnboardingProgressInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getOnboardingState: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OnboardingState"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getOpenAPIDocument: {
     parameters: {
       query?: never;
@@ -2552,6 +4374,113 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getPolicyCapability: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PolicyCapability"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -2920,6 +4849,112 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listUserLibraries: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UserLibraryCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
         headers: {
           [name: string]: unknown;
         };

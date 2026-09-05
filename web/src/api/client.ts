@@ -1,4 +1,5 @@
-import type { ApiError, RefreshResponse } from "./types";
+import type { ApiError } from "./types";
+import type { components } from "./v2/schema";
 import { storage } from "../utils/storage";
 import { randomUUID } from "../lib/uuid";
 
@@ -256,19 +257,29 @@ export async function bootstrapAccessToken(fetchImpl: typeof fetch = fetch): Pro
   }
 }
 
+/** The tokens the v2 refreshSession operation answers with. */
+export type RefreshedTokens = components["schemas"]["RefreshedTokens"];
+
+/**
+ * Rotates a refresh token through the v2 refreshSession operation. This is
+ * the one v2 request issued outside the typed boundary: it runs underneath
+ * `fetchWithSession`, so it cannot import that boundary without a cycle. A
+ * non-2xx answer (a revoked or malformed token) is `null`; the caller clears
+ * the session.
+ */
 export async function refreshAccessToken(
   refreshToken: string,
   fetchImpl: typeof fetch,
-): Promise<RefreshResponse | null> {
-  const res = await fetchImpl("/api/v1/auth/refresh", {
+): Promise<RefreshedTokens | null> {
+  const res = await fetchImpl("/api/v2/auth/refresh", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
   if (!res.ok) {
     return null;
   }
-  return res.json();
+  return (await res.json()) as RefreshedTokens;
 }
 
 export class ApiClientError extends Error {
