@@ -1105,8 +1105,7 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 	return true, nil
 }
 
-func (s *PostgresUserStore) ListHistory(ctx context.Context, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error) {
-	rows, err := s.pool.Query(ctx, `
+const historyListSelect = `
 		SELECT h.id, h.profile_id, h.media_item_id, h.watched_at, h.duration_seconds, h.completed, h.source, h.watch_identity::text
 		FROM user_watch_history h
 		WHERE h.user_id = $1 AND h.profile_id = $2
@@ -1117,11 +1116,43 @@ func (s *PostgresUserStore) ListHistory(ctx context.Context, profileID string, l
 			  AND hhi.profile_id = h.profile_id
 			  AND hhi.media_item_id = h.media_item_id
 			  AND h.watched_at <= hhi.hidden_before
-		  )
+		  )`
+
+func (s *PostgresUserStore) ListHistory(ctx context.Context, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error) {
+	return s.queryHistoryRows(ctx, historyListSelect+`
 		ORDER BY watched_at DESC
 		LIMIT $3 OFFSET $4`,
 		s.userID, profileID, limit, offset,
 	)
+}
+
+// ListHistoryPage pages by keyset over (watched_at DESC, id DESC). The key's
+// watched_at is the whole-second RFC 3339 string the rows are read back as
+// (timeToString), so both the sort and the comparison run on
+// date_trunc('second', watched_at): the key then round-trips exactly and a
+// sub-second neighbor is never skipped or repeated. Ties within a second are
+// broken by the unique row id.
+func (s *PostgresUserStore) ListHistoryPage(ctx context.Context, profileID string, after *userstore.HistoryKey, limit int) ([]userstore.WatchHistoryEntry, error) {
+	args := []any{s.userID, profileID}
+	query := historyListSelect
+	if after != nil {
+		watchedAt, err := time.Parse(time.RFC3339Nano, after.WatchedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parsing history key: %w", err)
+		}
+		args = append(args, watchedAt, after.ID)
+		query += fmt.Sprintf(`
+		  AND (date_trunc('second', h.watched_at), h.id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(`
+		ORDER BY date_trunc('second', h.watched_at) DESC, h.id DESC
+		LIMIT $%d`, len(args))
+	return s.queryHistoryRows(ctx, query, args...)
+}
+
+func (s *PostgresUserStore) queryHistoryRows(ctx context.Context, query string, args ...any) ([]userstore.WatchHistoryEntry, error) {
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing history: %w", err)
 	}

@@ -146,6 +146,10 @@ func (s *SQLiteUserStore) ListHistory(_ context.Context, profileID string, limit
 	return ListHistory(s.db, profileID, limit, offset)
 }
 
+func (s *SQLiteUserStore) ListHistoryPage(_ context.Context, profileID string, after *userstore.HistoryKey, limit int) ([]userstore.WatchHistoryEntry, error) {
+	return ListHistoryPage(s.db, profileID, after, limit)
+}
+
 func (s *SQLiteUserStore) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
 	return ListCompletedHistory(s.db, query)
 }

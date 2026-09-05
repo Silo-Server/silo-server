@@ -28077,7 +28077,7 @@
         "path": "/api/v2/history",
         "operation_id": "listHistory"
       },
-      "notes": "Section personal-progress (profile_scoped). Offset pagination replaced by limit+opaque cursor (offset underneath; has_more decided from the store page, so hidden/catalog-missing cards never make a page look final); offset rejected (422). Cards are the shared CatalogItem schema with an added watch object {media_item_id, watched_at, duration_seconds, completed, source} for the most recent watch behind the card (an episode watch still collapses to its series card, as v1); watched_at is a UTC-ms instant. image_size is a strict enum answered 422."
+      "notes": "Section personal-progress (profile_scoped). Offset pagination replaced by limit+opaque cursor (a keyset on (watched_at DESC, id DESC) underneath via the new store query ListHistoryPage, so a watch recorded or hidden mid-pagination neither repeats nor skips a row and equal timestamps order by id; has_more decided from the store page, so hidden/catalog-missing cards never make a page look final); offset rejected (422). v1 keeps its offset list. Cards are the shared CatalogItem schema with an added watch object {media_item_id, watched_at, duration_seconds, completed, source} for the most recent watch behind the card (an episode watch still collapses to its series card, as v1); watched_at is a UTC-ms instant. image_size is a strict enum answered 422."
     },
     {
       "listener": "api",

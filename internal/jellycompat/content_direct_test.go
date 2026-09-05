@@ -357,6 +357,9 @@ func (s *progressCountingStore) AddHistoryIfMissing(context.Context, userstore.W
 func (s *progressCountingStore) ListHistory(context.Context, string, int, int) ([]userstore.WatchHistoryEntry, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListHistoryPage(context.Context, string, *userstore.HistoryKey, int) ([]userstore.WatchHistoryEntry, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) ListCompletedHistory(context.Context, userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
 	panic("unused")
 }

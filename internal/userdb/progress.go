@@ -748,9 +748,7 @@ func AddHistoryIfMissing(db *sql.DB, entry WatchHistoryEntry) (bool, error) {
 	return true, nil
 }
 
-// ListHistory returns paginated watch history entries ordered by most recent first.
-func ListHistory(db *sql.DB, profileID string, limit, offset int) ([]WatchHistoryEntry, error) {
-	query := `
+const historyListSelect = `
 		SELECT h.id, h.profile_id, h.media_item_id, h.watched_at, h.duration_seconds, h.completed, h.source, h.watch_identity
 		FROM watch_history h
 		WHERE h.profile_id = ?
@@ -760,11 +758,39 @@ func ListHistory(db *sql.DB, profileID string, limit, offset int) ([]WatchHistor
 			WHERE hhi.profile_id = h.profile_id
 			  AND hhi.media_item_id = h.media_item_id
 			  AND h.watched_at <= hhi.hidden_before
-		  )
+		  )`
+
+// ListHistory returns paginated watch history entries ordered by most recent first.
+func ListHistory(db *sql.DB, profileID string, limit, offset int) ([]WatchHistoryEntry, error) {
+	query := historyListSelect + `
 		ORDER BY watched_at DESC
 		LIMIT ? OFFSET ?
 	`
-	rows, err := db.Query(query, profileID, limit, offset)
+	return queryHistoryRows(db, query, profileID, limit, offset)
+}
+
+// ListHistoryPage pages by keyset over (watched_at DESC, id DESC). watched_at
+// is RFC 3339 UTC text at whole-second precision, so text order is time order
+// and the key string compares exactly; the comparison is spelled out rather
+// than written as a row value so it does not depend on the linked SQLite
+// supporting row values.
+func ListHistoryPage(db *sql.DB, profileID string, after *userstore.HistoryKey, limit int) ([]WatchHistoryEntry, error) {
+	args := []any{profileID}
+	query := historyListSelect
+	if after != nil {
+		query += `
+		  AND (h.watched_at < ? OR (h.watched_at = ? AND h.id < ?))`
+		args = append(args, after.WatchedAt, after.WatchedAt, after.ID)
+	}
+	args = append(args, limit)
+	query += `
+		ORDER BY h.watched_at DESC, h.id DESC
+		LIMIT ?`
+	return queryHistoryRows(db, query, args...)
+}
+
+func queryHistoryRows(db *sql.DB, query string, args ...any) ([]WatchHistoryEntry, error) {
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing history: %w", err)
 	}

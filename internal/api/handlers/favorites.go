@@ -516,6 +516,23 @@ func (h *PersonalDataHandler) HistoryEntries(ctx context.Context, userID int, pr
 	return entries, nil
 }
 
+// HistoryPage is the keyset form of HistoryEntries: at most limit visible
+// history rows strictly after the key in (watched_at DESC, id DESC) order,
+// nil starting at the most recent watch. The v2 listHistory operation pages
+// with it so a watch recorded or hidden mid-pagination never repeats or
+// skips a row.
+func (h *PersonalDataHandler) HistoryPage(ctx context.Context, userID int, profileID string, after *userstore.HistoryKey, limit int) ([]userstore.WatchHistoryEntry, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entries, err := store.ListHistoryPage(ctx, profileID, after, limit)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list history")
+	}
+	return entries, nil
+}
+
 // HistoryCards renders the cards of a history page in entry order, one per
 // display item, omitting items the viewer cannot see or that left the
 // catalog.

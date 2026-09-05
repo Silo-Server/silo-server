@@ -61,6 +61,16 @@ type HistoryRemoveInput struct {
 // opListHistory is the operation id; the cursor scope is bound to it.
 const opListHistory = "listHistory"
 
+// historyPosition is the cursor payload: the keyset (watched_at, id) of the
+// last row the previous page emitted, in the store's own string form. The
+// next page resumes strictly after it in (watched_at DESC, id DESC), so a
+// watch recorded or hidden mid-pagination neither repeats nor skips a row,
+// and equal timestamps are ordered by the unique row id.
+type historyPosition struct {
+	WatchedAt string `json:"w"`
+	ID        string `json:"i"`
+}
+
 func registerHistory(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, Operation{
@@ -78,8 +88,8 @@ func registerHistory(reg *Registry) {
 	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true}, reg.removeHistoryEntries)
 }
 
-// listHistory pages the same rows v1 GET /history does; the cursor carries
-// the offset the store pages by underneath.
+// listHistory pages the same rows v1 GET /history does, by keyset rather
+// than v1's offset; the cursor carries the key of the last row emitted.
 func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *HistoryListInput) (*HistoryCollectionOutput, error) {
 	if reg.deps.History == nil {
 		return nil, unavailable("history")
@@ -94,20 +104,31 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 		// policy it was minted under.
 		Security:   strconv.Itoa(userID) + "/" + profileID + "/" + viewerScopeDigest(ctx),
 		Filter:     in.ImageSize,
-		Sort:       "-watched_at",
-		Tiebreaker: "offset",
+		Sort:       "-watched_at,-id",
+		Tiebreaker: "id",
 	}
-	offset, p := decodeOffset(cursors, scope, in.Cursor)
-	if p != nil {
-		return nil, p
+	var after *userstore.HistoryKey
+	if in.Cursor != "" {
+		var pos historyPosition
+		if p := cursors.Decode(scope, in.Cursor, &pos); p != nil {
+			return nil, p
+		}
+		after = &userstore.HistoryKey{WatchedAt: pos.WatchedAt, ID: pos.ID}
 	}
-	entries, err := reg.deps.History.HistoryEntries(ctx, userID, profileID, in.Limit+1, offset)
+	// has_more is decided on the raw store rows, before cards are rendered,
+	// so a hidden or catalog-missing card never makes a page look final.
+	entries, err := reg.deps.History.HistoryPage(ctx, userID, profileID, after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	entries, next, p := offsetPage(cursors, scope, len(entries), in.Limit, offset, entries)
-	if p != nil {
-		return nil, p
+	next := ""
+	if len(entries) > in.Limit {
+		entries = entries[:in.Limit]
+		last := entries[len(entries)-1]
+		next, err = cursors.Encode(scope, historyPosition{WatchedAt: last.WatchedAt, ID: last.ID})
+		if err != nil {
+			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+		}
 	}
 	cards, err := reg.deps.History.HistoryCards(ctx, sectionViewer(ctx, in.ImageSize), entries)
 	if err != nil {
@@ -174,7 +195,7 @@ func fieldProblem(err error) *Problem {
 // HistoryService is the slice of *handlers.PersonalDataHandler the history
 // operations use.
 type HistoryService interface {
-	HistoryEntries(ctx context.Context, userID int, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error)
+	HistoryPage(ctx context.Context, userID int, profileID string, after *userstore.HistoryKey, limit int) ([]userstore.WatchHistoryEntry, error)
 	HistoryCards(ctx context.Context, viewer handlers.SectionViewer, entries []userstore.WatchHistoryEntry) ([]handlers.HistoryCardView, error)
 	RemoveHistory(ctx context.Context, userID int, profileID string, filter catalogpkg.AccessFilter, targets []handlers.HistoryRemovalTarget) error
 }

@@ -92,6 +92,13 @@ type UserStore interface {
 	AddHistory(ctx context.Context, entry WatchHistoryEntry) error
 	AddHistoryIfMissing(ctx context.Context, entry WatchHistoryEntry) (bool, error)
 	ListHistory(ctx context.Context, profileID string, limit, offset int) ([]WatchHistoryEntry, error)
+	// ListHistoryPage is the keyset form of ListHistory: the same visible
+	// rows ordered by (watched_at DESC, id DESC), returning at most limit rows
+	// strictly after the key in that order (nil = from the newest row). A
+	// watch recorded or hidden between two calls neither repeats nor skips a
+	// row, and equal timestamps are ordered by the unique row id, which the
+	// offset form cannot promise.
+	ListHistoryPage(ctx context.Context, profileID string, after *HistoryKey, limit int) ([]WatchHistoryEntry, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error
