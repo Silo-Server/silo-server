@@ -1200,7 +1200,8 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		return nil, 0, err
 	}
 	args = append(args, min(max(filters.Limit, 0), 1000), max(filters.Offset, 0))
-	query := "SELECT " + episodeColumns + " FROM (SELECT e.*" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page"
+	pageOrder := strings.ReplaceAll(order, "e.", "episode_page.")
+	query := "SELECT " + episodeColumns + " FROM (SELECT e.*" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page" + " ORDER BY " + pageOrder
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err

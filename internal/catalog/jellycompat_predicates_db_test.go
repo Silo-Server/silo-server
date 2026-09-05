@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -216,6 +217,38 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 	q.Sort = ""
 	q.Order = ""
 	q.Offset = 1
+	t.Run("episode page preserves selected order", func(t *testing.T) {
+		// Equal creation dates exercise the content-ID tie breaker, while the
+		// earlier air date deliberately differs from the natural episode order.
+		exec(`UPDATE episodes SET created_at=$2 WHERE series_id=$1`, seriesID, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+		for _, sort := range []string{"", BrowseSortTitle, BrowseSortReleaseDate, BrowseSortCreatedAt} {
+			for _, descending := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/descending=%t", sort, descending), func(t *testing.T) {
+					query := BrowseFilters{Sort: sort, Limit: 3, Offset: 1}
+					want := []int{1, 2, 3}
+					if sort == BrowseSortReleaseDate {
+						want = []int{0, 1, 2}
+					}
+					if descending {
+						query.Order = BrowseOrderDescending
+						slices.Reverse(want)
+					}
+					items, total, err := episodes.BrowseEpisodes(ctx, seriesID, "", nil, "", query, access)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if total != 5 || len(items) != len(want) {
+						t.Fatalf("total=%d page length=%d", total, len(items))
+					}
+					for i, episode := range want {
+						if items[i].ContentID != episodeIDs[episode] {
+							t.Fatalf("page[%d]=%s want=%s", i, items[i].ContentID, episodeIDs[episode])
+						}
+					}
+				})
+			}
+		}
+	})
 	t.Run("episode played only binds every parameter", func(t *testing.T) {
 		for _, completed := range []bool{true, false} {
 			query := q
