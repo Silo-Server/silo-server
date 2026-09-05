@@ -1920,6 +1920,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if sectionHandler != nil {
 		v2deps.HomeSections = sectionHandler
 	}
+	v2deps.Recipes = &handlers.RecipeHandler{}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {

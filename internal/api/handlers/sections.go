@@ -559,18 +559,12 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 	if !rejectInvalidImageSize(w, r) {
 		return
 	}
-	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(r.Context())
+	resp, err := h.HomeSections(r.Context(), sectionViewerFromRequest(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load sections")
+		writeAPIError(w, err)
 		return
 	}
-
-	userID := apimw.GetUserID(r.Context())
-	resolved = h.maybeInjectNextUp(r.Context(), resolved, userID)
-	withItems := h.fetcher.FetchAll(r.Context(), resolved, nil, libraryIDs, userID, profileID, accessFilter)
-	withItems = applyDiversityFilter(withItems)
-	withItems = dropEmptySeasonalSections(withItems)
-	writeJSON(w, http.StatusOK, h.buildSectionsResponse(r, withItems, nil))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleHomeSectionItems handles GET /home/sections/{id}/items
@@ -584,50 +578,12 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(r.Context())
+	section, err := h.HomeSectionItems(r.Context(), sectionID, sectionViewerFromRequest(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load sections")
+		writeAPIError(w, err)
 		return
 	}
-	userID := apimw.GetUserID(r.Context())
-	resolved = h.maybeInjectNextUp(r.Context(), resolved, userID)
-
-	for _, s := range resolved {
-		if s.ID != sectionID {
-			continue
-		}
-
-		withItems, fetchErr := h.fetcher.FetchOne(r.Context(), s, nil, libraryIDs, userID, profileID, accessFilter)
-		if fetchErr != nil {
-			slog.ErrorContext(r.Context(), "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
-			withItems = sections.SectionWithItems{
-				ResolvedSection: s,
-				Items:           []*models.MediaItem{},
-			}
-		}
-
-		resp := h.buildSectionsResponse(r, []sections.SectionWithItems{withItems}, nil)
-		if len(resp.Sections) == 0 {
-			resp.Sections = append(resp.Sections, resolvedSectionResponse{
-				ID:          withItems.ID,
-				SectionType: string(withItems.SectionType),
-				Title:       withItems.Title,
-				Featured:    withItems.Featured,
-				ItemLimit:   withItems.ItemLimit,
-				TotalCount:  withItems.TotalCount,
-				IsCustom:    withItems.IsCustom,
-				Customized:  withItems.Customized,
-				Items:       []sectionItemResponse{},
-			})
-		}
-
-		writeJSON(w, http.StatusOK, homeSectionItemsResponse{
-			Section: resp.Sections[0],
-		})
-		return
-	}
-
-	writeError(w, http.StatusNotFound, "not_found", "Section not found")
+	writeJSON(w, http.StatusOK, homeSectionItemsResponse{Section: section})
 }
 
 // HandleLibrarySections handles GET /library/{id}/sections

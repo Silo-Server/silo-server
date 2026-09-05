@@ -206,6 +206,7 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		"GET " + Prefix + "/library/{id}/layout", "GET " + Prefix + "/library/{id}/sections", "GET " + Prefix + "/library/{id}/sections/{section_id}/items",
 		"GET " + Prefix + "/library/{id}/collections", "GET " + Prefix + "/library/{id}/collections/{collection_id}/items", "GET " + Prefix + "/library/{id}/user-collections",
 		"GET " + Prefix + "/calendar", "PUT " + Prefix + "/home/dismissals/{surface}/{item_id}", "DELETE " + Prefix + "/home/dismissals/{surface}/{item_id}", "GET " + Prefix + "/home/layout",
+		"GET " + Prefix + "/home/sections", "GET " + Prefix + "/home/sections/{id}/items", "GET " + Prefix + "/sections/recipes", "GET " + Prefix + "/sections/recipes/{type}/candidates",
 	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)

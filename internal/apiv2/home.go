@@ -2,12 +2,14 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 // The home domain: the profile-scoped home page (layout, sections, cards),
@@ -79,28 +81,140 @@ type HomeDismissalUpsertInput struct {
 	Body HomeDismissal
 }
 
+// HomeSectionsInput is the listHomeSections query.
+type HomeSectionsInput struct {
+	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+}
+
+// HomeSectionItemsInput is the getHomeSectionItems query.
+type HomeSectionItemsInput struct {
+	ID        string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
+	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+}
+
+// SectionConfig is a recipe's configuration document. Its keys are fixed by
+// the recipe named in section_type, not by this contract.
+type SectionConfig map[string]any
+
+// Schema declares the config as a named extension bag.
+func (SectionConfig) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{
+		Type:                 "object",
+		Description:          "A recipe's configuration document; its keys are fixed by the recipe named in section_type.",
+		AdditionalProperties: true,
+		Extensions:           map[string]any{extExtensionBag: "section-config"},
+	}
+}
+
+// RecipePreset is one gallery preset: a recipe plus the config it starts from.
+type RecipePreset struct {
+	Key              string        `json:"key" example:"new_this_week"`
+	DisplayName      string        `json:"display_name" example:"New this week"`
+	Icon             string        `json:"icon" example:"sparkles"`
+	DescriptionShort string        `json:"description_short" example:"Items added in the last seven days"`
+	DescriptionLong  string        `json:"description_long" doc:"Empty when the preset has none"`
+	DefaultParams    SectionConfig `json:"default_params" doc:"The config the preset starts from; empty, never null"`
+}
+
+// RecipeDefinition is one recipe as the gallery shows it.
+type RecipeDefinition struct {
+	Type             string         `json:"type" example:"recently_added"`
+	Category         string         `json:"category" example:"library_staples"`
+	Presets          []RecipePreset `json:"presets" doc:"Empty, never null"`
+	AvoidDuplicates  bool           `json:"avoid_duplicates" example:"true"`
+	SupportsRotation bool           `json:"supports_rotation" example:"false"`
+	AdminOnly        bool           `json:"admin_only" example:"false"`
+}
+
+// RecipeCategory is one gallery category with its recipes.
+type RecipeCategory struct {
+	Category string             `json:"category" example:"library_staples"`
+	Recipes  []RecipeDefinition `json:"recipes" doc:"Empty, never null"`
+}
+
+// RecipeCatalog is the listSectionRecipes response: the visible recipes
+// grouped by category, categories in key order.
+type RecipeCatalog struct {
+	Categories []RecipeCategory `json:"categories" doc:"Empty, never null"`
+}
+
+// RecipeCatalogOutput is the listSectionRecipes response.
+type RecipeCatalogOutput struct {
+	Body RecipeCatalog
+}
+
+// RecipeCandidatesInput names the recipe type whose candidates are listed.
+type RecipeCandidatesInput struct {
+	Type string `path:"type" minLength:"1" doc:"Recipe type from the catalog" example:"custom_filter"`
+}
+
+// RecipeCandidate is one UI-pickable value for a parameterized recipe.
+type RecipeCandidate struct {
+	Value       string `json:"value" example:"action"`
+	DisplayName string `json:"display_name" example:"Action"`
+	Subtitle    string `json:"subtitle" doc:"Empty when the candidate has none"`
+}
+
+// RecipeCandidateCollection is the listSectionRecipeCandidates response, a
+// bounded list.
+type RecipeCandidateCollection struct {
+	Candidates []RecipeCandidate `json:"candidates" doc:"Empty, never null"`
+}
+
+// RecipeCandidateCollectionOutput is the listSectionRecipeCandidates response.
+type RecipeCandidateCollectionOutput struct {
+	Body RecipeCandidateCollection
+}
+
+// The section's operation ids, shared with the fixture cases.
+const (
+	opGetCalendar                 = "getCalendar"
+	opDismissHomeItem             = "dismissHomeItem"
+	opUndismissHomeItem           = "undismissHomeItem"
+	opGetHomeLayout               = "getHomeLayout"
+	opListHomeSections            = "listHomeSections"
+	opGetHomeSectionItems         = "getHomeSectionItems"
+	opListSectionRecipes          = "listSectionRecipes"
+	opListSectionRecipeCandidates = "listSectionRecipeCandidates"
+)
+
 // homeOperationIDs is every operation the catalog-home section registers.
-var homeOperationIDs = []string{"getCalendar", "dismissHomeItem", "undismissHomeItem", "getHomeLayout"}
+var homeOperationIDs = []string{opGetCalendar, opDismissHomeItem, opUndismissHomeItem, opGetHomeLayout, opListHomeSections, opGetHomeSectionItems, opListSectionRecipes, opListSectionRecipeCandidates}
 
 func registerHome(reg *Registry) {
 	viewer := func(op huma.Operation) Operation {
 		return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}
 	}
-	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/calendar", "getCalendar", "home",
+	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/calendar", opGetCalendar, "home",
 		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), reg.getCalendar)
 
-	dismiss := humaOp(http.MethodPut, Prefix+"/home/dismissals/{surface}/{item_id}", "dismissHomeItem", "home",
+	dismiss := humaOp(http.MethodPut, Prefix+"/home/dismissals/{surface}/{item_id}", opDismissHomeItem, "home",
 		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal.")
 	dismiss.DefaultStatus = http.StatusNoContent
 	Register(reg, viewer(dismiss), reg.dismissHomeItem)
 
-	undismiss := humaOp(http.MethodDelete, Prefix+"/home/dismissals/{surface}/{item_id}", "undismissHomeItem", "home",
+	undismiss := humaOp(http.MethodDelete, Prefix+"/home/dismissals/{surface}/{item_id}", opUndismissHomeItem, "home",
 		"Show a dismissed card again; an item that was not dismissed is left as is.")
 	undismiss.DefaultStatus = http.StatusNoContent
 	Register(reg, viewer(undismiss), reg.undismissHomeItem)
 
-	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/home/layout", "getHomeLayout", "home",
+	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
 		"The home page's section layout for the acting profile, without items.")), reg.getHomeLayout)
+	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/home/sections", opListHomeSections, "home",
+		"The home page's sections with their cards, as the acting profile sees them.")), reg.listHomeSections)
+	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
+		"One section of the home page with its cards.")), reg.getHomeSectionItems)
+	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/sections/recipes", opListSectionRecipes, "home",
+		"The section recipe gallery: every visible recipe with its presets, grouped by category.")), reg.listSectionRecipes)
+	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/sections/recipes/{type}/candidates", opListSectionRecipeCandidates, "home",
+		"The values a parameterized recipe offers for its parameter.")), reg.listSectionRecipeCandidates)
+}
+
+func (reg *Registry) recipes() (RecipeService, *Problem) {
+	if reg.deps.Recipes == nil {
+		return nil, unavailable("section recipe")
+	}
+	return reg.deps.Recipes, nil
 }
 
 func (reg *Registry) calendar() (CalendarService, *Problem) {
@@ -262,4 +376,97 @@ func (reg *Registry) getHomeLayout(ctx context.Context, _ *struct{}) (*SectionLa
 		return nil, serviceProblem(err)
 	}
 	return &SectionLayoutOutput{Body: sectionLayoutOf(view)}, nil
+}
+
+func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput) (*SectionCollectionOutput, error) {
+	svc, p := reg.homeSections()
+	if p != nil {
+		return nil, p
+	}
+	if _, _, p := viewerIdentity(ctx); p != nil {
+		return nil, p
+	}
+	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.ImageSize))
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	out := SectionCollection{Sections: make([]Section, 0, len(view.Sections))}
+	for _, s := range view.Sections {
+		out.Sections = append(out.Sections, sectionOf(s))
+	}
+	return &SectionCollectionOutput{Body: out}, nil
+}
+
+func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionItemsInput) (*SectionOutput, error) {
+	svc, p := reg.homeSections()
+	if p != nil {
+		return nil, p
+	}
+	if _, _, p := viewerIdentity(ctx); p != nil {
+		return nil, p
+	}
+	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.ImageSize))
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return &SectionOutput{Body: sectionOf(view)}, nil
+}
+
+// sectionConfigOf decodes a recipe's raw config document; anything that is
+// not a JSON object (including null and empty) is the empty bag.
+func sectionConfigOf(raw json.RawMessage) SectionConfig {
+	out := SectionConfig{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &out)
+	}
+	if out == nil {
+		out = SectionConfig{}
+	}
+	return out
+}
+
+func recipeDefinitionOf(def recipes.RecipeDefinition) RecipeDefinition {
+	presets := make([]RecipePreset, 0, len(def.Presets))
+	for _, p := range def.Presets {
+		presets = append(presets, RecipePreset{Key: p.Key, DisplayName: p.DisplayName, Icon: p.Icon, DescriptionShort: p.DescriptionShort, DescriptionLong: p.DescriptionLong, DefaultParams: sectionConfigOf(p.DefaultParams)})
+	}
+	return RecipeDefinition{Type: def.Type, Category: string(def.Category), Presets: presets, AvoidDuplicates: def.AvoidDuplicates, SupportsRotation: def.SupportsRotation, AdminOnly: def.AdminOnly}
+}
+
+func (reg *Registry) listSectionRecipes(ctx context.Context, _ *struct{}) (*RecipeCatalogOutput, error) {
+	svc, p := reg.recipes()
+	if p != nil {
+		return nil, p
+	}
+	if _, _, p := viewerIdentity(ctx); p != nil {
+		return nil, p
+	}
+	out := RecipeCatalog{Categories: []RecipeCategory{}}
+	for _, cat := range svc.Recipes() {
+		defs := make([]RecipeDefinition, 0, len(cat.Recipes))
+		for _, def := range cat.Recipes {
+			defs = append(defs, recipeDefinitionOf(def))
+		}
+		out.Categories = append(out.Categories, RecipeCategory{Category: cat.Category, Recipes: defs})
+	}
+	return &RecipeCatalogOutput{Body: out}, nil
+}
+
+func (reg *Registry) listSectionRecipeCandidates(ctx context.Context, in *RecipeCandidatesInput) (*RecipeCandidateCollectionOutput, error) {
+	svc, p := reg.recipes()
+	if p != nil {
+		return nil, p
+	}
+	if _, _, p := viewerIdentity(ctx); p != nil {
+		return nil, p
+	}
+	cands, err := svc.RecipeCandidates(ctx, in.Type)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	out := RecipeCandidateCollection{Candidates: make([]RecipeCandidate, 0, len(cands))}
+	for _, c := range cands {
+		out.Candidates = append(out.Candidates, RecipeCandidate{Value: c.Value, DisplayName: c.DisplayName, Subtitle: c.Subtitle})
+	}
+	return &RecipeCandidateCollectionOutput{Body: out}, nil
 }

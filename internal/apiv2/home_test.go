@@ -2,21 +2,25 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 // --- home fakes ---
 
 type fakeHome struct {
-	err       error
-	lastQuery handlers.CalendarQuery
-	lastCmd   handlers.HomeDismissalCommand
-	undone    []string
+	err        error
+	lastQuery  handlers.CalendarQuery
+	lastCmd    handlers.HomeDismissalCommand
+	lastViewer handlers.SectionViewer
+	undone     []string
 }
 
 func (f *fakeHome) Calendar(_ context.Context, q handlers.CalendarQuery, _ catalogpkg.AccessFilter) (handlers.CalendarView, error) {
@@ -79,6 +83,45 @@ func (f *fakeHome) HomeLayout(_ context.Context) (handlers.SectionLayoutView, er
 	return handlers.SectionLayoutView{Sections: []handlers.SectionLayoutEntryView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20}, {ID: "next_up", SectionType: "next_up", Title: "Next Up", ItemLimit: 20, Customized: true}}}, nil
 }
 
+func (f *fakeHome) HomeSections(_ context.Context, viewer handlers.SectionViewer) (handlers.SectionsView, error) {
+	if f.err != nil {
+		return handlers.SectionsView{}, f.err
+	}
+	f.lastViewer = viewer
+	return handlers.SectionsView{Sections: []handlers.SectionView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}}}, nil
+}
+
+func (f *fakeHome) HomeSectionItems(_ context.Context, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error) {
+	if f.err != nil {
+		return handlers.SectionView{}, f.err
+	}
+	f.lastViewer = viewer
+	if sectionID != "continue_watching" {
+		return handlers.SectionView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Section not found"}
+	}
+	return handlers.SectionView{ID: sectionID, SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}, nil
+}
+
+func (f *fakeHome) Recipes() []handlers.RecipeCategoryView {
+	return []handlers.RecipeCategoryView{
+		{Category: "library_staples", Recipes: []recipes.RecipeDefinition{{Type: "recently_added", Category: recipes.CategoryLibraryStaples, Presets: []recipes.GalleryPreset{}, AvoidDuplicates: true}}},
+		{Category: "mood", Recipes: []recipes.RecipeDefinition{{Type: "mood", Category: recipes.CategoryMood, SupportsRotation: true, Presets: []recipes.GalleryPreset{
+			{Key: "cozy", DisplayName: "Cozy night in", Icon: "moon", DescriptionShort: "Warm and gentle", DefaultParams: json.RawMessage(`{"mood":"cozy","genres":["comedy"]}`)},
+			{Key: "bare", DisplayName: "Bare", Icon: "dot", DescriptionShort: "No params"},
+		}}}},
+	}
+}
+
+func (f *fakeHome) RecipeCandidates(_ context.Context, recipeType string) ([]handlers.Candidate, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if recipeType != "custom_filter" {
+		return nil, &handlers.APIError{Status: http.StatusNotFound, Code: "unknown_recipe", Message: "no candidate source for this recipe type"}
+	}
+	return []handlers.Candidate{{Value: "action", DisplayName: "Action", Subtitle: "12 titles"}, {Value: "drama", DisplayName: "Drama"}}, nil
+}
+
 func homeDeps(t *testing.T) (Dependencies, *fakeHome) {
 	t.Helper()
 	deps := libraryViewDeps(t)
@@ -86,6 +129,7 @@ func homeDeps(t *testing.T) (Dependencies, *fakeHome) {
 	deps.Calendar = fake
 	deps.HomeDismissals = fake
 	deps.HomeSections = fake
+	deps.Recipes = fake
 	return deps, fake
 }
 
@@ -185,4 +229,70 @@ func TestGetHomeLayout(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()), TypeInternalError)
 	deps.HomeSections = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+func TestListHomeSections(t *testing.T) {
+	deps, fake := homeDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=large", "", viewerHeaders())
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"continue_watching"`) || !strings.Contains(rec.Body.String(), `"total_count":1`) || !strings.Contains(rec.Body.String(), `"items":[{`) {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.Access.UserID != 1 || fake.lastViewer.Access.ProfileID != "p-owner" {
+		t.Fatalf("viewer = %+v", fake.lastViewer)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=huge", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections", "", nil), TypeAuthenticationRequired)
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to load sections"}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections", "", viewerHeaders()), TypeInternalError)
+	deps.HomeSections = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/home/sections", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+func TestGetHomeSectionItems(t *testing.T) {
+	deps, fake := homeDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/home/sections/continue_watching/items", "", viewerHeaders())
+	if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), `{"id":"continue_watching"`) || !strings.Contains(rec.Body.String(), `"items":[{`) || strings.Contains(rec.Body.String(), `"section":`) {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if fake.lastViewer.ImageSize != imagesize.Unset {
+		t.Fatalf("viewer = %+v", fake.lastViewer)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections/nope/items", "", viewerHeaders()), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections/continue_watching/items", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections/continue_watching/items", "", nil), TypeAuthenticationRequired)
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to load sections"}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections/continue_watching/items", "", viewerHeaders()), TypeInternalError)
+}
+
+func TestListSectionRecipes(t *testing.T) {
+	deps, _ := homeDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/sections/recipes", "", viewerHeaders())
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.HasPrefix(body, `{"categories":[{"category":"library_staples"`) || !strings.Contains(body, `"presets":[]`) ||
+		!strings.Contains(body, `"default_params":{"genres":["comedy"],"mood":"cozy"}`) || !strings.Contains(body, `"key":"bare"`) || !strings.Contains(body, `"default_params":{}`) ||
+		strings.Contains(body, "hidden") {
+		t.Fatal(rec.Code, body)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes", "", nil), TypeAuthenticationRequired)
+	deps.Recipes = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/sections/recipes", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+func TestListSectionRecipeCandidates(t *testing.T) {
+	deps, fake := homeDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", viewerHeaders())
+	if rec.Code != 200 || rec.Body.String() != `{"candidates":[{"value":"action","display_name":"Action","subtitle":"12 titles"},{"value":"drama","display_name":"Drama","subtitle":""}]}`+"\n" {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/nope/candidates", "", viewerHeaders()), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", nil), TypeAuthenticationRequired)
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "candidate_error", Message: "boom"}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", viewerHeaders()), TypeInternalError)
 }
