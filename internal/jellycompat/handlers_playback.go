@@ -2406,6 +2406,9 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 	}
 	for i := range dto.MediaStreams {
 		stream := &dto.MediaStreams[i]
+		if stream.Type == "Subtitle" && source.SubtitleExternalDelivery && dto.DefaultSubtitleStreamIndex != nil && stream.Index == *dto.DefaultSubtitleStreamIndex {
+			stream.DeliveryMethod = "External"
+		}
 		if stream.Type == "Subtitle" && !source.SupportsDirectPlay {
 			if source.SubtitleBurnIn && source.SelectedSubtitleStreamIndex != nil && stream.Index == *source.SelectedSubtitleStreamIndex {
 				stream.DeliveryMethod = compatSubtitleEncode
@@ -3437,6 +3440,7 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 			external = external || strings.EqualFold(sub.Method, "External")
 		}
 		text := !playback.NeedsBurnIn(track.Codec)
+		source.SubtitleExternalDelivery = text && external && !embed
 		if (track.External && !external) || (!embed && (!external || !text)) {
 			source.SupportsDirectPlay = false
 		}

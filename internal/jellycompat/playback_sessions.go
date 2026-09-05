@@ -82,19 +82,20 @@ type PlaybackSession struct {
 type PlaybackMediaSource struct {
 	// SiloSeekReanchor opts into source-time copy-HLS startup for clients that
 	// renegotiate seeks outside the produced playlist window.
-	SiloSeekReanchor     bool
-	SubtitleBurnIn       bool
-	SubtitleTrackIndex   int
-	SubtitleCodec        string
-	CanBurnSubtitle      bool
-	TargetBitrateKbps    int
-	TargetAudioChannels  int
-	ID                   string
-	FileID               int
-	Version              catalog.FileVersion
-	SupportsDirectPlay   bool
-	SupportsDirectStream bool
-	SupportsTranscoding  bool
+	SiloSeekReanchor         bool
+	SubtitleBurnIn           bool
+	SubtitleExternalDelivery bool
+	SubtitleTrackIndex       int
+	SubtitleCodec            string
+	CanBurnSubtitle          bool
+	TargetBitrateKbps        int
+	TargetAudioChannels      int
+	ID                       string
+	FileID                   int
+	Version                  catalog.FileVersion
+	SupportsDirectPlay       bool
+	SupportsDirectStream     bool
+	SupportsTranscoding      bool
 	// HLSRemux selects HLS with video copy. TranscodeAudio remains the
 	// independent audio-encode decision, so a compatible audio codec can stay
 	// bit-for-bit copied. HLSRemuxMPEGTS overrides the normal fMP4 packaging for
