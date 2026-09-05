@@ -290,9 +290,20 @@ func decorateLiveSessions(
 		}
 		row.Telemetry = newSessionTelemetry(facts, at, window)
 		if !viewComplete || viewStale {
-			// Cannot be told apart from a publisher we simply cannot see.
+			// Cannot be told apart from a publisher we simply cannot see: the one
+			// holding this session's bytes may be exactly the one that is missing.
 			row.Telemetry.NoDelivery = false
-			row.Telemetry.UnclaimedIdle = false
+			// Unclaimed-idle is different when the measurement has already been
+			// retired. A tombstone is memory of a session no present publisher is
+			// measuring, published for TombstoneRetention after it ended; a
+			// missing publisher cannot make it live again, so blindness is no
+			// reason to un-hide it. Without this every session that ended in the
+			// last half hour re-appeared as an identity-only row, and was counted
+			// as an active stream, for as long as the view stayed stale — which a
+			// rebuild race or a rolling deploy makes routine.
+			if !facts.MeasurementPruned {
+				row.Telemetry.UnclaimedIdle = false
+			}
 		}
 		// Too young to have been measured yet. A zero StartedAt is left flagged:
 		// its age is unknown, and suppressing on an unknown age would give any

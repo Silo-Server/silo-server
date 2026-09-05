@@ -31,6 +31,11 @@ export interface SessionDeliveryDisplay {
    * view being readable at all: the server is the side that knows whether bytes
    * are still moving, and re-deriving this from `evidence` alone painted a red
    * badge over every normal stream for the whole window after it ended.
+   *
+   * The blind-view gate does not apply once `measurement_pruned` is set. That row
+   * is memory of a session no publisher is measuring any more, and a missing or
+   * stale publisher cannot make it live again — which is exactly the rule the
+   * server applies before it decides whether to hide the row.
    */
   unclaimed: boolean;
   /** The byte total is a known floor, not a measurement. */
@@ -49,7 +54,8 @@ export interface SessionDeliveryContext {
    * incomplete view is blindness rather than disagreement (the publisher holding this
    * session's bytes may be exactly the one that is missing), and a stale view is blindness
    * about NOW: the cache serves its last good view after a failed refresh, and that view
-   * stays complete while it ages.
+   * stays complete while it ages. Like the server, it does not un-badge a row whose
+   * measurement was already retired (`measurement_pruned`).
    *
    * One flag rather than two because the server draws no distinction between them either.
    * Omitted means "nothing is known to be wrong" — the pure-helper call sites that pass no
@@ -72,7 +78,8 @@ export function describeSessionDelivery(
         ? formatMbpsFromKbps(telemetry.delivery_rate_kbps, "0.0 Mbps")
         : null,
     noDelivery: telemetry.no_delivery === true,
-    unclaimed: telemetry.unclaimed_idle === true && !blind,
+    unclaimed:
+      telemetry.unclaimed_idle === true && (!blind || telemetry.measurement_pruned === true),
     degraded: telemetry.bytes_degraded === true,
     identityConflict: telemetry.identity_conflict === true,
     viewerIpCount: telemetry.viewer_ips?.length ?? 0,

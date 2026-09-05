@@ -184,6 +184,41 @@ func TestStaleViewNeitherClassifiesNorHides(t *testing.T) {
 	}
 }
 
+// A retired measurement nobody reports is an ended session, and a missing or
+// stale publisher cannot make it live again. Un-hiding it under blindness put
+// every session that ended in the last TombstoneRetention back on the default
+// list as an identity-only row, counted as an active stream, for as long as the
+// view stayed stale.
+func TestBlindViewStillHidesPrunedUnclaimedSessions(t *testing.T) {
+	snapshot := snapshotOf(
+		streamtelemetry.LiveByteFacts{SessionID: "tombstone", ViewerBytes: 8192, MeasurementPruned: true,
+			ViewerLastByteAt: readAt.Add(-20 * time.Minute), StartedAt: settled},
+		// Still being measured somewhere: a missing publisher could be the one
+		// delivering, so this one is un-hidden exactly as before.
+		streamtelemetry.LiveByteFacts{SessionID: "live-unclaimed", ViewerBytes: 8192,
+			ViewerLastByteAt: readAt.Add(-2 * minimumDeliveryIdleWindow), StartedAt: settled},
+	)
+	for _, blind := range []struct {
+		name            string
+		complete, stale bool
+	}{{"stale", true, true}, {"incomplete", false, false}} {
+		t.Run(blind.name, func(t *testing.T) {
+			sessions, noDelivery, unclaimedIdle := decorateLiveSessions(
+				snapshot, nil, false, blind.complete, blind.stale, readAt, minimumDeliveryIdleWindow,
+			)
+			if len(sessions) != 1 || sessions[0].SessionID != "live-unclaimed" || noDelivery != 0 || unclaimedIdle != 1 {
+				t.Fatalf("blind view = sessions %+v, counts %d/%d", sessions, noDelivery, unclaimedIdle)
+			}
+			revealed, _, _ := decorateLiveSessions(
+				snapshot, nil, true, blind.complete, blind.stale, readAt, minimumDeliveryIdleWindow,
+			)
+			if len(revealed) != 2 {
+				t.Fatalf("include_idle did not reveal the tombstone: %+v", revealed)
+			}
+		})
+	}
+}
+
 func TestIncompleteCoverageReasonsSuppressGhostClassification(t *testing.T) {
 	configuredAll := append([]streamtelemetry.Family(nil), streamtelemetry.AllFamilies...)
 	params := streamtelemetry.ViewParams{Freshness: time.Hour, MembershipTTL: time.Hour,
