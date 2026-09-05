@@ -14,6 +14,10 @@ type AccountUserRepository interface {
 	Delete(ctx context.Context, id int) error
 }
 
+type initialAccountUserRepository interface {
+	CreateInitial(ctx context.Context, input models.CreateUserInput) (*models.User, error)
+}
+
 type DefaultProfileOptions struct {
 	Enabled bool
 	Name    string
@@ -43,7 +47,28 @@ func (p *AccountProvisioner) CreateAccount(
 	ctx context.Context,
 	input CreateAccountInput,
 ) (*models.User, error) {
-	user, err := p.users.Create(ctx, input.User)
+	return p.createAccount(ctx, input, p.users.Create)
+}
+
+// CreateInitialAccount provisions the first account through the repository's
+// database-enforced empty-table claim, then applies the normal profile flow.
+func (p *AccountProvisioner) CreateInitialAccount(
+	ctx context.Context,
+	input CreateAccountInput,
+) (*models.User, error) {
+	initialUsers, ok := p.users.(initialAccountUserRepository)
+	if !ok {
+		return nil, fmt.Errorf("initial account creation unavailable")
+	}
+	return p.createAccount(ctx, input, initialUsers.CreateInitial)
+}
+
+func (p *AccountProvisioner) createAccount(
+	ctx context.Context,
+	input CreateAccountInput,
+	createUser func(context.Context, models.CreateUserInput) (*models.User, error),
+) (*models.User, error) {
+	user, err := createUser(ctx, input.User)
 	if err != nil {
 		return nil, err
 	}

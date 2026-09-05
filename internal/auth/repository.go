@@ -43,6 +43,10 @@ type UserRepository struct {
 	pool *pgxpool.Pool
 }
 
+type userRowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // NewUserRepository creates a new UserRepository backed by the given pool.
 func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
@@ -133,6 +137,48 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 
 // Create inserts a new user with a bcrypt-hashed password and returns the created user.
 func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInput) (*models.User, error) {
+	return r.createWithQuerier(ctx, r.pool, input)
+}
+
+// CreateInitial inserts the first user only while the users table is still
+// empty. The table lock, emptiness check, and insert share one transaction so
+// setup is linearizable across Silo nodes and competing account-creation paths.
+func (r *UserRepository) CreateInitial(ctx context.Context, input models.CreateUserInput) (*models.User, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning initial user creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// SHARE ROW EXCLUSIVE conflicts with the ROW EXCLUSIVE lock taken by every
+	// INSERT, while still allowing setup-status reads during the short claim.
+	if _, err := tx.Exec(ctx, "LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+		return nil, fmt.Errorf("locking users for initial creation: %w", err)
+	}
+
+	var usersExist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM users)").Scan(&usersExist); err != nil {
+		return nil, fmt.Errorf("checking for existing users: %w", err)
+	}
+	if usersExist {
+		return nil, ErrSetupAlreadyComplete
+	}
+
+	user, err := r.createWithQuerier(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing initial user creation: %w", err)
+	}
+	return user, nil
+}
+
+func (r *UserRepository) createWithQuerier(
+	ctx context.Context,
+	db userRowQuerier,
+	input models.CreateUserInput,
+) (*models.User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
@@ -212,7 +258,7 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 		allColumns,
 	)
 
-	row := r.pool.QueryRow(ctx, query, args...)
+	row := db.QueryRow(ctx, query, args...)
 
 	user, err := scanUser(row)
 	if err != nil {

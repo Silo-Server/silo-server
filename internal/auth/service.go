@@ -316,7 +316,7 @@ func (s *Service) SetupInitialUser(
 		return nil, nil, ErrSetupAlreadyComplete
 	}
 
-	if _, err := s.accounts.CreateAccount(ctx, CreateAccountInput{
+	if _, err := s.accounts.CreateInitialAccount(ctx, CreateAccountInput{
 		User: models.CreateUserInput{
 			Username: username,
 			Email:    email,
