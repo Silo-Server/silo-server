@@ -101,6 +101,7 @@ GET /api/v1/admin/users/{id}/profiles
 GET /api/v1/admin/users/{userId}/api-keys
 GET /api/v1/api-keys/
 GET /api/v1/api-keys/scopes
+GET /api/v1/auth/account/capability
 GET /api/v1/auth/device
 GET /api/v1/auth/device/capability
 GET /api/v1/auth/me
@@ -260,6 +261,7 @@ POST /api/v1/admin/subtitle-providers/{provider}/test
 POST /api/v1/admin/users
 POST /api/v1/admin/users/{id}/impersonate
 POST /api/v1/api-keys/
+POST /api/v1/auth/account/password
 POST /api/v1/auth/device/approve
 POST /api/v1/auth/device/deny
 POST /api/v1/auth/device/poll

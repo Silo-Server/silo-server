@@ -49,12 +49,12 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 				return
 			}
 			if claims.ProfileID == "" {
-				writeUnauthorized(w, "Invalid or expired token")
+				writeUnauthorized(w, "Invalid or expired token", ReasonInvalidCredential)
 				return
 			}
 			valid, err := am.checkSession(r.Context(), claims.SessionID)
 			if err != nil || !valid {
-				writeUnauthorized(w, "Session is no longer valid")
+				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}
 			// Same attribution RequireAuth performs, so display fetches are

@@ -411,6 +411,9 @@ for r in rows:
     if k in external: consumers.add('external_unknown')
     if r['listener'] == 'root' and r['path'] == '/': consumers.add('web')
     if r['listener'] == 'root' and r['path'] == '/api/': consumers.add('internal')
+    # The API listener's /api/v2/* hand-off is consumed by the server itself,
+    # like the root /api/ delegation; there is no call site to credit.
+    if r['delegates_to'] == 'api_v2': consumers.add('internal')
     if not consumers: consumers = {'unused'}
     consumers = sorted(consumers)
     flow = flow_for(r)

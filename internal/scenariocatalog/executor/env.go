@@ -591,8 +591,10 @@ func (e *Env) guardScratchDatabase() {
 		{"media files", "media_files", "", nil},
 		{"library folders", "media_folders", "", nil},
 		{"non-fixture users", "users", "email IS NULL OR btrim(email::text) = '' OR email::text NOT ILIKE $1", []any{fixtureEmailPattern}},
+		// ratelimit.* keys are budgets the server seeds on startup, and
+		// ratelimit.auth.password_change.* would otherwise match `password`.
 		{"non-fixture server settings", "server_settings",
-			"(key ~ '(secret|password|api_key|access_key|token_secret|jwt)' AND value <> '') OR (key = 'branding.server_name' AND value <> $1)",
+			"(key NOT LIKE 'ratelimit.%' AND key ~ '(secret|password|api_key|access_key|token_secret|jwt)' AND value <> '') OR (key = 'branding.server_name' AND value <> $1)",
 			[]any{serverName}},
 	}
 	var found []string
