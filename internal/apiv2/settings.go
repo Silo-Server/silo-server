@@ -883,9 +883,30 @@ type EffectiveSettingsBatch struct {
 	Contexts []SettingContextRequest `json:"contexts" required:"true" minItems:"1" maxItems:"200" doc:"The content contexts to resolve under"`
 }
 
+// EffectiveSettingsBatchTarget is what a batch resolution names beyond the
+// body: the client family and the declared device. The batch resolves for
+// the acting profile under each body context, so it carries none of the
+// profile_id, device_id, library_ids or series_ids parameters of
+// listEffectiveSettings; v1 read those on the batch route and ignored them.
+type EffectiveSettingsBatchTarget struct {
+	ClientFamily   string `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; required when a requested key has that scope" example:"tv"`
+	DeviceHeader   string `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier; its profile_device values take part" example:"iphone-1"`
+	DeviceName     string `header:"X-Silo-Device-Name" maxLength:"120" doc:"Optional display name recorded on the device registry" example:"Living room"`
+	DevicePlatform string `header:"X-Silo-Device-Platform" maxLength:"40" doc:"Optional platform recorded on the device registry" example:"iOS"`
+}
+
+func (t EffectiveSettingsBatchTarget) query(ctx context.Context, keys []string) handlers.EffectiveSettingsQuery {
+	return handlers.EffectiveSettingsQuery{
+		Keys:            keys,
+		ActiveProfileID: profileFrom(ctx),
+		Device:          handlers.NewDeviceMetadata(t.DeviceHeader, t.DeviceName, t.DevicePlatform),
+		ClientFamily:    t.ClientFamily,
+	}
+}
+
 // EffectiveSettingsBatchInput is the resolveEffectiveSettings request.
 type EffectiveSettingsBatchInput struct {
-	EffectiveSettingsQuery
+	EffectiveSettingsBatchTarget
 	Body EffectiveSettingsBatch
 }
 
@@ -1083,10 +1104,7 @@ func (reg *Registry) resolveEffectiveSettings(ctx context.Context, in *Effective
 	if p != nil {
 		return nil, p
 	}
-	q, p := in.query(ctx, in.Body.Keys)
-	if p != nil {
-		return nil, p
-	}
+	q := in.query(ctx, in.Body.Keys)
 	contexts := make([]handlers.EffectiveContextRequest, 0, len(in.Body.Contexts))
 	for _, c := range in.Body.Contexts {
 		req := handlers.EffectiveContextRequest{ContextID: c.ContextID, SeriesID: c.SeriesID}

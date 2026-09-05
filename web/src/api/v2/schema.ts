@@ -3691,16 +3691,7 @@ export interface operations {
   };
   resolveEffectiveSettings: {
     parameters: {
-      query?: {
-        /** @description Another registered device of the profile to resolve for; absent means the declared device */
-        device_id?: string;
-        /** @description Libraries whose profile_library values take part, one library_ids parameter per id */
-        library_ids?: string[];
-        /** @description Another profile on the account to resolve for; only the household parent may name one */
-        profile_id?: string;
-        /** @description Series whose profile_series values take part, one series_ids parameter per id */
-        series_ids?: string[];
-      };
+      query?: never;
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;

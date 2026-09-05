@@ -40632,7 +40632,7 @@
         "path": "/api/v2/settings/values/effective",
         "operation_id": "resolveEffectiveSettings"
       },
-      "notes": "Settings (profile_scoped). Same {keys, contexts:[{context_id, library_id | series_id}]} body with library_id as a string ID (v1 also accepted a JSON number), strict unknown-field rejection, and keys/contexts required and non-empty at the schema (v1: 400 from the handler). The v1 {contexts:[...], revision} envelope becomes {items:[{context_id, settings:[...]}], revision}. A key the contract does not define is a 422 at body.keys (v1: 404 unknown_setting)."
+      "notes": "Settings (profile_scoped). Same {keys, contexts:[{context_id, library_id | series_id}]} body with library_id as a string ID (v1 also accepted a JSON number), strict unknown-field rejection, and keys/contexts required and non-empty at the schema (v1: 400 from the handler). The v1 {contexts:[...], revision} envelope becomes {items:[{context_id, settings:[...]}], revision}. A key the contract does not define is a 422 at body.keys (v1: 404 unknown_setting). The batch resolves for the acting profile under each body context, so v2 declares only the device and client-family headers; the profile_id, device_id, library_ids and series_ids query parameters of the single-shot read are not declared here (v1 parsed them on this route and then ignored them)."
     },
     {
       "listener": "api",
