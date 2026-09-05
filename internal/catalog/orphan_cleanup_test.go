@@ -35,6 +35,8 @@ func TestOrphanedProvisionalPredicatePreservesDurableMediaItemReferences(t *test
 		"abs_playlist_items",
 		"abs_playlists",
 		"watch_provider_favorite_items",
+		"plex_sync_item_bindings",
+		"plex_sync_item_state",
 	} {
 		if strings.Contains(predicate, droppedTable) {
 			t.Fatalf("cleanup predicate must not reference dropped legacy table %q", droppedTable)

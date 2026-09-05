@@ -788,30 +788,6 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			  AND dest.user_id = src.user_id
 			  AND dest.profile_id = src.profile_id`},
 	{"move series playback preferences", `UPDATE user_series_playback_preferences SET series_id = $2 WHERE series_id = $1`},
-	{"merge plex sync item bindings timestamps", `
-			UPDATE plex_sync_item_bindings dest
-			SET last_seen_at = GREATEST(dest.last_seen_at, src.last_seen_at),
-			    updated_at = NOW()
-			FROM plex_sync_item_bindings src
-			WHERE src.media_item_id = $1
-			  AND dest.connection_id = src.connection_id
-			  AND (dest.media_item_id = $2 OR dest.plex_rating_key = src.plex_rating_key)
-			  AND dest.media_item_id <> src.media_item_id`},
-	{"delete duplicate plex sync item bindings", `
-			DELETE FROM plex_sync_item_bindings src
-			USING plex_sync_item_bindings dest
-			WHERE src.media_item_id = $1
-			  AND dest.connection_id = src.connection_id
-			  AND (dest.media_item_id = $2 OR dest.plex_rating_key = src.plex_rating_key)
-			  AND dest.media_item_id <> src.media_item_id`},
-	{"move remaining plex sync item bindings", `UPDATE plex_sync_item_bindings SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-	{"delete duplicate plex sync item state", `
-			DELETE FROM plex_sync_item_state src
-			USING plex_sync_item_state dest
-			WHERE src.media_item_id = $1
-			  AND dest.media_item_id = $2
-			  AND dest.mapping_id = src.mapping_id`},
-	{"move plex sync item state", `UPDATE plex_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
 	{"move webhook sync item state", `UPDATE webhook_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
 	{"move watch together rooms selected", `UPDATE watch_together_rooms SET selected_content_id = $2 WHERE selected_content_id = $1`},
 	{"move watch together suggestions", `UPDATE watch_together_suggestions SET content_id = $2 WHERE content_id = $1`},
