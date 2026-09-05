@@ -74,6 +74,12 @@ func TestLintSeededFailures(t *testing.T) {
 			seed: func(doc map[string]any) { delete(op(doc, info, "get")["responses"].(map[string]any), "406") },
 			want: "status 406 is implied by class public but not documented",
 		},
+		"undocumented body-read timeout": {
+			seed: func(doc map[string]any) {
+				delete(op(doc, "/api/v2/profiles/{id}", "patch")["responses"].(map[string]any), "408")
+			},
+			want: "status 408 is implied by class profile_scoped but not documented",
+		},
 		"undocumented gated status": {
 			seed: func(doc map[string]any) {
 				o := op(doc, info, "get")

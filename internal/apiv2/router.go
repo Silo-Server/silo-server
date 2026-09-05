@@ -159,6 +159,10 @@ func humaConfig() huma.Config {
 					},
 				},
 			},
+			// The document lists only the request media types the listener
+			// accepts; the generator and the served router share this
+			// config, so the artifact and the runtime document agree.
+			OnAddOperation: []huma.AddOpFunc{documentAcceptedRequestMediaTypes},
 		},
 		// Built-in spec, docs and schema routes are disabled: Silo serves the
 		// committed artifact itself (getOpenAPIDocument) and nothing else.
@@ -176,6 +180,25 @@ func humaConfig() huma.Config {
 		RejectUnknownQueryParameters: true,
 		// The schema-link transformer is absent: no $schema member, no links.
 		Transformers: []huma.Transformer{problemTransformer},
+	}
+}
+
+// documentAcceptedRequestMediaTypes drops every request media type the
+// framework documented that mediaTypeGuard would answer with 415. Huma
+// documents a RawBody member as application/octet-stream even when the
+// operation also declares a structured Body (updateProfile reads the raw
+// document only for its omitted-versus-null rule), and the listener accepts
+// application/json alone. It runs after Huma has built the request body and
+// before the operation reaches the document, so the schema Huma derived for
+// validation is untouched.
+func documentAcceptedRequestMediaTypes(_ *huma.OpenAPI, op *huma.Operation) {
+	if op.RequestBody == nil {
+		return
+	}
+	for mediaType := range op.RequestBody.Content {
+		if !structuredMediaTypeOK(mediaType) {
+			delete(op.RequestBody.Content, mediaType)
+		}
 	}
 }
 

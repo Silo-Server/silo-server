@@ -803,7 +803,7 @@
         "additionalProperties": false,
         "properties": {
           "allowed_library_ids": {
-            "description": "Replaces the allowlist; an empty array allows none",
+            "description": "Replaces the allowlist with these unique library identifiers; an empty array allows none",
             "examples": [
               [
                 "1",
@@ -1472,13 +1472,6 @@
               "schema": {
                 "$ref": "#/components/schemas/ProfileUpdate"
               }
-            },
-            "application/octet-stream": {
-              "schema": {
-                "contentMediaType": "application/octet-stream",
-                "format": "binary",
-                "type": "string"
-              }
             }
           },
           "required": true
@@ -1543,6 +1536,26 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "413": {
             "content": {

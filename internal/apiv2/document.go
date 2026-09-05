@@ -101,15 +101,18 @@ func resolvesProfile(class Class) bool {
 // ImpliedStatuses lists the problem statuses an operation of the given shape
 // documents, in ascending order. Shared by every operation: 400 (malformed
 // request), 406 (negotiation), 422 (undeclared query parameter), 500. A body
-// adds 413 and 415; a path parameter adds 404; every gated class adds 401, 429
-// and 503 (a gate the wiring lacks fails closed); a class that resolves a
-// profile or a demo-restricted mutation adds 403.
+// adds 408 (the body-read deadline), 413 and 415; a path parameter adds 404;
+// every gated class adds 401, 429 and 503 (a gate the wiring lacks fails
+// closed); a class that resolves a profile or a demo-restricted mutation adds
+// 403. Statuses an operation produces on its own (409 for a name conflict,
+// say) are declared on that operation's Errors, not here.
 func ImpliedStatuses(class Class, demoRestricted, hasBody, hasPath bool) []int {
 	set := map[int]bool{
 		http.StatusBadRequest: true, http.StatusNotAcceptable: true,
 		http.StatusUnprocessableEntity: true, http.StatusInternalServerError: true,
 	}
 	if hasBody {
+		set[http.StatusRequestTimeout] = true
 		set[http.StatusRequestEntityTooLarge] = true
 		set[http.StatusUnsupportedMediaType] = true
 	}

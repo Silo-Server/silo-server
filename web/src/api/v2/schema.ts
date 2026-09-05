@@ -498,7 +498,7 @@ export interface components {
     };
     ProfileUpdate: {
       /**
-       * @description Replaces the allowlist; an empty array allows none
+       * @description Replaces the allowlist with these unique library identifiers; an empty array allows none
        * @example [
        *       "1",
        *       "2"
@@ -910,7 +910,6 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["ProfileUpdate"];
-        "application/octet-stream": string;
       };
     };
     responses: {
@@ -961,6 +960,24 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

@@ -1,3 +1,11 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "updateProfile",
+      "change_id": "request-body-media-type-removed",
+      "fingerprint": "68508d4cbc44068b8079a033b68fde18e748eb50f2ce2ba98c7c49f0e81ca3eb",
+      "reason": "octet-stream was never accepted by the listener; pre-1.0 pilot",
+      "approved_in": "#941"
+    }
+  ]
 }

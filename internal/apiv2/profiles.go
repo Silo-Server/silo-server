@@ -60,7 +60,7 @@ type ProfileUpdate struct {
 	AutoPlayNextPreview        *bool         `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
 	ShowForcedSubtitles        *bool         `json:"show_forced_subtitles,omitempty" nullable:"false" example:"false"`
 	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
-	AllowedLibraryIDs          *[]ID         `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Replaces the allowlist; an empty array allows none" example:"[\"1\",\"2\"]"`
+	AllowedLibraryIDs          *[]ID         `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Replaces the allowlist with these unique library identifiers; an empty array allows none" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         Patch[string] `json:"max_playback_quality,omitzero" enum:"1080p,2160p" doc:"Playback ceiling; null removes it" example:"1080p"`
 }
 
@@ -77,6 +77,9 @@ type ProfileUpdateInput struct {
 
 // fieldMaxPlaybackQuality is the member the v1 handler rejects by name.
 const fieldMaxPlaybackQuality = "max_playback_quality"
+
+// locationAllowedLibraryIDs is the problem location of the allowlist member.
+const locationAllowedLibraryIDs = locationBody + ".allowed_library_ids"
 
 // profileUpdateNullable names the members whose null is a clearing value;
 // null on any other member is a type failure.
@@ -111,9 +114,14 @@ type ProfileOutput struct {
 }
 
 func registerProfiles(reg *Registry) {
+	update := humaOp(http.MethodPatch, Prefix+"/profiles/{id}", "updateProfile", "profiles",
+		"Update a household profile; omitted members are unchanged.")
+	// v1 UpdateProfile answers a taken name with 409 name_conflict, which
+	// serviceProblem carries through as conflict; the status is this
+	// operation's own, not one the class implies.
+	update.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodPatch, Prefix+"/profiles/{id}", "updateProfile", "profiles",
-			"Update a household profile; omitted members are unchanged."),
+		Operation: update,
 		// Profile scoped without a required header, as v1 PUT /profiles/{id}:
 		// an administrator or the verified primary profile manages the
 		// household, and any other caller may change only its own active
@@ -217,12 +225,21 @@ func (u ProfileUpdate) toRequest() (handlers.ProfileUpdateRequest, *Problem) {
 	}
 	if u.AllowedLibraryIDs != nil {
 		ids := make([]int, 0, len(*u.AllowedLibraryIDs))
+		seen := make(map[int]bool, len(*u.AllowedLibraryIDs))
 		for _, id := range *u.AllowedLibraryIDs {
 			n, err := intOfID(id)
 			if err != nil || n <= 0 {
 				return req, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-					WithErrors(ProblemError{Location: "body.allowed_library_ids", Code: codeInvalid, Detail: "expected library identifiers"})
+					WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "expected library identifiers"})
 			}
+			// The store replaces the allowlist row by row under a
+			// (user, profile, library) primary key, so a repeated identifier
+			// is the client's error, not a 500.
+			if seen[n] {
+				return req, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+					WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "duplicate library identifier"})
+			}
+			seen[n] = true
 			ids = append(ids, n)
 		}
 		req.AllowedLibraryIDs = &ids

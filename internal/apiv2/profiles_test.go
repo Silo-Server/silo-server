@@ -92,11 +92,18 @@ func TestUpdateProfileValidation(t *testing.T) {
 		{`{"nickname":"x"}`, "body.nickname", codeUnknownField},
 		{`{"name":""}`, "body.name", codeOutOfRange},
 		{`{"allowed_library_ids":["x"]}`, "body.allowed_library_ids", codeInvalid},
+		// A repeated identifier would abort the store's primary-key insert;
+		// it is the client's error, answered before the store sees it.
+		{`{"allowed_library_ids":["1","1"]}`, "body.allowed_library_ids", codeInvalid},
 	} {
 		p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", tc.body, auth), TypeValidationFailed)
 		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
 			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
 		}
+	}
+	dup := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":["2","3","2"]}`, auth), TypeValidationFailed)
+	if len(dup.Errors) != 1 || dup.Errors[0].Detail != "duplicate library identifier" {
+		t.Errorf("duplicate detail: errors = %+v", dup.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name": "x"`, auth), TypeMalformedRequest)
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/", `{}`, auth), TypeNotFound)
