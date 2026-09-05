@@ -2098,7 +2098,7 @@ func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testi
 		DisabledLibraryIDs: []int{12},
 		MaxContentRating:   "PG-13",
 	}))
-	observed := handler.observedLanguageSuggestions(req, []settingsresolve.Effective{{
+	observed := handler.observedLanguageSuggestions(req.Context(), []settingsresolve.Effective{{
 		Key: settingskeys.CatalogMetadataLanguage,
 	}})
 
@@ -2123,7 +2123,7 @@ func TestObservedLanguageSuggestionsSkipsPlaybackKeys(t *testing.T) {
 	handler.SetLanguageSuggestionSource(source)
 
 	req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
-	observed := handler.observedLanguageSuggestions(req, []settingsresolve.Effective{
+	observed := handler.observedLanguageSuggestions(req.Context(), []settingsresolve.Effective{
 		{Key: settingskeys.PlaybackAudioLanguage},
 		{Key: settingskeys.PlaybackSubtitleLanguage},
 	})
