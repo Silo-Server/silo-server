@@ -43915,7 +43915,7 @@
       },
       "notes": "Conditionally registered: authMiddleware != nil; watchProviderHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
       "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by auth_session_id and state-gated."
+      "retry_safety_note": "DEFECT: keyed by auth_session_id, but the completion check is a plain read and the plugin is polled before the session is marked complete, so two overlapping polls across API nodes both call out and can consume the authorization twice. The v2 port must claim the session durably before calling out."
     },
     {
       "listener": "api",

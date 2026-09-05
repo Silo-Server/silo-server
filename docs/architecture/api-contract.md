@@ -458,7 +458,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   (email-address verification; favorites, watchlist, and rating add and remove, and the
   taste seed, whose store converges but whose provider dispatch or recommendation refresh
   fires unconditionally) name the outbox or change-gated claim the v2 port must add before
-  their retry is safe. Twenty-nine rows carry a `DEFECT` note where v1 gates on
+  their retry is safe. Thirty rows carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
   sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
@@ -470,8 +470,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   whose unique key resolves a retry but whose losing insert deletes the winner's S3
   object, transcode start, which replaces a live session under the same id, and media
   request creation, whose partial unique index stops covering a request once it reaches a
-  terminal state, and profile update, which bumps the account-wide access-policy revision
-  on field presence rather than on an effective change); their v2 port must move the gate
+  terminal state, profile update, which bumps the account-wide access-policy revision on
+  field presence rather than on an effective change, and the provider device-auth poll,
+  whose completion check is a plain read ahead of the plugin call); their v2 port must move
+  the gate
   to shared durable state, add the missing unique constraint or event time, gate the
   dispatch on a reported change, or make the repeat a no-op before the declared strategy
   holds.
