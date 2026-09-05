@@ -5956,7 +5956,7 @@ func (h *PlaybackHandler) persistTerminalStartDecisionV3(ctx context.Context, us
 	// aborted. A terminal-save collision must not resurrect that playable plan.
 	if existing.SessionID != "" {
 		if _, err := h.sessionMgr.GetSession(existing.SessionID); err != nil {
-			return playback.NewTerminalResponseV3("session_expired", "The playback session for this attempt has ended.", true), nil
+			return playback.NewTerminalResponseV3("session_expired", "The playback session for this attempt has ended.", true), nil //nolint:nilerr // Expiration is a successful terminal protocol response.
 		}
 	}
 	return decisionResponseFromAttemptV3(existing), nil
