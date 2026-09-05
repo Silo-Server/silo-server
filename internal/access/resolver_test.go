@@ -144,6 +144,9 @@ func (s stubStore) RemoveFavorite(context.Context, string, string) error {
 func (s stubStore) ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error) {
 	panic("unused")
 }
+func (s stubStore) ListFavoritesPage(context.Context, string, *userstore.ListKey, int) ([]userstore.Favorite, error) {
+	panic("unused")
+}
 func (s stubStore) ListFavoritesByMediaItems(context.Context, string, []string) (map[string]bool, error) {
 	panic("unused")
 }
@@ -166,6 +169,9 @@ func (s stubStore) ReplaceWatchlistOrder(context.Context, string, []string) erro
 	panic("unused")
 }
 func (s stubStore) ListWatchlist(context.Context, string, int, int) ([]userstore.WatchlistEntry, error) {
+	panic("unused")
+}
+func (s stubStore) ListWatchlistPage(context.Context, string, *userstore.ListKey, int) ([]userstore.WatchlistEntry, error) {
 	panic("unused")
 }
 func (s stubStore) ListWatchlistByMediaItems(context.Context, string, []string) (map[string]bool, error) {

@@ -13,6 +13,10 @@ import (
 	"strings"
 )
 
+// tiebreakerItemID is the CursorScope tiebreaker of a keyset that ends on
+// the unique catalog item id.
+const tiebreakerItemID = "item_id"
+
 // CursorScope binds a cursor to its operation, security scope, filter, sort
 // and tiebreaker. A cursor presented against a different scope is invalid.
 type CursorScope struct {

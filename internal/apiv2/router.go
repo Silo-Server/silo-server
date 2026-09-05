@@ -505,19 +505,21 @@ type LibraryCollectionService interface {
 // favorites and watchlist operations use. Every method acts as the viewer's profile and
 // returns an *handlers.APIError on failure.
 type PersonalListService interface {
-	// ListFavorites answers the store page [offset, offset+limit) of the
-	// profile's favorites, newest first, and the cards of the entries the
+	// ListFavoritesPage answers at most limit entries of the profile's
+	// favorites ordered by (added_at DESC, media_item_id DESC) strictly after
+	// the key (nil = from the newest), and the cards of the entries the
 	// viewer may see, in the same order.
-	ListFavorites(ctx context.Context, viewer handlers.PersonalListViewer, limit, offset int) ([]userstore.Favorite, []handlers.CollectionItemView, error)
+	ListFavoritesPage(ctx context.Context, viewer handlers.PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.Favorite, []handlers.CollectionItemView, error)
 	// GetFavorite answers the entry of an item the viewer may see; found is
 	// false when the item is not a favorite.
 	GetFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.Favorite, found bool, err error)
 	AddFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
 	RemoveFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
-	// ListWatchlist answers the store page [offset, offset+limit) of the
-	// profile's watchlist, newest first, and the cards of the entries the
+	// ListWatchlistPage answers at most limit entries of the profile's
+	// watchlist ordered by (added_at DESC, media_item_id DESC) strictly after
+	// the key (nil = from the newest), and the cards of the entries the
 	// viewer may see (fully-watched series hidden), in the same order.
-	ListWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, limit, offset int) ([]userstore.WatchlistEntry, []handlers.CollectionItemView, error)
+	ListWatchlistPage(ctx context.Context, viewer handlers.PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.WatchlistEntry, []handlers.CollectionItemView, error)
 	// GetWatchlistEntry answers the entry of an item the viewer may see;
 	// found is false when the item is not on the watchlist.
 	GetWatchlistEntry(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error)
@@ -528,7 +530,10 @@ type PersonalListService interface {
 // RatingService is the slice of *handlers.RatingsHandler the ratings
 // operations use.
 type RatingService interface {
-	ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]mediacatalog.UserRating, error)
+	// ListRatingsPage answers at most limit of the profile's ratings ordered
+	// by (rated_at DESC, media_item_id DESC) strictly after the key (nil =
+	// from the most recently rated).
+	ListRatingsPage(ctx context.Context, userID int, profileID string, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, error)
 	// GetRating answers the profile's rating of the item; found is false
 	// when the profile has not rated it.
 	GetRating(ctx context.Context, userID int, profileID, itemID string) (rating mediacatalog.UserRating, found bool, err error)

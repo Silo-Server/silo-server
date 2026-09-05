@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // The ratings domain: the acting profile's star ratings of catalog items.
@@ -117,9 +119,19 @@ func (reg *Registry) setRating(ctx context.Context, in *RatingSetInput) (*struct
 	return nil, nil
 }
 
-// listRatings answers from the same listing v1 GET /ratings uses. The store
-// pages by offset; the cursor carries the offset and a limit+1 probe decides
-// has_more.
+// ratingPosition is the ratings cursor payload: the keyset (rated_at,
+// media_item_id) of the last entry the previous page emitted, rated_at in
+// RFC 3339 with nanoseconds so the store's own precision round-trips. The
+// next page resumes strictly after it, so a rating set or removed between
+// pages neither repeats nor hides a row, and equal timestamps are ordered by
+// the unique item id.
+type ratingPosition struct {
+	RatedAt     string `json:"r"`
+	MediaItemID string `json:"m"`
+}
+
+// listRatings answers from the same listing v1 GET /ratings uses, paged by
+// keyset; a limit+1 probe decides has_more.
 func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *RatingListInput) (*RatingCollectionOutput, error) {
 	if reg.deps.Ratings == nil {
 		return nil, unavailable("ratings")
@@ -128,22 +140,34 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 	if p != nil {
 		return nil, p
 	}
-	scope := CursorScope{OperationID: opListRatings, Security: strconv.Itoa(userID) + "/" + profileID, Sort: sortStore, Tiebreaker: sortStore}
-	offset, p := decodeOffset(cursors, scope, in.Cursor)
-	if p != nil {
-		return nil, p
+	scope := CursorScope{OperationID: opListRatings, Security: strconv.Itoa(userID) + "/" + profileID, Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}
+	var after *mediacatalog.RatingKey
+	if in.Cursor != "" {
+		var pos ratingPosition
+		if p := cursors.Decode(scope, in.Cursor, &pos); p != nil {
+			return nil, p
+		}
+		ratedAt, err := time.Parse(time.RFC3339Nano, pos.RatedAt)
+		if err != nil {
+			return nil, NewProblem(TypeInvalidCursor, "The cursor is malformed, tampered with, or belongs to a different query.")
+		}
+		after = &mediacatalog.RatingKey{RatedAt: ratedAt, MediaItemID: pos.MediaItemID}
 	}
-	ratings, err := reg.deps.Ratings.ListRatings(ctx, userID, profileID, in.Limit+1, offset)
+	ratings, err := reg.deps.Ratings.ListRatingsPage(ctx, userID, profileID, after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
+	}
+	next := ""
+	if len(ratings) > in.Limit {
+		ratings = ratings[:in.Limit]
+		last := ratings[len(ratings)-1]
+		if next, err = cursors.Encode(scope, ratingPosition{RatedAt: last.RatedAt.UTC().Format(time.RFC3339Nano), MediaItemID: last.MediaItemID}); err != nil {
+			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+		}
 	}
 	items := make([]RatingEntry, 0, len(ratings))
 	for _, r := range ratings {
 		items = append(items, RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Rating, RatedAt: NewInstant(r.RatedAt)})
-	}
-	items, next, p := offsetPage(cursors, scope, len(ratings), in.Limit, offset, items)
-	if p != nil {
-		return nil, p
 	}
 	return &RatingCollectionOutput{Body: RatingCollection{Collection: Paginated(items, next)}}, nil
 }

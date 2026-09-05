@@ -73,6 +73,49 @@ func ListFavorites(db *sql.DB, profileID string, limit, offset int) ([]Favorite,
 	return favorites, rows.Err()
 }
 
+// ListFavoritesPage pages by keyset over (added_at DESC, media_item_id DESC).
+// added_at is RFC 3339 UTC text at whole-second precision, so text order is
+// time order and the key string compares exactly. The comparison is spelled
+// out rather than written as a row value so it does not depend on the linked
+// SQLite supporting row values.
+func ListFavoritesPage(db *sql.DB, profileID string, after *userstore.ListKey, limit int) ([]Favorite, error) {
+	query, args := listKeysetQuery(`SELECT profile_id, media_item_id, added_at FROM favorites`, profileID, after, limit)
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var favorites []Favorite
+	for rows.Next() {
+		var f Favorite
+		if err := rows.Scan(&f.ProfileID, &f.MediaItemID, &f.AddedAt); err != nil {
+			return nil, err
+		}
+		favorites = append(favorites, f)
+	}
+	return favorites, rows.Err()
+}
+
+// listKeysetQuery completes a personal-list SELECT with the profile
+// predicate, the keyset predicate for after (when set), the fixed
+// (added_at DESC, media_item_id DESC) order and the limit.
+func listKeysetQuery(selectClause, profileID string, after *userstore.ListKey, limit int) (string, []any) {
+	args := []any{profileID}
+	query := selectClause + `
+		 WHERE profile_id = ?`
+	if after != nil {
+		query += `
+		 AND (added_at < ? OR (added_at = ? AND media_item_id < ?))`
+		args = append(args, after.AddedAt, after.AddedAt, after.MediaItemID)
+	}
+	args = append(args, limit)
+	query += `
+		 ORDER BY added_at DESC, media_item_id DESC
+		 LIMIT ?`
+	return query, args
+}
+
 // GetFavorite answers a profile's favorite entry for a media item, nil when
 // the item is not a favorite.
 func GetFavorite(db *sql.DB, profileID, mediaItemID string) (*Favorite, error) {
@@ -229,6 +272,28 @@ func ListWatchlist(db *sql.DB, profileID string, limit, offset int) ([]Watchlist
 		return nil, err
 	}
 	defer rows.Close()
+
+	var entries []WatchlistEntry
+	for rows.Next() {
+		var w WatchlistEntry
+		if err := rows.Scan(&w.ProfileID, &w.MediaItemID, &w.AddedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, w)
+	}
+	return entries, rows.Err()
+}
+
+// ListWatchlistPage pages by keyset over (added_at DESC, media_item_id DESC);
+// a synced sort_index does not take part. See ListFavoritesPage for the
+// comparison rule.
+func ListWatchlistPage(db *sql.DB, profileID string, after *userstore.ListKey, limit int) ([]WatchlistEntry, error) {
+	query, args := listKeysetQuery(`SELECT profile_id, media_item_id, added_at FROM watchlist`, profileID, after, limit)
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
 
 	var entries []WatchlistEntry
 	for rows.Next() {

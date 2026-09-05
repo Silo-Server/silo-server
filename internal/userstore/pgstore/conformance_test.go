@@ -245,6 +245,40 @@ func TestPostgresCollectionSortPreferences(t *testing.T) {
 	})
 }
 
+// TestPostgresPersonalListPage runs the keyset favorites/watchlist paging
+// conformance test against the Postgres backend, which is what pins the
+// date_trunc('second') comparison to the precision timeToString reports.
+// Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresPersonalListPage(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	storetest.RunPersonalListPage(t, func(t *testing.T) userstore.UserStore {
+		var userID int
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+			fmt.Sprintf("conf-listpage-%d", time.Now().UnixNano()),
+		).Scan(&userID); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM user_favorites WHERE user_id = $1`, userID)
+			_, _ = pool.Exec(ctx, `DELETE FROM user_watchlist WHERE user_id = $1`, userID)
+			_, _ = pool.Exec(ctx, `DELETE FROM user_profiles WHERE user_id = $1`, userID)
+			_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		})
+		return newStore(pool, userID)
+	})
+}
+
 // TestPostgresProgressPage runs the keyset progress paging conformance test
 // against the Postgres backend. Skips unless SILO_TEST_DATABASE_URL is set.
 func TestPostgresProgressPage(t *testing.T) {

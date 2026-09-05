@@ -27251,7 +27251,7 @@
         "path": "/api/v2/favorites",
         "operation_id": "listFavorites"
       },
-      "notes": "Section personal-lists (profile_scoped). Offset paging became limit+opaque cursor (page.next_cursor, page.has_more decided from the raw store rows, so a hidden or catalog-missing entry never hides the rows behind it); v1 has_more dropped; cards are the shared CatalogItem; image_size is a strict enum answered 422. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Offset paging became limit+opaque keyset cursor: the cursor is the (added_at, item_id) of the last entry emitted and the next page resumes strictly after it in (added_at DESC, item_id DESC) order, so an entry added or removed between pages neither repeats nor skips a row and equal timestamps are ordered by the unique item id; page.has_more is decided from the raw store rows, so a hidden or catalog-missing entry never hides the rows behind it; v1 has_more dropped; cards are the shared CatalogItem; image_size is a strict enum answered 422. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -36934,7 +36934,7 @@
         "path": "/api/v2/ratings",
         "operation_id": "listRatings"
       },
-      "notes": "Section personal-lists (profile_scoped). {ratings:[...]} with offset paging became {items:[...]} with limit+opaque cursor (page.next_cursor, page.has_more); media_item_id renamed item_id as a string ID; rated_at is a UTC ms instant. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). {ratings:[...]} with offset paging became {items:[...]} with limit+opaque keyset cursor: the cursor is the (rated_at, item_id) of the last entry emitted and the next page resumes strictly after it in (rated_at DESC, item_id DESC) order, so a rating set or removed between pages neither repeats nor skips a row and equal timestamps are ordered by the unique item id (page.next_cursor, page.has_more from a limit+1 probe); media_item_id renamed item_id as a string ID; rated_at is a UTC ms instant. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -45160,7 +45160,7 @@
         "path": "/api/v2/watchlist",
         "operation_id": "listWatchlist"
       },
-      "notes": "Section personal-lists (profile_scoped). Offset paging became limit+opaque cursor (page.next_cursor, page.has_more decided from the raw store rows, so a fully-watched series, a hidden or a catalog-missing entry never hides the rows behind it); v1 has_more dropped; cards are the shared CatalogItem; image_size is a strict enum answered 422. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Offset paging became limit+opaque keyset cursor: the cursor is the (added_at, item_id) of the last entry emitted and the next page resumes strictly after it in (added_at DESC, item_id DESC) order (a provider-synced sort_index does not take part), so an entry added or removed between pages neither repeats nor skips a row and equal timestamps are ordered by the unique item id; page.has_more is decided from the raw store rows, so a fully-watched series, a hidden or a catalog-missing entry never hides the rows behind it; v1 has_more dropped; cards are the shared CatalogItem; image_size is a strict enum answered 422. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",

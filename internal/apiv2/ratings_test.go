@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -19,16 +20,35 @@ type fakeRatings struct {
 	access  []catalogpkg.AccessFilter
 }
 
-func (f *fakeRatings) ListRatings(_ context.Context, userID int, profileID string, limit, offset int) ([]catalogpkg.UserRating, error) {
+// ratingKeyAfter reports whether the row sorts strictly after the key in
+// (rated_at DESC, media_item_id DESC) order.
+func ratingKeyAfter(row catalogpkg.UserRating, after catalogpkg.RatingKey) bool {
+	if !row.RatedAt.Equal(after.RatedAt) {
+		return row.RatedAt.Before(after.RatedAt)
+	}
+	return row.MediaItemID < after.MediaItemID
+}
+
+func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, error) {
 	f.limits = append(f.limits, limit)
 	if f.err != nil {
 		return nil, f.err
 	}
 	var page []catalogpkg.UserRating
-	for i := offset; i < len(f.ratings) && len(page) < limit; i++ {
-		if f.ratings[i].UserID == userID && f.ratings[i].ProfileID == profileID {
-			page = append(page, f.ratings[i])
+	for _, r := range f.ratings {
+		if r.UserID != userID || r.ProfileID != profileID {
+			continue
 		}
+		if after != nil && !ratingKeyAfter(r, *after) {
+			continue
+		}
+		page = append(page, r)
+	}
+	sort.SliceStable(page, func(i, j int) bool {
+		return ratingKeyAfter(page[j], catalogpkg.RatingKey{RatedAt: page[i].RatedAt, MediaItemID: page[i].MediaItemID})
+	})
+	if len(page) > limit {
+		page = page[:limit]
 	}
 	return page, nil
 }
@@ -141,6 +161,67 @@ func TestListRatings(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.offset" || p.Errors[0].Code != codeUnknownParameter {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
+}
+
+// TestListRatingsKeysetStable walks three pages while ratings change
+// underneath and while two rows share rated_at; see the favorites twin.
+func TestListRatingsKeysetStable(t *testing.T) {
+	at := fixedTime()
+	ratings := &fakeRatings{ratings: []catalogpkg.UserRating{
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:f", Rating: 5, RatedAt: at},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:d", Rating: 4, RatedAt: at.Add(-time.Hour)},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:e", Rating: 4, RatedAt: at.Add(-time.Hour)},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:c", Rating: 3, RatedAt: at.Add(-2 * time.Hour)},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:b", Rating: 2, RatedAt: at.Add(-3 * time.Hour)},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:a", Rating: 1, RatedAt: at.Add(-4 * time.Hour)},
+	}}
+	h := newTestHandler(t, ratingsDeps(ratings))
+	type page struct {
+		Items []struct {
+			ItemID string `json:"item_id"`
+		} `json:"items"`
+		Page struct {
+			NextCursor string `json:"next_cursor"`
+			HasMore    bool   `json:"has_more"`
+		} `json:"page"`
+	}
+	get := func(cursor string) page {
+		url := "/api/v2/ratings?limit=2"
+		if cursor != "" {
+			url += "&cursor=" + cursor
+		}
+		rec := do(t, h, http.MethodGet, url, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", url, rec.Code, rec.Body.String())
+		}
+		var p page
+		decodeJSON(t, rec.Body, &p)
+		return p
+	}
+	ids := func(p page) string {
+		var out []string
+		for _, it := range p.Items {
+			out = append(out, it.ItemID)
+		}
+		return strings.Join(out, ",")
+	}
+	first := get("")
+	if ids(first) != "movie:f,movie:e" || !first.Page.HasMore {
+		t.Fatalf("page 1 = %+v", first)
+	}
+	ratings.ratings = append(ratings.ratings, catalogpkg.UserRating{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:g", Rating: 5, RatedAt: at.Add(time.Hour)})
+	second := get(first.Page.NextCursor)
+	if ids(second) != "movie:d,movie:c" || !second.Page.HasMore {
+		t.Fatalf("page 2 = %+v", second)
+	}
+	ratings.ratings = ratings.ratings[1:]
+	third := get(second.Page.NextCursor)
+	if ids(third) != "movie:b,movie:a" || third.Page.HasMore || third.Page.NextCursor != "" {
+		t.Fatalf("page 3 = %+v", third)
+	}
+	// A cursor whose rated_at is not an instant is refused, not a 500.
+	bad, _ := NewCursors(nil).Encode(CursorScope{OperationID: opListRatings, Security: "1/p-owner", Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+bad, "", viewerHeaders()), TypeInvalidCursor)
 }
 
 func TestDeleteRating(t *testing.T) {

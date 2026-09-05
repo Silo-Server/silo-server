@@ -17,6 +17,7 @@ type ratingsRepository interface {
 	Get(ctx context.Context, userID int, profileID, mediaItemID string) (*catalog.UserRating, error)
 	Delete(ctx context.Context, userID int, profileID, mediaItemID string) error
 	List(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalog.UserRating, error)
+	ListPage(ctx context.Context, userID int, profileID string, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error)
 }
 
 // RatingsHandler handles user rating operations.
@@ -189,6 +190,17 @@ func (h *RatingsHandler) GetRating(ctx context.Context, userID int, profileID, i
 // ratings, newest first.
 func (h *RatingsHandler) ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalog.UserRating, error) {
 	ratings, err := h.ratingsRepo.List(ctx, userID, profileID, limit, offset)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
+	}
+	return ratings, nil
+}
+
+// ListRatingsPage is the keyset form of ListRatings the v2 listing uses: at
+// most limit rows ordered by (rated_at DESC, media_item_id DESC) strictly
+// after the key (nil = from the most recently rated row).
+func (h *RatingsHandler) ListRatingsPage(ctx context.Context, userID int, profileID string, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error) {
+	ratings, err := h.ratingsRepo.ListPage(ctx, userID, profileID, after, limit)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
 	}

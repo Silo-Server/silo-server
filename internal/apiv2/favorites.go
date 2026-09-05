@@ -93,20 +93,43 @@ func personalListViewer(ctx context.Context, imageSize string) (handlers.Persona
 }
 
 // personalListScope binds a personal list's cursor to the profile and the
-// viewer policy that filters its cards.
+// viewer policy that filters its cards, and to the keyset it pages by.
 func personalListScope(ctx context.Context, operationID string, viewer handlers.PersonalListViewer) CursorScope {
 	return CursorScope{
 		OperationID: operationID,
 		Security:    strconv.Itoa(viewer.UserID) + "/" + viewer.ProfileID + "/" + viewerScopeDigest(ctx),
-		Sort:        sortStore,
-		Tiebreaker:  sortStore,
+		Sort:        "-added_at,-item_id",
+		Tiebreaker:  tiebreakerItemID,
 	}
 }
 
-// listFavorites answers from the same listing v1 GET /favorites uses. The
-// store pages by offset; the cursor carries the offset, and a limit+1 probe
-// decides has_more from the raw rows, so an entry the catalog no longer has
-// or the viewer may not see never hides the rows behind it.
+// personalListPosition is the favorites and watchlist cursor payload: the
+// keyset (added_at, media_item_id) of the last entry the previous page
+// emitted, in the store's own string form. The next page resumes strictly
+// after it, so an entry added or removed between pages neither repeats nor
+// hides a row, and equal timestamps are ordered by the unique item id.
+type personalListPosition struct {
+	AddedAt     string `json:"a"`
+	MediaItemID string `json:"m"`
+}
+
+// decodeListKey reads the keyset a personal list's cursor carries; no
+// cursor starts at the newest row.
+func decodeListKey(cursors *Cursors, scope CursorScope, cursor string) (*userstore.ListKey, *Problem) {
+	if cursor == "" {
+		return nil, nil
+	}
+	var pos personalListPosition
+	if p := cursors.Decode(scope, cursor, &pos); p != nil {
+		return nil, p
+	}
+	return &userstore.ListKey{AddedAt: pos.AddedAt, MediaItemID: pos.MediaItemID}, nil
+}
+
+// listFavorites answers from the same listing v1 GET /favorites uses, paged
+// by keyset. A limit+1 probe decides has_more from the raw rows, so an entry
+// the catalog no longer has or the viewer may not see never hides the rows
+// behind it.
 func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *FavoriteListInput) (*FavoriteCollectionOutput, error) {
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
@@ -116,15 +139,17 @@ func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *Fa
 		return nil, p
 	}
 	scope := personalListScope(ctx, opListFavorites, viewer)
-	offset, p := decodeOffset(cursors, scope, in.Cursor)
+	after, p := decodeListKey(cursors, scope, in.Cursor)
 	if p != nil {
 		return nil, p
 	}
-	entries, cards, err := reg.deps.PersonalLists.ListFavorites(ctx, viewer, in.Limit+1, offset)
+	entries, cards, err := reg.deps.PersonalLists.ListFavoritesPage(ctx, viewer, after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	items, next, p := personalListPage(cursors, scope, in.Limit, offset, entries, cards, func(e userstore.Favorite) string { return e.MediaItemID })
+	items, next, p := personalListPage(cursors, scope, in.Limit, entries, cards, func(e userstore.Favorite) userstore.ListKey {
+		return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
+	})
 	if p != nil {
 		return nil, p
 	}
@@ -132,17 +157,20 @@ func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *Fa
 }
 
 // personalListPage renders the cards of a limit+1 probe as the page and
-// mints the next cursor when a probe row followed. The cards preserve entry
-// order and omit unresolved entries, so the probe row's card, when it has
-// one, can only be the last card.
-func personalListPage[E any](cursors *Cursors, scope CursorScope, limit, offset int, entries []E, cards []handlers.CollectionItemView, idOf func(E) string) ([]CatalogItem, string, *Problem) {
+// mints the next cursor, the keyset of the last entry of the page, when a
+// probe row followed. The cards preserve entry order and omit unresolved
+// entries, so the probe row's card, when it has one, can only be the last
+// card.
+func personalListPage[E any](cursors *Cursors, scope CursorScope, limit int, entries []E, cards []handlers.CollectionItemView, keyOf func(E) userstore.ListKey) ([]CatalogItem, string, *Problem) {
 	next := ""
 	if len(entries) > limit {
-		if n := len(cards); n > 0 && cards[n-1].ContentID == idOf(entries[limit]) {
+		probe := keyOf(entries[limit])
+		if n := len(cards); n > 0 && cards[n-1].ContentID == probe.MediaItemID {
 			cards = cards[:n-1]
 		}
+		last := keyOf(entries[limit-1])
 		var err error
-		if next, err = cursors.Encode(scope, offsetPosition{Offset: offset + limit}); err != nil {
+		if next, err = cursors.Encode(scope, personalListPosition{AddedAt: last.AddedAt, MediaItemID: last.MediaItemID}); err != nil {
 			return nil, "", NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
 	}

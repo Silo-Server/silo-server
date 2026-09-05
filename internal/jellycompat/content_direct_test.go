@@ -388,6 +388,9 @@ func (s *progressCountingStore) RemoveFavorite(context.Context, string, string) 
 func (s *progressCountingStore) ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListFavoritesPage(context.Context, string, *userstore.ListKey, int) ([]userstore.Favorite, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) ListFavoritesByMediaItems(context.Context, string, []string) (map[string]bool, error) {
 	panic("unused")
 }
@@ -416,6 +419,9 @@ func (s *progressCountingStore) ReplaceWatchlistOrder(context.Context, string, [
 	panic("unused")
 }
 func (s *progressCountingStore) ListWatchlist(context.Context, string, int, int) ([]userstore.WatchlistEntry, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) ListWatchlistPage(context.Context, string, *userstore.ListKey, int) ([]userstore.WatchlistEntry, error) {
 	panic("unused")
 }
 func (s *progressCountingStore) ListWatchlistByMediaItems(context.Context, string, []string) (map[string]bool, error) {

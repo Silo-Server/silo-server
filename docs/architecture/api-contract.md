@@ -946,7 +946,13 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a naturally idempotent
 bodiless `PUT` add (ratings take `{rating}`) answering `204`, and a naturally idempotent `DELETE`
 answering `204` whether or not the entry existed. The mutations are not demo-restricted: v1's demo
-guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. `has_more` is
+guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. The three
+lists page by keyset, not offset: the cursor is the (`added_at`, `item_id`) — for ratings
+(`rated_at`, `item_id`) — of the last entry emitted, and the next page resumes strictly after it
+in `(added_at DESC, item_id DESC)` order through dedicated `ListFavoritesPage`/`ListWatchlistPage`
+(`userstore.ListKey`) and `RatingsRepo.ListPage` (`catalog.RatingKey`) store queries, so an entry
+added or removed between pages neither repeats nor skips a row and equal timestamps are ordered by
+the unique item id; the v1 offset queries are untouched. `has_more` is
 decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
 see never hides the rows behind it. The v1 handlers call the same seams
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their

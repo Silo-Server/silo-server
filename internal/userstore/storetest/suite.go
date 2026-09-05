@@ -5,6 +5,7 @@ package storetest
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -2397,6 +2398,142 @@ func testSectionOverridesUserAddedFields(t *testing.T, newStore func(t *testing.
 // exposed separately so each backend pins the (updated_at DESC, media_item_id
 // DESC) order, the strict resume after a key, and the equal-timestamp
 // tiebreak without the full suite.
+// RunPersonalListPage checks ListFavoritesPage and ListWatchlistPage: the
+// (added_at DESC, media_item_id DESC) order, the tie on added_at broken by
+// the id, resumption strictly after a key, and that a synced watchlist
+// sort_index does not reorder the keyset page.
+// The ids of the personal-list conformance rows.
+const (
+	listA = "l-a"
+	listB = "l-b"
+	listC = "l-c"
+	listD = "l-d"
+	listE = "l-e"
+)
+
+func RunPersonalListPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("Favorites", func(t *testing.T) {
+		store := newStore(t)
+		testPersonalListPage(t, store, store.AddFavoriteAt, func(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.ListKey, error) {
+			rows, err := store.ListFavoritesPage(ctx, profileID, after, limit)
+			keys := make([]userstore.ListKey, 0, len(rows))
+			for _, r := range rows {
+				keys = append(keys, userstore.ListKey{AddedAt: r.AddedAt, MediaItemID: r.MediaItemID})
+			}
+			return keys, err
+		})
+	})
+	t.Run("Watchlist", func(t *testing.T) {
+		store := newStore(t)
+		testPersonalListPage(t, store, store.AddToWatchlistAt, func(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.ListKey, error) {
+			rows, err := store.ListWatchlistPage(ctx, profileID, after, limit)
+			keys := make([]userstore.ListKey, 0, len(rows))
+			for _, r := range rows {
+				keys = append(keys, userstore.ListKey{AddedAt: r.AddedAt, MediaItemID: r.MediaItemID})
+			}
+			return keys, err
+		})
+		// A synced order changes ListWatchlist but not the keyset page.
+		ctx := context.Background()
+		if err := store.ReplaceWatchlistOrder(ctx, "p1", []string{listA, listE}); err != nil {
+			t.Fatalf("ReplaceWatchlistOrder: %v", err)
+		}
+		rows, err := store.ListWatchlistPage(ctx, "p1", nil, 10)
+		if err != nil {
+			t.Fatalf("ListWatchlistPage: %v", err)
+		}
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			got = append(got, r.MediaItemID)
+		}
+		if strings.Join(got, ",") != "m-new,"+listD+","+listC+","+listB+","+listA+","+listE+",m-old" {
+			t.Fatalf("synced order leaked into the keyset page: %v", got)
+		}
+	})
+}
+
+func testPersonalListPage(t *testing.T, store userstore.UserStore,
+	add func(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error),
+	page func(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.ListKey, error),
+) {
+	ctx := context.Background()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p2", Name: "Other"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	// m-b and m-c share added_at: the id breaks the tie, greater first.
+	writes := []struct {
+		profile, id string
+		at          time.Time
+	}{
+		{"p1", listA, base.Add(time.Minute)},
+		{"p1", listB, base.Add(2 * time.Minute)},
+		{"p1", listC, base.Add(2 * time.Minute)},
+		{"p1", listD, base.Add(3 * time.Minute)},
+		{"p1", listE, base},
+		{"p2", "m-z", base.Add(4 * time.Minute)},
+	}
+	for _, w := range writes {
+		if _, err := add(ctx, w.profile, w.id, w.at); err != nil {
+			t.Fatalf("add %s: %v", w.id, err)
+		}
+	}
+	want := []string{listD, listC, listB, listA, listE}
+
+	var got []string
+	var after *userstore.ListKey
+	for pages := 0; ; pages++ {
+		if pages > 10 {
+			t.Fatal("paging did not terminate")
+		}
+		keys, err := page(ctx, "p1", after, 2)
+		if err != nil {
+			t.Fatalf("page: %v", err)
+		}
+		for _, k := range keys {
+			got = append(got, k.MediaItemID)
+		}
+		if len(keys) < 2 {
+			break
+		}
+		last := keys[len(keys)-1]
+		after = &last
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("keyset walk = %v, want %v", got, want)
+	}
+	// A key resumes strictly after itself, including in the middle of a tie.
+	all, err := page(ctx, "p1", nil, 10)
+	if err != nil {
+		t.Fatalf("page(all): %v", err)
+	}
+	rest, err := page(ctx, "p1", &all[1], 10)
+	if err != nil {
+		t.Fatalf("page(after m-c): %v", err)
+	}
+	if len(rest) != 3 || rest[0].MediaItemID != listB {
+		t.Fatalf("rest = %+v", rest)
+	}
+	// An entry added after the key was minted, newer than the key, does not
+	// appear in the resumed page; one older than the key does.
+	if _, err := add(ctx, "p1", "m-new", base.Add(5*time.Minute)); err != nil {
+		t.Fatalf("add m-new: %v", err)
+	}
+	if _, err := add(ctx, "p1", "m-old", base.Add(-time.Minute)); err != nil {
+		t.Fatalf("add m-old: %v", err)
+	}
+	rest, err = page(ctx, "p1", &all[1], 10)
+	if err != nil {
+		t.Fatalf("page(after m-c, changed): %v", err)
+	}
+	if len(rest) != 4 || rest[0].MediaItemID != listB || rest[3].MediaItemID != "m-old" {
+		t.Fatalf("rest after change = %+v", rest)
+	}
+}
+
 func RunProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	t.Run("KeysetPage", func(t *testing.T) {
 		testProgressPage(t, newStore)

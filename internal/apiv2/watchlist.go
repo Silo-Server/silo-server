@@ -74,11 +74,10 @@ func registerWatchlist(reg *Registry) {
 		reg.deleteWatchlistEntry)
 }
 
-// listWatchlist answers from the same listing v1 GET /watchlist uses. The
-// store pages by offset; the cursor carries the offset, and a limit+1 probe
-// decides has_more from the raw rows, so a hidden series, an entry the
-// catalog no longer has, or one the viewer may not see never hides the rows
-// behind it.
+// listWatchlist answers from the same listing v1 GET /watchlist uses, paged
+// by keyset. A limit+1 probe decides has_more from the raw rows, so a hidden
+// series, an entry the catalog no longer has, or one the viewer may not see
+// never hides the rows behind it.
 func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *WatchlistListInput) (*WatchlistCollectionOutput, error) {
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
@@ -88,15 +87,17 @@ func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *Wa
 		return nil, p
 	}
 	scope := personalListScope(ctx, opListWatchlist, viewer)
-	offset, p := decodeOffset(cursors, scope, in.Cursor)
+	after, p := decodeListKey(cursors, scope, in.Cursor)
 	if p != nil {
 		return nil, p
 	}
-	entries, cards, err := reg.deps.PersonalLists.ListWatchlist(ctx, viewer, in.Limit+1, offset)
+	entries, cards, err := reg.deps.PersonalLists.ListWatchlistPage(ctx, viewer, after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	items, next, p := personalListPage(cursors, scope, in.Limit, offset, entries, cards, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
+	items, next, p := personalListPage(cursors, scope, in.Limit, entries, cards, func(e userstore.WatchlistEntry) userstore.ListKey {
+		return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
+	})
 	if p != nil {
 		return nil, p
 	}

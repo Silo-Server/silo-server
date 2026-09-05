@@ -64,6 +64,57 @@ func (s *PostgresUserStore) ListFavorites(ctx context.Context, profileID string,
 	return favorites, rows.Err()
 }
 
+// ListFavoritesPage pages by keyset over (added_at DESC, media_item_id DESC).
+// added_at compares at whole-second precision on both sides, which is the
+// precision timeToString keeps, so a key read back from a row compares equal
+// to the stored value.
+func (s *PostgresUserStore) ListFavoritesPage(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.Favorite, error) {
+	query, args, err := s.listKeysetQuery(`SELECT profile_id, media_item_id, added_at FROM user_favorites`, profileID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing favorites page: %w", err)
+	}
+	defer rows.Close()
+
+	var favorites []userstore.Favorite
+	for rows.Next() {
+		var f userstore.Favorite
+		var addedAt time.Time
+		if err := rows.Scan(&f.ProfileID, &f.MediaItemID, &addedAt); err != nil {
+			return nil, fmt.Errorf("scanning favorite row: %w", err)
+		}
+		f.AddedAt = timeToString(addedAt)
+		favorites = append(favorites, f)
+	}
+	return favorites, rows.Err()
+}
+
+// listKeysetQuery completes a personal-list SELECT with the profile
+// predicate, the keyset predicate for after (when set), the fixed
+// (added_at DESC, media_item_id DESC) order and the limit.
+func (s *PostgresUserStore) listKeysetQuery(selectClause, profileID string, after *userstore.ListKey, limit int) (string, []any, error) {
+	args := []any{s.userID, profileID}
+	query := selectClause + `
+		 WHERE user_id = $1 AND profile_id = $2`
+	if after != nil {
+		addedAt, err := time.Parse(time.RFC3339Nano, after.AddedAt)
+		if err != nil {
+			return "", nil, fmt.Errorf("parsing list key: %w", err)
+		}
+		args = append(args, addedAt, after.MediaItemID)
+		query += fmt.Sprintf(`
+		 AND (date_trunc('second', added_at), media_item_id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(`
+		 ORDER BY date_trunc('second', added_at) DESC, media_item_id DESC
+		 LIMIT $%d`, len(args))
+	return query, args, nil
+}
+
 func (s *PostgresUserStore) IsFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
 	var count int
 	err := s.pool.QueryRow(ctx,
@@ -182,6 +233,32 @@ func (s *PostgresUserStore) ListWatchlist(ctx context.Context, profileID string,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing watchlist: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []userstore.WatchlistEntry
+	for rows.Next() {
+		var w userstore.WatchlistEntry
+		var addedAt time.Time
+		if err := rows.Scan(&w.ProfileID, &w.MediaItemID, &addedAt); err != nil {
+			return nil, fmt.Errorf("scanning watchlist row: %w", err)
+		}
+		w.AddedAt = timeToString(addedAt)
+		entries = append(entries, w)
+	}
+	return entries, rows.Err()
+}
+
+// ListWatchlistPage pages by keyset over (added_at DESC, media_item_id DESC);
+// see ListFavoritesPage for the precision rule.
+func (s *PostgresUserStore) ListWatchlistPage(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.WatchlistEntry, error) {
+	query, args, err := s.listKeysetQuery(`SELECT profile_id, media_item_id, added_at FROM user_watchlist`, profileID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing watchlist page: %w", err)
 	}
 	defer rows.Close()
 

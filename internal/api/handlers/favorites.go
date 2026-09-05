@@ -186,6 +186,26 @@ func (h *PersonalDataHandler) ListFavorites(ctx context.Context, viewer Personal
 	return favorites, items, nil
 }
 
+// ListFavoritesPage is the keyset form of ListFavorites the v2 listing
+// uses: at most limit entries ordered by (added_at DESC, media_item_id DESC)
+// strictly after the key (nil = from the newest row), and the cards of those
+// entries in the same order, resolved exactly as ListFavorites resolves them.
+func (h *PersonalDataHandler) ListFavoritesPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.Favorite, []CollectionItemView, error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	favorites, err := store.ListFavoritesPage(ctx, viewer.ProfileID, after, limit)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list favorites")
+	}
+	items, err := resolveItems(h, ctx, viewer, favorites, func(f userstore.Favorite) string { return f.MediaItemID })
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve favorite items")
+	}
+	return favorites, items, nil
+}
+
 // GetFavorite answers the profile's favorite entry for an item the viewer
 // may see. found is false when the item is not a favorite; an item the
 // viewer may not see is a 404 error, as v1 answers it.
@@ -359,6 +379,30 @@ func (h *PersonalDataHandler) ListWatchlist(ctx context.Context, viewer Personal
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	entries, err := store.ListWatchlist(ctx, viewer.ProfileID, limit, offset)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
+	}
+	visible, err := h.filterHiddenWatchlistSeries(ctx, store, viewer.ProfileID, append([]userstore.WatchlistEntry(nil), entries...))
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
+	}
+	items, err := resolveItems(h, ctx, viewer, visible, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
+	}
+	return entries, items, nil
+}
+
+// ListWatchlistPage is the keyset form of ListWatchlist the v2 listing
+// uses: at most limit entries ordered by (added_at DESC, media_item_id DESC)
+// strictly after the key (nil = from the newest row), and the cards of the
+// entries the viewer may see (fully-watched series hidden) in the same order.
+func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entries, err := store.ListWatchlistPage(ctx, viewer.ProfileID, after, limit)
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
 	}

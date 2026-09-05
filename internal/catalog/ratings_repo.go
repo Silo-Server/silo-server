@@ -18,6 +18,16 @@ type UserRating struct {
 	RatedAt     time.Time `json:"rated_at"`
 }
 
+// RatingKey is the keyset position ListPage resumes after: the (RatedAt,
+// MediaItemID) of the last row a caller already holds, copied verbatim from
+// a UserRating the page returned. media_item_id is unique per profile, so
+// with the fixed ORDER BY rated_at DESC, media_item_id DESC the pair orders
+// every row totally.
+type RatingKey struct {
+	RatedAt     time.Time
+	MediaItemID string
+}
+
 // RatingsRepo provides access to the user_ratings table.
 type RatingsRepo struct {
 	pool *pgxpool.Pool
@@ -75,6 +85,43 @@ func (r *RatingsRepo) Delete(ctx context.Context, userID int, profileID, mediaIt
 }
 
 // List returns all ratings for a user+profile with pagination.
+// ListPage is the keyset form of List: ordered by (rated_at DESC,
+// media_item_id DESC), at most limit rows strictly after the key in that
+// order (nil = from the most recently rated row). rated_at keeps the
+// column's own precision, so a key read back from a row compares equal to
+// the stored value.
+func (r *RatingsRepo) ListPage(ctx context.Context, userID int, profileID string, after *RatingKey, limit int) ([]UserRating, error) {
+	args := []any{userID, profileID}
+	query := `
+		SELECT user_id, profile_id, media_item_id, rating, rated_at
+		FROM user_ratings
+		WHERE user_id = $1 AND profile_id = $2`
+	if after != nil {
+		args = append(args, after.RatedAt, after.MediaItemID)
+		query += fmt.Sprintf(`
+		  AND (rated_at, media_item_id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(`
+		ORDER BY rated_at DESC, media_item_id DESC
+		LIMIT $%d`, len(args))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list ratings page: %w", err)
+	}
+	defer rows.Close()
+
+	var ratings []UserRating
+	for rows.Next() {
+		var ur UserRating
+		if err := rows.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt); err != nil {
+			return nil, fmt.Errorf("scan rating: %w", err)
+		}
+		ratings = append(ratings, ur)
+	}
+	return ratings, rows.Err()
+}
+
 func (r *RatingsRepo) List(ctx context.Context, userID int, profileID string, limit, offset int) ([]UserRating, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, profile_id, media_item_id, rating, rated_at

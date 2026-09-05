@@ -65,6 +65,42 @@ func TestListWatchlistCursor(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist?cursor="+foreign, "", viewerHeaders()), TypeInvalidCursor)
 }
 
+// TestListWatchlistKeysetStable: an entry added between pages is not a
+// duplicate, and equal added_at values are ordered by item id.
+func TestListWatchlistKeysetStable(t *testing.T) {
+	lists := &fakePersonalLists{watchlist: []userstore.WatchlistEntry{
+		{ProfileID: "p-owner", MediaItemID: "series:d", AddedAt: "2026-01-02T00:00:00Z"},
+		{ProfileID: "p-owner", MediaItemID: "series:e", AddedAt: "2026-01-02T00:00:00Z"},
+		{ProfileID: "p-owner", MediaItemID: "series:c", AddedAt: "2026-01-01T00:00:00Z"},
+		{ProfileID: "p-owner", MediaItemID: "series:b", AddedAt: "2025-12-31T00:00:00Z"},
+		{ProfileID: "p-owner", MediaItemID: "series:a", AddedAt: "2025-12-30T00:00:00Z"},
+	}}
+	h := newTestHandler(t, favoritesDeps(lists))
+	rec := do(t, h, http.MethodGet, "/api/v2/watchlist?limit=1", "", viewerHeaders())
+	first := decodeCards(t, rec.Body.String())
+	if len(first.Items) != 1 || first.Items[0].ContentID != "series:e" || !first.Page.HasMore {
+		t.Fatalf("page 1 = %s", rec.Body.String())
+	}
+	lists.watchlist = append(lists.watchlist, userstore.WatchlistEntry{ProfileID: "p-owner", MediaItemID: "series:f", AddedAt: "2026-01-03T00:00:00Z"})
+	var ids []string
+	cursor, pages := first.Page.NextCursor, 0
+	for cursor != "" {
+		rec = do(t, h, http.MethodGet, "/api/v2/watchlist?limit=2&cursor="+cursor, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body.String())
+		}
+		page := decodeCards(t, rec.Body.String())
+		pages++
+		for _, it := range page.Items {
+			ids = append(ids, it.ContentID)
+		}
+		cursor = page.Page.NextCursor
+	}
+	if pages != 2 || strings.Join(ids, ",") != "series:d,series:c,series:b,series:a" {
+		t.Fatalf("ids = %v pages = %d", ids, pages)
+	}
+}
+
 func TestListWatchlistValidation(t *testing.T) {
 	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{}))
 	for _, tc := range []struct{ query, location, code string }{
