@@ -43836,8 +43836,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; watchProviderHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Starts a provider device-auth session; a duplicate is a harmless orphan session that expires."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "StartDeviceAuth calls the provider (a new device code) before any durable claim and stores the result under a new session id, so a retry after a lost response opens a second provider session and row. The v2 port must claim an active session durably before calling out."
     },
     {
       "listener": "api",
@@ -45323,7 +45323,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "recordMarkUnwatched hides history through a fresh time.Now() cutoff and re-dispatches the provider event, so a retry after a lost response also hides a viewing recorded in between. The v2 port must carry the cutoff in the request so a retry targets the original set."
     },
     {
       "listener": "api",
