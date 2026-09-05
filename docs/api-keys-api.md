@@ -1,5 +1,9 @@
 # API Keys API
 
+> **API lifecycle:** this documents the frozen alpha `/api/v1` surface. Silo serves it through one
+> pre-1.0 bridge release and then retires it; Silo 1.0's stable native API is `/api/v2`. See
+> [the native API contract](architecture/api-contract.md).
+
 API keys are long-lived credentials for scripts and integrations. A key is a
 string with an `sa_` prefix and is sent the same way as a JWT access token:
 

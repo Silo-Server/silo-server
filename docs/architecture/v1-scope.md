@@ -1,6 +1,13 @@
 # Silo v1 Scope
 
-**Status: NOT LOCKED — proposal window open.**
+**Status: NOT LOCKED — proposal window open. The API-contract portion of this file is superseded
+by [the native API contract](api-contract.md).**
+
+This file governs v1 **capability** scope: which user-facing capabilities Silo 1.0 ships. It no
+longer decides the API contract. Silo 1.0's stable native API is `/api/v2`; `/api/v1` is a frozen
+alpha contract carried through one pre-1.0 bridge release and then retired behind a `410 Gone`
+tombstone. The removals table below remains the authoritative record of the v1 removals taken
+during alpha.
 
 Propose capabilities with the **v1 capability proposal** issue template; triage happens on the
 [Silo v1 project](https://github.com/orgs/Silo-Server/projects/5).
@@ -8,9 +15,11 @@ Propose capabilities with the **v1 capability proposal** issue template; triage 
 When the scope locks, this file becomes the source of truth and will contain:
 
 1. **Locked capabilities** — a table of capability epics (issue links) with one-line scope statements.
-2. **API policy** — additive-only within `/api/v1` (no field renames/removals, no type changes,
-   no status-code repurposing; removals only via the Deprecation/Sunset header flow; capability
-   endpoints for feature detection). Contract tooling: #135.
+2. **API policy** — superseded by [the native API contract](api-contract.md). The additive-only
+   rules (no field renames/removals, no type changes, no status-code repurposing; removals only
+   via the Deprecation/Sunset header flow; capability endpoints for feature detection) bind
+   `/api/v2` at the 1.0 lock. `/api/v1` never locks: it is frozen and retired after the bridge
+   release. Contract tooling: #135.
 3. **Amendment rules** — after lock, this file changes only via PR with code-owner review.
    An amendment PR is the exception process: it must say what changes, why it cannot wait
    for v1.1, and what it displaces.
@@ -20,14 +29,16 @@ for feature PRs (see the scope gate in `CLAUDE.md`).
 
 ## Breaking removals taken before lock
 
-The additive-only rule in item 2 binds at lock. Before then a removal is in scope, and there is no
-amendment to write because the amendment process in item 3 does not exist yet. `CLAUDE.md` states
-the rule without that qualifier, which reads as a contradiction — it is not, but a removal taken
-now has to be recorded here so a reader after lock can tell a deliberate decision from a violation.
+Additive-only never bound the alpha `/api/v1` contract; per item 2 it binds `/api/v2` at the 1.0
+lock. A v1 removal was in scope while v1 was alpha, and there is no amendment to write because the
+amendment process in item 3 does not exist yet. Each removal is still recorded here so a reader can
+tell a deliberate decision from a violation.
 
 Each entry names what goes, why waiting is worse, and the design that decided it. **Every removal
-listed here must have shipped before the scope locks.** One still outstanding at lock loses its
-justification and falls back to the Deprecation/Sunset flow like anything else.
+listed here must have shipped before the scope locks.** One still outstanding at lock needs no
+deprecation window: the route simply rides the frozen `/api/v1` bridge surface until the
+retirement tombstone removes it with everything else, and its successor shape is decided in the v2
+migration ledger.
 
 | Removed | Release | Rationale |
 |---|---|---|

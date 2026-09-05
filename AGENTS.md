@@ -17,9 +17,9 @@ users. Weigh every design against that full spectrum; treat a node dying mid-str
 event, not an edge case.
 
 It is an open platform, not a walled garden: third-party clients are encouraged, and other
-people's clients will depend on the v1 API once it locks — see "v1 API rules" below for the
-current pre-1.0 posture. Jellyfin-protocol compatibility is a long-term commitment as an
-on-ramp for the existing ecosystem.
+people's clients will depend on the native API once `/api/v2` locks with 1.0 — see "API contract
+rules" below for the current pre-1.0 posture. Jellyfin-protocol compatibility is a long-term
+commitment as an on-ramp for the existing ecosystem.
 
 The core/plugin line is about implementation multiplicity: library types (movies, TV,
 audiobooks, ebooks, podcasts) are core; plugins are for interfaces where many implementations
@@ -54,8 +54,10 @@ server-side (`watchstate`, `userdb`, `settingsresolve`).
 - **Node** — a remote transcode/streaming worker in `nodepool`, not the API server.
 - **Session** — ambiguous; always say which: playback session (`internal/playback`) or login
   session (`internal/auth`).
-- **jellycompat vs v1** — jellycompat is the Jellyfin-protocol surface for ecosystem clients;
-  "the API" or "v1" means Silo's native `/api/v1`.
+- **jellycompat vs the native API** — jellycompat is the Jellyfin-protocol surface for ecosystem
+  clients; "the API" means Silo's native surface, which spans `/api/v1` (the frozen alpha
+  contract, served only through the bridge release) and `/api/v2` (the stable 1.0 target and the
+  native API going forward). See "API contract rules" below.
 
 ## Priorities
 
@@ -127,8 +129,8 @@ catalog, or in a specific plugin repo.
 A client-visible change (API, auth, playback, session, library, or metadata behavior) is not
 done until each of these has been handled or ruled out:
 
-- The API change fits the current v1 posture (see "v1 API rules" below); new features still
-  expose a capability endpoint.
+- The API change fits the current contract posture (see "API contract rules" below); new
+  features still expose a capability endpoint.
 - Follow-up work is done or filed for both `silo-apple` and `silo-android` — prefer
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
@@ -179,24 +181,34 @@ document, or status update.
 - Match the tone to the audience and use only formatting that improves
   readability.
 
-## v1 API rules
+## API contract rules
 
-Silo is alpha and `/api/v1` is not locked yet. Until it locks, restructuring the API is in
-scope — if a shape is wrong, fix it now rather than carry it into 1.0. Prefer larger
-coordinated sweeps over a drip of small breaks, and don't build backwards-compatibility shims
-for pre-lock clients. A breaking change still needs coordination with `silo-apple` and
-`silo-android`, and removals get recorded in the pre-lock removals table in
-[docs/architecture/v1-scope.md](docs/architecture/v1-scope.md) so client authors can track
-them.
+`/api/v2` is Silo's first stable native API and locks with Silo 1.0. `/api/v1` is a frozen alpha
+contract: it is carried unchanged through exactly one published pre-1.0 bridge release and then
+retired, after which the main API listener answers the whole `/api/v1` namespace with a
+`410 Gone` tombstone carrying the `client_upgrade_required` problem code. The decision, the
+shared wire conventions, and the release gates live in
+[docs/architecture/api-contract.md](docs/architecture/api-contract.md); that document is the
+authority and this section is only the summary. Program tracking: issue #135.
 
-At v1 lock (1.0), the contract becomes additive-only and binding:
+What that means for a change today:
 
-- Never rename or remove a response field, change a field's type, or repurpose a status code on
-  an existing endpoint.
-- New functionality adds new fields or endpoints. Removals go through the Deprecation/Sunset
-  header flow only.
+- V1 feature development is frozen. Only critical fixes that keep the bridge usable land on
+  `/api/v1`; new contract work targets `/api/v2`.
+- A client-visible change during the bridge still needs coordination with `silo-apple` and
+  `silo-android`.
+- V1 removals taken during alpha stay recorded in the pre-lock removals table in
+  [docs/architecture/v1-scope.md](docs/architecture/v1-scope.md), which remains the historical
+  record for them.
+
+At the 1.0 lock the additive-only rules bind `/api/v2`:
+
+- Never rename or remove an operation, parameter, response field, error code, operation ID, or
+  schema name; never change a field's type or meaning or repurpose a status code.
+- New functionality adds fields, enum values, or operations. Removals go through the
+  Deprecation/Sunset header flow only.
 - New features expose capability endpoints for feature detection rather than relying on version
-  sniffing. Contract strategy and tooling: issue #135.
+  sniffing.
 
 Design new endpoints today so they can live under that regime tomorrow.
 

@@ -1,5 +1,9 @@
 # Downloads & Offline Sync API (client integration guide)
 
+> **API lifecycle:** this documents the frozen alpha `/api/v1` surface. Silo serves it through one
+> pre-1.0 bridge release and then retires it; Silo 1.0's stable native API is `/api/v2`. See
+> [the native API contract](architecture/api-contract.md).
+
 This is the client-facing integration guide for downloads v2 / offline sync. It is
 the contract the Apple (`silo-apple`) and Android (`silo-android`) apps should use
 to download movies and episodes for fully offline playback and reconcile watch

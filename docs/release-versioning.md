@@ -19,6 +19,23 @@ For releases below `v1.0.0`, a minor release may include breaking changes. Every
 release note must call out upgrade, configuration, and compatibility impact when
 applicable.
 
+## Backups and rollback
+
+Administrators take a backup before every release upgrade and verify that it can
+be restored. This applies to every upgrade, not only to major versions.
+
+Silo does not guarantee downgrade or in-place rollback compatibility between
+releases. A newer release may write or migrate data that an older release cannot
+read, and there is no supported in-place database downgrade. Recovery from a
+failed upgrade means stopping the new version, restoring the verified
+pre-upgrade backup and its matching configuration, and redeploying the previous
+release. That restore discards any change made after the backup was taken.
+
+Release notes are authoritative for version-specific compatibility. They state
+the supported upgrade path, required intermediate releases, and any database or
+component combination a particular release certifies. Treat a combination the
+release notes do not certify as unsupported.
+
 ## Source of truth
 
 The Git tag and matching GitHub Release are the authoritative product version.

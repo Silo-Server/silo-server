@@ -1,5 +1,9 @@
 # Scan API
 
+> **API lifecycle:** this documents the frozen alpha `/api/v1` surface. Silo serves it through one
+> pre-1.0 bridge release and then retires it; Silo 1.0's stable native API is `/api/v2`. See
+> [the native API contract](architecture/api-contract.md).
+
 Silo exposes a scan API that lets external tools trigger media library scans on demand. This is useful for integrating with download managers like Sonarr, Radarr, or relay tools like Autoscan that notify your server when new media arrives.
 
 ## Prerequisites

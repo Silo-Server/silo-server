@@ -714,6 +714,11 @@ realtime invalidation, stop cleanup, and two `/api/v1` endpoints under the
 additive-only rule. Dual-publish, prove parity, migrate each named consumer, retire
 writes last.
 
+> **Superseded on this point:** `/api/v1` is a frozen alpha contract retired after the
+> bridge release, not an additive-only surface — see
+> [the native API contract](../architecture/api-contract.md) for the current `/api/v1`
+> lifecycle.
+
 **What is authoritative for what.** Telemetry is canonical *only* for server-observed
 live activity, viewer bytes, viewer addresses and enforcement. The control stores stay
 authoritative for their own lifecycle concerns and are not absorbed:

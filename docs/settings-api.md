@@ -1,5 +1,9 @@
 # Canonical Settings API
 
+> **API lifecycle:** this documents the frozen alpha `/api/v1` surface. Silo serves it through one
+> pre-1.0 bridge release and then retires it; Silo 1.0's stable native API is `/api/v2`. See
+> [the native API contract](architecture/api-contract.md).
+
 The canonical settings API stores typed user preferences from the shared
 settings contract. Client implementations should discover the server contract
 before rendering controls or writing a value; do not keep a separate list of

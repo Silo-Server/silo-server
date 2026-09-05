@@ -1,5 +1,9 @@
 # Admin API
 
+> **API lifecycle:** this documents the frozen alpha `/api/v1` surface. Silo serves it through one
+> pre-1.0 bridge release and then retires it; Silo 1.0's stable native API is `/api/v2`. See
+> [the native API contract](architecture/api-contract.md).
+
 Server-administration endpoints under `/api/v1/admin`. Every `/api/v1/admin`
 route requires an authenticated account with the server-wide `admin` role — the
 same authorization as `/api/v1/admin/sessions` — and none of them are part of
