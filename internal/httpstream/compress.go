@@ -1,6 +1,9 @@
 package httpstream
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -74,10 +77,27 @@ func (x *responseExclusionWriter) Write(p []byte) (int, error) {
 	return x.w.Write(p)
 }
 
+// The optional ResponseWriter interfaces are delegated to whichever writer
+// is current (the compressor's, or the one beneath it once excluded) so the
+// wrapper is transparent to handlers that need them. Hijack is what the
+// WebSocket upgrader asserts before it has written anything: gorilla answers
+// 500 when the writer it is handed lacks it. io.ReaderFrom is deliberately
+// absent: the compressor's writer does not offer it either, and the bulk
+// routes that rely on sendfile bypass the wrapper through skipRequest.
+
 func (x *responseExclusionWriter) Flush() {
-	if f, ok := x.w.(http.Flusher); ok {
-		f.Flush()
+	_ = http.NewResponseController(x.w).Flush()
+}
+
+func (x *responseExclusionWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(x.w).Hijack()
+}
+
+func (x *responseExclusionWriter) Push(target string, opts *http.PushOptions) error {
+	if p, ok := x.w.(http.Pusher); ok {
+		return p.Push(target, opts)
 	}
+	return errors.New("httpstream: http.Pusher is unavailable on the writer")
 }
 
 // Unwrap exposes the compressor's writer so http.ResponseController reaches
