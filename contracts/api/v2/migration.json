@@ -13209,7 +13209,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; policyHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Activate repoints active_version_id unconditionally and bumps the policy generation, so a retry after a lost response that lands after another activation restores an obsolete policy and triggers a cluster reload. The v2 port must require If-Match on the document."
     },
     {
       "listener": "api",
@@ -25964,7 +25965,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "domain_identity",
+      "retry_safety_note": "DEFECT: UpdateManagedStatus accepts completed as a source state and writes the request status and completed_at (nil) verbatim, so a retried downloading report landing after completed rewinds the row to unfinished. The v2 port must carry an event time and apply only if newer."
     },
     {
       "listener": "api",
@@ -26991,7 +26993,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; ebookReaderHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "domain_identity",
+      "retry_safety_note": "DEFECT: the handler assigns a fresh server UpdatedAt and the upsert replaces file_id and location unconditionally, so a delayed retry of an older autosave rewinds the reader past a newer position. The v2 port must carry a client event time and apply only if newer."
     },
     {
       "listener": "api",
@@ -34115,7 +34118,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; onboardingHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "domain_identity",
+      "retry_safety_note": "DEFECT: completion and skip flags are monotonic, but the upsert writes last_step verbatim with a fresh server timestamp, so a retried older report landing after a later step moves progress backward. The v2 port must carry a step sequence and apply only if newer."
     },
     {
       "listener": "api",
@@ -37278,7 +37282,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: the row converges, but Set rewrites rated_at to now() when the rating is unchanged and the handler marks the profile stale and requests a recommendation refresh unconditionally, so a retry repeats the work per API node. The v2 port must make an unchanged rating a no-op and gate the refresh."
     },
     {
       "listener": "api",
@@ -37411,7 +37416,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: the row converges, but Set rewrites rated_at to now() when the rating is unchanged and the handler marks the profile stale and requests a recommendation refresh unconditionally, so a retry repeats the work per API node. The v2 port must make an unchanged rating a no-op and gate the refresh."
     },
     {
       "listener": "api",

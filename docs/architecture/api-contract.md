@@ -430,9 +430,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (138
-  `natural_idempotent`, 29 `unique_constraint`, 12 `domain_identity`, 10 `coalescing`, 5
-  `durable_dispatch`, 24 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  tier-1 ported mutation rows (218 distinct operations) are classified (132
+  `natural_idempotent`, 29 `unique_constraint`, 15 `domain_identity`, 10 `coalescing`, 7
+  `durable_dispatch`, 25 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
@@ -444,23 +444,26 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   notifications read-all), a fresh server-side cutoff a retry would move (history remove,
   mark-unwatched), an external call made before any durable claim (provider device-auth
   start), a one-shot token-bearing or secret-bearing response that cannot be replayed
-  (device-pairing poll, OAuth completion, API-key creation), or
-  a one-shot destructive allowance a retry would re-arm (empty-root cleanup confirmation), a
+  (device-pairing poll, OAuth completion, API-key creation), an unconditional repoint of
+  cluster-wide state (policy version activation, whose stale retry restores an obsolete
+  policy), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
+  confirmation), a
   command that re-runs its side effect on every call (watch-together selection and
   suggestion promotion, which reset playback and clear member sessions each time;
   metadata-match-queue retry, which schedules another run once the first is leased); each
   note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
-  (email-address verification; favorites and watchlist add and remove, whose store
-  converges but whose provider dispatch fires unconditionally) name the outbox or
-  change-gated claim the v2 port must add before their retry is safe. Eighteen rows carry
-  a `DEFECT` note where v1 gates on
+  (email-address verification; favorites, watchlist, and rating add and remove, whose
+  store converges but whose provider dispatch or recommendation refresh fires
+  unconditionally) name the outbox or change-gated claim the v2 port must add before their
+  retry is safe. Twenty-three rows carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
   sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
   invite-code redemption during signup, playback route events, mark-watched history,
   watch-together selection and promotion, metadata-match-queue retry, playback session
-  progress and sync progress, whose last-write-wins update lets a delayed retry rewind a
-  newer report, favorites and watchlist add and remove); their v2 port must move the gate
+  progress, sync progress, download status, ebook reader progress, and onboarding progress,
+  whose last-write-wins update lets a delayed retry rewind a newer report, favorites,
+  watchlist, and rating add and remove); their v2 port must move the gate
   to shared durable state, add the missing unique constraint or event time, gate the
   dispatch on a reported change, or make the repeat a no-op before the declared strategy
   holds.
