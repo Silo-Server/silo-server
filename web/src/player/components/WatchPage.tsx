@@ -5,10 +5,12 @@ import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { playerFetch } from "../player-fetch";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
-import { buildSubtitleChoiceRequests } from "../utils/subtitleChoicePersistence";
+import {
+  buildSubtitleChoiceRequests,
+  sendSubtitleChoiceRequest,
+} from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { itemKeys } from "@/hooks/queries/keys";
@@ -214,10 +216,7 @@ export function WatchPage({
         showForcedSubtitles,
       });
       for (const request of requests) {
-        void playerFetch(config, request.path, {
-          method: "PUT",
-          body: JSON.stringify(request.body),
-        }).catch(() => {
+        void sendSubtitleChoiceRequest(config, request).catch(() => {
           // Best effort.
         });
       }

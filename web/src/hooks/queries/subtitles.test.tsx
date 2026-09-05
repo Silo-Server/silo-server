@@ -59,15 +59,19 @@ const TRACKS: PlayerSubtitleInfo[] = [
 
 /** The profile_series rows an in-player pick leaves behind. */
 function rowsFromInPlayerPick(seriesId: string): StoredSettingRow[] {
-  return buildSubtitleChoiceRequests({ seriesId, index: 0, tracks: TRACKS })
-    .filter((request) => request.path.startsWith("/settings/values/"))
-    .map((request) => ({
-      key: decodeURIComponent(request.path.slice("/settings/values/".length).split("?")[0]!),
-      scope: "profile_series" as const,
-      profileId: "profile-1",
-      seriesId,
-      value: (request.body as { value: unknown }).value,
-    }));
+  return buildSubtitleChoiceRequests({ seriesId, index: 0, tracks: TRACKS }).flatMap((request) =>
+    request.kind === "setting"
+      ? [
+          {
+            key: decodeURIComponent(request.path.slice("/settings/values/".length).split("?")[0]!),
+            scope: "profile_series" as const,
+            profileId: "profile-1",
+            seriesId,
+            value: request.body.value,
+          },
+        ]
+      : [],
+  );
 }
 
 describe("useDeleteSubtitlePreference", () => {

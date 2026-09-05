@@ -28,15 +28,20 @@ export class PlayerFetchError extends Error {
  * carries no body.
  * Throws PlayerFetchError for non-2xx responses.
  */
-export async function playerFetch<T>(
+/**
+ * The auth, profile and device headers every player request carries, built
+ * from PlayerConfig so a host that embeds the player elsewhere keeps control
+ * of them. `hasJsonBody` adds the JSON content type for a non-FormData body.
+ */
+export function playerRequestHeaders(
   config: PlayerConfig,
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+  base: HeadersInit | undefined,
+  hasJsonBody: boolean,
+): Record<string, string> {
   const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string>),
+    ...(base as Record<string, string>),
   };
-  if (!(options.body instanceof FormData)) {
+  if (hasJsonBody) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -56,6 +61,25 @@ export async function playerFetch<T>(
   }
 
   headers["X-Silo-Device-Id"] = config.getDeviceId();
+  return headers;
+}
+
+/**
+ * Performs an authenticated fetch against the configured API.
+ * Returns the parsed JSON body for 2xx responses, undefined when the response
+ * carries no body.
+ * Throws PlayerFetchError for non-2xx responses.
+ */
+export async function playerFetch<T>(
+  config: PlayerConfig,
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const headers = playerRequestHeaders(
+    config,
+    options.headers,
+    !(options.body instanceof FormData),
+  );
 
   const res = await fetch(`${config.apiBaseUrl}${path}`, {
     ...options,
