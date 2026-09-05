@@ -164,8 +164,10 @@ type LibraryPlaybackPreferenceUpdateInput struct {
 
 const (
 	tagPreferences = "preferences"
-	// locationLibraryID is where a library_id path failure is reported.
-	locationLibraryID = "path.library_id"
+	// locationPathLibraryID is where a library_id path failure is reported.
+	locationPathLibraryID = "path.library_id"
+	// detailLibraryIDInvalid is the detail every library_id parse failure reports.
+	detailLibraryIDInvalid = "expected a library identifier"
 
 	pathAudioPreference           = Prefix + "/audio-prefs/{series_id}"
 	pathSubtitlePreference        = Prefix + "/subtitle-prefs/{series_id}"
@@ -363,7 +365,7 @@ func libraryIDOf(id ID) (int, *Problem) {
 	n, err := intOfID(id)
 	if err != nil || n <= 0 {
 		return 0, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationLibraryID, Code: codeInvalid, Detail: "expected a library identifier"})
+			WithErrors(ProblemError{Location: locationPathLibraryID, Code: codeInvalid, Detail: detailLibraryIDInvalid})
 	}
 	return n, nil
 }

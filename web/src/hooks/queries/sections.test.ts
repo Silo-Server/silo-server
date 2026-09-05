@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import listProfileSectionOverridesOk from "../../../../contracts/api/v2/fixtures/list_profile_section_overrides_ok.json";
+
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
 }));
@@ -12,7 +14,7 @@ import {
   fetchHomeSectionItems,
   fetchLibrarySectionItems,
   useLibraryLayout,
-  normalizeProfileSectionOverridesResponse,
+  profileSectionOverridesFromV2,
 } from "./sections";
 
 describe("sections query helpers", () => {
@@ -38,39 +40,26 @@ describe("sections query helpers", () => {
     expect(useLibraryLayout).toBeTypeOf("function");
   });
 
-  it("normalizes backend-shaped raw section overrides into frontend override fields", () => {
-    const response = normalizeProfileSectionOverridesResponse({
-      overrides: [
-        {
-          ID: "override-1",
-          SectionID: "admin-1",
-          Position: 2,
-          Hidden: true,
-          Removed: true,
-          SectionType: "recently_added",
-          Title: "Recently Added",
-          Featured: true,
-          ItemLimit: 12,
-          Config: '{"media_scope":"movie"}',
-        },
-      ],
-    });
+  it("projects stored v2 section overrides onto the editor's override fields", () => {
+    const overrides = profileSectionOverridesFromV2(listProfileSectionOverridesOk.items);
 
-    expect(response).toEqual({
-      overrides: [
-        {
-          id: "override-1",
-          section_id: "admin-1",
-          position: 2,
-          hidden: true,
-          removed: true,
-          section_type: "recently_added",
-          title: "Recently Added",
-          featured: true,
-          item_limit: 12,
-          config: { media_scope: "movie" },
-        },
-      ],
+    expect(overrides[0]).toEqual({
+      id: "o-1",
+      section_id: "s-continue",
+      position: 2,
+      hidden: true,
+      removed: false,
+      section_type: undefined,
+      title: "Keep watching",
+      featured: false,
+      item_limit: 10,
+      config: undefined,
+    });
+    expect(overrides[1]).toMatchObject({
+      section_id: undefined,
+      position: undefined,
+      featured: undefined,
+      item_limit: undefined,
     });
   });
 });

@@ -55,6 +55,10 @@ type BodyOf<Op> = Op extends { requestBody: { content: { "application/json": inf
   ? B
   : never;
 
+type FormBodyOf<Op> = Op extends { requestBody: { content: { "multipart/form-data": infer F } } }
+  ? F
+  : never;
+
 type SuccessStatus = 200 | 201 | 202 | 203 | 204;
 
 type SuccessOf<Op> = Op extends { responses: infer R }
@@ -88,6 +92,14 @@ export type V2Result<K extends V2OperationKey> = V2<SuccessOf<OperationOf<K>>>;
 /** The JSON request body type of a v2 operation (`never` when it has none). */
 export type V2Body<K extends V2OperationKey> = BodyOf<OperationOf<K>>;
 
+/**
+ * The multipart form of a v2 operation (`never` when it has none): each
+ * declared part is sent as a file or a text field.
+ */
+export type V2Form<K extends V2OperationKey> = [FormBodyOf<OperationOf<K>>] extends [never]
+  ? never
+  : { [P in keyof FormBodyOf<OperationOf<K>>]: Blob | string };
+
 /** The query parameter type of a v2 operation (`never` when it has none). */
 export type V2Query<K extends V2OperationKey> = QueryOf<OperationOf<K>>;
 
@@ -108,7 +120,8 @@ interface CommonOptions {
 export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
   ([V2PathParams<K>] extends [never] ? unknown : { path: V2PathParams<K> }) &
   ([V2Query<K>] extends [never] ? unknown : { query?: V2Query<K> }) &
-  ([V2Body<K>] extends [never] ? unknown : { body: V2Body<K> });
+  ([V2Body<K>] extends [never] ? unknown : { body: V2Body<K> }) &
+  ([V2Form<K>] extends [never] ? unknown : { form: V2Form<K> });
 
 type RequestArgs<K extends V2OperationKey> =
   Record<never, never> extends V2RequestOptions<K>
@@ -242,6 +255,7 @@ export async function v2<K extends V2OperationKey>(
     path?: Record<string, string | number>;
     query?: Record<string, QueryValue>;
     body?: unknown;
+    form?: Record<string, Blob | string | undefined>;
   };
 
   const headers: Record<string, string> = {
@@ -252,6 +266,13 @@ export async function v2<K extends V2OperationKey>(
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body);
+  } else if (options.form !== undefined) {
+    // The browser sets the multipart Content-Type and boundary itself.
+    const form = new FormData();
+    for (const [name, value] of Object.entries(options.form)) {
+      if (value !== undefined) form.set(name, value);
+    }
+    init.body = form;
   }
 
   const { res, requestProfileId, requestProfileToken } = await fetchWithSession(

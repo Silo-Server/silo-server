@@ -128,16 +128,28 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	doc := generatedDocument(t)
 	bodies := 0
 	expect := map[string]map[int]bool{
-		"getSetupStatus":     {http.StatusServiceUnavailable: true},
-		"getSystemInfo":      {http.StatusServiceUnavailable: false},
-		"getOpenAPIDocument": {http.StatusServiceUnavailable: false},
-		"getCurrentUser":     {http.StatusNotFound: false},
-		"listProgress":       {http.StatusNotFound: true},
-		"listAdminUsers":     {http.StatusNotFound: true},
-		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
+		"getSetupStatus":                 {http.StatusServiceUnavailable: true},
+		"getSystemInfo":                  {http.StatusServiceUnavailable: false},
+		"getOpenAPIDocument":             {http.StatusServiceUnavailable: false},
+		"getCurrentUser":                 {http.StatusNotFound: false},
+		"listProgress":                   {http.StatusNotFound: true},
+		"listAdminUsers":                 {http.StatusNotFound: true},
+		"updateProfile":                  {http.StatusNotFound: true, http.StatusConflict: true},
+		"listProfiles":                   {http.StatusNotFound: true, http.StatusConflict: false},
+		"createProfile":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true, http.StatusOK: false},
+		"replaceProfileSectionOverrides": {http.StatusNoContent: true, http.StatusForbidden: true},
+		"resetProfileSectionOverrides":   {http.StatusNoContent: true},
+		"deleteProfile":                  {http.StatusNoContent: true, http.StatusConflict: true, http.StatusNotFound: true},
+		"deleteProfileAvatar":            {http.StatusNoContent: true, http.StatusNotFound: true},
+		"uploadProfileAvatar":            {http.StatusOK: true, http.StatusRequestEntityTooLarge: true, http.StatusUnsupportedMediaType: true},
+		"verifyProfilePIN":               {http.StatusOK: true, http.StatusNotFound: true},
+		"listHouseholdSessions":          {http.StatusOK: true, http.StatusForbidden: true},
 	}
 	profileToken := map[string]bool{
-		"listProgress": true, "listAdminUsers": true, "updateProfile": true,
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
+		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
+		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
+		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
 		"getAudioPreference": true, "updateAudioPreference": true, "deleteAudioPreference": true,
 		"listLibraryPlaybackPreferences": true, "deleteLibraryPlaybackPreference": true, "updateLibraryPlaybackPreference": true,
 		"getSubtitlePreference": true, "updateSubtitlePreference": true, "deleteSubtitlePreference": true,
@@ -212,7 +224,7 @@ func TestGeneratedDocumentRequestMediaTypes(t *testing.T) {
 				t.Errorf("%s %s documents a body with no media type", method, path)
 			}
 			for mediaType := range content {
-				if !structuredMediaTypeOK(mediaType) {
+				if !requestMediaTypeOK(mediaType) {
 					t.Errorf("%s %s documents request media type %q that the listener rejects with 415", method, path, mediaType)
 				}
 			}

@@ -51,7 +51,7 @@ type profileSettingSync struct {
 // planCreateProfileSettingsSync plans the canonical writes for POST
 // /profiles. Create requests carry plain strings, so an absent field arrives
 // as "" and plans a no-op delete against the freshly created profile.
-func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSync, error) {
+func planCreateProfileSettingsSync(req ProfileCreateRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		&req.Language, &req.SubtitleLanguage, &req.PreferredMetadataLanguage,
 		&req.SubtitleMode, req.ShowForcedSubtitles,

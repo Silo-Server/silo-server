@@ -406,7 +406,7 @@ func TestDeleteLibraryPlaybackPreference(t *testing.T) {
 	// An identifier no library can carry fails validation at the path.
 	for _, id := range []string{"abc", "0", "-1"} {
 		doc := requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/library-playback-prefs/"+id, "", owner), TypeValidationFailed)
-		if len(doc.Errors) != 1 || doc.Errors[0].Location != locationLibraryID {
+		if len(doc.Errors) != 1 || doc.Errors[0].Location != locationPathLibraryID {
 			t.Fatalf("%s: errors = %+v", id, doc.Errors)
 		}
 	}
@@ -629,7 +629,7 @@ func TestUpdateLibraryPlaybackPreference(t *testing.T) {
 	// An unknown library is 404; an identifier no library can carry fails validation at the path.
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/9", `{"audio_language":"de"}`, owner), TypeNotFound)
 	doc := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/abc", `{"audio_language":"de"}`, owner), TypeValidationFailed)
-	if len(doc.Errors) != 1 || doc.Errors[0].Location != locationLibraryID {
+	if len(doc.Errors) != 1 || doc.Errors[0].Location != locationPathLibraryID {
 		t.Fatalf("errors = %+v", doc.Errors)
 	}
 }
