@@ -36168,7 +36168,7 @@
         "path": "/api/v2/progress",
         "operation_id": "listProgress"
       },
-      "notes": "Pilot (profile_scoped). Offset pagination replaced by limit+opaque cursor; offset/since rejected (422). The v1 ?since= delta pull is a separate operation in a later section."
+      "notes": "Pilot (profile_scoped). Offset pagination replaced by limit+opaque keyset cursor (updated_at, media_item_id of the last emitted entry; has_more decided after the access/library filters); offset/since rejected (422). The v1 ?since= delta pull is a separate operation in a later section."
     },
     {
       "listener": "api",

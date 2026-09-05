@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -32,25 +33,72 @@ func (f fakeAccounts) CurrentUser(_ context.Context, claims *auth.Claims) (handl
 	return view, nil
 }
 
+// fakeProgressQuery is one ListProgressPage call as the handler made it.
+type fakeProgressQuery struct {
+	Status    string
+	LibraryID int
+	After     *userstore.ProgressKey
+	Limit     int
+}
+
+// fakeProgress stands in for handlers.ProgressHandler.ListProgressPage: a
+// keyset store over entries plus the library filter (libraries maps
+// media_item_id to its library; a nil map leaves the filter a no-op, a
+// non-nil one puts unknown ids in no library), applied the way the real seam
+// does — fetch, filter, re-fetch until limit+1 matches.
 type fakeProgress struct {
-	entries []userstore.WatchProgress
+	entries   []userstore.WatchProgress
+	libraries map[string]int
 	// calls records each query so a test can assert the window and filter
 	// the handler asked for.
-	calls []handlers.ProgressQuery
+	calls []fakeProgressQuery
 	err   error
 }
 
-func (f *fakeProgress) ListProgress(_ context.Context, _ int, profileID string, q handlers.ProgressQuery) ([]userstore.WatchProgress, error) {
-	f.calls = append(f.calls, q)
+func (f *fakeProgress) ListProgressPage(_ context.Context, _ int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error) {
+	f.calls = append(f.calls, fakeProgressQuery{Status: status, LibraryID: libraryID, After: after, Limit: limit})
 	if f.err != nil {
-		return nil, f.err
+		return nil, false, f.err
 	}
+	want := limit + 1
+	var matches []userstore.WatchProgress
+	for len(matches) < want {
+		batch := f.page(profileID, status, after, want)
+		for _, e := range batch {
+			if libraryID == 0 || f.libraries == nil || f.libraries[e.MediaItemID] == libraryID {
+				matches = append(matches, e)
+			}
+		}
+		if len(batch) < want {
+			break
+		}
+		last := batch[len(batch)-1]
+		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
+	}
+	if len(matches) > limit {
+		return matches[:limit], true, nil
+	}
+	return matches, false, nil
+}
+
+// keyBefore reports whether e sorts strictly after the key in
+// (UpdatedAt desc, MediaItemID desc) order, i.e. its own key is smaller.
+func keyBefore(e userstore.WatchProgress, key userstore.ProgressKey) bool {
+	if e.UpdatedAt != key.UpdatedAt {
+		return e.UpdatedAt < key.UpdatedAt
+	}
+	return e.MediaItemID < key.MediaItemID
+}
+
+// page is the store: the status set sorted by (UpdatedAt desc, MediaItemID
+// desc), strictly after the key, at most limit rows.
+func (f *fakeProgress) page(profileID, status string, after *userstore.ProgressKey, limit int) []userstore.WatchProgress {
 	var out []userstore.WatchProgress
 	for _, e := range f.entries {
 		if e.ProfileID != profileID {
 			continue
 		}
-		switch q.Status {
+		switch status {
 		case "completed":
 			if !e.Completed {
 				continue
@@ -60,16 +108,21 @@ func (f *fakeProgress) ListProgress(_ context.Context, _ int, profileID string, 
 				continue
 			}
 		}
+		if after != nil && !keyBefore(e, *after) {
+			continue
+		}
 		out = append(out, e)
 	}
-	if q.Offset >= len(out) {
-		return nil, nil
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt != out[j].UpdatedAt {
+			return out[i].UpdatedAt > out[j].UpdatedAt
+		}
+		return out[i].MediaItemID > out[j].MediaItemID
+	})
+	if len(out) > limit {
+		out = out[:limit]
 	}
-	out = out[q.Offset:]
-	if len(out) > q.Limit {
-		out = out[:q.Limit]
-	}
-	return out, nil
+	return out
 }
 
 type fakeProfiles struct {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -54,8 +55,8 @@ func TestListProgress(t *testing.T) {
 	if page.Items[0].MediaItemID != "movie-8f2c1a" || page.Items[0].Position != 1325.5 || page.Items[0].UpdatedAt != "2026-01-02T03:04:05.000Z" {
 		t.Fatalf("item = %+v", page.Items[0])
 	}
-	// The handler asked for the default window plus the has_more probe row.
-	if q := progress.calls[0]; q.Limit != DefaultLimit+1 || q.Offset != 0 || q.Status != "" || q.LibraryID != 0 {
+	// The handler asked for the default window from the newest row.
+	if q := progress.calls[0]; q.Limit != DefaultLimit || q.After != nil || q.Status != "" || q.LibraryID != 0 {
 		t.Fatalf("query = %+v", q)
 	}
 
@@ -66,6 +67,126 @@ func TestListProgress(t *testing.T) {
 	}
 	if q := progress.calls[1]; q.Status != "completed" || q.LibraryID != 3 {
 		t.Fatalf("query = %+v", q)
+	}
+}
+
+// listProgressIDs walks every page of the query and returns the item ids in
+// order, along with the number of pages.
+func listProgressIDs(t *testing.T, h http.Handler, query string, headers map[string]string) ([]string, int) {
+	t.Helper()
+	var ids []string
+	cursor := ""
+	for pages := 1; ; pages++ {
+		q := query
+		if cursor != "" {
+			q += "&cursor=" + url.QueryEscape(cursor)
+		}
+		rec := do(t, h, http.MethodGet, "/api/v2/progress?"+q, "", headers)
+		if rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body.String())
+		}
+		page := decodeProgress(t, rec.Body)
+		for _, it := range page.Items {
+			ids = append(ids, it.MediaItemID)
+		}
+		if page.Page.HasMore != (page.Page.NextCursor != "") {
+			t.Fatalf("has_more and next_cursor disagree: %s", rec.Body.String())
+		}
+		if !page.Page.HasMore {
+			return ids, pages
+		}
+		cursor = page.Page.NextCursor
+		if pages > 10 {
+			t.Fatal("pagination did not terminate")
+		}
+	}
+}
+
+// TestListProgressFilteredHasMore proves a library filter that drops rows
+// still reports has_more while older matching rows exist, and that the
+// second page continues with no gap and no duplicate. Library 3 holds every
+// other row; a raw window of limit+1 = 3 rows sees only one or two matches.
+func TestListProgressFilteredHasMore(t *testing.T) {
+	var rows []userstore.WatchProgress
+	libraries := map[string]int{}
+	for i := 0; i < 8; i++ {
+		id := "item-" + string(rune('a'+i))
+		rows = append(rows, userstore.WatchProgress{ProfileID: "p-owner", MediaItemID: id, PositionSeconds: 1, UpdatedAt: "2026-01-0" + string(rune('1'+i)) + "T00:00:00Z"})
+		if i%2 == 0 {
+			libraries[id] = 3
+		} else {
+			libraries[id] = 4
+		}
+	}
+	progress := &fakeProgress{entries: rows, libraries: libraries}
+	h := newTestHandler(t, pilotDeps(progress, nil))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	rec := do(t, h, http.MethodGet, "/api/v2/progress?limit=2&library_id=3", "", owner)
+	first := decodeProgress(t, rec.Body)
+	if rec.Code != 200 || len(first.Items) != 2 || !first.Page.HasMore || first.Page.NextCursor == "" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if first.Items[0].MediaItemID != "item-g" || first.Items[1].MediaItemID != "item-e" {
+		t.Fatalf("first page = %+v", first.Items)
+	}
+	ids, pages := listProgressIDs(t, h, "limit=2&library_id=3", owner)
+	want := []string{"item-g", "item-e", "item-c", "item-a"}
+	if pages != 2 || strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("pages = %d ids = %v, want %v", pages, ids, want)
+	}
+	// The resumed query asked the seam to start strictly after the last emitted row.
+	if q := progress.calls[len(progress.calls)-1]; q.After == nil || q.After.MediaItemID != "item-e" || q.After.UpdatedAt != "2026-01-05T00:00:00Z" || q.LibraryID != 3 || q.Limit != 2 {
+		t.Fatalf("query = %+v after = %+v", q, q.After)
+	}
+}
+
+// TestListProgressEqualTimestamps proves rows sharing an updated_at paginate
+// deterministically across a page boundary by the media_item_id tiebreaker.
+func TestListProgressEqualTimestamps(t *testing.T) {
+	const at = "2026-01-02T03:04:05Z"
+	rows := []userstore.WatchProgress{
+		{ProfileID: "p-owner", MediaItemID: "movie-b", PositionSeconds: 1, UpdatedAt: at},
+		{ProfileID: "p-owner", MediaItemID: "movie-d", PositionSeconds: 1, UpdatedAt: at},
+		{ProfileID: "p-owner", MediaItemID: "movie-a", PositionSeconds: 1, UpdatedAt: at},
+		{ProfileID: "p-owner", MediaItemID: "movie-c", PositionSeconds: 1, UpdatedAt: at},
+		{ProfileID: "p-owner", MediaItemID: "movie-z", PositionSeconds: 1, UpdatedAt: "2026-01-01T00:00:00Z"},
+	}
+	h := newTestHandler(t, pilotDeps(&fakeProgress{entries: rows}, nil))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	ids, pages := listProgressIDs(t, h, "limit=2", owner)
+	want := []string{"movie-d", "movie-c", "movie-b", "movie-a", "movie-z"}
+	if pages != 3 || strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("pages = %d ids = %v, want %v", pages, ids, want)
+	}
+}
+
+// TestListProgressRowMovesAhead proves a row whose updated_at advances between
+// two pages (playback) appears on neither the first page it was not yet on
+// nor the second, and does not push an older unseen row off the second page.
+func TestListProgressRowMovesAhead(t *testing.T) {
+	rows := []userstore.WatchProgress{
+		{ProfileID: "p-owner", MediaItemID: "movie-1", PositionSeconds: 1, UpdatedAt: "2026-01-05T00:00:00Z"},
+		{ProfileID: "p-owner", MediaItemID: "movie-2", PositionSeconds: 1, UpdatedAt: "2026-01-04T00:00:00Z"},
+		{ProfileID: "p-owner", MediaItemID: "movie-3", PositionSeconds: 1, UpdatedAt: "2026-01-03T00:00:00Z"},
+		{ProfileID: "p-owner", MediaItemID: "movie-4", PositionSeconds: 1, UpdatedAt: "2026-01-02T00:00:00Z"},
+	}
+	progress := &fakeProgress{entries: rows}
+	h := newTestHandler(t, pilotDeps(progress, nil))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	rec := do(t, h, http.MethodGet, "/api/v2/progress?limit=2", "", owner)
+	first := decodeProgress(t, rec.Body)
+	if rec.Code != 200 || len(first.Items) != 2 || first.Items[0].MediaItemID != "movie-1" || first.Items[1].MediaItemID != "movie-2" || !first.Page.HasMore {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	// movie-3 is played between the pages and becomes the newest row.
+	progress.entries[2].UpdatedAt = "2026-01-06T00:00:00Z"
+
+	rec = do(t, h, http.MethodGet, "/api/v2/progress?limit=2&cursor="+url.QueryEscape(first.Page.NextCursor), "", owner)
+	second := decodeProgress(t, rec.Body)
+	if rec.Code != 200 || len(second.Items) != 1 || second.Items[0].MediaItemID != "movie-4" || second.Page.HasMore {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -84,7 +205,7 @@ func TestListProgressCursor(t *testing.T) {
 	if rec.Code != 200 || len(second.Items) != 1 || second.Items[0].MediaItemID != "episode-1b2c3d" || second.Page.HasMore {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if q := progress.calls[1]; q.Offset != 1 || q.Limit != 2 {
+	if q := progress.calls[1]; q.After == nil || q.After.MediaItemID != "movie-8f2c1a" || q.After.UpdatedAt != "2026-01-02T03:04:05Z" || q.Limit != 1 {
 		t.Fatalf("query = %+v", q)
 	}
 	// The cursor is bound to the filter and to the profile.

@@ -911,7 +911,10 @@ Two findings from the pilot are now settled for every later section:
   optimistic concurrency stays opt-in per operation.
 - **Cursor pagination replaces offset.** `listProgress` takes `limit` (default 50, maximum 200)
   and an opaque `cursor` bound to the operation, account, profile, filters, and sort; `offset`
-  and the v1 `since` parameter are refused with the unknown-query-parameter `422`. The v1
+  and the v1 `since` parameter are refused with the unknown-query-parameter `422`. The cursor
+  is a keyset (`updated_at`, `media_item_id`) of the last entry emitted, so a row whose
+  `updated_at` moves during playback is neither repeated nor lets an older row slip past, and
+  `has_more` is decided after the viewer-access and library filters run. The v1
   `?since=` delta pull is a separate operation for a later section, not a mode of `listProgress`.
   Bounded collections such as `listAdminUsers` return `{items}` with no page object.
 

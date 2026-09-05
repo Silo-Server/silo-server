@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -40,11 +39,15 @@ type ProgressCollectionOutput struct {
 	Body ProgressCollection
 }
 
-// progressPosition is the cursor payload: the offset into the store's
-// updated_at-ordered window. The store paginates by offset today; the
-// cursor keeps that private so the wire contract does not.
+// progressPosition is the cursor payload: the keyset (updated_at,
+// media_item_id) of the last entry the previous page emitted, in the store's
+// own string form. The next page resumes strictly after it in the effective
+// sort, so a row whose updated_at moves ahead during playback is neither
+// repeated nor lets an older row slip past, and equal timestamps are ordered
+// by the unique media_item_id.
 type progressPosition struct {
-	Offset int `json:"o"`
+	UpdatedAt   string `json:"u"`
+	MediaItemID string `json:"m"`
 }
 
 // ProgressCollection is the named envelope the contract carries.
@@ -90,26 +93,27 @@ func (reg *Registry) listProgress(ctx context.Context, cursors *Cursors, in *Pro
 		OperationID: opListProgress,
 		Security:    strconv.Itoa(claims.UserID) + "/" + profileID,
 		Filter:      in.Status + "|" + string(in.LibraryID),
-		Sort:        "-updated_at",
-		Tiebreaker:  "offset",
+		Sort:        "-updated_at,-media_item_id",
+		Tiebreaker:  "media_item_id",
 	}
-	var pos progressPosition
+	var after *userstore.ProgressKey
 	if in.Cursor != "" {
+		var pos progressPosition
 		if p := cursors.Decode(scope, in.Cursor, &pos); p != nil {
 			return nil, p
 		}
+		after = &userstore.ProgressKey{UpdatedAt: pos.UpdatedAt, MediaItemID: pos.MediaItemID}
 	}
-	// One extra row decides has_more without a count query.
-	entries, err := reg.deps.Progress.ListProgress(ctx, claims.UserID, profileID, handlers.ProgressQuery{
-		Status: in.Status, LibraryID: libraryID, Limit: in.Limit + 1, Offset: pos.Offset,
-	})
+	// The seam applies the access and library filters before deciding
+	// has_more, so a filtered-out row never hides the rows behind it.
+	entries, hasMore, err := reg.deps.Progress.ListProgressPage(ctx, claims.UserID, profileID, in.Status, libraryID, after, in.Limit)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	next := ""
-	if len(entries) > in.Limit {
-		entries = entries[:in.Limit]
-		next, err = cursors.Encode(scope, progressPosition{Offset: pos.Offset + in.Limit})
+	if hasMore && len(entries) > 0 {
+		last := entries[len(entries)-1]
+		next, err = cursors.Encode(scope, progressPosition{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID})
 		if err != nil {
 			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
