@@ -202,17 +202,34 @@ export function useUploadProfileAvatar() {
 export function useDeleteProfileAvatar() {
   const queryClient = useQueryClient();
   return useMutation({
-    // deleteProfileAvatar answers 204; the editor wants the profile back, so
-    // the list is re-read and the whole cache refreshed from that read.
-    mutationFn: async (id: string): Promise<Profile> => {
-      await v2("DELETE /api/v2/profiles/{id}/avatar", { path: { id } });
-      const list = await listProfiles();
-      const updatedProfile = list.profiles.find((profile) => profile.id === id);
-      if (!updatedProfile) {
-        throw new Error("Profile not found after removing its avatar");
+    // deleteProfileAvatar answers 204 and the editor wants the profile back.
+    // The DELETE is the mutation result: once it succeeds the avatar is gone,
+    // so a failed follow-up read must not report the mutation as failed. The
+    // caller passes the profile it is clearing; the list is re-read when
+    // possible and the cached copy is patched locally otherwise.
+    mutationFn: async (profile: Profile): Promise<Profile> => {
+      await v2("DELETE /api/v2/profiles/{id}/avatar", { path: { id: profile.id } });
+      const cleared: Profile = {
+        ...profile,
+        avatar: "",
+        avatar_url: undefined,
+        avatar_source: "none",
+      };
+      try {
+        const list = await listProfiles();
+        queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), list);
+        return list.profiles.find((candidate) => candidate.id === profile.id) ?? cleared;
+      } catch {
+        queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), (current) =>
+          current
+            ? {
+                ...current,
+                profiles: current.profiles.map((p) => (p.id === profile.id ? cleared : p)),
+              }
+            : current,
+        );
+        return cleared;
       }
-      queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), list);
-      return updatedProfile;
     },
     onSuccess: () => {
       toast.success("Avatar removed");
