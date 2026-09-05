@@ -182,6 +182,71 @@
       "body_file": "create_library_validation_failed.json"
     },
     {
+      "name": "create_taste_seed_ok",
+      "operation_id": "createTasteSeed",
+      "scenario": "Two picks recorded as favourites; a retry converges on the same set.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/recommendations/taste-seed",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"item_ids\":[\"movie:heat-1995\",\"movie:collateral-2004\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/TasteSeedResult",
+      "body_file": "create_taste_seed_ok.json"
+    },
+    {
+      "name": "create_taste_seed_profile_header_required",
+      "operation_id": "createTasteSeed",
+      "scenario": "A taste-seed submission without X-Profile-Id.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/recommendations/taste-seed",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"item_ids\":[\"movie:heat-1995\"]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "create_taste_seed_profile_header_required.json"
+    },
+    {
+      "name": "create_taste_seed_validation_failed",
+      "operation_id": "createTasteSeed",
+      "scenario": "A submission with no picks: item_ids needs at least one.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/recommendations/taste-seed",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"item_ids\":[]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "create_taste_seed_validation_failed.json"
+    },
+    {
       "name": "delete_library_accepted",
       "operation_id": "deleteLibrary",
       "scenario": "Deletion is queued as an admin job: 202 with the job.",
@@ -280,6 +345,109 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Account",
       "body_file": "get_current_user_ok.json"
+    },
+    {
+      "name": "get_discover_ok",
+      "operation_id": "getDiscover",
+      "scenario": "The Discover page: every recommendation row with its cards.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/discover",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecommendationRowCollection",
+      "body_file": "get_discover_ok.json"
+    },
+    {
+      "name": "get_discover_profile_header_required",
+      "operation_id": "getDiscover",
+      "scenario": "The Discover page without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/discover",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_discover_profile_header_required.json"
+    },
+    {
+      "name": "get_for_you_main_limit_out_of_range",
+      "operation_id": "getForYouMain",
+      "scenario": "limit of 0 is below the minimum.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/main?limit=0",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_for_you_main_limit_out_of_range.json"
+    },
+    {
+      "name": "get_for_you_main_ok",
+      "operation_id": "getForYouMain",
+      "scenario": "The profile's main For You row.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/main",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecommendationRow",
+      "body_file": "get_for_you_main_ok.json"
+    },
+    {
+      "name": "get_for_you_main_profile_header_required",
+      "operation_id": "getForYouMain",
+      "scenario": "The For You row without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/main",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_for_you_main_profile_header_required.json"
     },
     {
       "name": "get_library_collection_items_ok",
@@ -549,6 +717,68 @@
       "body_file": "get_metadata_match_queue_ok.json"
     },
     {
+      "name": "get_recommendation_section_key_required",
+      "operation_id": "getRecommendationSection",
+      "scenario": "A cluster section without its key: one errors[] entry at query.key.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/section/cluster",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_recommendation_section_key_required.json"
+    },
+    {
+      "name": "get_recommendation_section_ok",
+      "operation_id": "getRecommendationSection",
+      "scenario": "One genre row in full for its see-all page; the v1 {kind}/{key} path is the key query parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/section/genre?key=Crime&limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecommendationRow",
+      "body_file": "get_recommendation_section_ok.json"
+    },
+    {
+      "name": "get_recommendation_section_profile_header_required",
+      "operation_id": "getRecommendationSection",
+      "scenario": "A section read without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/section/popular",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_recommendation_section_profile_header_required.json"
+    },
+    {
       "name": "get_setup_status_ok",
       "operation_id": "getSetupStatus",
       "scenario": "First-run discovery before login: whether the server still needs its initial admin account.",
@@ -585,6 +815,109 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/SystemInfo",
       "body_file": "get_system_info_ok.json"
+    },
+    {
+      "name": "get_taste_profile_ok",
+      "operation_id": "getTasteProfile",
+      "scenario": "The profile's taste summary with updated_at as a UTC instant.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/taste-profile",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/TasteProfile",
+      "body_file": "get_taste_profile_ok.json"
+    },
+    {
+      "name": "get_taste_profile_profile_header_required",
+      "operation_id": "getTasteProfile",
+      "scenario": "The taste summary without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/taste-profile",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_taste_profile_profile_header_required.json"
+    },
+    {
+      "name": "get_watch_tonight_limit_out_of_range",
+      "operation_id": "getWatchTonight",
+      "scenario": "limit above 20; v1 silently fell back to 5, v2 refuses.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight?limit=21",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_watch_tonight_limit_out_of_range.json"
+    },
+    {
+      "name": "get_watch_tonight_ok",
+      "operation_id": "getWatchTonight",
+      "scenario": "The Watch Tonight list: in-progress and next-up items merged with taste candidates.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/WatchTonight",
+      "body_file": "get_watch_tonight_ok.json"
+    },
+    {
+      "name": "get_watch_tonight_profile_header_required",
+      "operation_id": "getWatchTonight",
+      "scenario": "Watch Tonight without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_watch_tonight_profile_header_required.json"
     },
     {
       "name": "list_admin_users_offset_rejected",
@@ -645,6 +978,130 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_admin_users_permission_denied.json"
+    },
+    {
+      "name": "list_because_watched_limit_out_of_range",
+      "operation_id": "listBecauseWatched",
+      "scenario": "limit above 50; v1 silently clamped, v2 refuses.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/because-watched/movie:heat-1995?limit=51",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_because_watched_limit_out_of_range.json"
+    },
+    {
+      "name": "list_because_watched_ok",
+      "operation_id": "listBecauseWatched",
+      "scenario": "Cards recommended because the profile watched an item, minus what it has watched or rated low.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/because-watched/movie:heat-1995?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollection",
+      "body_file": "list_because_watched_ok.json"
+    },
+    {
+      "name": "list_because_watched_profile_header_required",
+      "operation_id": "listBecauseWatched",
+      "scenario": "A recommendation read without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/because-watched/movie:heat-1995",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_because_watched_profile_header_required.json"
+    },
+    {
+      "name": "list_for_you_rows_offset_rejected",
+      "operation_id": "listForYouRows",
+      "scenario": "The v1 offset parameter is unknown to a bounded list.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/rows?offset=20",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_for_you_rows_offset_rejected.json"
+    },
+    {
+      "name": "list_for_you_rows_ok",
+      "operation_id": "listForYouRows",
+      "scenario": "The profile's For You rows, one per taste cluster.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/rows",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/RecommendationRowCollection",
+      "body_file": "list_for_you_rows_ok.json"
+    },
+    {
+      "name": "list_for_you_rows_profile_header_required",
+      "operation_id": "listForYouRows",
+      "scenario": "The For You rows without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/for-you/rows",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_for_you_rows_profile_header_required.json"
     },
     {
       "name": "list_libraries_ok",
@@ -827,6 +1284,68 @@
       "body_file": "list_metadata_match_queues_ok.json"
     },
     {
+      "name": "list_popular_days_out_of_range",
+      "operation_id": "listPopular",
+      "scenario": "days of 0; v1 silently fell back to the default, v2 refuses.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/popular?days=0",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_popular_days_out_of_range.json"
+    },
+    {
+      "name": "list_popular_ok",
+      "operation_id": "listPopular",
+      "scenario": "The most played items over a 7-day window, minus what the profile has watched.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/popular?days=7&limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollection",
+      "body_file": "list_popular_ok.json"
+    },
+    {
+      "name": "list_popular_profile_header_required",
+      "operation_id": "listPopular",
+      "scenario": "The popular list without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/popular",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_popular_profile_header_required.json"
+    },
+    {
       "name": "list_progress_offset_rejected",
       "operation_id": "listProgress",
       "scenario": "The v1 offset parameter is not part of v2 pagination; cursor-paginated operations refuse it as unknown.",
@@ -889,6 +1408,192 @@
       "body_file": "list_progress_profile_header_required.json"
     },
     {
+      "name": "list_recently_added_limit_out_of_range",
+      "operation_id": "listRecentlyAdded",
+      "scenario": "limit above 50.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/recently-added?limit=100",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_recently_added_limit_out_of_range.json"
+    },
+    {
+      "name": "list_recently_added_ok",
+      "operation_id": "listRecentlyAdded",
+      "scenario": "Items added over the default 14-day window, minus what the profile has watched.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/recently-added?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollection",
+      "body_file": "list_recently_added_ok.json"
+    },
+    {
+      "name": "list_recently_added_profile_header_required",
+      "operation_id": "listRecentlyAdded",
+      "scenario": "The recently-added list without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/recently-added",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_recently_added_profile_header_required.json"
+    },
+    {
+      "name": "list_similar_limit_out_of_range",
+      "operation_id": "listSimilar",
+      "scenario": "limit above 50; v1 silently clamped, v2 refuses.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar/movie:heat-1995?limit=51",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_similar_limit_out_of_range.json"
+    },
+    {
+      "name": "list_similar_ok",
+      "operation_id": "listSimilar",
+      "scenario": "Cards similar to an item by content.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar/movie:heat-1995?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollection",
+      "body_file": "list_similar_ok.json"
+    },
+    {
+      "name": "list_similar_profile_header_required",
+      "operation_id": "listSimilar",
+      "scenario": "A similar-items read without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar/movie:heat-1995",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_similar_profile_header_required.json"
+    },
+    {
+      "name": "list_similar_users_liked_offset_rejected",
+      "operation_id": "listSimilarUsersLiked",
+      "scenario": "The v1 offset parameter is unknown to a bounded list.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar-users?offset=20",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_similar_users_liked_offset_rejected.json"
+    },
+    {
+      "name": "list_similar_users_liked_ok",
+      "operation_id": "listSimilarUsersLiked",
+      "scenario": "Cards profiles with similar taste liked.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar-users?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollection",
+      "body_file": "list_similar_users_liked_ok.json"
+    },
+    {
+      "name": "list_similar_users_liked_profile_header_required",
+      "operation_id": "listSimilarUsersLiked",
+      "scenario": "The similar-users list without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/similar-users",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_similar_users_liked_profile_header_required.json"
+    },
+    {
       "name": "list_skipped_roots_ok",
       "operation_id": "listSkippedRoots",
       "scenario": "Every root the scanner skipped, across libraries.",
@@ -929,6 +1634,68 @@
       "body_file": "list_stale_ids_ok.json"
     },
     {
+      "name": "list_taste_seed_items_offset_rejected",
+      "operation_id": "listTasteSeedItems",
+      "scenario": "The v1 offset parameter is not part of v2 pagination; the picker pages by cursor.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/taste-seed/items?offset=30",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_taste_seed_items_offset_rejected.json"
+    },
+    {
+      "name": "list_taste_seed_items_ok",
+      "operation_id": "listTasteSeedItems",
+      "scenario": "The first page of taste-seeding picker cards with a cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/taste-seed/items?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogItemCollection",
+      "body_file": "list_taste_seed_items_ok.json"
+    },
+    {
+      "name": "list_taste_seed_items_profile_header_required",
+      "operation_id": "listTasteSeedItems",
+      "scenario": "The picker page without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/taste-seed/items",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_taste_seed_items_profile_header_required.json"
+    },
+    {
       "name": "list_unmatched_items_ok",
       "operation_id": "listUnmatchedItems",
       "scenario": "The first page of items awaiting a metadata match, filtered by a search term.",
@@ -947,6 +1714,68 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/UnmatchedItemCollection",
       "body_file": "list_unmatched_items_ok.json"
+    },
+    {
+      "name": "list_watch_tonight_cards_ok",
+      "operation_id": "listWatchTonightCards",
+      "scenario": "A page of discover-mode swipe cards filtered to two genres, minus one already swiped.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight/cards?mode=discover&genres=Crime&genres=Thriller&exclude_ids=movie:collateral-2004&limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/WatchTonightCardPage",
+      "body_file": "list_watch_tonight_cards_ok.json"
+    },
+    {
+      "name": "list_watch_tonight_cards_profile_header_required",
+      "operation_id": "listWatchTonightCards",
+      "scenario": "Swipe cards without X-Profile-Id.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight/cards?mode=continue",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_watch_tonight_cards_profile_header_required.json"
+    },
+    {
+      "name": "list_watch_tonight_cards_unknown_genre",
+      "operation_id": "listWatchTonightCards",
+      "scenario": "A genre outside the known set: one errors[] entry naming the member; v1 dropped it silently.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/recommendations/watch-tonight/cards?mode=discover&genres=Noir",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_watch_tonight_cards_unknown_genre.json"
     },
     {
       "name": "not_acceptable",

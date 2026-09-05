@@ -1,0 +1,15 @@
+{
+  "top_genres": [
+    "Crime",
+    "Thriller"
+  ],
+  "favorite_directors": [
+    "Michael Mann"
+  ],
+  "signal_counts": {
+    "favorited": 2,
+    "rated": 4
+  },
+  "updated_at": "2026-01-02T03:04:05.000Z"
+}
+
