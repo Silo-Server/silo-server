@@ -806,7 +806,7 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 			continue
 		}
 		marked++
-		if e.Concurrency != ConcurrencyIfMatch || e.Tier != 1 || e.Disposition != DispositionPorted || !isMutatingMethod(e.Method) {
+		if e.Concurrency != ConcurrencyIfMatch || e.Tier != 1 || e.Disposition != DispositionPorted || !isGuardableMethod(e.Method) {
 			t.Errorf("%s: concurrency %q on tier %d %s %s", e.key(), e.Concurrency, e.Tier, e.Disposition, e.Method)
 		}
 	}
@@ -828,7 +828,13 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 			return notMarked(e) && e["method"] == "GET" && e["tier"] == float64(1) && e["disposition"] == "ported"
 		})
 		e["concurrency"] = ConcurrencyIfMatch
-	}), "only for a mutating method")
+	}), "only for a method a Guarded v2 operation may use")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, func(e map[string]any) bool {
+			return notMarked(e) && e["method"] == "POST" && e["tier"] == float64(1) && e["disposition"] == "ported"
+		})
+		e["concurrency"] = ConcurrencyIfMatch
+	}), "only for a method a Guarded v2 operation may use")
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the

@@ -270,12 +270,14 @@ func malformedETagList(field string) *Problem {
 // with StaleVersionProblem; it never reaches the wire as a 500.
 var ErrStaleVersion = errors.New("apiv2: row version is stale")
 
-// StaleVersionProblem is the 412 precondition_failed a stale If-Match or a
-// lost compare-and-update race produces. current is the ETag the caller may
-// see; pass the zero value to omit the header when the caller may not.
+// StaleVersionProblem is the 412 precondition_failed a lost
+// compare-and-update race produces, whichever precondition admitted the
+// request (an exact If-Match, If-Match: *, or a create-only If-None-Match: *).
+// current is the ETag the caller may see; pass the zero value to omit the
+// header when the caller may not.
 func StaleVersionProblem(current EntityTag) *Problem {
 	p := NewProblem(TypePreconditionFailed,
-		"The resource changed since the version named by If-Match; fetch it again and retry with the current ETag.")
+		"The resource changed while the request was being applied; fetch it again and retry against the current ETag.")
 	if !current.IsZero() {
 		p = p.WithHeader(etagField, current.String())
 	}
@@ -293,9 +295,9 @@ func NotModified[O any](out *O, current EntityTag) *O {
 	v.FieldByName("Status").SetInt(http.StatusNotModified)
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
-		// Direct fields only, the same rule Register applies: Huma writes
-		// no header from an embedded struct.
-		if !t.Field(i).Anonymous && strings.EqualFold(t.Field(i).Tag.Get("header"), etagField) {
+		// Direct exported fields only, the same rule Register applies: Huma
+		// writes no header from an embedded struct or an unexported field.
+		if f := t.Field(i); !f.Anonymous && f.IsExported() && strings.EqualFold(f.Tag.Get("header"), etagField) {
 			v.Field(i).SetString(current.String())
 		}
 	}

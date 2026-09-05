@@ -2,7 +2,7 @@
   "type": "https://siloserver.org/docs/api/v2/problems/precondition_failed",
   "title": "Precondition failed",
   "status": 412,
-  "detail": "The resource changed since the version named by If-Match; fetch it again and retry with the current ETag.",
+  "detail": "The resource changed while the request was being applied; fetch it again and retry against the current ETag.",
   "instance": "urn:silo:request:00000000000000000000000c"
 }
 

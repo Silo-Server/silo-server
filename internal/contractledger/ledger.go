@@ -452,16 +452,18 @@ func reviewRules(k Key, e Entry, r inventoryRoute) []string {
 			out = append(out, fmt.Sprintf("unknown concurrency marking %q: %s", e.Concurrency, k))
 		case e.Tier != 1 || e.Disposition != DispositionPorted:
 			out = append(out, fmt.Sprintf("concurrency %s is only for tier-1 ported rows; row is tier %d %s: %s", e.Concurrency, e.Tier, e.Disposition, k))
-		case !isMutatingMethod(e.Method):
-			out = append(out, fmt.Sprintf("concurrency %s is only for a mutating method (POST, PUT, PATCH, DELETE), not %s: %s", e.Concurrency, e.Method, k))
+		case !isGuardableMethod(e.Method):
+			out = append(out, fmt.Sprintf("concurrency %s is only for a method a Guarded v2 operation may use (PUT, PATCH, DELETE), not %s: %s", e.Concurrency, e.Method, k))
 		}
 	}
 	return out
 }
 
-func isMutatingMethod(method string) bool {
+// isGuardableMethod mirrors apiv2.checkOperation: only PUT, PATCH and DELETE
+// may be registered Guarded, so only their rows may be marked if_match.
+func isGuardableMethod(method string) bool {
 	switch method {
-	case "POST", "PUT", "PATCH", "DELETE":
+	case "PUT", "PATCH", "DELETE":
 		return true
 	}
 	return false

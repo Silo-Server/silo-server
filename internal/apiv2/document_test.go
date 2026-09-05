@@ -506,6 +506,13 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		Status int
 		ETag   int `header:"ETag"`
 	}
+	type unexportedIn struct {
+		ifMatch string `header:"If-Match"` //nolint:unused // the refusal is the point
+	}
+	type unexportedOut struct {
+		Status int
+		etag   string `header:"ETag"` //nolint:unused // the refusal is the point
+	}
 	guarded := func(method string) Operation {
 		return Operation{Operation: humaOp(method, Prefix+"/x/{id}", "opX", "x", ""), Class: ClassPublic, Guarded: true}
 	}
@@ -535,6 +542,12 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"create-only and guarded": {func() Operation { op := createOnly(http.MethodPut); op.Guarded = true; return op }(), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}, "exclusive"},
+		"guarded with unexported If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *unexportedIn) (*okOut, error) { return nil, nil })
+		}, "If-Match"},
+		"conditional with unexported ETag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*unexportedOut, error) { return nil, nil })
+		}, "ETag"},
 		"guarded DELETE with ETag": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}, "must not declare"},

@@ -302,18 +302,18 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 	return nil
 }
 
-// declaresHeaderString reports whether struct type t has a direct string
-// field bound to the named header, compared case-insensitively as HTTP header
-// names are. Only direct fields count: Huma ignores embedded structs when it
-// binds and writes headers, so a field declared through one never reaches
-// the wire.
+// declaresHeaderString reports whether struct type t has a direct, exported
+// string field bound to the named header, compared case-insensitively as
+// HTTP header names are. Only direct exported fields count: Huma ignores
+// embedded structs and cannot bind or write an unexported field, so a header
+// declared either way never reaches the wire.
 func declaresHeaderString(t reflect.Type, name string) bool {
 	if t == nil || t.Kind() != reflect.Struct {
 		return false
 	}
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		if f.Anonymous {
+		if f.Anonymous || !f.IsExported() {
 			continue
 		}
 		if strings.EqualFold(f.Tag.Get("header"), name) && f.Type.Kind() == reflect.String {
