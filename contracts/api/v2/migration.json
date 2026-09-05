@@ -17496,7 +17496,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil; deps.TaskManager != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "CancelTask cancels whichever run is currently attached to the task key; a retry after the first run exits can cancel a scheduled or manual replacement run. The v2 port must cancel a stable run id."
     },
     {
       "listener": "api",
@@ -28318,8 +28319,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Removes the listed items from history; a retry finds nothing left to remove."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "HandleRemoveHistory supplies a fresh time.Now() cutoff and RemoveHistoryItems advances hidden_before to it, so a retry after a lost response also erases a viewing recorded in between. The v2 port must carry the cutoff in the request so a retry targets the original set."
     },
     {
       "listener": "api",
@@ -32500,8 +32501,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "DEFECT: converges on one pending address, but the verification mail is sent inline after the row is stored, so a retry sends a second mail. The v2 port must move the send behind the pending row (outbox)."
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: RequestEmailAddress mints a fresh token, overwrites the pending hash, then mails inline, so a retry invalidates the first link and sends another. The v2 port must gate the send on the stored pending row through a durable outbox."
     },
     {
       "listener": "api",

@@ -429,18 +429,22 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (152
-  `natural_idempotent`, 31 `unique_constraint`, 12 `domain_identity`, 10 `coalescing`, 13
-  `non_retryable`, 0 `idempotency_key`, counted per distinct operation) and no residual
+  tier-1 ported mutation rows (218 distinct operations) are classified (149
+  `natural_idempotent`, 31 `unique_constraint`, 12 `domain_identity`, 10 `coalescing`, 1
+  `durable_dispatch`, 15 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
   first call never touched (node force-reload, per node and fleet-wide), a token-issuing
   send with no request identity (invitation create and resend, whose retry supersedes the
   token the first call mailed), a blanket command over whatever currently matches rather
-  than a named target (library scan cancel, metadata-match-queue cancel, notifications
-  read-all), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
-  confirmation); each note says what the v2 port needs before clients may retry. Nine rows carry a `DEFECT` note where v1 gates on process-local state, fires an
+  than a named target (library scan cancel, metadata-match-queue cancel, task cancel by key,
+  notifications read-all), a fresh server-side cutoff a retry would move (history remove), or
+  a one-shot destructive allowance a retry would re-arm (empty-root cleanup confirmation);
+  each note says what the v2 port needs before clients may retry. The one
+  `durable_dispatch` row (email-address verification) names the outbox the v2 port must add
+  before its retry is safe. Nine rows carry a `DEFECT` note where v1 gates on process-local state, fires an
   external effect inline, or lacks the dedup its identity implies (task run, collection sync,
   trailer refresh, person refresh, stale-id rematch, email-address verification, invite-code
   redemption during signup, playback route events, mark-watched history); their v2 port must
