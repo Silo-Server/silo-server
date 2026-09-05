@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"net/url"
 	"testing"
@@ -85,6 +86,14 @@ type upcomingContractRepo struct {
 	offset, limit      int
 	seriesID, seasonID string
 	libraryID, calls   int
+	hasFiles           map[string]bool
+	availabilityIDs    []string
+	availabilityErr    error
+}
+
+func (r *upcomingContractRepo) HasFilesByIDs(_ context.Context, ids []string) (map[string]bool, error) {
+	r.availabilityIDs = ids
+	return r.hasFiles, r.availabilityErr
 }
 
 func (r *upcomingContractRepo) ListUpcoming(_ context.Context, since time.Time, seriesID, seasonID string, libraryID int, limit, offset int, filter catalog.AccessFilter) ([]*models.Episode, int, error) {
@@ -193,5 +202,87 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 	}
 	if len(result.Items) != 1 || result.TotalRecordCount != 6 || result.StartIndex != 3 {
 		t.Fatalf("incorrect bounded page: %+v", result)
+	}
+}
+
+func TestUpcomingAvailabilityOnSelectedPage(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		available bool
+		detail    bool
+		err       error
+	}{
+		{name: "metadata only"},
+		{name: "downloaded", available: true},
+		{name: "metadata with details", detail: true},
+		{name: "availability failure", err: errors.New("catalog unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			repo := &upcomingContractRepo{hasFiles: map[string]bool{"future": tc.available}, availabilityErr: tc.err}
+			h := &ItemsHandler{episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, content: &countingContentService{}}
+			path := "/Shows/Upcoming?StartIndex=2&Limit=1"
+			if tc.detail {
+				path += "&Fields=MediaSources"
+			}
+			req := httptest.NewRequest("GET", path, nil)
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+			rec := httptest.NewRecorder()
+			h.HandleUpcoming(rec, req)
+			if len(repo.availabilityIDs) != 1 || repo.availabilityIDs[0] != "future" {
+				t.Fatalf("availability not page bounded: %v", repo.availabilityIDs)
+			}
+			if tc.err != nil {
+				if rec.Code < 500 {
+					t.Fatalf("availability error hidden: %d", rec.Code)
+				}
+				return
+			}
+			if rec.Code != 200 {
+				t.Fatalf("response: %d %s", rec.Code, rec.Body.String())
+			}
+			var result queryResultDTO
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Items) != 1 || result.TotalRecordCount != 5 || result.StartIndex != 2 {
+				t.Fatalf("page: %+v", result)
+			}
+			item := result.Items[0]
+			if tc.available {
+				if item.LocationType != "FileSystem" || item.VideoType != "VideoFile" {
+					t.Fatalf("available: %+v", item)
+				}
+			} else if item.LocationType != "Virtual" || item.VideoType != "" {
+				t.Fatalf("fileless: %+v", item)
+			}
+		})
+	}
+}
+
+type presentationViewsContent struct{ countingContentService }
+
+func (*presentationViewsContent) ListUserLibraries(context.Context, *Session) ([]upstreamUserLibrary, error) {
+	return []upstreamUserLibrary{{ID: 3, Name: "Movies", Type: "movies", PosterPath: "poster.jpg", PosterURL: "https://example.com/poster.jpg"}}, nil
+}
+
+func TestItemsViewsPresentationControls(t *testing.T) {
+	for _, path := range []string{"/Items?", "/Items?IncludeItemTypes=CollectionFolder&"} {
+		for _, controls := range []string{"", "EnableImages=false&EnableUserData=false", "ImageTypeLimit=0", "EnableImageTypes=Backdrop"} {
+			t.Run(path+controls, func(t *testing.T) {
+				codec := NewResourceIDCodec()
+				h := &ItemsHandler{content: &presentationViewsContent{}, codec: codec, mapper: newMapper(codec, &config.Config{}), images: NewImageCache(time.Hour, time.Now)}
+				result := performItemsRequest(t, h, path+controls)
+				if len(result.Items) != 1 {
+					t.Fatalf("views: %+v", result)
+				}
+				if (len(result.Items[0].ImageTags) > 0) != (controls == "") {
+					t.Fatalf("image controls ignored: %+v", result.Items[0])
+				}
+				if controls == "EnableImages=false&EnableUserData=false" && result.Items[0].UserData != nil {
+					t.Fatal("user data controls ignored")
+				}
+			})
+		}
 	}
 }

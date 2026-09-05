@@ -288,12 +288,24 @@ func (p DeviceProfile) SupportsHLSRemuxForAudioStream(version catalog.FileVersio
 	return false
 }
 
-func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version catalog.FileVersion, audioStreamIndex *int, targetAudioChannels int) bool {
+	outputVersion := version
+	outputAudio := compatAudioTrack(version, audioStreamIndex)
+	outputAudio.Codec = compatTargetAudioCodec
+	outputAudio.Profile = ""
+	outputAudio.Bitrate = 192_000
+	outputAudio.Channels = targetAudioChannels
+	outputAudio.Default = true
+	outputVersion.CodecAudio = compatTargetAudioCodec
+	outputVersion.AudioTracks = []models.AudioTrack{outputAudio}
+	outputAudioStreamIndex := len(outputVersion.VideoTracks)
 	if len(p.TranscodingProfiles) == 0 {
-		return false
+		// Omitted profiles retain the permissive legacy audio-remux fallback,
+		// while explicit profiles below must authorize the actual container.
+		return p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
 	}
 	for _, profile := range p.TranscodingProfiles {
-		if cap, _ := strconv.Atoi(profile.MaxAudioChannels); cap > 0 && cap < 2 {
+		if cap, _ := strconv.Atoi(profile.MaxAudioChannels); cap > 0 && cap < targetAudioChannels {
 			continue
 		}
 		if !matchesVideoType(profile.Type) {
@@ -308,18 +320,6 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 			continue
 		}
 
-		outputVersion := version
-		outputAudio := compatAudioTrack(version, audioStreamIndex)
-		outputAudio.Codec = compatTargetAudioCodec
-		outputAudio.Profile = ""
-		outputAudio.Bitrate = 192_000
-		if outputAudio.Channels > 0 {
-			outputAudio.Channels = 2
-		}
-		outputAudio.Default = true
-		outputVersion.CodecAudio = compatTargetAudioCodec
-		outputVersion.AudioTracks = []models.AudioTrack{outputAudio}
-		outputAudioStreamIndex := len(outputVersion.VideoTracks)
 		if conditionsMatch(profile.Conditions, buildConditionValues(outputVersion, &outputAudioStreamIndex)) && p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay() {
 			return true
 		}

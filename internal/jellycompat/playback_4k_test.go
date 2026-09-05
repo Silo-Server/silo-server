@@ -149,6 +149,8 @@ func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 			{Type: "Video", Container: "mp4", VideoCodec: "h264,hevc", AudioCodec: "aac"},
 		},
 	}
+	hevcTSOnly := hevcNoEac3
+	hevcTSOnly.TranscodingProfiles = []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"}}
 
 	tests := []struct {
 		name               string
@@ -179,6 +181,12 @@ func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 			allow4K:            false,
 			wantTranscoding:    true,
 			wantTranscodeAudio: true,
+		},
+		{
+			name:    "4K explicit TS-only profile cannot authorize fMP4 copy",
+			version: version4K,
+			profile: hevcTSOnly,
+			allow4K: false,
 		},
 		{
 			name:            "non-4K video transcode unaffected",

@@ -2261,6 +2261,10 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	audioSupported := !channelsRequireEncode && profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := !bitrateRequiresEncode && profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	enableTranscoding := boolDefault(req.EnableTranscoding, true)
+	targetAudioChannels := 2
+	if req.MaxAudioChannels == 1 {
+		targetAudioChannels = 1
+	}
 	hlsAudioCopy := !bitrateRequiresEncode && !channelsRequireEncode && enableTranscoding &&
 		enableDirectStream &&
 		allowVideoCopy &&
@@ -2271,12 +2275,12 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		enableTranscoding &&
 		!supportsDirectPlay &&
 		(!allowAudioCopy || !audioSupported) &&
-		profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex)
+		profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex, targetAudioChannels)
 	transcodeAudio := !hlsAudioCopy &&
 		enableDirectStream &&
 		allowVideoCopy &&
 		videoSupported &&
-		(!audioSupported || hlsAudioTranscode)
+		hlsAudioTranscode
 	hlsRemux := hlsAudioCopy || transcodeAudio
 	var hlsRemuxAudioStreamIndexes []int
 	if hlsRemux && !transcodeAudio {
@@ -2295,12 +2299,17 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		!compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "") {
 		supportsDirectStream = false
 	}
-	// A remux route is only advertised when some transcoding profile vouched
-	// for it: the copy and AAC legs each verified the fMP4 HLS output above,
-	// and the legacy audio-transcode leg keeps the pre-remux SupportsTranscoding
-	// gate rather than minting a TranscodingURL no profile ever matched.
+	// Copy and audio-transcode remuxes must match the fMP4 output profile;
+	// full video encodes independently match the MPEG-TS output profile.
+	targetBitrateKbps := 0
+	if maxBitrate > 0 {
+		// Reserve audio and mux overhead; copied video cannot satisfy a lower
+		// bandwidth setting. Match profiles against this actual encoder output.
+		targetBitrateKbps = int(maxBitrate*95/100/1000) - 192
+	}
+	canEncodeOutput := profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0))
 	supportsTranscoding := enableTranscoding &&
-		(hlsAudioCopy || (transcodeAudio && hlsAudioTranscode) || profile.SupportsTranscoding(version))
+		(hlsAudioCopy || transcodeAudio || canEncodeOutput)
 	// Don't offer full video encodes of 4K sources when allow_4k_transcode is
 	// off. HLS remuxes stream-copy the video and stay available regardless of
 	// whether their audio is copied or encoded.
@@ -2308,24 +2317,11 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		supportsTranscoding = false
 	}
 
-	targetBitrateKbps := 0
-	if maxBitrate > 0 {
-		// Reserve audio and mux overhead; copied video is never used to satisfy a
-		// lower bandwidth setting. The durable source freezes the encoder ceiling.
-		targetBitrateKbps = int(maxBitrate*95/100/1000) - 192
-		if targetBitrateKbps < 64 {
-			supportsTranscoding = false
-		}
-	}
-	targetAudioChannels := 2
-	if req.MaxAudioChannels == 1 {
-		targetAudioChannels = 1
-	}
-	if supportsTranscoding && !hlsRemux {
-		supportsTranscoding = profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0))
+	if maxBitrate > 0 && targetBitrateKbps < 64 {
+		supportsTranscoding = false
 	}
 	return PlaybackMediaSource{
-		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= 64) && (allow4KTranscode || !is4KResolution(version.Resolution)) && profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0)),
+		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= 64) && (allow4KTranscode || !is4KResolution(version.Resolution)) && canEncodeOutput,
 		TargetBitrateKbps:          max(targetBitrateKbps, 0),
 		TargetAudioChannels:        targetAudioChannels,
 		ID:                         sourceID,

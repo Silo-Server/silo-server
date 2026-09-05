@@ -113,6 +113,7 @@ func (h *ItemsHandler) handleViewsResponse(w http.ResponseWriter, r *http.Reques
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	applyItemsResponseOptions(items, parseItemsQuery(r, h.codec))
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: len(items),
@@ -2154,6 +2155,11 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := contentIDsFromEpisodes(episodes)
+	hasFiles, err := h.episodeRepo.HasFilesByIDs(r.Context(), ids)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
 	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, ids)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -2170,6 +2176,9 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 				items[i] = h.mapper.itemFromDetailWithFields(*detail, favorites[ep.ContentID], progress[ep.ContentID], query.requestedFields)
 			}
 		}
+	}
+	for i, ep := range episodes {
+		applyPlayableLocation(&items[i], hasFiles[ep.ContentID])
 	}
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, 200, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})

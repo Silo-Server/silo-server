@@ -77,6 +77,72 @@ func TestPlaybackConstraintsFreezeTransportAndRecipe(t *testing.T) {
 	}
 }
 
+func TestPlaybackInfoMonoOnlyTranscodingProfile(t *testing.T) {
+	h, item := newSubtitleSelectionHandler(t)
+	response := postPlaybackInfo(t, h, item, `{"MaxAudioChannels":1,"EnableDirectPlay":false,"EnableDirectStream":false,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac","MaxAudioChannels":"1"}]}}`)
+	if len(response.MediaSources) != 1 || !response.MediaSources[0].SupportsTranscoding || response.MediaSources[0].TranscodingURL == "" {
+		t.Fatalf("mono output unavailable: %+v", response)
+	}
+	_, source, ok := h.playbackStore.FindByRoute("token-1", response.MediaSources[0].ID)
+	if !ok || source == nil || source.TargetAudioChannels != 1 || source.HLSRemux {
+		t.Fatalf("mono recipe: %+v", source)
+	}
+}
+
+func TestMonoOutputProfilePreservesTranscodeRestrictions(t *testing.T) {
+	version := subtitleSelectionVersion()
+	profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac", MaxAudioChannels: "1"}}}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, tc := range []struct {
+		name       string
+		req        playbackInfoRequest
+		resolution string
+		allow4K    bool
+		want       bool
+	}{
+		{"mono matches", playbackInfoRequest{MaxAudioChannels: 1}, "1080p", true, true},
+		{"stereo does not match", playbackInfoRequest{}, "1080p", true, false},
+		{"encoding disabled", playbackInfoRequest{MaxAudioChannels: 1, EnableTranscoding: new(false)}, "1080p", true, false},
+		{"4K policy disabled", playbackInfoRequest{MaxAudioChannels: 1}, "2160p", false, false},
+		{"bitrate too low", playbackInfoRequest{MaxAudioChannels: 1, MaxStreamingBitrate: 100000}, "1080p", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.req.EnableDirectPlay = new(false)
+			tc.req.EnableDirectStream = new(false)
+			version.Resolution = tc.resolution
+			source := h.buildPlaybackSource("item", "play", version, profile, tc.req, tc.allow4K)
+			if source.SupportsTranscoding != tc.want || source.CanBurnSubtitle != tc.want {
+				t.Fatalf("transcoding=%v burn=%v want %v", source.SupportsTranscoding, source.CanBurnSubtitle, tc.want)
+			}
+		})
+	}
+}
+
+func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
+	version := subtitleSelectionVersion()
+	version.CodecVideo = "h264"
+	version.AudioTracks[0].Codec = "eac3"
+	version.AudioTracks[0].Channels = 6
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, container := range []string{"ts", "mp4"} {
+		t.Run(container, func(t *testing.T) {
+			profile := DeviceProfile{
+				DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "h264", AudioCodec: "aac"}},
+				TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: container, VideoCodec: "h264", AudioCodec: "aac", MaxAudioChannels: "1"}},
+			}
+			source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 1}, true)
+			dto := h.mediaSourceDTO("item", "play", "token", source)
+			if source.SupportsDirectPlay || !source.SupportsTranscoding || source.TargetAudioChannels != 1 || source.HLSRemux != (container == "mp4") || dto.TranscodingContainer != container || dto.TranscodingURL == "" {
+				t.Fatalf("wrong negotiated container: source=%+v dto=%+v", source, dto)
+			}
+			stereo := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 2}, true)
+			if stereo.SupportsTranscoding || stereo.HLSRemux {
+				t.Fatalf("mono-only profile accepted stereo output: %+v", stereo)
+			}
+		})
+	}
+}
+
 func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
 	dto := h.mediaSourceDTO("item", "play", "token", PlaybackMediaSource{ID: "source", SupportsDirectStream: true})
