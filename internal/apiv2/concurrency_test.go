@@ -305,6 +305,24 @@ func TestGuardedProbeWildcardRetryRechecksIfNoneMatchAndDomain(t *testing.T) {
 	}
 }
 
+// TestGuardedProbeWildcardDeleteRetryRechecksIfNoneMatch: a DELETE under
+// If-Match: * that loses its compare-and-delete judges If-None-Match again
+// against the latest row, so a writer that installs the named tag turns the
+// retry into 412 and the resource survives.
+func TestGuardedProbeWildcardDeleteRetryRechecksIfNoneMatch(t *testing.T) {
+	store := newGuardedProbeStore()
+	h := NewHandler(Dependencies{testRegister: registerGuardedProbes(store)})
+	store.raceNextGets(1, func() { store.Upsert("a", "racer") })
+	rec := do(t, h, http.MethodDelete, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": "*", "If-None-Match": RenderETag(2, guardedProbeScope).String()})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if got := rec.Header().Get("ETag"); got != RenderETag(2, guardedProbeScope).String() {
+		t.Fatalf("412 ETag = %q", got)
+	}
+	if row, exists := store.Get("a"); !exists || row.Version != 2 {
+		t.Fatalf("resource deleted despite If-None-Match: %+v %v", row, exists)
+	}
+}
+
 // TestGuardedProbeWildcardSurvivesLostRace: "*" is a deliberate overwrite,
 // so a writer that lands between the load and the compare-and-update does
 // not turn it into a 412 while the resource still exists.

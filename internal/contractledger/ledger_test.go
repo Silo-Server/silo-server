@@ -867,12 +867,15 @@ func TestGuardedOperationsAreMarkedIfMatch(t *testing.T) {
 // synthetic registry and ledger, since the live registry guards nothing yet.
 func TestConcurrencyMismatchesFire(t *testing.T) {
 	opID := func(s string) *string { return &s }
+	v2 := func(id string) V2Target {
+		return V2Target{OperationID: opID(id), Method: opID(http.MethodPut), Path: opID("/api/v2/things/{id}")}
+	}
 	entries := []Entry{
-		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, Concurrency: ConcurrencyIfMatch, V2: V2Target{OperationID: opID("updateThing")}},
-		{copied: copied{Method: http.MethodDelete, Path: "/api/v1/things/{id}"}, V2: V2Target{OperationID: opID("deleteThing")}},
+		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, Concurrency: ConcurrencyIfMatch, V2: v2("updateThing")},
+		{copied: copied{Method: http.MethodDelete, Path: "/api/v1/things/{id}"}, V2: v2("deleteThing")},
 	}
 	guarded := func(id string) apiv2registry.Declared {
-		return apiv2registry.Declared{Method: http.MethodPut, OperationID: id, Guarded: true}
+		return apiv2registry.Declared{Method: http.MethodPut, Path: "/api/v2/things/{id}", OperationID: id, Guarded: true}
 	}
 	cases := []struct {
 		name     string
@@ -885,7 +888,9 @@ func TestConcurrencyMismatchesFire(t *testing.T) {
 		{"guarded op with no row", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, nil, "maps to no legacy row"},
 		{"guarded op with no row, exempt with reason", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, map[string]string{"replaceThing": "v2-only resource"}, ""},
 		{"guarded op with no row, exempt without reason", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, map[string]string{"replaceThing": ""}, "maps to no legacy row"},
-		{"marked row, op not guarded", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing"}}, nil, "is not declared Guarded"},
+		{"marked row, op not guarded", []apiv2registry.Declared{{Method: http.MethodPut, Path: "/api/v2/things/{id}", OperationID: "updateThing"}}, nil, "is not declared Guarded"},
+		{"target method disagrees", []apiv2registry.Declared{{Method: http.MethodPatch, Path: "/api/v2/things/{id}", OperationID: "updateThing", Guarded: true}}, nil, "disagree with the registry"},
+		{"target path disagrees", []apiv2registry.Declared{{Method: http.MethodPut, Path: "/api/v2/other/{id}", OperationID: "updateThing", Guarded: true}}, nil, "disagree with the registry"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -903,6 +908,31 @@ func TestConcurrencyMismatchesFire(t *testing.T) {
 	}
 }
 
+// v2TargetMismatches checks that every ledger row naming a v2 operation the
+// registry declares agrees with the declaration on method and path too, so
+// a gate keyed by operation id cannot certify a mapping whose other two
+// target fields are stale or mistyped.
+func v2TargetMismatches(entries []Entry, declared []apiv2registry.Declared) []string {
+	byID := map[string]apiv2registry.Declared{}
+	for _, op := range declared {
+		byID[op.OperationID] = op
+	}
+	var problems []string
+	for _, e := range entries {
+		if e.V2.OperationID == nil {
+			continue
+		}
+		op, ok := byID[*e.V2.OperationID]
+		if !ok {
+			continue
+		}
+		if e.V2.Method == nil || *e.V2.Method != op.Method || e.V2.Path == nil || *e.V2.Path != op.Path {
+			problems = append(problems, fmt.Sprintf("%s: v2 target names operation %s but its method/path (%s %s) disagree with the registry (%s %s)", e.key(), op.OperationID, deref(e.V2.Method), deref(e.V2.Path), op.Method, op.Path))
+		}
+	}
+	return problems
+}
+
 // concurrencyMismatches reconciles the ledger's if_match markings with the
 // v2 registry in both directions. exempt names guarded operations that port
 // no legacy route, each with a reason.
@@ -913,7 +943,7 @@ func concurrencyMismatches(entries []Entry, declared []apiv2registry.Declared, e
 			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
 		}
 	}
-	var problems []string
+	problems := v2TargetMismatches(entries, declared)
 	guarded := map[string]bool{}
 	for _, op := range declared {
 		if !op.Guarded {

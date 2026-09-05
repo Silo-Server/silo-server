@@ -399,31 +399,31 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			Class:     ClassPublic,
 			Guarded:   true,
 		}, func(_ context.Context, in *guardedProbeDeleteInput) (*guardedProbeDeleteOutput, error) {
-			row, ok := store.Get(in.ID)
-			if !ok {
-				return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
-			}
-			current := RenderETag(row.Version, guardedProbeScope)
-			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
-				return nil, p
-			}
-			expected := row.Version
-			for err := store.Delete(in.ID, expected); err != nil; err = store.Delete(in.ID, expected) {
-				latest, exists := store.Get(in.ID)
-				if !exists {
-					// The winner deleted it: nothing current to advertise.
+			// The same shape as the guarded PUT: every attempt loads the
+			// row and runs the whole sequence, so a wildcard retry judges
+			// If-None-Match again against the latest row before deleting.
+			for attempt := 0; ; attempt++ {
+				row, ok := store.Get(in.ID)
+				if !ok {
+					if attempt == 0 {
+						return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
+					}
+					// The race winner deleted it: nothing current to advertise.
 					return nil, StaleVersionProblem(EntityTag{})
 				}
-				if !IsOverwrite(in.IfMatch) {
-					return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				current := RenderETag(row.Version, guardedProbeScope)
+				if attempt > 0 && !IsOverwrite(in.IfMatch) {
+					return nil, StaleVersionProblem(current)
 				}
-				// "*": the resource still exists, so the precondition still
-				// holds; delete whatever is there now, however many writers
-				// land in between.
-				expected = latest.Version
+				if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
+					return nil, p
+				}
+				if err := store.Delete(in.ID, row.Version); err != nil {
+					continue
+				}
+				// The deleted representation has no ETag: 204 with no validator.
+				return &guardedProbeDeleteOutput{}, nil
 			}
-			// The deleted representation has no ETag: 204 with no validator.
-			return &guardedProbeDeleteOutput{}, nil
 		})
 		// The create-only probe: PUT at a client-selected id. Without
 		// If-None-Match it creates or replaces; with "*" it refuses to
