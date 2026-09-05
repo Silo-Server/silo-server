@@ -254,16 +254,40 @@ func applyLegacyPreferenceSettingsSync(
 	writes []profileSettingSync,
 	legacyMutation func(userstore.PreferenceSettingsWriter) error,
 ) error {
+	return applyPlannedLegacyPreferenceSettingsSync(ctx, store, events, userID, base,
+		func(tx userstore.PreferenceSettingsWriter) ([]profileSettingSync, error) {
+			if err := legacyMutation(tx); err != nil {
+				return nil, err
+			}
+			return writes, nil
+		})
+}
+
+// applyPlannedLegacyPreferenceSettingsSync is applyLegacyPreferenceSettingsSync
+// for a mutation that has to look at the store before it knows what to
+// write: plan runs inside the transaction — after the Postgres store has
+// taken the per-user advisory lock — performs the legacy mutation and returns
+// the canonical writes, so a read-merge-write is one serialized unit across
+// every replica. An error plan returns comes back unwrapped, so a caller can
+// tell a rejected value from a failed write.
+func applyPlannedLegacyPreferenceSettingsSync(
+	ctx context.Context,
+	store userstore.UserStore,
+	events *evt.Hub,
+	userID int,
+	base userstore.SettingIdentity,
+	plan func(userstore.PreferenceSettingsWriter) ([]profileSettingSync, error),
+) error {
 	var changedKeys []string
 	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
 	if !ok {
 		return fmt.Errorf("user store does not support atomic preference settings synchronization")
 	}
 	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
-		if err := legacyMutation(tx); err != nil {
+		writes, err := plan(tx)
+		if err != nil {
 			return err
 		}
-		var err error
 		changedKeys, err = writeCanonicalSettingsSync(ctx, tx, base, writes)
 		return err
 	})

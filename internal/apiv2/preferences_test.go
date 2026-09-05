@@ -55,7 +55,7 @@ func (f *fakeAudioPreferences) DeleteAudioPreference(_ context.Context, _ int, p
 type fakeLibraryPlaybackPreferences struct {
 	known map[int]bool
 	prefs []userstore.LibraryPlaybackPreference
-	last  *handlers.LibraryPlaybackPrefUpdate
+	last  *handlers.LibraryPlaybackPrefPatch
 	err   error
 }
 
@@ -79,25 +79,54 @@ func (f *fakeLibraryPlaybackPreferences) library(libraryID int) error {
 	return nil
 }
 
-func (f *fakeLibraryPlaybackPreferences) GetLibraryPlaybackPreference(_ context.Context, _ int, profileID string, libraryID int) (*userstore.LibraryPlaybackPreference, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	for i := range f.prefs {
-		if f.prefs[i].ProfileID == profileID && f.prefs[i].LibraryID == libraryID {
-			p := f.prefs[i]
-			return &p, nil
-		}
-	}
-	return nil, nil
-}
-
-func (f *fakeLibraryPlaybackPreferences) SetLibraryPlaybackPreference(_ context.Context, _ int, profileID string, libraryID int, req handlers.LibraryPlaybackPrefUpdate) error {
+// PatchLibraryPlaybackPreference records the patch and applies it to the
+// kept row the way the seam does: present members replace or clear their
+// override, a row left with none is removed.
+func (f *fakeLibraryPlaybackPreferences) PatchLibraryPlaybackPreference(_ context.Context, _ int, profileID string, libraryID int, patch handlers.LibraryPlaybackPrefPatch) error {
 	if err := f.library(libraryID); err != nil {
 		return err
 	}
-	f.last = &req
-	return f.err
+	f.last = &patch
+	if f.err != nil {
+		return f.err
+	}
+	idx := -1
+	for i := range f.prefs {
+		if f.prefs[i].ProfileID == profileID && f.prefs[i].LibraryID == libraryID {
+			idx = i
+		}
+	}
+	row := userstore.LibraryPlaybackPreference{ProfileID: profileID, LibraryID: libraryID}
+	if idx >= 0 {
+		row = f.prefs[idx]
+	}
+	apply := func(p handlers.PrefPatch[string], has *bool, value *string) {
+		if !p.Present {
+			return
+		}
+		*has, *value = p.Value != nil, ""
+		if p.Value != nil {
+			*value = *p.Value
+		}
+	}
+	apply(patch.AudioLanguage, &row.HasAudioLanguage, &row.AudioLanguage)
+	apply(patch.SubtitleLanguage, &row.HasSubtitleLanguage, &row.SubtitleLanguage)
+	apply(patch.SubtitleMode, &row.HasSubtitleMode, &row.SubtitleMode)
+	if p := patch.ShowForcedSubtitles; p.Present {
+		row.HasShowForcedSubtitles, row.ShowForcedSubtitles = p.Value != nil, p.Value != nil && *p.Value
+	}
+	if !row.HasAudioLanguage && !row.HasSubtitleLanguage && !row.HasSubtitleMode && !row.HasShowForcedSubtitles {
+		if idx >= 0 {
+			f.prefs = append(f.prefs[:idx], f.prefs[idx+1:]...)
+		}
+		return nil
+	}
+	if idx >= 0 {
+		f.prefs[idx] = row
+	} else {
+		f.prefs = append(f.prefs, row)
+	}
+	return nil
 }
 
 func (f *fakeLibraryPlaybackPreferences) DeleteLibraryPlaybackPreference(_ context.Context, _ int, profileID string, libraryID int) error {
@@ -532,37 +561,52 @@ func TestUpdateLibraryPlaybackPreference(t *testing.T) {
 	h := newTestHandler(t, preferenceDeps(nil, library))
 	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
 
-	// A partial body: the stored overrides the body omits reach the seam
-	// unchanged, a present member replaces its override, null clears one.
+	// A partial body: only the present members reach the seam — the handler
+	// never reads the stored row itself, the seam merges onto the canonical
+	// rows inside its transaction — a value sets one, null clears one.
 	rec := do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{"subtitle_language":"fr","subtitle_mode":null,"show_forced_subtitles":true}`, owner)
 	if rec.Code != 204 || rec.Body.Len() != 0 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	got := library.last
-	if got == nil || got.AudioLanguage == nil || *got.AudioLanguage != "en" {
-		t.Fatalf("omitted audio_language not kept: %+v", got)
+	if got == nil || got.AudioLanguage.Present {
+		t.Fatalf("omitted audio_language reached the seam: %+v", got)
 	}
-	if got.SubtitleLanguage == nil || *got.SubtitleLanguage != "fr" || got.ShowForcedSubtitles == nil || !*got.ShowForcedSubtitles {
+	if !got.SubtitleLanguage.Present || got.SubtitleLanguage.Value == nil || *got.SubtitleLanguage.Value != "fr" ||
+		!got.ShowForcedSubtitles.Present || got.ShowForcedSubtitles.Value == nil || !*got.ShowForcedSubtitles.Value {
 		t.Fatalf("present members not applied: %+v", got)
 	}
-	// Null on any member is no override at all (a nil member), never the
-	// seam's empty-string spelling, which the store would keep as a row.
-	if got.SubtitleMode != nil {
+	// Null on any member is present with no value, never the seam's
+	// empty-string spelling, which the store would keep as a row.
+	if !got.SubtitleMode.Present || got.SubtitleMode.Value != nil {
 		t.Fatalf("null subtitle_mode = %+v", got.SubtitleMode)
 	}
-	// Nulling every override reaches the seam with every member nil, its
-	// row-removal form.
+	// The row the seam keeps holds the untouched member alongside the patch.
+	rows, _ := library.ListLibraryPlaybackPreferences(context.Background(), 0, "p-owner")
+	if rows[0].LibraryID != 1 || !rows[0].HasAudioLanguage || rows[0].AudioLanguage != "en" || rows[0].SubtitleLanguage != "fr" || rows[0].HasSubtitleMode || !rows[0].ShowForcedSubtitles {
+		t.Fatalf("row = %+v", rows[0])
+	}
+	// Nulling every override reaches the seam with every member present and
+	// empty, its row-removal form, and the row leaves the list.
 	rec = do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{"audio_language":null,"subtitle_language":null,"subtitle_mode":null,"show_forced_subtitles":null}`, owner)
-	if rec.Code != 204 || library.last == nil || library.last.AudioLanguage != nil || library.last.SubtitleLanguage != nil || library.last.SubtitleMode != nil || library.last.ShowForcedSubtitles != nil {
+	if rec.Code != 204 || library.last == nil ||
+		!library.last.AudioLanguage.Present || library.last.AudioLanguage.Value != nil ||
+		!library.last.SubtitleLanguage.Present || library.last.SubtitleLanguage.Value != nil ||
+		!library.last.SubtitleMode.Present || library.last.SubtitleMode.Value != nil ||
+		!library.last.ShowForcedSubtitles.Present || library.last.ShowForcedSubtitles.Value != nil {
 		t.Fatalf("%d %+v", rec.Code, library.last)
 	}
+	rows, _ = library.ListLibraryPlaybackPreferences(context.Background(), 0, "p-owner")
+	if len(rows) != 1 || rows[0].LibraryID != 3 {
+		t.Fatalf("cleared row still listed: %+v", rows)
+	}
 	rec = do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/3", `{"show_forced_subtitles":null}`, owner)
-	if rec.Code != 204 || library.last.ShowForcedSubtitles != nil || library.last.AudioLanguage != nil {
+	if rec.Code != 204 || library.last.ShowForcedSubtitles.Value != nil || library.last.AudioLanguage.Present {
 		t.Fatalf("%d %+v", rec.Code, library.last)
 	}
 	// A library with no row yet: only the body's members reach the seam.
 	rec = do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/2", `{"audio_language":"de"}`, owner)
-	if rec.Code != 204 || library.last.AudioLanguage == nil || *library.last.AudioLanguage != "de" || library.last.SubtitleLanguage != nil || library.last.SubtitleMode != nil || library.last.ShowForcedSubtitles != nil {
+	if rec.Code != 204 || library.last.AudioLanguage.Value == nil || *library.last.AudioLanguage.Value != "de" || library.last.SubtitleLanguage.Present || library.last.SubtitleMode.Present || library.last.ShowForcedSubtitles.Present {
 		t.Fatalf("%d %+v", rec.Code, library.last)
 	}
 	// An empty body is a valid no-op patch.

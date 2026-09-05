@@ -497,10 +497,12 @@ func (reg *Registry) deleteSubtitlePreference(ctx context.Context, in *SubtitleP
 }
 
 // updateLibraryPlaybackPreference is v1 PUT /library-playback-prefs/{library_id}
-// as a PATCH: the stored overrides are read, the present members applied
-// (null clears one), and the merged set handed to the same seam v1 writes
-// through, so clearing every override still removes the row. It answers 204
-// as v1 does; an unknown library is 404.
+// as a PATCH: the present members are handed to the seam's partial update,
+// which merges them onto the current canonical rows inside one locked
+// transaction, so an omitted member keeps whatever /settings/values or the
+// web library editor last wrote and two patches of different members both
+// land. null clears a member, and clearing every override removes the row.
+// It answers 204 as v1 does; an unknown library is 404.
 func (reg *Registry) updateLibraryPlaybackPreference(ctx context.Context, in *LibraryPlaybackPreferenceUpdateInput) (*struct{}, error) {
 	if reg.deps.LibraryPlaybackPreferences == nil {
 		return nil, unavailable("preference")
@@ -514,47 +516,26 @@ func (reg *Registry) updateLibraryPlaybackPreference(ctx context.Context, in *Li
 	if p != nil {
 		return nil, p
 	}
-	current, err := reg.deps.LibraryPlaybackPreferences.GetLibraryPlaybackPreference(ctx, claims.UserID, profileID, libraryID)
-	if err != nil {
-		return nil, preferenceProblem(err)
-	}
-	var req handlers.LibraryPlaybackPrefUpdate
-	if current != nil {
-		if current.HasAudioLanguage {
-			req.AudioLanguage = ptr(current.AudioLanguage)
-		}
-		if current.HasSubtitleLanguage {
-			req.SubtitleLanguage = ptr(current.SubtitleLanguage)
-		}
-		if current.HasSubtitleMode {
-			req.SubtitleMode = ptr(current.SubtitleMode)
-		}
-		if current.HasShowForcedSubtitles {
-			req.ShowForcedSubtitles = ptr(current.ShowForcedSubtitles)
-		}
-	}
 	// A present member replaces the stored override; null is no override at
 	// all (a nil member), so a body that clears every override reaches the
 	// seam's row-removal path rather than storing empty strings.
-	apply := func(p Patch[string], into **string) {
-		if !p.Present {
-			return
+	clearable := func(p Patch[string]) handlers.PrefPatch[string] {
+		out := handlers.PrefPatch[string]{Present: p.Present}
+		if p.Present && !p.Null {
+			out.Value = ptr(p.Value)
 		}
-		*into = nil
-		if !p.Null {
-			*into = ptr(p.Value)
-		}
+		return out
 	}
-	apply(in.Body.AudioLanguage, &req.AudioLanguage)
-	apply(in.Body.SubtitleLanguage, &req.SubtitleLanguage)
-	apply(in.Body.SubtitleMode, &req.SubtitleMode)
-	if f := in.Body.ShowForcedSubtitles; f.Present {
-		req.ShowForcedSubtitles = nil
-		if !f.Null {
-			req.ShowForcedSubtitles = ptr(f.Value)
-		}
+	patch := handlers.LibraryPlaybackPrefPatch{
+		AudioLanguage:       clearable(in.Body.AudioLanguage),
+		SubtitleLanguage:    clearable(in.Body.SubtitleLanguage),
+		SubtitleMode:        clearable(in.Body.SubtitleMode),
+		ShowForcedSubtitles: handlers.PrefPatch[bool]{Present: in.Body.ShowForcedSubtitles.Present},
 	}
-	if err := reg.deps.LibraryPlaybackPreferences.SetLibraryPlaybackPreference(ctx, claims.UserID, profileID, libraryID, req); err != nil {
+	if f := in.Body.ShowForcedSubtitles; f.Present && !f.Null {
+		patch.ShowForcedSubtitles.Value = ptr(f.Value)
+	}
+	if err := reg.deps.LibraryPlaybackPreferences.PatchLibraryPlaybackPreference(ctx, claims.UserID, profileID, libraryID, patch); err != nil {
 		return nil, preferenceProblem(err)
 	}
 	return &struct{}{}, nil

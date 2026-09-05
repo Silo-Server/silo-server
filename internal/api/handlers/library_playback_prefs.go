@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -98,26 +99,9 @@ func (h *LibraryPlaybackPrefHandler) ListLibraryPlaybackPreferences(ctx context.
 	return prefs, nil
 }
 
-// GetLibraryPlaybackPreference is the single-library read v2
-// updateLibraryPlaybackPreference merges its partial body onto. It answers
-// nil when the profile has no row for the library, which is not an error: an
-// unknown library surfaces from the write that follows. A failure is an
-// *APIError.
-func (h *LibraryPlaybackPrefHandler) GetLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int) (*userstore.LibraryPlaybackPreference, error) {
-	store, err := h.storeProvider.ForUser(ctx, userID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	pref, err := store.GetLibraryPlaybackPreference(ctx, profileID, libraryID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get library playback preference")
-	}
-	return pref, nil
-}
-
-// LibraryPlaybackPrefUpdate is the write v1 PUT and v2
-// updateLibraryPlaybackPreference hand SetLibraryPlaybackPreference: each
-// member nil means "no preference" for that trait and clears it.
+// LibraryPlaybackPrefUpdate is the whole-row write v1 PUT
+// /library-playback-prefs/{library_id} performs: each member nil means "no
+// preference" for that trait and clears it.
 type LibraryPlaybackPrefUpdate struct {
 	AudioLanguage       *string
 	SubtitleLanguage    *string
@@ -125,37 +109,150 @@ type LibraryPlaybackPrefUpdate struct {
 	ShowForcedSubtitles *bool
 }
 
-// SetLibraryPlaybackPreference is the write v1 PUT
-// /library-playback-prefs/{library_id} and v2 updateLibraryPlaybackPreference
-// share: the legacy row and the canonical profile_library rows commit
-// together, and a user_settings.changed event follows each canonical row that
-// moved. A request with every member nil removes the row. A failure is an
-// *APIError: an unknown library is 404 not_found, a subtitle_mode outside
-// auto/always/off or a value the canonical contract refuses is a 400
-// bad_request naming the member.
-func (h *LibraryPlaybackPrefHandler) SetLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int, req LibraryPlaybackPrefUpdate) error {
+// PrefPatch is one member of a partial preference update. An absent member
+// leaves the stored override alone; a present one with a nil Value clears
+// it, with a value sets it.
+type PrefPatch[T any] struct {
+	Present bool
+	Value   *T
+}
+
+// LibraryPlaybackPrefPatch is the partial update v2
+// updateLibraryPlaybackPreference hands PatchLibraryPlaybackPreference.
+type LibraryPlaybackPrefPatch struct {
+	AudioLanguage       PrefPatch[string]
+	SubtitleLanguage    PrefPatch[string]
+	SubtitleMode        PrefPatch[string]
+	ShowForcedSubtitles PrefPatch[bool]
+}
+
+// PatchLibraryPlaybackPreference is the partial write v2
+// updateLibraryPlaybackPreference performs. It runs read, merge and write as
+// one store transaction — on Postgres behind the per-user advisory lock the
+// transaction takes first — so two patches of different members from
+// different replicas both land, and it merges onto the canonical
+// profile_library rows, not the legacy composite row: PUT /settings/values
+// and the web library editor write the canonical rows without mirroring them
+// into the legacy row, so the legacy row is not the current state. Only the
+// present members write a canonical row (and publish a user_settings.changed
+// event); the legacy row is rewritten from the merged set, and is removed
+// when the merge leaves no override. A failure is an *APIError: an unknown
+// library is 404 not_found, a subtitle_mode outside auto/always/off or a value
+// the canonical contract refuses is a 400 bad_request naming the member.
+func (h *LibraryPlaybackPrefHandler) PatchLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int, patch LibraryPlaybackPrefPatch) error {
 	if err := h.libraryExists(ctx, libraryID); err != nil {
 		return err
 	}
-	return h.setLibraryPlaybackPreference(ctx, userID, profileID, libraryID, req)
-}
-
-// setLibraryPlaybackPreference is SetLibraryPlaybackPreference after the
-// library check; the v1 handler runs that check before it reads the body.
-func (h *LibraryPlaybackPrefHandler) setLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int, req LibraryPlaybackPrefUpdate) error {
-	if !isValidLibrarySubtitleMode(req.SubtitleMode) {
+	if patch.SubtitleMode.Present && !isValidLibrarySubtitleMode(patch.SubtitleMode.Value) {
 		return fieldError("subtitle_mode", "Invalid subtitle_mode")
 	}
-	sync, err := planLibraryPlaybackSettingsSync(setLibraryPlaybackPrefRequest(req))
+	// The present members are validated and planned before the transaction
+	// opens, so a rejected value never takes the lock.
+	present, err := planLibraryPlaybackSettingsSync(setLibraryPlaybackPrefRequest{
+		AudioLanguage:       patch.AudioLanguage.Value,
+		SubtitleLanguage:    patch.SubtitleLanguage.Value,
+		SubtitleMode:        patch.SubtitleMode.Value,
+		ShowForcedSubtitles: patch.ShowForcedSubtitles.Value,
+	})
 	if err != nil {
 		return fieldError(libraryPlaybackPrefField(err), err.Error())
+	}
+	presentKeys := map[string]bool{
+		settingskeys.PlaybackAudioLanguage:       patch.AudioLanguage.Present,
+		settingskeys.PlaybackSubtitleLanguage:    patch.SubtitleLanguage.Present,
+		settingskeys.PlaybackSubtitleMode:        patch.SubtitleMode.Present,
+		settingskeys.PlaybackShowForcedSubtitles: patch.ShowForcedSubtitles.Present,
+	}
+	writes := make([]profileSettingSync, 0, len(present))
+	for _, w := range present {
+		if presentKeys[w.key] {
+			writes = append(writes, w)
+		}
 	}
 
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
+	base := userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfileLibrary, ProfileID: profileID, LibraryID: libraryID,
+	}
+	err = applyPlannedLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, base,
+		func(tx userstore.PreferenceSettingsWriter) ([]profileSettingSync, error) {
+			merged, err := mergeLibraryPlaybackPatch(ctx, tx, base, patch)
+			if err != nil {
+				return nil, err
+			}
+			pref, has := libraryPlaybackPreferenceOf(profileID, libraryID, merged)
+			if !has {
+				return writes, tx.DeleteLibraryPlaybackPreference(ctx, profileID, libraryID)
+			}
+			return writes, tx.UpsertLibraryPlaybackPreference(ctx, pref)
+		})
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to store library playback preference")
+	}
+	return nil
+}
 
+// mergeLibraryPlaybackPatch is the row the patch leaves: each present member
+// as given, each omitted one as the canonical profile_library row currently
+// holds (nil when there is none). It reads through the transaction's writer.
+func mergeLibraryPlaybackPatch(ctx context.Context, tx userstore.PreferenceSettingsWriter, base userstore.SettingIdentity, patch LibraryPlaybackPrefPatch) (LibraryPlaybackPrefUpdate, error) {
+	var merged LibraryPlaybackPrefUpdate
+	for _, m := range []struct {
+		key   string
+		patch PrefPatch[string]
+		into  **string
+	}{
+		{settingskeys.PlaybackAudioLanguage, patch.AudioLanguage, &merged.AudioLanguage},
+		{settingskeys.PlaybackSubtitleLanguage, patch.SubtitleLanguage, &merged.SubtitleLanguage},
+		{settingskeys.PlaybackSubtitleMode, patch.SubtitleMode, &merged.SubtitleMode},
+	} {
+		if m.patch.Present {
+			*m.into = m.patch.Value
+			continue
+		}
+		if err := canonicalMember(ctx, tx, base, m.key, m.into); err != nil {
+			return merged, err
+		}
+	}
+	if patch.ShowForcedSubtitles.Present {
+		merged.ShowForcedSubtitles = patch.ShowForcedSubtitles.Value
+	} else if err := canonicalMember(ctx, tx, base, settingskeys.PlaybackShowForcedSubtitles, &merged.ShowForcedSubtitles); err != nil {
+		return merged, err
+	}
+	return merged, nil
+}
+
+// canonicalMember loads the canonical row for key at base into *into, leaving
+// it nil when the row is unset.
+func canonicalMember[T any](ctx context.Context, tx userstore.PreferenceSettingsWriter, base userstore.SettingIdentity, key string, into **T) error {
+	id := base
+	id.Key = key
+	row, err := tx.GetSettingValue(ctx, id)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", key, err)
+	}
+	if row == nil {
+		*into = nil
+		return nil
+	}
+	var v T
+	if err := json.Unmarshal(row.Value, &v); err != nil {
+		return fmt.Errorf("decoding %s: %w", key, err)
+	}
+	*into = &v
+	return nil
+}
+
+// libraryPlaybackPreferenceOf is the legacy composite row for req, and
+// whether any member is set; a request with none is the row-removal form.
+func libraryPlaybackPreferenceOf(profileID string, libraryID int, req LibraryPlaybackPrefUpdate) (userstore.LibraryPlaybackPreference, bool) {
 	pref := userstore.LibraryPlaybackPreference{
 		ProfileID:              profileID,
 		LibraryID:              libraryID,
@@ -176,8 +273,30 @@ func (h *LibraryPlaybackPrefHandler) setLibraryPlaybackPreference(ctx context.Co
 	if req.ShowForcedSubtitles != nil {
 		pref.ShowForcedSubtitles = *req.ShowForcedSubtitles
 	}
+	return pref, pref.HasAudioLanguage || pref.HasSubtitleLanguage || pref.HasSubtitleMode || pref.HasShowForcedSubtitles
+}
 
-	if !pref.HasAudioLanguage && !pref.HasSubtitleLanguage && !pref.HasSubtitleMode && !pref.HasShowForcedSubtitles {
+// setLibraryPlaybackPreference is the whole-row write behind v1 PUT, after
+// the library check the v1 handler runs before it reads the body: the legacy
+// row and the canonical profile_library rows commit together, and a
+// user_settings.changed event follows each canonical row that moved. A
+// request with every member nil removes the row.
+func (h *LibraryPlaybackPrefHandler) setLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int, req LibraryPlaybackPrefUpdate) error {
+	if !isValidLibrarySubtitleMode(req.SubtitleMode) {
+		return fieldError("subtitle_mode", "Invalid subtitle_mode")
+	}
+	sync, err := planLibraryPlaybackSettingsSync(setLibraryPlaybackPrefRequest(req))
+	if err != nil {
+		return fieldError(libraryPlaybackPrefField(err), err.Error())
+	}
+
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+
+	pref, has := libraryPlaybackPreferenceOf(profileID, libraryID, req)
+	if !has {
 		if err := h.applyLibraryPlaybackSettingsSync(ctx, store, userID,
 			profileID, libraryID, sync, func(tx userstore.PreferenceSettingsWriter) error {
 				return tx.DeleteLibraryPlaybackPreference(ctx, profileID, libraryID)

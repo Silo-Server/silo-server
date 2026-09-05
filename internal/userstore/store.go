@@ -37,6 +37,10 @@ type PreferenceSettingsWriter interface {
 	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
 	// DeleteSettingValue removes one explicit value and reports whether it existed.
 	DeleteSettingValue(ctx context.Context, id SettingIdentity) (bool, error)
+	// GetSettingValue reads one explicit value inside the transaction, so a
+	// partial legacy update can merge onto the canonical rows it is about to
+	// rewrite without a window for another writer between read and write.
+	GetSettingValue(ctx context.Context, id SettingIdentity) (*SettingValue, error)
 }
 
 // PreferenceSettingsTransactioner is implemented by stores that can atomically

@@ -110,6 +110,10 @@ func (tx *preferenceSettingsTx) DeleteAudioPreference(_ context.Context, profile
 	return deleteAudioPreference(tx.exec, profileID, seriesID)
 }
 
+func (tx *preferenceSettingsTx) GetSettingValue(_ context.Context, id userstore.SettingIdentity) (*userstore.SettingValue, error) {
+	return getSettingValue(tx.exec, id)
+}
+
 func (tx *preferenceSettingsTx) UpsertLibraryPlaybackPreference(_ context.Context, pref userstore.LibraryPlaybackPreference) error {
 	return upsertLibraryPlaybackPreference(tx.exec, pref)
 }
