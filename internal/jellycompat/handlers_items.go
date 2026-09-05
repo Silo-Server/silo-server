@@ -3677,7 +3677,7 @@ func (h *ItemsHandler) validateThemeOwner(w http.ResponseWriter, r *http.Request
 		writeError(w, 401, "Unauthorized", "Missing authentication token")
 		return false
 	}
-	id, err := decodeItemID(h.codec, chi.URLParam(r, "id"))
+	id, err := decodeContentID(h.codec, chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, 404, "NotFound", "Item not found")
 		return false

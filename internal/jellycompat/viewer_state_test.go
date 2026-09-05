@@ -445,3 +445,59 @@ func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
 		})
 	}
 }
+
+func TestViewerOwnerQueryIsCaseInsensitive(t *testing.T) {
+	for _, key := range []string{"userId", "UserId", "USERID"} {
+		t.Run(key, func(t *testing.T) {
+			store := newJellycompatUserStore(t)
+			provider := compatTestUserStoreProvider{store: store}
+			codec := NewResourceIDCodec()
+			itemID := codec.EncodeStringID(EncodedIDItem, "movie-1")
+			session := &Session{Token: "caller", StreamAppUserID: 1, ProfileID: "profile-1", PseudoUserID: uuid.New()}
+			data := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}, codec, &config.Config{})
+			prefs := NewDisplayPreferencesHandler(provider)
+			auth := NewAuthHandler(func() *config.Config { return &config.Config{} }, nil, nil).WithUserStore(provider)
+			for _, tc := range []struct {
+				name, method, body, param, value string
+				handler                          http.HandlerFunc
+			}{
+				{"user data", "POST", `{"IsFavorite":true,"Played":true}`, "itemId", itemID, data.HandleUpdateUserData},
+				{"favorite", "POST", "", "itemId", itemID, data.HandleAddFavorite},
+				{"mark played", "POST", "", "itemId", itemID, data.HandleMarkPlayed},
+				{"configuration", "POST", `{"HidePlayedInLatest":true}`, "", "", auth.HandleUpdateConfiguration},
+				{"display write", "POST", `{"ViewType":"List"}`, "displayPreferencesId", "home", prefs.HandleUpdateDisplayPreferences},
+				{"display read", "GET", "", "displayPreferencesId", "home", prefs.HandleGetDisplayPreferences},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					rec := httptest.NewRecorder()
+					tc.handler(rec, viewerRequest(tc.method, "/?"+key+"="+uuid.NewString(), tc.body, tc.param, tc.value, session))
+					if rec.Code != http.StatusNotFound {
+						t.Fatalf("foreign owner status=%d body=%s", rec.Code, rec.Body.String())
+					}
+				})
+			}
+			favorite, err := store.IsFavorite(t.Context(), "profile-1", "movie-1")
+			if err != nil || favorite {
+				t.Fatalf("foreign request mutated favorite: %v %v", favorite, err)
+			}
+			progress, err := store.GetProgress(t.Context(), "profile-1", "movie-1")
+			if err != nil || progress != nil {
+				t.Fatalf("foreign request mutated progress: %+v %v", progress, err)
+			}
+			configuration, err := store.GetSetting(t.Context(), configurationKey("profile-1"))
+			if err != nil || configuration != "" {
+				t.Fatalf("foreign request mutated configuration: %s %v", configuration, err)
+			}
+			display, err := store.GetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "home"), "")
+			if err != nil || display != "" {
+				t.Fatalf("foreign request mutated display preferences: %s %v", display, err)
+			}
+			// The same query casing must still allow the authenticated owner.
+			rec := httptest.NewRecorder()
+			prefs.HandleUpdateDisplayPreferences(rec, viewerRequest("POST", "/?"+key+"="+session.PseudoUserID.String(), `{}`, "displayPreferencesId", "home", session))
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("owner status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

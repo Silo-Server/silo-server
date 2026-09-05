@@ -203,7 +203,7 @@ func profilePreferencesID(profileID, id string) string {
 }
 
 func validateOptionalUser(w http.ResponseWriter, r *http.Request, session *Session) bool {
-	if id := r.URL.Query().Get("userId"); id != "" {
+	if id := newCaseInsensitiveQuery(r.URL.Query()).Get("userId"); id != "" {
 		return validatePseudoUser(w, id, session)
 	}
 	return true
