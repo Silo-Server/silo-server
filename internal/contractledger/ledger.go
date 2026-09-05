@@ -459,6 +459,15 @@ func reviewRules(k Key, e Entry, r inventoryRoute) []string {
 	return out
 }
 
+// eligibleForConcurrency reports whether the review rule above allows a row
+// to carry concurrency=if_match: tier-1, ported, and a method a Guarded v2
+// operation may use. The reconcile against the registry requires the
+// marking only on such rows, so a redesigned or replaced row that names a
+// guarded v2 operation is not caught between the two rules.
+func eligibleForConcurrency(e Entry) bool {
+	return e.Tier == 1 && e.Disposition == DispositionPorted && isGuardableMethod(e.Method)
+}
+
 // isGuardableMethod mirrors apiv2.checkOperation: only PUT, PATCH and DELETE
 // may be registered Guarded, so only their rows may be marked if_match.
 func isGuardableMethod(method string) bool {

@@ -374,8 +374,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   and only an exact tag turns a lost race into `412` with the current `ETag`. A create-only
   handler that loses its write evaluates `If-None-Match` again against the latest state and
   retries while the condition holds, so only a state that falsifies the condition is `412`. `TestGuardedOperationsAreMarkedIfMatch`
-  reconciles both directions and refuses a guarded operation that maps to no legacy row
-  unless `guardedWithoutLegacyRow` names it with a reason. A
+  reconciles both directions, requires the marking only on a row eligible to carry it
+  (tier-1, ported, PUT/PATCH/DELETE, so a redesigned or replaced row that names a guarded
+  operation is not caught between two rules), and refuses a guarded operation that maps to
+  no legacy row unless `guardedWithoutLegacyRow` names it with a reason. A
   guarded operation documents `412` and `428`, a required `If-Match` parameter, an optional
   `If-None-Match` parameter, and the `ETag` header on every `2xx`
   (except a guarded DELETE's `204`, which carries none) and on the `412`; a conditional read

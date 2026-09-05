@@ -871,8 +871,11 @@ func TestConcurrencyMismatchesFire(t *testing.T) {
 		return V2Target{OperationID: opID(id), Method: opID(http.MethodPut), Path: opID("/api/v2/things/{id}")}
 	}
 	entries := []Entry{
-		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, Concurrency: ConcurrencyIfMatch, V2: v2("updateThing")},
-		{copied: copied{Method: http.MethodDelete, Path: "/api/v1/things/{id}"}, V2: v2("deleteThing")},
+		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, Tier: 1, Disposition: DispositionPorted, Concurrency: ConcurrencyIfMatch, V2: v2("updateThing")},
+		{copied: copied{Method: http.MethodDelete, Path: "/api/v1/things/{id}"}, Tier: 1, Disposition: DispositionPorted, V2: v2("deleteThing")},
+		// A redesigned row may name a guarded v2 operation; the review rule
+		// keeps the marking off it, so the reconcile must not demand one.
+		{copied: copied{Method: http.MethodPut, Path: "/api/v1/old-things/{id}"}, Tier: 1, Disposition: DispositionRedesigned, V2: v2("replaceThing")},
 	}
 	guarded := func(id string) apiv2registry.Declared {
 		return apiv2registry.Declared{Method: http.MethodPut, Path: "/api/v2/things/{id}", OperationID: id, Guarded: true}
@@ -885,9 +888,10 @@ func TestConcurrencyMismatchesFire(t *testing.T) {
 	}{
 		{"agree", []apiv2registry.Declared{guarded("updateThing")}, nil, ""},
 		{"mapped row unmarked", []apiv2registry.Declared{guarded("updateThing"), guarded("deleteThing")}, nil, "is not marked concurrency"},
-		{"guarded op with no row", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, nil, "maps to no legacy row"},
-		{"guarded op with no row, exempt with reason", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, map[string]string{"replaceThing": "v2-only resource"}, ""},
-		{"guarded op with no row, exempt without reason", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, map[string]string{"replaceThing": ""}, "maps to no legacy row"},
+		{"guarded op with no row", []apiv2registry.Declared{guarded("updateThing"), guarded("newThing")}, nil, "maps to no legacy row"},
+		{"guarded op with no row, exempt with reason", []apiv2registry.Declared{guarded("updateThing"), guarded("newThing")}, map[string]string{"newThing": "v2-only resource"}, ""},
+		{"guarded op with no row, exempt without reason", []apiv2registry.Declared{guarded("updateThing"), guarded("newThing")}, map[string]string{"newThing": ""}, "maps to no legacy row"},
+		{"redesigned row mapped to a guarded op needs no marking", []apiv2registry.Declared{guarded("updateThing"), guarded("replaceThing")}, nil, ""},
 		{"marked row, op not guarded", []apiv2registry.Declared{{Method: http.MethodPut, Path: "/api/v2/things/{id}", OperationID: "updateThing"}}, nil, "is not declared Guarded"},
 		{"target method disagrees", []apiv2registry.Declared{{Method: http.MethodPatch, Path: "/api/v2/things/{id}", OperationID: "updateThing", Guarded: true}}, nil, "disagree with the registry"},
 		{"target path disagrees", []apiv2registry.Declared{{Method: http.MethodPut, Path: "/api/v2/other/{id}", OperationID: "updateThing", Guarded: true}}, nil, "disagree with the registry"},
@@ -963,6 +967,14 @@ func concurrencyMismatches(entries []Entry, declared []apiv2registry.Declared, e
 			continue
 		}
 		for _, e := range rows {
+			// Only a row eligible for the marking (tier-1 ported, guardable
+			// method) is required to carry it: a redesigned or replaced row
+			// may name a guarded v2 operation while the review rule keeps
+			// the concurrency field off it, and the two rules must not
+			// contradict each other.
+			if !eligibleForConcurrency(e) {
+				continue
+			}
 			if e.Concurrency != ConcurrencyIfMatch {
 				problems = append(problems, fmt.Sprintf("%s maps to guarded v2 operation %s but is not marked concurrency %s", e.key(), op.OperationID, ConcurrencyIfMatch))
 			}
