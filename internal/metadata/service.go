@@ -5580,8 +5580,8 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		return
 	}
 
-	incomplete := false
 	var completeEpisodeIDs []string
+	var actionableEpisodes []*models.Episode
 	for _, episode := range episodes {
 		if !EpisodeHasActionableMetadataDebt(episode, now) {
 			if s.refreshDebtRepo != nil && episode != nil {
@@ -5591,14 +5591,10 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 			}
 			continue
 		}
-		incomplete = true
-		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
-			slog.WarnContext(ctx, "metadata: failed to sync episode refresh debt", "component", "metadata",
-				"series_id", seriesID,
-				"episode_id", episode.ContentID,
-				"error", err)
-		}
+		actionableEpisodes = append(actionableEpisodes, episode)
 	}
+	// Clear the snapshot's complete episodes before other episode debt writes
+	// can delay cleanup and expose newer retries to the stale snapshot.
 	if len(completeEpisodeIDs) > 0 {
 		if err := s.refreshDebtRepo.DeleteEpisodeDebts(ctx, completeEpisodeIDs); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to clear complete episode refresh debt", "component", "metadata",
@@ -5606,8 +5602,16 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		}
 	}
 
-	lastCheckedAt := now
-	s.updateEpisodeMetadataState(ctx, seriesID, incomplete, &lastCheckedAt)
+	for _, episode := range actionableEpisodes {
+		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to sync episode refresh debt", "component", "metadata",
+				"series_id", seriesID,
+				"episode_id", episode.ContentID,
+				"error", err)
+		}
+	}
+
+	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0, new(now))
 }
 
 func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, episode *models.Episode, now time.Time) error {

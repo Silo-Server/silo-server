@@ -1,8 +1,10 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestRefreshSeriesEpisodeMetadataStateDebtQueries(t *testing.T) {
+func episodeRefreshDebtTestPool(t *testing.T) (*pgxpool.Pool, *seasonEpisodeQueryTracer) {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -42,6 +45,12 @@ func TestRefreshSeriesEpisodeMetadataStateDebtQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return pool, tracer
+}
+
+func TestRefreshSeriesEpisodeMetadataStateDebtQueries(t *testing.T) {
+	pool, tracer := episodeRefreshDebtTestPool(t)
+	ctx := t.Context()
 	for _, count := range []int{1, 100, 1000} {
 		for _, mixed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("episodes=%d/mixed=%t", count, mixed), func(t *testing.T) {
@@ -99,5 +108,74 @@ func TestRefreshSeriesEpisodeMetadataStateDebtQueries(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Keep the complete episode first so this interleaving also preserves the
+// behavior of the original per-episode cleanup loop.
+type orderedDebtEpisodeRepo struct {
+	metadataEpisodeRepo
+	episodes []*models.Episode
+}
+
+func (r *orderedDebtEpisodeRepo) ListBySeries(context.Context, string) ([]*models.Episode, error) {
+	return r.episodes, nil
+}
+
+type failureDuringEpisodeSyncRepo struct {
+	*RefreshDebtRepository
+	retryAt time.Time
+}
+
+func (r *failureDuringEpisodeSyncRepo) GetTarget(ctx context.Context, targetType, contentID string) (*models.MetadataRefreshDebt, error) {
+	if targetType == RefreshTargetEpisode && contentID == "incomplete" {
+		// Another refresh records a failure after ListBySeries returned a
+		// complete snapshot, while this refresh is syncing another episode.
+		if err := r.MarkTargetFailure(ctx, RefreshTargetEpisode, "complete", 300,
+			RefreshDebtReasonEpisodeIncomplete, r.retryAt, 2, "newer provider failure"); err != nil {
+			return nil, err
+		}
+	}
+	return r.RefreshDebtRepository.GetTarget(ctx, targetType, contentID)
+}
+
+func TestRefreshSeriesEpisodeMetadataStateRetainsFailureDuringIncompleteSync(t *testing.T) {
+	pool, tracer := episodeRefreshDebtTestPool(t)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	debts := &failureDuringEpisodeSyncRepo{
+		RefreshDebtRepository: NewRefreshDebtRepository(pool),
+		retryAt:               now.Add(time.Hour),
+	}
+	if err := debts.MarkTargetFailure(ctx, RefreshTargetEpisode, "complete", 300,
+		RefreshDebtReasonEpisodeIncomplete, now, 1, "old failure"); err != nil {
+		t.Fatal(err)
+	}
+	items := newFakeItemRepo()
+	items.items["series"] = &models.MediaItem{ContentID: "series"}
+	episodes := &orderedDebtEpisodeRepo{episodes: []*models.Episode{
+		{ContentID: "complete", SeriesID: "series", Title: "Complete", TmdbID: "123"},
+		{ContentID: "incomplete", SeriesID: "series", Title: "TBA"},
+	}}
+	service := &MetadataService{itemRepo: items, episodeRepo: episodes, refreshDebtRepo: debts}
+	tracer.reset()
+	service.refreshSeriesEpisodeMetadataState(ctx, "series", now)
+	tracer.mu.Lock()
+	deletes := 0
+	for _, query := range tracer.queries {
+		if strings.HasPrefix(strings.TrimSpace(query), "DELETE FROM metadata_refresh_debt") {
+			deletes++
+		}
+	}
+	tracer.mu.Unlock()
+	if deletes != 1 {
+		t.Fatalf("debt DELETE statements = %d, want 1", deletes)
+	}
+	debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "complete")
+	if err != nil {
+		t.Fatalf("newer retry was lost: %v", err)
+	}
+	if debt.AttemptCount != 2 || debt.LastError != "newer provider failure" || !debt.NextRefreshAt.Equal(debts.retryAt) {
+		t.Fatalf("newer retry = %#v", debt)
 	}
 }
