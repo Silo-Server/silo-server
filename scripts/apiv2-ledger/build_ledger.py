@@ -45,6 +45,7 @@ the committed file against the inventory; this script only helps a maintainer
 add rows for new routes or refresh consumer evidence without losing decisions.
 """
 import json
+from assign_sections import section_for
 import os
 import re
 import sys
@@ -70,7 +71,7 @@ if os.path.exists(OUT):
         for e in json.load(f)['entries']:
             existing[(e['listener'], e['method'], e['path'], e['registration_index'])] = e
 
-CURATED = ("capability_endpoint", "release_flow", "tier", "disposition", "disposition_rule",
+CURATED = ("capability_endpoint", "section", "release_flow", "tier", "disposition", "disposition_rule",
            "disposition_rationale", "owner", "review_state", "v2", "notes")
 
 def key(r): return f"{r['listener']} {r['method']} {r['path']}"
@@ -456,7 +457,7 @@ for r in rows:
         ("streams", r['streams']), ("upgrades_websocket", r['upgrades_websocket']),
         ("capability_endpoint", cap_for(r)),
         ("consumers", consumers), ("consumer_call_sites", sites),
-        ("release_flow", flow), ("tier", tier),
+        ("section", section_for({"listener": r["listener"], "namespace": r["namespace"], "method": r["method"], "path": r["path"]})), ("release_flow", flow), ("tier", tier),
         ("disposition", disp), ("disposition_rule", rule), ("disposition_rationale", why),
         ("owner", owner),
         ("review_state", "proposed"),
@@ -470,7 +471,7 @@ for r in rows:
 
 doc = OrderedDict([
     ("schema_version", 1),
-    ("description", "Pre-1.0 native surface to /api/v2 migration ledger: one entry per contracts/api/v2/route-inventory.json row, keyed by listener + method + path + registration_index (the inventory registers a few method+path pairs more than once under different middleware/conditions). Dispositions are proposals until review_state is ratified. release_flow is derived from route intent (who calls the route and for what), not from the path prefix: acting_admin library management under /api/v1/libraries/, the admin scan triggers, and the theme catalog refresh are core_admin while the viewer-facing /api/v1/library/{id}/* reads are browse_search. Tier rule: tier 1 when release_flow is one of the plan's release-critical flows (login, setup, profiles, browse_search, playback_lifecycle, progress, settings, notifications, downloads, core_admin) and the disposition is not removed; removed rows are tier 2 because there is no v2 behavior to baseline; every other row is tier 2. owner is required on removed, redesigned, and replaced rows and holds the literal pending:#135/execution-input-1 until named reviewers are recorded; a row cannot be ratified while its owner is pending."),
+    ("description", "Pre-1.0 native surface to /api/v2 migration ledger: one entry per contracts/api/v2/route-inventory.json row, keyed by listener + method + path + registration_index (the inventory registers a few method+path pairs more than once under different middleware/conditions). Dispositions are proposals until review_state is ratified. release_flow is derived from route intent (who calls the route and for what), not from the path prefix: acting_admin library management under /api/v1/libraries/, the admin scan triggers, and the theme catalog refresh are core_admin while the viewer-facing /api/v1/library/{id}/* reads are browse_search. Tier rule: tier 1 when release_flow is one of the plan's release-critical flows (login, setup, profiles, browse_search, playback_lifecycle, progress, settings, notifications, downloads, core_admin) and the disposition is not removed; removed rows are tier 2 because there is no v2 behavior to baseline; every other row is tier 2. owner is required on removed, redesigned, and replaced rows and holds the literal pending:#135/execution-input-1 until named reviewers are recorded; a row cannot be ratified while its owner is pending. section is the Phase 4 delivery unit (one section PR per value), assigned by scripts/apiv2-ledger/assign_sections.py from listener, namespace and path."),
     ("source_inventory", "contracts/api/v2/route-inventory.json"),
     ("source_trees", OrderedDict([("silo-apple", APPLE_SHA), ("silo-android", ANDROID_SHA), ("silo-server", "this repository")])),
     ("consumer_method", "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse."),

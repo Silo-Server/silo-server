@@ -18,6 +18,10 @@ will pin rather than pointing the scripts at a working checkout.
   checkouts given, also report credited files missing at the pinned commits
   as `stale-against-pinned-tree`.
 - `build_ledger.py ROUTE_INVENTORY CONSUMER_MAP LEDGER APPLE_SHA ANDROID_SHA`
+- `assign_sections.py [--check] [LEDGER]` writes the `section` field (the Phase 4 delivery
+  unit) onto every entry from listener, namespace and path; `--check` is what
+  `make verify-migration-ledger` runs. Move a route between sections by editing the
+  script's tables, then rerun it.
   — merge a regenerated inventory and consumer map into the ledger by key,
   preserving curated fields, manual and follower call sites, and each
   mechanical site's `path_literal_line`; seeds defaults only for rows with no

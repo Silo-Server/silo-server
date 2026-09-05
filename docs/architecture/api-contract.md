@@ -168,7 +168,7 @@ fails with `dynamic_plugin_proxy rule on a non-proxy handler`. The gate also pri
 mismatch, because later ones cascade from it.
 
 The second kind is curated by hand and is what the ledger exists to hold: `consumers` and
-`consumer_call_sites` (including `match: manual` and `match: follower` sites), `release_flow`, `tier`, `disposition`,
+`consumer_call_sites` (including `match: manual` and `match: follower` sites), `section`, `release_flow`, `tier`, `disposition`,
 `disposition_rule`, `disposition_rationale`, `owner`, `review_state`, `v2`, and `notes`. The
 schema ties them together: each `disposition_rule` names the document or decision that justifies
 it and is therefore allowed only with the disposition it justifies (`maintainer_decision` is the
@@ -187,6 +187,14 @@ listeners have no `/api/v2` namespace, so the route is retained at its version-n
 described through the manual registry, never aliased into v2. Because these fields are decisions
 rather than derivations, the ledger is gated, not regenerated: CI checks the committed file, and
 nothing rewrites it.
+
+`section` is the one scheduling field with a generator: it names the Phase 4 delivery unit (one
+section PR per value, at most 40 rows each) and is a pure function of listener, namespace and
+path in `scripts/apiv2-ledger/assign_sections.py`. `make verify-migration-ledger` fails when the
+committed assignments differ from the script's, so a new route lands in a section by regenerating,
+and moving a route between sections is a change to the script, reviewed like any other boundary
+decision. Rows that need no v2 work (`removed`, `documented_exclusion`) still carry a section so
+the PR that retires or documents them is unambiguous.
 
 Consumer evidence comes from `scripts/apiv2-ledger/`. `extract_consumers.py` scans `web/src`, a
 silo-apple tree, and a silo-android tree for HTTP and WebSocket calls, resolving path literals,
