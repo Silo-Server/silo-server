@@ -1061,7 +1061,7 @@ export interface components {
       allow_profile_custom_sections: boolean;
     };
     ProfileSectionSetting: {
-      /** @description The recipe's effective config; absent when none */
+      /** @description The recipe's effective config; absent when none, {} when explicitly empty */
       config?: {
         [key: string]: unknown;
       };
@@ -1238,7 +1238,7 @@ export interface components {
       updated_at: string;
     };
     SectionOverride: {
-      /** @description Legacy config override; absent when none */
+      /** @description Legacy config override; absent when the profile saved none (the section's own config applies), {} when it saved an empty one */
       config?: {
         [key: string]: unknown;
       };
@@ -1303,7 +1303,7 @@ export interface components {
        * @example 2026-01-02T03:04:05.000Z
        */
       updated_at: string | null;
-      /** @description Config of a profile-built section; absent when none */
+      /** @description Config of a profile-built section; absent when the profile saved none (config applies), {} when it saved an empty one */
       user_config?: {
         [key: string]: unknown;
       };
@@ -1329,7 +1329,7 @@ export interface components {
       overrides: components["schemas"]["SectionOverrideWrite"][];
     };
     SectionOverrideWrite: {
-      /** @description Legacy config override; validated by the recipe on a profile-built section */
+      /** @description Legacy config override; {} saves an explicitly empty one, omitted saves none. Validated by the recipe on a profile-built section */
       config?: {
         [key: string]: unknown;
       };
@@ -1379,7 +1379,7 @@ export interface components {
        * @example New this week
        */
       title?: string;
-      /** @description Config of a profile-built section; validated by the recipe */
+      /** @description Config of a profile-built section; {} saves an explicitly empty one, omitted saves none. Validated by the recipe */
       user_config?: {
         [key: string]: unknown;
       };

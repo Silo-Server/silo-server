@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func sectionDeps(svc *fakeProfileSections) Dependencies {
@@ -49,6 +50,72 @@ func TestListProfileSectionOverrides(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/api/v2/profile/sections", "", with(bearer(memberToken), "X-Profile-Id", "p-owner"))
 	if rec.Body.String() != `{"items":[]}`+"\n" {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+// TestProfileSectionConfigPresence is the absent-versus-empty rule for the
+// config members: the web editors round-trip GET through the
+// full-replacement PUT, so a saved {} must survive as {} or an unrelated hide
+// or reorder would silently drop it and let the section fall back to its
+// inherited config.
+func TestProfileSectionConfigPresence(t *testing.T) {
+	svc := &fakeProfileSections{rows: []userstore.SectionOverride{
+		{ID: "o-empty", SectionID: "s-continue", Config: `{}`},
+		{ID: "o-user-empty", IsUserAdded: true, UserSectionType: "hidden_gems", Config: `{"library_ids":[3]}`, UserConfig: `{}`},
+		{ID: "o-none", SectionID: "s-recent"},
+	}}
+	h := newTestHandler(t, sectionDeps(svc))
+	auth := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	// A stored {} is present and empty on the read; no stored config omits
+	// the member.
+	rec := do(t, h, http.MethodGet, "/api/v2/profile/sections", "", auth)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	var got struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got.Items) != 3 {
+		t.Fatalf("%v %s", err, rec.Body.String())
+	}
+	if c, ok := got.Items[0]["config"]; !ok || string(c) != `{}` {
+		t.Fatalf("o-empty config = %q, present %v", c, ok)
+	}
+	if _, ok := got.Items[0]["user_config"]; ok {
+		t.Fatalf("o-empty user_config present: %s", rec.Body.String())
+	}
+	if c, ok := got.Items[1]["user_config"]; !ok || string(c) != `{}` {
+		t.Fatalf("o-user-empty user_config = %q, present %v", c, ok)
+	}
+	if c := got.Items[1]["config"]; string(c) != `{"library_ids":[3]}` {
+		t.Fatalf("o-user-empty config = %q", c)
+	}
+	for _, member := range []string{"config", "user_config"} {
+		if _, ok := got.Items[2][member]; ok {
+			t.Fatalf("o-none %s present: %s", member, rec.Body.String())
+		}
+	}
+
+	// On the write, {} reaches v1 as {} (an explicitly empty document) and
+	// an omitted member reaches it as absent.
+	body := `{"overrides":[` +
+		`{"id":"o-empty","section_id":"s-continue","config":{}},` +
+		`{"id":"o-user-empty","is_user_added":true,"user_section_type":"hidden_gems","config":{"library_ids":[3]},"user_config":{}},` +
+		`{"id":"o-none","section_id":"s-recent"}` +
+		`]}`
+	rec = do(t, h, http.MethodPut, "/api/v2/profile/sections", body, auth)
+	if rec.Code != 204 || len(svc.lastWrites) != 3 {
+		t.Fatalf("%d %s writes = %+v", rec.Code, rec.Body.String(), svc.lastWrites)
+	}
+	if w := svc.lastWrites[0]; string(w.Config) != `{}` || w.UserConfig != nil {
+		t.Fatalf("o-empty write = config %q user_config %q", w.Config, w.UserConfig)
+	}
+	if w := svc.lastWrites[1]; string(w.Config) != `{"library_ids":[3]}` || string(w.UserConfig) != `{}` {
+		t.Fatalf("o-user-empty write = config %q user_config %q", w.Config, w.UserConfig)
+	}
+	if w := svc.lastWrites[2]; w.Config != nil || w.UserConfig != nil {
+		t.Fatalf("o-none write = config %q user_config %q", w.Config, w.UserConfig)
 	}
 }
 

@@ -21,7 +21,11 @@ import (
 // in PascalCase and took the write in snake_case; v2 is snake_case on both.
 
 // SectionConfig is a recipe's configuration document. Its keys are fixed by
-// the recipe named in section_type, not by this contract.
+// the recipe named in section_type, not by this contract. Presence carries
+// meaning: a nil map is an absent member (no config saved, so the section's
+// own config applies) and an empty non-nil map is an explicitly empty one,
+// so every member of this type is tagged omitzero, never omitempty, which
+// would drop {} on the read and let a full-replacement PUT lose it.
 type SectionConfig map[string]any
 
 // Schema declares the config as a named extension bag.
@@ -47,10 +51,10 @@ type SectionOverride struct {
 	Title           string          `json:"title" doc:"Title override; empty keeps the admin title" example:"New this week"`
 	Featured        *bool           `json:"featured" nullable:"true" doc:"Featured override; null keeps the admin value" example:"false"`
 	ItemLimit       *int            `json:"item_limit" nullable:"true" doc:"Item-limit override; null keeps the admin value" example:"20"`
-	Config          SectionConfig   `json:"config,omitempty" doc:"Legacy config override; absent when none"`
+	Config          SectionConfig   `json:"config,omitzero" doc:"Legacy config override; absent when the profile saved none (the section's own config applies), {} when it saved an empty one"`
 	IsUserAdded     bool            `json:"is_user_added" doc:"A profile-built section rather than a customization of an admin one" example:"false"`
 	UserSectionType string          `json:"user_section_type" doc:"Recipe of a profile-built section; empty otherwise" example:"hidden_gems"`
-	UserConfig      SectionConfig   `json:"user_config,omitempty" doc:"Config of a profile-built section; absent when none"`
+	UserConfig      SectionConfig   `json:"user_config,omitzero" doc:"Config of a profile-built section; absent when the profile saved none (config applies), {} when it saved an empty one"`
 	UserTitle       string          `json:"user_title" doc:"Title of a profile-built section; empty otherwise" example:"Hidden gems"`
 	CreatedAt       NullableInstant `json:"created_at" doc:"When the row was saved; null when the store did not record it" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt       NullableInstant `json:"updated_at" doc:"When the row was last saved; null when the store did not record it" example:"2026-01-02T03:04:05.000Z"`
@@ -80,10 +84,10 @@ type SectionOverrideWrite struct {
 	Title           *string       `json:"title,omitempty" nullable:"false" maxLength:"200" doc:"Title override; empty keeps the admin title" example:"New this week"`
 	Featured        *bool         `json:"featured,omitempty" nullable:"true" doc:"Featured override; null or omitted keeps the admin value" example:"false"`
 	ItemLimit       *int          `json:"item_limit,omitempty" nullable:"true" minimum:"1" doc:"Item-limit override; null or omitted keeps the admin value" example:"20"`
-	Config          SectionConfig `json:"config,omitempty" doc:"Legacy config override; validated by the recipe on a profile-built section"`
+	Config          SectionConfig `json:"config,omitzero" doc:"Legacy config override; {} saves an explicitly empty one, omitted saves none. Validated by the recipe on a profile-built section"`
 	IsUserAdded     *bool         `json:"is_user_added,omitempty" nullable:"false" doc:"A profile-built section; an empty section_id implies it" example:"false"`
 	UserSectionType *string       `json:"user_section_type,omitempty" nullable:"false" maxLength:"64" doc:"Recipe of a profile-built section; must be registered on this server" example:"hidden_gems"`
-	UserConfig      SectionConfig `json:"user_config,omitempty" doc:"Config of a profile-built section; validated by the recipe"`
+	UserConfig      SectionConfig `json:"user_config,omitzero" doc:"Config of a profile-built section; {} saves an explicitly empty one, omitted saves none. Validated by the recipe"`
 	UserTitle       *string       `json:"user_title,omitempty" nullable:"false" maxLength:"200" example:"Hidden gems"`
 }
 
@@ -120,7 +124,7 @@ type ProfileSectionSetting struct {
 	IsCustom    bool          `json:"is_custom" doc:"Built by the profile rather than defined by an administrator" example:"false"`
 	Customized  bool          `json:"customized" doc:"An admin section the profile has changed" example:"true"`
 	Position    int           `json:"position" example:"0"`
-	Config      SectionConfig `json:"config,omitempty" doc:"The recipe's effective config; absent when none"`
+	Config      SectionConfig `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
 }
 
 // ProfileSectionSettingCollection is the getProfileSectionSettings envelope.
@@ -425,7 +429,9 @@ func (o SectionOverrideWrite) toWrite(index int) (handlers.SectionOverrideWrite,
 }
 
 // rawConfigOf re-encodes a config document for the v1 member, where an
-// absent one is empty.
+// absent one is empty and {} is stored as sent, so v1's recipe gate
+// validates an explicitly empty user_config instead of falling back to the
+// legacy config.
 func rawConfigOf(c SectionConfig, index int, member string) (json.RawMessage, *Problem) {
 	if c == nil {
 		return nil, nil
@@ -440,7 +446,8 @@ func rawConfigOf(c SectionConfig, index int, member string) (json.RawMessage, *P
 
 // sectionConfigOf decodes a stored config document. The store holds what a
 // client sent through the recipe gate, so a document that is not an object
-// is a server defect, never a client one; empty is absent.
+// is a server defect, never a client one. An empty string is absent (nil);
+// a stored {} decodes to an empty non-nil map and stays present on the wire.
 func sectionConfigOf(stored string) (SectionConfig, *Problem) {
 	if stored == "" {
 		return nil, nil

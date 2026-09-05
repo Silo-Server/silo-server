@@ -35905,7 +35905,7 @@
         "path": "/api/v2/profile/sections",
         "operation_id": "listProfileSectionOverrides"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape (/profile/sections). Read is snake_case, matching the write (v1 answered PascalCase store fields; the Phase 1 catalogs flagged the GET/PUT casing mismatch). scope is an enum (home, library) and must agree with library_id (v1 stored any pair). Store timestamps are nullable instants."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape (/profile/sections). Read is snake_case, matching the write (v1 answered PascalCase store fields; the Phase 1 catalogs flagged the GET/PUT casing mismatch). scope is an enum (home, library) and must agree with library_id (v1 stored any pair). Store timestamps are nullable instants. config and user_config keep v1's presence rule: omitted when the profile saved none, {} when it saved an explicitly empty one, so the read round-trips through the full-replacement PUT without dropping an empty config."
     },
     {
       "listener": "api",

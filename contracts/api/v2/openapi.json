@@ -1643,7 +1643,7 @@
         "properties": {
           "config": {
             "additionalProperties": true,
-            "description": "The recipe's effective config; absent when none",
+            "description": "The recipe's effective config; absent when none, {} when explicitly empty",
             "type": "object",
             "x-silo-extension-bag": "section-config"
           },
@@ -2024,7 +2024,7 @@
         "properties": {
           "config": {
             "additionalProperties": true,
-            "description": "Legacy config override; absent when none",
+            "description": "Legacy config override; absent when the profile saved none (the section's own config applies), {} when it saved an empty one",
             "type": "object",
             "x-silo-extension-bag": "section-config"
           },
@@ -2136,7 +2136,7 @@
           },
           "user_config": {
             "additionalProperties": true,
-            "description": "Config of a profile-built section; absent when none",
+            "description": "Config of a profile-built section; absent when the profile saved none (config applies), {} when it saved an empty one",
             "type": "object",
             "x-silo-extension-bag": "section-config"
           },
@@ -2215,7 +2215,7 @@
         "properties": {
           "config": {
             "additionalProperties": true,
-            "description": "Legacy config override; validated by the recipe on a profile-built section",
+            "description": "Legacy config override; {} saves an explicitly empty one, omitted saves none. Validated by the recipe on a profile-built section",
             "type": "object",
             "x-silo-extension-bag": "section-config"
           },
@@ -2306,7 +2306,7 @@
           },
           "user_config": {
             "additionalProperties": true,
-            "description": "Config of a profile-built section; validated by the recipe",
+            "description": "Config of a profile-built section; {} saves an explicitly empty one, omitted saves none. Validated by the recipe",
             "type": "object",
             "x-silo-extension-bag": "section-config"
           },
