@@ -270,6 +270,38 @@ func malformedETagList(field string) *Problem {
 // with StaleVersionProblem; it never reaches the wire as a 500.
 var ErrStaleVersion = errors.New("apiv2: row version is stale")
 
+// EvaluateGuardedPreconditions evaluates a guarded mutation's preconditions
+// in RFC 9110 13.2.2 order once the resource is known to exist: If-Match
+// first (nil, 428, 412 with the current ETag, or 400), then If-None-Match,
+// which on a state-changing request answers 412 when any listed tag weakly
+// matches the current representation or the field is "*". A handler whose
+// input binds both fields calls this instead of EvaluateIfMatch alone.
+func EvaluateGuardedPreconditions(ifMatch, ifNoneMatch string, current EntityTag) *Problem {
+	if p := EvaluateIfMatch(ifMatch, current); p != nil {
+		return p
+	}
+	if ifNoneMatch == "" {
+		return nil
+	}
+	tags, star, err := ParseETagList(ifNoneMatch)
+	if err != nil {
+		return malformedETagList(ifNoneMatchField)
+	}
+	if star {
+		return NewProblem(TypePreconditionFailed,
+			"If-None-Match: * refuses the mutation because the resource exists.").
+			WithHeader(etagField, current.String())
+	}
+	for _, t := range tags {
+		if WeakMatch(t, current) {
+			return NewProblem(TypePreconditionFailed,
+				"A tag named by If-None-Match matches the current representation; the mutation was not applied.").
+				WithHeader(etagField, current.String())
+		}
+	}
+	return nil
+}
+
 // IsOverwrite reports whether an If-Match field is the wildcard: the caller
 // asked for a deliberate overwrite, so a compare-and-update that loses a race
 // to a writer who left the resource in place is re-applied against the

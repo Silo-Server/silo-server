@@ -310,6 +310,24 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 	return nil
 }
 
+// declaresHeader reports whether struct type t has a direct, exported field
+// bound to the named header, of any type.
+func declaresHeader(t reflect.Type, name string) bool {
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous || !f.IsExported() {
+			continue
+		}
+		if strings.EqualFold(f.Tag.Get("header"), name) {
+			return true
+		}
+	}
+	return false
+}
+
 // declaresHeaderString reports whether struct type t has a direct, exported
 // string field bound to the named header, compared case-insensitively as
 // HTTP header names are. Only direct exported fields count: Huma ignores

@@ -154,6 +154,13 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/probe/guarded/a",
 			headers: map[string]string{"If-None-Match": RenderETag(1, guardedProbeScope).String()},
 			status:  http.StatusNotModified, assertHeaders: []string{"Cache-Control", "ETag"}},
+		// Last: one handler serves every case, and the cases above read
+		// resource "a" at version 1.
+		{name: "guarded_delete_ok",
+			scenario: "A guarded DELETE whose If-Match names the current ETag: 204 with no body and no validator, since the representation is gone.",
+			method:   http.MethodDelete, path: "/api/v2/probe/guarded/a",
+			headers: map[string]string{"If-Match": RenderETag(1, guardedProbeScope).String()},
+			status:  http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
 	}
 }
 
@@ -187,7 +194,8 @@ type fixtureIndexEntry struct {
 	Request         fixtureRequest    `json:"request"`
 	ExpectedStatus  int               `json:"expected_status"`
 	ResponseHeaders map[string]string `json:"response_headers"`
-	// The three are null on a 304, which carries no representation.
+	// The three are null on a bodyless 204 or 304, which carries no
+	// representation.
 	ResponseMediaType *string `json:"response_media_type"`
 	Schema            *string `json:"schema"`
 	BodyFile          *string `json:"body_file"`
@@ -242,11 +250,11 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			headers[name] = v
 		}
 		var mediaType, schema, bodyFile *string
-		if c.status == http.StatusNotModified {
-			// A 304 has no representation: no body file, no media type, no
-			// schema. The index entry records the headers alone.
+		if c.status == http.StatusNotModified || c.status == http.StatusNoContent {
+			// A 204 or 304 has no representation: no body file, no media
+			// type, no schema. The index entry records the headers alone.
 			if rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "" {
-				t.Fatalf("%s: 304 carries a body %q or Content-Type %q", c.name, rec.Body.String(), rec.Header().Get("Content-Type"))
+				t.Fatalf("%s: %d carries a body %q or Content-Type %q", c.name, c.status, rec.Body.String(), rec.Header().Get("Content-Type"))
 			}
 		} else {
 			mt := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])

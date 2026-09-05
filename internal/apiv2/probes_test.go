@@ -274,9 +274,10 @@ type guardedProbeReadInput struct {
 }
 
 type guardedProbeWriteInput struct {
-	ID      string `path:"id" doc:"Probe resource id"`
-	IfMatch string `header:"If-Match" doc:"The resource's current ETag"`
-	Body    struct {
+	ID          string `path:"id" doc:"Probe resource id"`
+	IfMatch     string `header:"If-Match" doc:"The resource's current ETag"`
+	IfNoneMatch string `header:"If-None-Match" doc:"Optional second precondition, evaluated after If-Match"`
+	Body        struct {
 		Name string `json:"name" minLength:"1"`
 	}
 }
@@ -348,7 +349,7 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				return nil, NewProblem(TypeNotFound, "No probe resource has this id.")
 			}
 			current := RenderETag(row.Version, guardedProbeScope)
-			if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
 				return nil, p
 			}
 			// The precondition passed; domain state may still refuse.

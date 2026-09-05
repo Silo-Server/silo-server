@@ -234,6 +234,38 @@ func TestGuardedProbeLostRaceIs412(t *testing.T) {
 	}
 }
 
+// TestGuardedProbeIfNoneMatchAfterIfMatch: RFC 9110 13.2.2 evaluates
+// If-None-Match after If-Match succeeds; on a mutation a match (or "*") is
+// 412 with the current ETag, and the resource is untouched.
+func TestGuardedProbeIfNoneMatchAfterIfMatch(t *testing.T) {
+	h, store := guardedHandler(t)
+	current := RenderETag(1, guardedProbeScope).String()
+	for _, none := range []string{current, "W/" + current, "*", `"other", ` + current} {
+		rec := do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"beta"}`, map[string]string{"If-Match": current, "If-None-Match": none})
+		requireProblem(t, rec, TypePreconditionFailed)
+		if got := rec.Header().Get("ETag"); got != current {
+			t.Fatalf("If-None-Match %q: 412 ETag = %q", none, got)
+		}
+		if row, _ := store.Get("a"); row.Name != "alpha" || row.Version != 1 {
+			t.Fatalf("If-None-Match %q: resource changed: %+v", none, row)
+		}
+	}
+	// A non-matching If-None-Match lets the mutation through.
+	rec := do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"beta"}`, map[string]string{"If-Match": current, "If-None-Match": RenderETag(99, guardedProbeScope).String()})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("non-matching If-None-Match: status %d body %s", rec.Code, rec.Body.String())
+	}
+	// A stale If-Match is reported before If-None-Match is looked at.
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"gamma"}`, map[string]string{"If-Match": current, "If-None-Match": "*"})
+	p := requireProblem(t, rec, TypePreconditionFailed)
+	if strings.Contains(p.Detail, "If-None-Match") {
+		t.Fatalf("If-Match should be evaluated first: %q", p.Detail)
+	}
+	// Malformed If-None-Match after a passing If-Match is 400.
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"gamma"}`, map[string]string{"If-Match": "*", "If-None-Match": "not-a-tag"})
+	requireProblem(t, rec, TypeMalformedRequest)
+}
+
 // TestGuardedProbeWildcardSurvivesLostRace: "*" is a deliberate overwrite,
 // so a writer that lands between the load and the compare-and-update does
 // not turn it into a 412 while the resource still exists.

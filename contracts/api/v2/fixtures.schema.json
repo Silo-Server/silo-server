@@ -53,26 +53,25 @@
         "response_media_type": {
           "type": ["string", "null"],
           "enum": ["application/json", "application/problem+json", null],
-          "description": "Null only on a 304, which carries no representation."
+          "description": "Null only on a bodyless status (204 or 304), which carries no representation."
         },
         "schema": {
           "type": ["string", "null"],
           "pattern": "^#/components/schemas/[A-Z][A-Za-z0-9]*$",
-          "description": "JSON pointer into contracts/api/v2/openapi.json naming the schema the body satisfies; null only on a 304."
+          "description": "JSON pointer into contracts/api/v2/openapi.json naming the schema the body satisfies; null only on a bodyless status (204 or 304)."
         },
         "body_file": {
           "type": ["string", "null"],
           "pattern": "^[a-z][a-z0-9_]*\\.json$",
-          "description": "The committed body, <name>.json; null only on a 304, which has no body file."
+          "description": "The committed body, <name>.json; null only on a bodyless status (204 or 304), which has no body file."
         }
       },
-      "if": { "properties": { "expected_status": { "const": 304 } } },
+      "if": { "properties": { "expected_status": { "enum": [204, 304] } } },
       "then": {
         "properties": {
           "response_media_type": { "type": "null" },
           "schema": { "type": "null" },
-          "body_file": { "type": "null" },
-          "response_headers": { "required": ["ETag"] }
+          "body_file": { "type": "null" }
         }
       },
       "else": {

@@ -77,6 +77,9 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.Conditional {
 		op.Extensions[extConditional] = true
 	}
+	if op.Guarded && declaresHeader(input, ifNoneMatchField) {
+		op.Parameters = append(op.Parameters, ifNoneMatchGuardedParam())
+	}
 	if op.CreateOnly {
 		op.Extensions[extCreateOnly] = true
 		op.Parameters = append(op.Parameters, ifNoneMatchCreateParam())
@@ -158,6 +161,19 @@ func ifMatchParam() *huma.Param {
 
 // ifNoneMatchCreateParam documents the optional create-only precondition:
 // "*" refuses to overwrite an existing resource at the client-selected id.
+// ifNoneMatchGuardedParam documents the optional second precondition a
+// guarded mutation may bind: evaluated after If-Match succeeds, per RFC 9110
+// 13.2.2.
+func ifNoneMatchGuardedParam() *huma.Param {
+	return &huma.Param{
+		Name:        ifNoneMatchField,
+		In:          "header",
+		Required:    false,
+		Description: "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+		Schema:      &huma.Schema{Type: "string"},
+	}
+}
+
 func ifNoneMatchCreateParam() *huma.Param {
 	return &huma.Param{
 		Name:        ifNoneMatchField,
@@ -214,9 +230,13 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 			continue
 		}
 		switch {
-		case code >= 200 && code < 300 && code != http.StatusNoContent:
-			// A 204 has no representation to validate; Register refuses an
-			// ETag field on a guarded DELETE's output for the same reason.
+		case code == http.StatusNoContent && op.Guarded && op.Method == http.MethodDelete:
+			// A guarded DELETE's 204 has no representation to validate and
+			// Register refuses an ETag field on its output.
+			continue
+		case code >= 200 && code < 300:
+			// Every other success, including a bodyless 204 from a PUT or
+			// PATCH output that carries only ETag, sends the header.
 		case code == http.StatusPreconditionFailed && (op.Guarded || op.CreateOnly):
 			// A stale If-Match, a refused create-only If-None-Match, and a
 			// lost compare-and-update race all answer 412 with the current

@@ -369,8 +369,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   retries while the condition holds, so only a state that falsifies the condition is `412`. `TestGuardedOperationsAreMarkedIfMatch`
   reconciles both directions and refuses a guarded operation that maps to no legacy row
   unless `guardedWithoutLegacyRow` names it with a reason. A
-  guarded operation documents `412` and `428`, a required `If-Match` parameter, and the
-  `ETag` header on every `2xx` other than `204` and on the `412`; a conditional read
+  guarded operation documents `412` and `428`, a required `If-Match` parameter, an optional
+  `If-None-Match` parameter when its input binds one, and the `ETag` header on every `2xx`
+  (except a guarded DELETE's `204`, which carries none) and on the `412`; a conditional read
   documents `304` with `ETag`; a create-only PUT documents `412` with `ETag`, an optional
   `If-None-Match` parameter and `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
   `x-silo-create-only` so a reader can enumerate them. The router joins repeated `If-Match`
@@ -382,7 +383,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   quoted, opaque; the scope keeps redacted representations from sharing a validator),
   `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),
   `StrongMatch` / `WeakMatch`, `EvaluateIfMatch` (nil, `428`, `412` with the current `ETag`, or
-  `400 malformed_request` without echoing the value), `EvaluateIfNoneMatch` and `NotModified`
+  `400 malformed_request` without echoing the value), `EvaluateGuardedPreconditions` (the RFC
+  9110 13.2.2 order for a mutation that binds both fields: `If-Match` first, then an
+  `If-None-Match` whose match or `*` is `412`), `EvaluateIfNoneMatch` and `NotModified`
   for `304`, `EvaluateCreateOnly` for `If-None-Match: *`, and the `ErrStaleVersion` sentinel a
   storage compare-and-update returns, mapped by `StaleVersionProblem`. The handler loads
   first (`404` before any precondition), evaluates, then writes. The ledger's optional

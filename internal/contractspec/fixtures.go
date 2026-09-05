@@ -40,7 +40,8 @@ type Fixture struct {
 	Request         FixtureRequest    `json:"request"`
 	ExpectedStatus  int               `json:"expected_status"`
 	ResponseHeaders map[string]string `json:"response_headers"`
-	// The three are null on a 304, which carries no representation.
+	// The three are null on a bodyless status (204 or 304), which carries
+	// no representation.
 	ResponseMediaType *string `json:"response_media_type"`
 	Schema            *string `json:"schema"`
 	BodyFile          *string `json:"body_file"`
@@ -128,22 +129,25 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 			fail("%s: duplicate fixture name", where)
 		}
 		names[f.Name] = true
-		if f.ExpectedStatus == 304 {
+		if f.ExpectedStatus == 204 || f.ExpectedStatus == 304 {
 			if f.BodyFile != nil || f.Schema != nil || f.ResponseMediaType != nil {
-				fail("%s: a 304 fixture has no representation: body_file, schema and response_media_type must be null", where)
+				fail("%s: a %d fixture has no representation: body_file, schema and response_media_type must be null", where, f.ExpectedStatus)
 			}
-			if f.ResponseHeaders["ETag"] == "" {
+			if f.ExpectedStatus == 304 && f.ResponseHeaders["ETag"] == "" {
 				fail("%s: a 304 fixture must record ETag", where)
 			}
+			if f.ExpectedStatus == 204 && f.ResponseHeaders["ETag"] != "" {
+				fail("%s: a 204 fixture records an ETag, but a deleted representation has no validator", where)
+			}
 			if f.OperationID != nil {
-				if info, ok := ops[*f.OperationID]; !ok || !info.statuses["304"] {
-					fail("%s: openapi.json does not document status 304 on %s", where, *f.OperationID)
+				if info, ok := ops[*f.OperationID]; !ok || !info.statuses[fmt.Sprint(f.ExpectedStatus)] {
+					fail("%s: openapi.json does not document status %d on %s", where, f.ExpectedStatus, *f.OperationID)
 				}
 			}
 			continue
 		}
 		if f.BodyFile == nil || f.Schema == nil || f.ResponseMediaType == nil {
-			fail("%s: body_file, schema and response_media_type are required outside a 304", where)
+			fail("%s: body_file, schema and response_media_type are required outside a bodyless 204 or 304", where)
 			continue
 		}
 		bodyFile, schemaRef, mediaType := *f.BodyFile, *f.Schema, *f.ResponseMediaType

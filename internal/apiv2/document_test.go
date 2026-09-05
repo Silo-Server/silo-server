@@ -296,11 +296,12 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		Class:     ClassPublic,
 		Guarded:   true,
 	}, func(_ context.Context, in *struct {
-		ID      string `path:"id"`
-		IfMatch string `header:"If-Match"`
-		Body    probeBody
+		ID          string `path:"id"`
+		IfMatch     string `header:"If-Match"`
+		IfNoneMatch string `header:"If-None-Match"`
+		Body        probeBody
 	}) (*guardedDocOutput, error) {
-		if p := EvaluateIfMatch(in.IfMatch, current); p != nil {
+		if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
 			return nil, p
 		}
 		return &guardedDocOutput{ETag: current.String(), Body: probeEcho{Name: in.Body.Name, Tags: []string{}, Labels: map[string]int{}}}, nil
@@ -388,6 +389,18 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	}
 	if put.Responses["200"].Headers["ETag"] == nil {
 		t.Fatalf("put 200 lacks the ETag header: %+v", put.Responses["200"])
+	}
+	ifNoneMatchOnPut := false
+	for _, p := range put.Parameters {
+		if p.Name == "If-None-Match" && p.In == "header" {
+			ifNoneMatchOnPut = true
+			if p.Required {
+				t.Fatal("If-None-Match on a guarded put must be optional")
+			}
+		}
+	}
+	if !ifNoneMatchOnPut {
+		t.Fatalf("a guarded put that binds If-None-Match must document it: %+v", put.Parameters)
 	}
 	if put.Responses["412"].Headers["ETag"] == nil {
 		t.Fatalf("put 412 lacks the ETag header a stale tag is answered with: %+v", put.Responses["412"])
