@@ -49,6 +49,7 @@ export default function AdminDashboard() {
   const pageActivity = usePageActivity();
   const layout = useDashboardLayout();
   const manualRefreshStartedAtRef = useRef<number | null>(null);
+  const autoRefreshPromiseRef = useRef<Promise<void> | null>(null);
   const wasDashboardPollingPausedRef = useRef(!pageActivity.canPollDashboard);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   const [lastDashboardUpdatedAt, setLastDashboardUpdatedAt] = useState<number | null>(null);
@@ -182,9 +183,14 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!pageActivity.canPollDashboard || isManualRefreshPending) return;
     const interval = window.setInterval(() => {
-      void refreshDashboard({ manual: false }).catch((error: unknown) => {
-        console.error("Failed to refresh dashboard", error);
-      });
+      if (autoRefreshPromiseRef.current) return;
+      autoRefreshPromiseRef.current = refreshDashboard({ manual: false })
+        .catch((error: unknown) => {
+          console.error("Failed to refresh dashboard", error);
+        })
+        .finally(() => {
+          autoRefreshPromiseRef.current = null;
+        });
     }, DASHBOARD_AUTO_REFRESH_MS);
     return () => window.clearInterval(interval);
   }, [isManualRefreshPending, pageActivity.canPollDashboard, refreshDashboard]);

@@ -97,3 +97,34 @@ it("retries on the next interval after an automatic refresh fails", async () => 
   expect(mocks.fetchStats).toHaveBeenCalledTimes(2);
   error.mockRestore();
 });
+
+it.each(["resolve", "reject"] as const)(
+  "skips automatic refresh ticks until a pending request settles (%s)",
+  async (outcome) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    let resolve!: (value: object) => void;
+    let reject!: (reason: Error) => void;
+    mocks.fetchStats.mockReturnValueOnce(
+      new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      }),
+    );
+    try {
+      render(<AdminDashboard />);
+      await act(() => vi.advanceTimersByTimeAsync(180_000));
+      expect(mocks.fetchStats).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+
+      await act(async () => {
+        if (outcome === "resolve") resolve({});
+        else reject(new Error("temporary outage"));
+      });
+      expect(error).toHaveBeenCalledTimes(outcome === "reject" ? 1 : 0);
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      expect(mocks.fetchStats).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+    }
+  },
+);
