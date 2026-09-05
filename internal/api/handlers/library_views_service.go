@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -315,7 +316,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, l
 		return nil, apiError(http.StatusNotFound, "not_found", "Library not found")
 	}
 	collection, err := h.repo.GetByID(ctx, collectionID)
-	if err != nil || collection.LibraryID != libraryID || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {
+	if err != nil || !collectionSpansLibrary(collection, libraryID) || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {
 		return nil, apiError(http.StatusNotFound, "not_found", "Collection not found")
 	}
 	var items []itemListResponse
@@ -332,4 +333,14 @@ func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, l
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection items")
 	}
 	return items, nil
+}
+
+// collectionSpansLibrary reports whether the collection is a member of the
+// library: listed in its full membership (LibraryIDs, the rows of
+// library_collection_libraries that ListByLibrary joins on) or carrying it
+// as the legacy primary LibraryID. A collection spanning libraries [1,2]
+// is listed on both Collections tabs, so its items must be served from
+// either library too.
+func collectionSpansLibrary(collection *models.LibraryCollection, libraryID int) bool {
+	return collection.LibraryID == libraryID || slices.Contains(collection.LibraryIDs, libraryID)
 }
