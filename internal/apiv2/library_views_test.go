@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -175,19 +176,32 @@ func (f *fakeLibraryViews) LibraryUserCollections(_ context.Context, libraryID, 
 	return []usercollections.ServerVisibleCollection{{ID: "u1", CreatorProfileID: profileID, Name: "Rainy days", CollectionType: "manual", ItemCount: 4, CreatedAt: "2026-01-02T03:04:05Z", UpdatedAt: "2026-01-02T03:04:05Z"}}, nil
 }
 
-func (f *fakeLibraryViews) LibraryCollectionItems(_ context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter) ([]handlers.CollectionItemView, error) {
+func (f *fakeLibraryViews) LibraryCollectionItems(_ context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter, page handlers.CollectionItemPage) ([]handlers.CollectionItemView, bool, error) {
 	if f.err != nil {
-		return nil, f.err
+		return nil, false, f.err
 	}
 	switch collectionID {
 	case "c1":
 		added := fixedTime()
 		return []handlers.CollectionItemView{{ContentID: "movie:heat-1995", Type: "movie", Title: "Heat", Year: 1995, Genres: []string{"Crime"}, Status: "matched", AddedAt: &added,
-			WorkFormats: []catalogpkg.WorkFormatSummary{{Type: "ebook", ContentID: "ebook:heat", LibraryID: 2}}}}, nil
+			WorkFormats: []catalogpkg.WorkFormatSummary{{Type: "ebook", ContentID: "ebook:heat", LibraryID: 2}}}}, false, nil
+	case "many":
+		// Five items in stored order; the page window is honored the way
+		// the real seam honors it.
+		all := make([]handlers.CollectionItemView, 0, 5)
+		for i := 1; i <= 5; i++ {
+			all = append(all, handlers.CollectionItemView{ContentID: fmt.Sprintf("movie:m%d", i), Type: "movie", Title: fmt.Sprintf("M%d", i), Status: "matched"})
+		}
+		if page.Limit <= 0 {
+			return all, false, nil
+		}
+		start := min(page.Offset, len(all))
+		end := min(start+page.Limit, len(all))
+		return all[start:end], end < len(all), nil
 	case "broken":
-		return nil, &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "validating smart collection query definition: unknown filter"}
+		return nil, false, &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "validating smart collection query definition: unknown filter"}
 	}
-	return nil, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Collection not found"}
+	return nil, false, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Collection not found"}
 }
 
 func libraryViewDeps(t *testing.T) Dependencies {
@@ -435,7 +449,7 @@ func TestLibraryCollections(t *testing.T) {
 		t.Errorf("group = %v", body.Groups[0])
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/library/1/collections/c1/items", "", viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"added_at":"2026-01-02T03:04:05.678Z"`) || !strings.Contains(rec.Body.String(), `"work_formats":[{"type":"ebook","content_id":"ebook:heat","library_id":"2"}]`) || strings.Contains(rec.Body.String(), `"page"`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"added_at":"2026-01-02T03:04:05.678Z"`) || !strings.Contains(rec.Body.String(), `"work_formats":[{"type":"ebook","content_id":"ebook:heat","library_id":"2"}]`) || !strings.Contains(rec.Body.String(), `"page":{"has_more":false}`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/library/1/collections/broken/items", "", viewerHeaders()), TypeValidationFailed)
@@ -451,4 +465,59 @@ func TestLibraryCollections(t *testing.T) {
 	deps := libraryViewDeps(t)
 	deps.LibraryCollections = &fakeLibraryViews{err: &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Library not found"}}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/library/1/collections", "", viewerHeaders()), TypeNotFound)
+}
+
+// TestLibraryCollectionItemsPage: the items are paged behind an opaque
+// offset cursor. The first page carries a next cursor, the second continues
+// exactly where it stopped, the last page has no cursor, and a cursor is
+// bound to its collection and library.
+func TestLibraryCollectionItemsPage(t *testing.T) {
+	h := newTestHandler(t, libraryViewDeps(t))
+	type page struct {
+		Items []struct {
+			ContentID string `json:"content_id"`
+		} `json:"items"`
+		Page struct {
+			NextCursor string `json:"next_cursor"`
+			HasMore    bool   `json:"has_more"`
+		} `json:"page"`
+	}
+	get := func(t *testing.T, path string) page {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+		var out page
+		decodeJSON(t, rec.Body, &out)
+		return out
+	}
+	ids := func(p page) string {
+		out := make([]string, 0, len(p.Items))
+		for _, it := range p.Items {
+			out = append(out, it.ContentID)
+		}
+		return strings.Join(out, ",")
+	}
+	first := get(t, "/api/v2/library/1/collections/many/items?limit=2")
+	if ids(first) != "movie:m1,movie:m2" || !first.Page.HasMore || first.Page.NextCursor == "" {
+		t.Fatalf("first page = %s has_more=%v cursor=%q", ids(first), first.Page.HasMore, first.Page.NextCursor)
+	}
+	second := get(t, "/api/v2/library/1/collections/many/items?limit=2&cursor="+first.Page.NextCursor)
+	if ids(second) != "movie:m3,movie:m4" || !second.Page.HasMore {
+		t.Fatalf("second page = %s has_more=%v", ids(second), second.Page.HasMore)
+	}
+	last := get(t, "/api/v2/library/1/collections/many/items?limit=2&cursor="+second.Page.NextCursor)
+	if ids(last) != "movie:m5" || last.Page.HasMore || last.Page.NextCursor != "" {
+		t.Fatalf("last page = %s has_more=%v cursor=%q", ids(last), last.Page.HasMore, last.Page.NextCursor)
+	}
+	// The default limit answers the whole small collection in one page.
+	whole := get(t, "/api/v2/library/1/collections/many/items")
+	if len(whole.Items) != 5 || whole.Page.HasMore {
+		t.Fatalf("default page = %d items has_more=%v", len(whole.Items), whole.Page.HasMore)
+	}
+	// A cursor is bound to its collection and library.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/library/1/collections/c1/items?limit=2&cursor="+first.Page.NextCursor, "", viewerHeaders()), TypeInvalidCursor)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/library/2/collections/many/items?limit=2&cursor="+first.Page.NextCursor, "", viewerHeaders()), TypeInvalidCursor)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/library/1/collections/many/items?limit=201", "", viewerHeaders()), TypeValidationFailed)
 }

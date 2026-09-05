@@ -320,7 +320,7 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/library/1/collections", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
 			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "get_library_collection_items_ok", operationID: "getLibraryCollectionItems",
-			scenario: "Every card of one collection in its curated order; a bounded collection without a cursor.",
+			scenario: "The first page of one collection's cards in its curated order; a small collection fits in one page.",
 			method:   http.MethodGet, path: "/api/v2/library/1/collections/c1/items", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/CatalogItemCollection"},
 		{name: "get_library_collection_items_query_invalid", operationID: "getLibraryCollectionItems",

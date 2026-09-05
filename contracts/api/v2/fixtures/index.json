@@ -284,7 +284,7 @@
     {
       "name": "get_library_collection_items_ok",
       "operation_id": "getLibraryCollectionItems",
-      "scenario": "Every card of one collection in its curated order; a bounded collection without a cursor.",
+      "scenario": "The first page of one collection's cards in its curated order; a small collection fits in one page.",
       "request": {
         "method": "GET",
         "path": "/api/v2/library/1/collections/c1/items",

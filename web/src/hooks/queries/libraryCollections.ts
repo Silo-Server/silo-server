@@ -59,6 +59,9 @@ export function getLibraryCollectionList(
   return resp?.collections ?? [];
 }
 
+// The endpoint pages by cursor (default 50, max 200); this hook reads the
+// first page only for now, so the collection page shows at most the default
+// page size until it grows a cursor-following loader.
 export function useLibraryCollectionItems(libraryId: number, collectionId: string | null) {
   return useQuery({
     queryKey: libraryCollectionKeys.items(libraryId, collectionId ?? ""),

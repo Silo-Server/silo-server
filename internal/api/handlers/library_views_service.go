@@ -329,30 +329,50 @@ func (h *LibraryCollectionHandler) libraryCollectionResponsesOf(ctx context.Cont
 	return out
 }
 
+// CollectionItemPage bounds one page of a collection's items: at most
+// Limit items starting Offset positions into the collection's order. The
+// zero value asks for the whole collection in one answer, which is what v1
+// still serves.
+type CollectionItemPage struct {
+	Limit  int
+	Offset int
+}
+
+// paged reports whether the caller asked for a page rather than the whole
+// collection.
+func (p CollectionItemPage) paged() bool {
+	return p.Limit > 0
+}
+
 // LibraryCollectionItems answers the items of one visible collection of the
-// library, in curated order or as the smart query resolves them.
-func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalog.AccessFilter) ([]CollectionItemView, error) {
+// library, in curated order or as the smart query resolves them. With a
+// page it answers that window of the order and whether more follow; the
+// zero page answers everything and never reports more.
+func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalog.AccessFilter, page CollectionItemPage) ([]CollectionItemView, bool, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	collection, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil || !collectionSpansLibrary(collection, libraryID) || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {
-		return nil, apiError(http.StatusNotFound, "not_found", "Collection not found")
+		return nil, false, apiError(http.StatusNotFound, "not_found", "Collection not found")
 	}
-	var items []itemListResponse
+	var (
+		items   []itemListResponse
+		hasMore bool
+	)
 	if catalog.IsLiveQueryType(collection.CollectionType) {
-		items, err = h.loadLiveCollectionItems(ctx, collection, access)
+		items, hasMore, err = h.loadLiveCollectionItems(ctx, collection, access, page)
 	} else {
-		items, err = h.loadOrderedCollectionItems(ctx, collectionID, access)
+		items, hasMore, err = h.loadOrderedCollectionItems(ctx, collectionID, access, page)
 	}
 	if err != nil {
 		var queryErr smartCollectionQueryError
 		if errors.As(err, &queryErr) {
-			return nil, apiError(http.StatusBadRequest, "bad_request", err.Error())
+			return nil, false, apiError(http.StatusBadRequest, "bad_request", err.Error())
 		}
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection items")
+		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection items")
 	}
-	return items, nil
+	return items, hasMore, nil
 }
 
 // collectionSpansLibrary reports whether the collection is a member of the

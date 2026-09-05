@@ -385,7 +385,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Every card of one visible collection of the library, in its curated or query order. */
+    /** Page the cards of one visible collection of the library, in its curated or query order. */
     get: operations["getLibraryCollectionItems"];
     put?: never;
     post?: never;
@@ -5578,7 +5578,12 @@ export interface operations {
   };
   getLibraryCollectionItems: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;

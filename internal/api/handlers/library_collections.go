@@ -902,7 +902,7 @@ func (h *LibraryCollectionHandler) HandleGetLibraryCollectionItems(w http.Respon
 	if !ok {
 		return
 	}
-	items, err := h.LibraryCollectionItems(r.Context(), libraryID, chi.URLParam(r, "collection_id"), requestAccessFilter(r))
+	items, _, err := h.LibraryCollectionItems(r.Context(), libraryID, chi.URLParam(r, "collection_id"), requestAccessFilter(r), CollectionItemPage{})
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -3014,11 +3014,22 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 // loadOrderedCollectionItems answers a manual collection's stored items in
 // curated order, keeping only those the viewer's access filter admits
 // (library allow/deny lists, content-rating ceiling); inaccessible items are
-// dropped and the order of the survivors is preserved.
-func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Context, collectionID string, access catalog.AccessFilter) ([]itemListResponse, error) {
+// dropped and the order of the survivors is preserved. A page is a window
+// of the stored order, cut before the access-filtered lookup so only that
+// window's items are ever loaded; hasMore reports whether stored positions
+// follow the window. A page may therefore hold fewer than Limit items when
+// the filter drops some, while still pointing at the next window.
+func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Context, collectionID string, access catalog.AccessFilter, page CollectionItemPage) ([]itemListResponse, bool, error) {
 	collectionItems, err := h.repo.ListItems(ctx, collectionID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	hasMore := false
+	if page.paged() {
+		start := min(max(page.Offset, 0), len(collectionItems))
+		end := min(start+page.Limit, len(collectionItems))
+		hasMore = end < len(collectionItems)
+		collectionItems = collectionItems[start:end]
 	}
 
 	contentIDs := make([]string, 0, len(collectionItems))
@@ -3028,7 +3039,7 @@ func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Contex
 
 	items, err := h.itemRepo.GetByIDsWithAccess(ctx, contentIDs, access)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	itemByID := make(map[string]*models.MediaItem, len(items))
@@ -3044,23 +3055,27 @@ func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Contex
 		}
 		resp = append(resp, h.itemListResponseOf(ctx, item))
 	}
-	return resp, nil
+	return resp, hasMore, nil
 }
 
-func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, collection *models.LibraryCollection, access catalog.AccessFilter) ([]itemListResponse, error) {
+// loadLiveCollectionItems runs a smart collection's stored query. With a
+// page it asks the executor for that window only (the query's own item
+// limit still caps the whole result); without one it loads the entire
+// result, up to the query's limit, as v1 always has.
+func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, collection *models.LibraryCollection, access catalog.AccessFilter, page CollectionItemPage) ([]itemListResponse, bool, error) {
 	if h.Executor == nil {
-		return nil, fmt.Errorf("query executor is not configured")
+		return nil, false, fmt.Errorf("query executor is not configured")
 	}
 
 	var def catalog.QueryDefinition
 	if len(collection.QueryDefinition) > 0 {
 		if err := json.Unmarshal(collection.QueryDefinition, &def); err != nil {
-			return nil, smartCollectionQueryError{fmt.Errorf("parsing smart collection query definition: %w", err)}
+			return nil, false, smartCollectionQueryError{fmt.Errorf("parsing smart collection query definition: %w", err)}
 		}
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(false, false); err != nil {
-		return nil, smartCollectionQueryError{fmt.Errorf("validating smart collection query definition: %w", err)}
+		return nil, false, smartCollectionQueryError{fmt.Errorf("validating smart collection query definition: %w", err)}
 	}
 	def = catalog.ApplySmartCollectionItemLimit(def)
 
@@ -3068,26 +3083,39 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, 
 	case len(collection.LibraryIDs) > 0:
 		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, collection.LibraryIDs)
 		if len(def.LibraryIDs) == 0 {
-			return []itemListResponse{}, nil
+			return []itemListResponse{}, false, nil
 		}
 	case collection.LibraryID > 0:
 		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{collection.LibraryID})
 		if len(def.LibraryIDs) == 0 {
-			return []itemListResponse{}, nil
+			return []itemListResponse{}, false, nil
 		}
 	}
 
-	items, total, err := h.Executor.Preview(ctx, def, access, 1)
-	if err != nil {
-		return nil, err
-	}
-	if total == 0 {
-		return []itemListResponse{}, nil
-	}
-	if total > len(items) {
-		items, _, err = h.Executor.Preview(ctx, def, access, total)
+	var (
+		items   []*models.MediaItem
+		hasMore bool
+		err     error
+	)
+	if page.paged() {
+		items, _, hasMore, err = h.Executor.PreviewPage(ctx, def, access, page.Limit, max(page.Offset, 0), false)
 		if err != nil {
-			return nil, err
+			return nil, false, err
+		}
+	} else {
+		var total int
+		items, total, err = h.Executor.Preview(ctx, def, access, 1)
+		if err != nil {
+			return nil, false, err
+		}
+		if total == 0 {
+			return []itemListResponse{}, false, nil
+		}
+		if total > len(items) {
+			items, _, err = h.Executor.Preview(ctx, def, access, total)
+			if err != nil {
+				return nil, false, err
+			}
 		}
 	}
 
@@ -3095,7 +3123,7 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, 
 	for _, item := range items {
 		resp = append(resp, h.itemListResponseOf(ctx, item))
 	}
-	return resp, nil
+	return resp, hasMore, nil
 }
 
 type smartCollectionQueryError struct {

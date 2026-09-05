@@ -30875,7 +30875,7 @@
         "path": "/api/v2/library/{id}/collections/{collection_id}/items",
         "operation_id": "getLibraryCollectionItems"
       },
-      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem; the bounded list drops v1 total/total_exact/has_more; an unrunnable smart query is 422 at path.collection_id."
+      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem; cursor pagination (limit, default 50, max 200; opaque cursor over the collection order) replaces the unbounded list and drops v1 total/total_exact/has_more; an unrunnable smart query is 422 at path.collection_id. The web client fetches the first page only for now."
     },
     {
       "listener": "api",

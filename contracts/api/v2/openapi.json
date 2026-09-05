@@ -8755,6 +8755,36 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJvZmZzZXQiOjUwfQ"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8864,7 +8894,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Every card of one visible collection of the library, in its curated or query order.",
+        "summary": "Page the cards of one visible collection of the library, in its curated or query order.",
         "tags": [
           "libraries"
         ],
