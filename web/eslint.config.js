@@ -46,6 +46,8 @@ export default tseslint.config(
       "src/hooks/queries/admin/users.ts",
       "src/hooks/queries/admin/libraries.ts",
       "src/hooks/queries/libraryCollections.ts",
+      "src/hooks/queries/calendar.ts",
+      "src/hooks/queries/homeDismissals.ts",
       "src/components/RecipeGallery/BulkApplyDialog.tsx",
       "src/pages/OAuthComplete.tsx",
     ],

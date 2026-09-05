@@ -94,7 +94,8 @@ export function useHomeSections(enabled = true) {
 export function useHomeLayout() {
   return useQuery({
     queryKey: sectionKeys.homeLayout(),
-    queryFn: () => api<HomeLayoutResponse>("/home/layout"),
+    queryFn: ({ signal }): Promise<HomeLayoutResponse> =>
+      v2("GET /api/v2/home/layout", { signal }).then((layout) => ({ sections: layout.sections })),
     staleTime: HOME_SECTION_STALE_TIME,
     gcTime: HOME_SECTION_GC_TIME,
   });

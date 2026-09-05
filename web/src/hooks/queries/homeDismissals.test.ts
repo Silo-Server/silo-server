@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  api: vi.fn(),
+  fetchWithSession: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
   removeItemFromHomeSectionCaches: vi.fn(),
   toastError: vi.fn(),
@@ -23,8 +23,22 @@ vi.mock("@tanstack/react-query", async () => {
 });
 
 vi.mock("@/api/client", () => ({
-  api: (...args: unknown[]) => mocks.api(...args),
+  fetchWithSession: (...args: unknown[]) => mocks.fetchWithSession(...args),
+  reportProfileUnverified: vi.fn(),
 }));
+
+function noContent() {
+  return {
+    res: new Response(null, { status: 204 }),
+    requestProfileId: "p-owner",
+    requestProfileToken: null,
+  };
+}
+
+function lastRequest() {
+  const call = mocks.fetchWithSession.mock.calls.at(-1) as [string, RequestInit] | undefined;
+  return { url: call?.[0], method: call?.[1]?.method, body: call?.[1]?.body };
+}
 
 vi.mock("./mediaSurfaceRefresh", () => ({
   invalidateMediaSurfaceQueries: (...args: unknown[]) =>
@@ -58,7 +72,8 @@ describe("home dismissal query hooks", () => {
   beforeEach(() => {
     queryClient = new QueryClient();
 
-    mocks.api.mockReset();
+    mocks.fetchWithSession.mockReset();
+    mocks.fetchWithSession.mockImplementation(() => Promise.resolve(noContent()));
     mocks.invalidateMediaSurfaceQueries.mockReset();
     mocks.removeItemFromHomeSectionCaches.mockReset();
     mocks.toastError.mockReset();
@@ -83,11 +98,10 @@ describe("home dismissal query hooks", () => {
       progressUpdatedAt: "2026-03-22T18:10:00Z",
     });
 
-    expect(mocks.api).toHaveBeenCalledWith("/home/dismissals/continue_watching/ep-1", {
+    expect(lastRequest()).toEqual({
+      url: "/api/v2/home/dismissals/continue_watching/ep-1",
       method: "PUT",
-      body: JSON.stringify({
-        progress_updated_at: "2026-03-22T18:10:00Z",
-      }),
+      body: JSON.stringify({ progress_updated_at: "2026-03-22T18:10:00Z" }),
     });
   });
 
@@ -101,14 +115,8 @@ describe("home dismissal query hooks", () => {
       progressUpdatedAt: "2026-03-22T18:10:00Z",
     });
 
-    expect(mocks.api).toHaveBeenCalledWith(
-      "/home/dismissals/continue_watching/ebook%201%2Fisbn%3A978",
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          progress_updated_at: "2026-03-22T18:10:00Z",
-        }),
-      },
+    expect(lastRequest().url).toBe(
+      "/api/v2/home/dismissals/continue_watching/ebook%201%2Fisbn%3A978",
     );
   });
 
@@ -122,11 +130,10 @@ describe("home dismissal query hooks", () => {
       seriesId: "series-1",
     });
 
-    expect(mocks.api).toHaveBeenCalledWith("/home/dismissals/next_up/ep-2", {
+    expect(lastRequest()).toEqual({
+      url: "/api/v2/home/dismissals/next_up/ep-2",
       method: "PUT",
-      body: JSON.stringify({
-        series_id: "series-1",
-      }),
+      body: JSON.stringify({ series_id: "series-1" }),
     });
   });
 

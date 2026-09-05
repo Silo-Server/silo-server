@@ -1,15 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockUseQuery = vi.fn();
-const mockApi = vi.fn();
+const mockFetchWithSession = vi.fn();
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (...args: unknown[]) => mockUseQuery(...args),
 }));
 
 vi.mock("@/api/client", () => ({
-  api: (...args: unknown[]) => mockApi(...args),
+  fetchWithSession: (...args: unknown[]) => mockFetchWithSession(...args),
+  reportProfileUnverified: vi.fn(),
 }));
+
+function calendarResponse() {
+  return {
+    res: new Response(JSON.stringify({ events: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+    requestProfileId: "p-owner",
+    requestProfileToken: null,
+  };
+}
 
 import { useCalendarWeek } from "./calendar";
 
@@ -19,16 +31,18 @@ describe("useCalendarWeek", () => {
 
   beforeEach(() => {
     mockUseQuery.mockReset();
-    mockApi.mockReset();
+    mockFetchWithSession.mockReset();
     mockUseQuery.mockImplementation((options: unknown) => options);
-    mockApi.mockResolvedValue({ events: [] });
+    mockFetchWithSession.mockImplementation(() => Promise.resolve(calendarResponse()));
   });
 
   it("requests an inclusive seven-day calendar window", async () => {
     useCalendarWeek("2026-04-06", { filter: "all" });
-    const queryOptions = mockUseQuery.mock.calls[0]?.[0] as { queryFn: () => Promise<unknown> };
+    const queryOptions = mockUseQuery.mock.calls[0]?.[0] as {
+      queryFn: (ctx: { signal?: AbortSignal }) => Promise<unknown>;
+    };
 
-    await queryOptions.queryFn();
+    await queryOptions.queryFn({});
 
     expect(mockUseQuery).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -36,19 +50,21 @@ describe("useCalendarWeek", () => {
         staleTime: 10 * 60 * 1000,
       }),
     );
-    expect(mockApi).toHaveBeenCalledWith(
-      `/calendar?start=2026-04-06&end=2026-04-12&filter=all&timezone=${encodedTimezone}`,
+    expect(mockFetchWithSession.mock.calls[0]?.[0]).toBe(
+      `/api/v2/calendar?start=2026-04-06&end=2026-04-12&filter=all&timezone=${encodedTimezone}`,
     );
   });
 
   it("includes the selected library in the request", async () => {
     useCalendarWeek("2026-04-06", { filter: "favorites", libraryId: 7 });
-    const queryOptions = mockUseQuery.mock.calls[0]?.[0] as { queryFn: () => Promise<unknown> };
+    const queryOptions = mockUseQuery.mock.calls[0]?.[0] as {
+      queryFn: (ctx: { signal?: AbortSignal }) => Promise<unknown>;
+    };
 
-    await queryOptions.queryFn();
+    await queryOptions.queryFn({});
 
-    expect(mockApi).toHaveBeenCalledWith(
-      `/calendar?start=2026-04-06&end=2026-04-12&filter=favorites&timezone=${encodedTimezone}&library_id=7`,
+    expect(mockFetchWithSession.mock.calls[0]?.[0]).toBe(
+      `/api/v2/calendar?start=2026-04-06&end=2026-04-12&filter=favorites&timezone=${encodedTimezone}&library_id=7`,
     );
   });
 });
