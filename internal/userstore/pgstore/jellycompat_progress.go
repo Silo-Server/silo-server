@@ -64,5 +64,15 @@ func (s *PostgresUserStore) ApplyJellycompatProgress(ctx context.Context, profil
 	if err := s.setJellycompatProgress(ctx, tx, profileID, edit.MediaItemID, edit.PositionSeconds, edit.DurationSeconds, edit.Completed, edit.EventAt); err != nil {
 		return err
 	}
+	if edit.IsFavorite != nil {
+		if *edit.IsFavorite {
+			_, err = tx.Exec(ctx, `INSERT INTO user_favorites (user_id, profile_id, media_item_id, added_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`, s.userID, profileID, edit.MediaItemID, time.Now().UTC())
+		} else {
+			_, err = tx.Exec(ctx, `DELETE FROM user_favorites WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`, s.userID, profileID, edit.MediaItemID)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }

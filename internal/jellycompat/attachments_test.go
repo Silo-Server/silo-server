@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -28,14 +29,23 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	secondFontPath := filepath.Join(filepath.Dir(fontPath), "LiberationSans-Bold.ttf")
+	secondFont, err := os.ReadFile(secondFontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mediaPath := filepath.Join(t.TempDir(), "attached.mkv")
 	assPath := filepath.Join(filepath.Dir(mediaPath), "movie.ass")
 	if err := os.WriteFile(assPath, []byte("[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Liberation Sans,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:00.10,Default,,0,0,0,,Hello\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=size=16x16:duration=0.1", "-i", assPath, "-map", "0:v", "-map", "1:s", "-c:s", "ass", "-c:v", "ffv1", "-attach", fontPath, "-attach", fontPath, "-metadata:s:t", "mimetype=application/x-truetype-font", mediaPath)
+	cmd := exec.CommandContext(t.Context(), ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=size=16x16:duration=0.1", "-i", assPath, "-map", "0:v", "-map", "1:s", "-c:s", "ass", "-c:v", "ffv1", "-attach", fontPath, "-attach", secondFontPath, "-metadata:s:t", "mimetype=application/x-truetype-font", "-metadata:s:t:1", "filename=payload.html", mediaPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("fixture: %v %s", err, output)
+	}
+	bundle, err := playback.ExtractAttachedSubtitleFonts(t.Context(), mediaPath, ffmpeg)
+	if err != nil || len(bundle) != 2 || !bytes.Equal(bundle[0].Data, font) || !bytes.Equal(bundle[1].Data, secondFont) || bundle[0].StreamIndex != 2 || bundle[1].StreamIndex != 3 {
+		t.Fatalf("real bundle framing: %d fonts, %v", len(bundle), err)
 	}
 	// Negotiate the fixture through the public handler, then follow its discovered URL.
 	codec := NewResourceIDCodec()
@@ -75,7 +85,7 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 	second := response.MediaSources[0].MediaAttachments[1]
 	delivered = httptest.NewRecorder()
 	router.ServeHTTP(delivered, httptest.NewRequest("GET", second["DeliveryUrl"].(string), nil))
-	if second["Index"] != float64(3) || delivered.Code != 200 || !bytes.Equal(delivered.Body.Bytes(), font) {
+	if second["Index"] != float64(3) || second["FileName"] != "attachment-1.ttf" || second["MimeType"] != "font/ttf" || delivered.Code != 200 || !bytes.Equal(delivered.Body.Bytes(), secondFont) || delivered.Header().Get("Content-Type") != "font/ttf" || delivered.Header().Get("X-Content-Type-Options") != "nosniff" || strings.Contains(delivered.Header().Get("Content-Disposition"), "payload.html") {
 		t.Fatalf("second discovered font: %d %d bytes", delivered.Code, delivered.Body.Len())
 	}
 

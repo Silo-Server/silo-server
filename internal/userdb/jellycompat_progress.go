@@ -65,5 +65,15 @@ func (s *SQLiteUserStore) ApplyJellycompatProgress(ctx context.Context, profileI
 	if err := setJellycompatProgress(ctx, tx, profileID, edit.MediaItemID, edit.PositionSeconds, edit.DurationSeconds, edit.Completed, edit.EventAt); err != nil {
 		return err
 	}
+	if edit.IsFavorite != nil {
+		if *edit.IsFavorite {
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO favorites (profile_id, media_item_id, added_at) VALUES (?, ?, ?)`, profileID, edit.MediaItemID, time.Now().UTC().Format(time.RFC3339))
+		} else {
+			_, err = tx.ExecContext(ctx, `DELETE FROM favorites WHERE profile_id = ? AND media_item_id = ?`, profileID, edit.MediaItemID)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }

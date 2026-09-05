@@ -8,7 +8,6 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -96,11 +95,8 @@ func (h *PlaybackHandler) HandleAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if font != nil {
-		typ := mime.TypeByExtension(filepath.Ext(font.Name))
-		if typ == "" {
-			typ = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", typ)
+		w.Header().Set("Content-Type", playback.SubtitleFontMIMEType(font.Name))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": font.Name}))
 		http.ServeContent(w, r, font.Name, time.Time{}, bytes.NewReader(font.Data))
 		return

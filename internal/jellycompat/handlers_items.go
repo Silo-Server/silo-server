@@ -1756,14 +1756,14 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
 		if !h.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable) {
 			content, ok := h.content.(interface {
-				browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
+				browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, bool, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
 			})
 			if !ok {
 				writeError(w, 503, "Unavailable", "Configured user store unavailable")
 				return
 			}
 			selected := map[string]*models.Episode{}
-			result, err := content.browseConfiguredUserState(r.Context(), session, filters, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+			result, err := content.browseConfiguredUserState(r.Context(), session, filters, query.enableTotalRecordCount, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
 				episodes, total, err := repo.BrowseEpisodes(r.Context(), seriesID, requestedSeasonID, query.seasonNumber, startID, page, filter)
 				if err != nil {
 					return nil, false, err

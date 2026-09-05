@@ -200,7 +200,7 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 	if !validateOptionalUser(w, r, session) {
 		return
 	}
-	if raw := r.URL.Query().Get("datePlayed"); played && raw != "" {
+	if raw := newCaseInsensitiveQuery(r.URL.Query()).Get("datePlayed"); played && raw != "" {
 		date, parseErr := time.Parse(time.RFC3339Nano, raw)
 		if parseErr != nil {
 			writeError(w, 400, "BadRequest", "Invalid datePlayed")

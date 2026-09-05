@@ -409,13 +409,11 @@ func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Ses
 		if s.watchState == nil {
 			return fmt.Errorf("watch state service unavailable")
 		}
-		edit := userstore.JellycompatProgressEdit{MediaItemID: contentID, PositionSeconds: position, DurationSeconds: duration, Completed: played, EventAt: date}
+		edit := userstore.JellycompatProgressEdit{MediaItemID: contentID, PositionSeconds: position, DurationSeconds: duration, Completed: played, EventAt: date, IsFavorite: req.IsFavorite}
 		if err := s.watchState.RecordJellycompatProgress(ctx, session.StreamAppUserID, session.ProfileID, edit, req.Played); err != nil {
 			return err
 		}
-
-	}
-	if req.IsFavorite != nil {
+	} else if req.IsFavorite != nil {
 		if *req.IsFavorite {
 			err = store.AddFavorite(ctx, session.ProfileID, contentID)
 		} else {

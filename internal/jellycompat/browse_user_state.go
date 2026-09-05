@@ -15,7 +15,7 @@ const compatBrowseRandomSort = "random"
 // browseConfiguredUserState scans catalog candidates in bounded batches. State
 // predicates run against the configured store before counting and paging; only
 // the requested matching page survives the scan. PostgreSQL uses its SQL path.
-func (s *directContentService) browseConfiguredUserState(ctx context.Context, session *Session, filters catalog.BrowseFilters, fetch func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error) {
+func (s *directContentService) browseConfiguredUserState(ctx context.Context, session *Session, filters catalog.BrowseFilters, includeTotal bool, fetch func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error) {
 	store, err := s.userStore(ctx, session)
 	if err != nil {
 		return nil, err
@@ -50,6 +50,11 @@ func (s *directContentService) browseConfiguredUserState(ctx context.Context, se
 				result.Items = append(result.Items, item)
 			}
 			result.Total++
+			if !includeTotal && result.Total > filters.Offset+filters.Limit {
+				result.Total = 0
+				result.HasMore = true
+				return result, nil
+			}
 		}
 		if !more || len(items) == 0 {
 			break
@@ -57,6 +62,9 @@ func (s *directContentService) browseConfiguredUserState(ctx context.Context, se
 		page.Offset += len(items)
 	}
 	result.HasMore = result.Total > filters.Offset+len(result.Items)
+	if !includeTotal {
+		result.Total = 0
+	}
 	return result, nil
 }
 

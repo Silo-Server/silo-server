@@ -7,19 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
 const (
 	maxSubtitleFontAttachments = 32
 	maxSubtitleFontBytes       = 32 << 20 // 32 MiB
+	subtitleFontTTFMIME        = "font/ttf"
+	subtitleFontFallbackMIME   = "application/octet-stream"
 )
 
 // SubtitleFontAttachment is a font attached to a media container for ASS/SSA
@@ -42,10 +41,11 @@ type attachmentProbeOutput struct {
 }
 
 type attachmentProbeStream struct {
-	Index     int               `json:"index"`
-	CodecName string            `json:"codec_name"`
-	CodecType string            `json:"codec_type"`
-	Tags      map[string]string `json:"tags"`
+	Index         int               `json:"index"`
+	ExtraDataSize int64             `json:"extradata_size"`
+	CodecName     string            `json:"codec_name"`
+	CodecType     string            `json:"codec_type"`
+	Tags          map[string]string `json:"tags"`
 }
 
 // SubtitleFontMetadata identifies an attached font without extracting its bytes.
@@ -78,7 +78,8 @@ func ListAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string
 	}
 	fonts := make([]SubtitleFontMetadata, 0, len(streams))
 	for i, stream := range streams {
-		fonts = append(fonts, SubtitleFontMetadata{Index: stream.Index, Codec: stream.CodecName, FileName: safeAttachmentDisplayName(stream, fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))), MimeType: stream.Tags["mimetype"]})
+		name := safeAttachmentDisplayName(stream, fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream)))
+		fonts = append(fonts, SubtitleFontMetadata{Index: stream.Index, Codec: stream.CodecName, FileName: name, MimeType: SubtitleFontMIMEType(name)})
 	}
 	return fonts, nil
 }
@@ -152,144 +153,63 @@ func EncodeSubtitleFontBundle(fonts []SubtitleFontAttachment) []SubtitleFontBund
 	return items
 }
 
-// dumpFontAttachments extracts every attachment in a single ffmpeg invocation.
-//
-// ffmpeg re-opens the (often network-backed) media file once per process, so
-// the previous one-process-per-font approach paid that open cost N times and
-// dominated latency — 17–60 s for anime releases carrying 15–47 fonts. Dumping
-// all attachments in one pass opens the file once, cutting p95 from ~30 s to
-// ~1–2 s. The `-map 0:t? -c copy` flags are required: without them ffmpeg
-// decodes the whole video stream instead of stream-copying the attachments.
+// dumpFontAttachments concatenates the selected attachments on stdout in one
+// FFmpeg process. Probed extradata sizes frame each font; a bounded pipe reader
+// rejects oversized or changed output without ever spilling font data to disk.
 func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath string, streams []attachmentProbeStream, maxBytes int64) ([]SubtitleFontAttachment, error) {
-	dir, err := os.MkdirTemp("", "silo-subfonts-*")
-	if err != nil {
-		return nil, fmt.Errorf("subtitle fonts: create temp dir: %w", err)
+	var expected int64
+	for _, stream := range streams {
+		if stream.ExtraDataSize <= 0 {
+			return nil, errors.New("subtitle fonts: invalid attachment data size")
+		}
+		if stream.ExtraDataSize > maxBytes-expected {
+			return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxBytes)
+		}
+		expected += stream.ExtraDataSize
 	}
-	defer os.RemoveAll(dir)
-
-	// A fresh temp dir guarantees the dump targets don't pre-exist, so ffmpeg
-	// never prompts to overwrite (which would hang the process).
-	args := make([]string, 0, 4+len(streams)*2+8)
-	args = append(args, "-hide_banner", "-nostats", "-loglevel", "error")
-	paths := make([]string, len(streams))
-	for i, stream := range streams {
-		paths[i] = filepath.Join(dir, strconv.Itoa(i))
-		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), paths[i])
+	if expected == 0 {
+		return nil, nil
+	}
+	args := []string{ffmpegHideBannerArg, "-nostats", ffmpegLogLevelArg, ffmpegErrorLogLevel}
+	for _, stream := range streams {
+		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), "pipe:1")
 	}
 	args = append(args, "-i", inputPath, "-map", "0:t?", "-c", "copy", "-f", "null", "-")
-
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("subtitle fonts: start attachment extract: %w", err)
 	}
-
-	// ffmpeg writes each attachment to disk in full before we get a chance to
-	// read it, so unlike the old pipe-per-attachment reader (which killed at
-	// maxBytes+1) nothing here bounds what ffmpeg spills. Guard against a
-	// container whose oversized "font" attachments would otherwise fill the
-	// disk by killing the process once the dump dir crosses the cap.
-	overLimit, stopWatch := watchDumpSize(cmd, dir, maxBytes)
-
-	runErr := cmd.Wait()
-	stopWatch()
-	if overLimit.Load() {
-		return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxBytes)
+	data, readErr := io.ReadAll(io.LimitReader(stdout, expected+1))
+	if readErr != nil || int64(len(data)) > expected {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, errors.New("subtitle fonts: attachment data exceeds probed size or could not be read")
 	}
-	if runErr != nil {
+	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("subtitle fonts: extract attachments: %w (stderr: %s)",
-			runErr, truncateStderr(stderr.String()))
+		return nil, fmt.Errorf("subtitle fonts: extract attachments: %w", err)
 	}
-
-	var total int64
+	if int64(len(data)) != expected {
+		return nil, errors.New("subtitle fonts: attachment data differs from probed size")
+	}
 	fonts := make([]SubtitleFontAttachment, 0, len(streams))
+	offset := 0
 	for i, stream := range streams {
-		fallbackName := fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))
-		// Stat before reading so an over-limit attachment trips the cap
-		// without being pulled into memory.
-		info, err := os.Stat(paths[i])
-		if errors.Is(err, os.ErrNotExist) {
-			// ffmpeg silently skips attachments it can't stream-copy; treat
-			// a missing dump file as an absent font rather than a failure.
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("subtitle fonts: stat attachment %q: %w", fallbackName, err)
-		}
-		total += info.Size()
-		if total > maxBytes {
-			return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxBytes)
-		}
-		data, err := os.ReadFile(paths[i])
-		if err != nil {
-			return nil, fmt.Errorf("subtitle fonts: read attachment %q: %w", fallbackName, err)
-		}
+		end := offset + int(stream.ExtraDataSize)
 		fonts = append(fonts, SubtitleFontAttachment{
 			StreamIndex: stream.Index,
-			Name:        safeAttachmentDisplayName(stream, fallbackName),
-			Data:        data,
+			Name:        safeAttachmentDisplayName(stream, fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))),
+			Data:        data[offset:end:end],
 		})
+		offset = end
 	}
-
 	return fonts, nil
-}
-
-// watchDumpSize polls the dump directory while ffmpeg runs and kills the
-// process if the total bytes written exceed maxBytes, restoring the hard size
-// bound the previous streaming reader enforced. It returns a flag set when the
-// cap is tripped and a stop function the caller must invoke after cmd.Wait.
-// The worst-case overshoot is one poll interval of ffmpeg writes, which is far
-// smaller than the unbounded spill it replaces.
-func watchDumpSize(cmd *exec.Cmd, dir string, maxBytes int64) (*atomic.Bool, func()) {
-	overLimit := &atomic.Bool{}
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				if dirBytes(dir) > maxBytes {
-					overLimit.Store(true)
-					if cmd.Process != nil {
-						_ = cmd.Process.Kill()
-					}
-					return
-				}
-			}
-		}
-	}()
-	return overLimit, func() {
-		close(stop)
-		<-done
-	}
-}
-
-// dirBytes returns the total size of the regular files directly inside dir.
-// Errors (e.g. a file removed mid-scan) are treated as zero so the watchdog
-// never blocks extraction on a transient stat failure.
-func dirBytes(dir string) int64 {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	var total int64
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		total += info.Size()
-	}
-	return total
 }
 
 func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePath string) ([]attachmentProbeStream, error) {
@@ -300,7 +220,7 @@ func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePa
 	cmd := exec.CommandContext(ctx, bin,
 		"-v", "error",
 		"-select_streams", "t",
-		"-show_entries", "stream=index,codec_name,codec_type:stream_tags=filename,mimetype",
+		"-show_entries", "stream=index,codec_name,codec_type,extradata_size:stream_tags=filename,mimetype",
 		"-of", "json",
 		inputPath,
 	)
@@ -393,10 +313,29 @@ func isSupportedFontExt(ext string) bool {
 
 func safeAttachmentDisplayName(stream attachmentProbeStream, fallback string) string {
 	name := filepath.Base(stream.Tags["filename"])
-	if name == "." || name == string(filepath.Separator) || strings.TrimSpace(name) == "" {
+	if !isSupportedFontExt(strings.ToLower(filepath.Ext(name))) {
 		return fallback
 	}
 	return name
+}
+
+// SubtitleFontMIMEType never trusts a container's MIME metadata or the host's
+// extension registrations when serving authenticated attachment bytes inline.
+func SubtitleFontMIMEType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".ttf":
+		return subtitleFontTTFMIME
+	case ".otf":
+		return "font/otf"
+	case ".ttc", ".otc":
+		return "font/collection"
+	case ".woff":
+		return "font/woff"
+	case ".woff2":
+		return "font/woff2"
+	default:
+		return subtitleFontFallbackMIME
+	}
 }
 
 func ffprobePathFromFFmpeg(ffmpegPath string) string {

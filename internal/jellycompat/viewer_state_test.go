@@ -107,25 +107,30 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 }
 
 func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
-	store := newJellycompatUserStore(t)
-	provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
-	service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
-	codec := NewResourceIDCodec()
-	id := codec.EncodeStringID(EncodedIDItem, "movie-1")
-	h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	rec := httptest.NewRecorder()
-	h.HandleMarkPlayed(rec, viewerRequest("POST", "/?datePlayed=2025-02-03T04:05:06Z", "", "itemId", id, session))
-	var dto itemUserDataDTO
-	_ = json.Unmarshal(rec.Body.Bytes(), &dto)
-	if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != "2025-02-03T04:05:06Z" {
-		t.Fatalf("mark played %d %+v %s", rec.Code, dto, rec.Body.String())
-	}
-	rec = httptest.NewRecorder()
-	h.HandleMarkUnplayed(rec, viewerRequest("DELETE", "/", "", "itemId", id, session))
-	_ = json.Unmarshal(rec.Body.Bytes(), &dto)
-	if rec.Code != 200 || dto.Played {
-		t.Fatalf("mark unplayed %d %+v", rec.Code, dto)
+	for _, key := range []string{"datePlayed", "DatePlayed", "DATEPLAYED"} {
+		t.Run(key, func(t *testing.T) {
+			store := newJellycompatUserStore(t)
+			provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
+			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
+			codec := NewResourceIDCodec()
+			id := codec.EncodeStringID(EncodedIDItem, "movie-1")
+			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+			rec := httptest.NewRecorder()
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+key+"=2025-02-03T04:05:06Z", "", "itemId", id, session))
+			var dto itemUserDataDTO
+			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
+			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != "2025-02-03T04:05:06Z" {
+				t.Fatalf("mark played %d %+v %s", rec.Code, dto, rec.Body.String())
+			}
+			rec = httptest.NewRecorder()
+			h.HandleMarkUnplayed(rec, viewerRequest("DELETE", "/", "", "itemId", id, session))
+			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
+			if rec.Code != 200 || dto.Played {
+				t.Fatalf("mark unplayed %d %+v", rec.Code, dto)
+			}
+
+		})
 	}
 }
 
