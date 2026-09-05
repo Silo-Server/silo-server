@@ -134,10 +134,13 @@ func registerProfiles(reg *Registry) {
 		// an administrator or the verified primary profile manages the
 		// household, and any other caller may change only its own active
 		// profile's playback preferences. Naturally idempotent: repeating
-		// the same PATCH converges on the same state.
+		// the same PATCH converges on the same state (the ledger row records
+		// the access-policy revision bump as a defect for the section that
+		// guards profiles).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		DemoRestricted:  true,
+		RetrySafety:     RetrySafetyNaturalIdempotent,
 		ServiceBacked:   true,
 	}, reg.updateProfile)
 }
