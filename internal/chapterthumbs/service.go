@@ -493,11 +493,11 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 				"chapter_index",
 				chapter.Index,
 				"reason",
-				reasonChapterExtractFailed,
+				reasonChapterUploadFailed,
 				"error",
 				err,
 			)
-			recordChapterFailure(&updated.Chapters[candidate.offset], now, reasonChapterExtractFailed, err)
+			recordChapterFailure(&updated.Chapters[candidate.offset], now, reasonChapterUploadFailed, err)
 			mutated = true
 			failed++
 			continue
