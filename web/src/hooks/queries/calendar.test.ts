@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import getCalendarOk from "../../../../contracts/api/v2/fixtures/get_calendar_ok.json";
+
 const mockUseQuery = vi.fn();
 const mockFetchWithSession = vi.fn();
 
@@ -14,7 +16,7 @@ vi.mock("@/api/client", () => ({
 
 function calendarResponse() {
   return {
-    res: new Response(JSON.stringify({ events: [] }), {
+    res: new Response(JSON.stringify(getCalendarOk), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     }),
@@ -42,8 +44,9 @@ describe("useCalendarWeek", () => {
       queryFn: (ctx: { signal?: AbortSignal }) => Promise<unknown>;
     };
 
-    await queryOptions.queryFn({});
+    const days = await queryOptions.queryFn({});
 
+    expect(days).toEqual(getCalendarOk.events);
     expect(mockUseQuery).toHaveBeenCalledWith(
       expect.objectContaining({
         queryKey: ["calendar", "week", "2026-04-06", "all", "all", timezone],

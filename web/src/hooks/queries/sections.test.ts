@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import getHomeLayoutOk from "../../../../contracts/api/v2/fixtures/get_home_layout_ok.json";
 import getHomeSectionItemsOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_ok.json";
 import getLibrarySectionItemsOk from "../../../../contracts/api/v2/fixtures/get_library_section_items_ok.json";
+import listHomeSectionsOk from "../../../../contracts/api/v2/fixtures/list_home_sections_ok.json";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   fetchWithSession: vi.fn(),
+  useQuery: vi.fn(),
 }));
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual =
+    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
+  return { ...actual, useQuery: (...args: unknown[]) => mocks.useQuery(...args) };
+});
 
 vi.mock("@/api/client", () => ({
   api: mocks.api,
@@ -17,14 +26,63 @@ vi.mock("@/api/client", () => ({
 import {
   fetchHomeSectionItems,
   fetchLibrarySectionItems,
+  useHomeLayout,
+  useHomeSections,
   useLibraryLayout,
   normalizeProfileSectionOverridesResponse,
 } from "./sections";
+
+type QueryOptions = {
+  queryKey: unknown;
+  queryFn: (ctx: { signal?: AbortSignal }) => Promise<unknown>;
+};
+
+function jsonResponse(body: unknown) {
+  return {
+    res: new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+    requestProfileId: "p-owner",
+    requestProfileToken: null,
+  };
+}
 
 describe("sections query helpers", () => {
   beforeEach(() => {
     mocks.api.mockReset();
     mocks.fetchWithSession.mockReset();
+    mocks.useQuery.mockReset();
+    mocks.useQuery.mockImplementation((options: unknown) => options);
+  });
+
+  it("lists home sections from v2 and keeps the { sections } shape", async () => {
+    mocks.fetchWithSession.mockResolvedValue(jsonResponse(listHomeSectionsOk));
+
+    const options = useHomeSections() as unknown as QueryOptions;
+    const response = (await options.queryFn({})) as {
+      sections: { id: string; items: unknown[] }[];
+    };
+
+    expect(options.queryKey).toEqual(["sections", "home"]);
+    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe("/api/v2/home/sections");
+    expect(response.sections.map((section) => section.id)).toEqual(
+      listHomeSectionsOk.sections.map((section) => section.id),
+    );
+    expect(response.sections[0]?.items).toHaveLength(
+      listHomeSectionsOk.sections[0]?.items.length ?? -1,
+    );
+  });
+
+  it("fetches the home layout from v2 and keeps the { sections } shape", async () => {
+    mocks.fetchWithSession.mockResolvedValue(jsonResponse(getHomeLayoutOk));
+
+    const options = useHomeLayout() as unknown as QueryOptions;
+    const response = await options.queryFn({});
+
+    expect(options.queryKey).toEqual(["sections", "home", "layout"]);
+    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe("/api/v2/home/layout");
+    expect(response).toEqual({ sections: getHomeLayoutOk.sections });
   });
 
   it("fetches home section items from the v2 home section and keeps the { section } shape", async () => {
