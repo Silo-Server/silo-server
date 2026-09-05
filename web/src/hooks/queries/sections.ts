@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiClientError, api } from "@/api/client";
+import { sectionFromV2 } from "@/api/v2/catalog";
+import { v2 } from "@/api/v2/request";
 import type {
   SectionsResponse,
   HomeLayoutResponse,
@@ -102,21 +104,29 @@ export function fetchHomeSectionItems(sectionId: string, options?: RequestInit) 
   return api<HomeSectionItemsResponse>(`/home/sections/${sectionId}/items`, options);
 }
 
+/**
+ * Fetches one library section with its items. Answers in the same
+ * `{ section }` shape as the home section fetch so the section caches and
+ * refresh helpers treat both alike.
+ */
 export function fetchLibrarySectionItems(
   libraryId: number,
   sectionId: string,
-  options?: RequestInit,
-) {
-  return api<HomeSectionItemsResponse>(
-    `/library/${libraryId}/sections/${sectionId}/items`,
-    options,
-  );
+  options?: { signal?: AbortSignal },
+): Promise<HomeSectionItemsResponse> {
+  return v2("GET /api/v2/library/{id}/sections/{section_id}/items", {
+    path: { id: String(libraryId), section_id: sectionId },
+    signal: options?.signal,
+  }).then((section) => ({ section: sectionFromV2(section) }));
 }
 
 export function useLibraryLayout(libraryId: number) {
   return useQuery({
     queryKey: sectionKeys.libraryLayout(libraryId),
-    queryFn: () => api<LibraryLayoutResponse>(`/library/${libraryId}/layout`),
+    queryFn: ({ signal }): Promise<LibraryLayoutResponse> =>
+      v2("GET /api/v2/library/{id}/layout", { path: { id: String(libraryId) }, signal }).then(
+        (layout) => ({ sections: layout.sections }),
+      ),
     staleTime: 5 * 60 * 1000,
     enabled: libraryId > 0,
   });
@@ -125,7 +135,10 @@ export function useLibraryLayout(libraryId: number) {
 export function useLibrarySections(libraryId: number) {
   return useQuery({
     queryKey: sectionKeys.library(libraryId),
-    queryFn: () => api<SectionsResponse>(`/library/${libraryId}/sections`),
+    queryFn: ({ signal }): Promise<SectionsResponse> =>
+      v2("GET /api/v2/library/{id}/sections", { path: { id: String(libraryId) }, signal }).then(
+        (data) => ({ sections: data.sections.map(sectionFromV2) }),
+      ),
     staleTime: 5 * 60 * 1000,
     enabled: libraryId > 0,
   });
