@@ -319,12 +319,16 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "")
 	cfg.Playback.TranscodeDir = stringOr(m, playbackTranscodeDirSettingKey, DefaultTranscodeDir)
-	segmentRetentionSeconds, err := intOr(m, playbackSegmentRetentionSettingKey, 600)
+	segmentRetentionSeconds, err := intOr(
+		m,
+		PlaybackSegmentRetentionSettingKey,
+		DefaultPlaybackSegmentRetentionSeconds,
+	)
 	if err != nil {
 		return nil, err
 	}
 	if segmentRetentionSeconds != 0 && (segmentRetentionSeconds < 120 || segmentRetentionSeconds > 86400) {
-		return nil, fmt.Errorf("%s must be 0 or between 120 and 86400", playbackSegmentRetentionSettingKey)
+		return nil, fmt.Errorf("%s must be 0 or between 120 and 86400", PlaybackSegmentRetentionSettingKey)
 	}
 	cfg.Playback.SegmentRetentionSeconds = segmentRetentionSeconds
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")

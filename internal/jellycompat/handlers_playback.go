@@ -280,6 +280,7 @@ type PlaybackHandler struct {
 	TranscodeDir            string
 	SegmentRetentionSeconds func() int
 	PlaybackConfig          func() config.PlaybackConfig
+	FFmpegLogSink           playback.FFmpegLogSink
 	// tm is the shared transcode-session lifecycle (live map, reconstruct) — the
 	// same type the native handler uses, so jellycompat gets the reconstruct cap
 	// and node-affinity rule for free. The reconstruction recipe is carried in the
@@ -1057,7 +1058,7 @@ func NewPlaybackHandler(
 	transcodeDir := filepath.Join(os.TempDir(), "silo-transcode")
 	ffmpegPath := ""
 	hwAccel := ""
-	segmentRetentionSeconds := 600
+	segmentRetentionSeconds := config.DefaultPlaybackSegmentRetentionSeconds
 	if cfg != nil {
 		if cfg.Playback.TranscodeDir != "" {
 			transcodeDir = cfg.Playback.TranscodeDir
@@ -1085,6 +1086,7 @@ func NewPlaybackHandler(
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (late-set) JWTSecret lazily, matching the native handler.
 	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.LogSinkFn = func() playback.FFmpegLogSink { return h.FFmpegLogSink }
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		return playback.TranscodeRuntimeConfig{
 			TranscodeDir:            h.TranscodeDir,
@@ -1127,6 +1129,9 @@ func NewPlaybackHandler(
 			_ = h.sessionMgr.StopSession(sessionID)
 		}
 	}
+	h.tm.StartThrottler = func(ctx context.Context, session *playback.TranscodeSession) {
+		h.maybeStartThrottler(ctx, session)
+	}
 	return h
 }
 
@@ -1134,7 +1139,12 @@ func (h *PlaybackHandler) segmentRetentionSeconds() int {
 	if h.SegmentRetentionSeconds != nil {
 		return h.SegmentRetentionSeconds()
 	}
-	return 600
+	return config.DefaultPlaybackSegmentRetentionSeconds
+}
+
+func (h *PlaybackHandler) maybeStartThrottler(ctx context.Context, session *playback.TranscodeSession) {
+	enabled, thresholdSeconds := config.ResolveTranscodeThrottleSettings(ctx, h.SettingsRepo)
+	session.ConfigureThrottler(ctx, enabled, thresholdSeconds)
 }
 
 func (h *PlaybackHandler) playbackRoutingPolicy() config.PlaybackRoutingPolicy {
@@ -1478,22 +1488,26 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 
 	reqBody := transcodenode.TranscodeStartRequest{
-		SessionID:           upstreamSessionID,
-		InputPath:           file.FilePath,
-		SourceVideoCodec:    sourceVideoCodec,
-		SourceVideoProfile:  sourceVideoProfile,
-		SourceVideoBitDepth: sourceVideoBitDepth,
-		SeekSeconds:         initialSeekSeconds,
-		StartSegmentNumber:  startSegmentNumber,
-		TargetCodecVideo:    compatTargetVideoCodec,
-		TargetCodecAudio:    compatTargetAudioCodec,
-		SegmentDuration:     segmentDuration,
-		HWAccel:             h.remoteDispatchHWAccel(transcodeNodeURL),
-		AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
-		SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
-		TotalDuration:       float64(source.Version.Duration),
-		RequireReady:        toneMapRecipe.mode != "",
+		SessionID:             upstreamSessionID,
+		PlaybackSessionID:     upstreamSessionID,
+		InputPath:             file.FilePath,
+		SourceVideoCodec:      sourceVideoCodec,
+		SourceVideoProfile:    sourceVideoProfile,
+		SourceVideoBitDepth:   sourceVideoBitDepth,
+		SourceVideoResolution: source.Version.Resolution,
+		SeekSeconds:           initialSeekSeconds,
+		StartSegmentNumber:    startSegmentNumber,
+		TargetCodecVideo:      compatTargetVideoCodec,
+		TargetCodecAudio:      compatTargetAudioCodec,
+		SegmentDuration:       segmentDuration,
+		HWAccel:               h.remoteDispatchHWAccel(transcodeNodeURL),
+		AudioTrackIndex:       compatAudioTrackIndexOrDefault(source),
+		SourceAudioChannels:   compatHLSRecipeSourceAudioChannels(source),
+		TotalDuration:         float64(source.Version.Duration),
+		RequireReady:          true,
 	}
+	reqBody.ThrottlePolicyConfigured = true
+	reqBody.ThrottleEnabled, reqBody.ThrottleThresholdSeconds = config.ResolveTranscodeThrottleSettings(ctx, h.SettingsRepo)
 	if playback.IsAudioToAACStereoDownmixV3(reqBody.SourceAudioChannels, reqBody.TargetCodecAudio, reqBody.TargetAudioChannels) {
 		reqBody.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3
 		reqBody.TargetAudioChannels = 2
@@ -1700,28 +1714,38 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	// internal/noderecipe), and central serves Jellyfin clients that carry no native
 	// token of their own, so without a persisted recipe a node or central restart
 	// cannot rebuild ffmpeg and segment serves 404.
+	effectiveHWAccel := strings.TrimSpace(nodeResponse.HWAccel)
+	softwareVideoDecode := nodeResponse.SoftwareVideoDecode
+	if effectiveHWAccel == "" {
+		softwareVideoDecode = reqBody.SoftwareVideoDecode
+	}
 	opts := playback.TranscodeOpts{
-		SessionID:           upstreamSessionID,
-		InputPath:           reqBody.InputPath,
-		SourceVideoCodec:    reqBody.SourceVideoCodec,
-		SourceVideoProfile:  reqBody.SourceVideoProfile,
-		SourceVideoBitDepth: reqBody.SourceVideoBitDepth,
-		SeekSeconds:         reqBody.SeekSeconds,
-		StartSegmentNumber:  reqBody.StartSegmentNumber,
-		TargetCodecVideo:    reqBody.TargetCodecVideo,
-		TargetCodecAudio:    reqBody.TargetCodecAudio,
-		TargetResolution:    reqBody.TargetResolution,
-		TargetBitrateKbps:   reqBody.TargetBitrateKbps,
-		VideoSampleEntry:    reqBody.VideoSampleEntry,
-		CopyVideoMPEGTS:     reqBody.CopyVideoMPEGTS,
-		SegmentDuration:     reqBody.SegmentDuration,
-		AudioTrackIndex:     reqBody.AudioTrackIndex,
-		SourceAudioChannels: reqBody.SourceAudioChannels,
-		TargetAudioChannels: reqBody.TargetAudioChannels,
-		TotalDuration:       reqBody.TotalDuration,
+		SessionID:                upstreamSessionID,
+		InputPath:                reqBody.InputPath,
+		SourceVideoCodec:         reqBody.SourceVideoCodec,
+		SourceVideoProfile:       reqBody.SourceVideoProfile,
+		SourceVideoBitDepth:      reqBody.SourceVideoBitDepth,
+		SourceVideoResolution:    reqBody.SourceVideoResolution,
+		SoftwareVideoDecode:      softwareVideoDecode,
+		SeekSeconds:              reqBody.SeekSeconds,
+		StartSegmentNumber:       reqBody.StartSegmentNumber,
+		TargetCodecVideo:         reqBody.TargetCodecVideo,
+		TargetCodecAudio:         reqBody.TargetCodecAudio,
+		TargetResolution:         reqBody.TargetResolution,
+		TargetBitrateKbps:        reqBody.TargetBitrateKbps,
+		VideoSampleEntry:         reqBody.VideoSampleEntry,
+		CopyVideoMPEGTS:          reqBody.CopyVideoMPEGTS,
+		SegmentDuration:          reqBody.SegmentDuration,
+		ThrottlePolicyConfigured: reqBody.ThrottlePolicyConfigured,
+		ThrottleEnabled:          reqBody.ThrottleEnabled,
+		ThrottleThresholdSeconds: reqBody.ThrottleThresholdSeconds,
+		AudioTrackIndex:          reqBody.AudioTrackIndex,
+		SourceAudioChannels:      reqBody.SourceAudioChannels,
+		TargetAudioChannels:      reqBody.TargetAudioChannels,
+		TotalDuration:            reqBody.TotalDuration,
 	}
 	toneMapRecipe.apply(&opts)
-	opts.HWAccel = strings.TrimSpace(nodeResponse.HWAccel)
+	opts.HWAccel = effectiveHWAccel
 	opts.ToneMapMode = nodeResponse.ToneMapMode
 	if compatHLSCopiesVideo(source) {
 		opts.TargetCodecVideo = compatCopyCodec

@@ -15,7 +15,6 @@ import (
 
 const (
 	cloudflareURLMode                  = "cloudflare_token"
-	playbackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
 	chapterThumbnailSoftwareToneMapKey = "playback.chapter_thumbnail_software_tone_map_enabled"
 )
 
@@ -87,7 +86,7 @@ var adminSettingDefaults = map[string]string{
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
-	playbackSegmentRetentionSettingKey:               "600",
+	PlaybackSegmentRetentionSettingKey:               strconv.Itoa(DefaultPlaybackSegmentRetentionSeconds),
 	"playback.hw_accel":                              "auto",
 	"playback.transcode_enabled":                     "true",
 	PlaybackRoutingDirectPlayEgressSettingKey:        string(PlaybackEgressPreferProxy),
@@ -105,8 +104,8 @@ var adminSettingDefaults = map[string]string{
 	"playback.watched_threshold":                     "90",
 	"playback.min_resume_threshold":                  "5",
 	Allow4KTranscodeSettingKey:                       "false",
-	"enable_transcode_throttle":                      "false",
-	"transcode_throttle_seconds":                     "300",
+	TranscodeThrottleEnabledSettingKey:               strconv.FormatBool(DefaultTranscodeThrottleEnabled),
+	TranscodeThrottleSecondsSettingKey:               strconv.Itoa(DefaultTranscodeThrottleSeconds),
 
 	"audiobookshelf_compat.enabled":           "true",
 	"jellyfin_compat.enabled":                 "true",
@@ -324,7 +323,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	case "metadata.cache_images", "playback.transcode_enabled",
 		chapterThumbnailSoftwareToneMapKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey,
-		Allow4KTranscodeSettingKey, "enable_transcode_throttle", "audiobookshelf_compat.enabled",
+		Allow4KTranscodeSettingKey, TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
@@ -357,9 +356,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100)
 	case "playback.min_resume_threshold":
 		return normalizeAdminInt(key, value, 1, 99)
-	case "transcode_throttle_seconds":
+	case TranscodeThrottleSecondsSettingKey:
 		return normalizeAdminInt(key, value, 60, 86400)
-	case playbackSegmentRetentionSettingKey:
+	case PlaybackSegmentRetentionSettingKey:
 		normalized, err := normalizeAdminInt(key, value, 0, 86400)
 		if err != nil {
 			return "", err

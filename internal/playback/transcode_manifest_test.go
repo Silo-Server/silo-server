@@ -1005,11 +1005,42 @@ func TestTranscodeThrottlerUsesProducedHeadForGap(t *testing.T) {
 
 	writeManifestRange(t, tempDir, 225, 254, ".ts")
 	throttler.CheckOnce()
+	if !throttler.paused {
+		t.Fatal("throttler resumed before the hysteresis boundary")
+	}
+	if writer.writes != "p" {
+		t.Fatalf("writes = %q, want p", writer.writes)
+	}
+
+	writeManifestRange(t, tempDir, 225, 240, ".ts")
+	throttler.CheckOnce()
 	if throttler.paused {
 		t.Fatal("expected throttler to resume")
 	}
 	if writer.writes != "pu" {
 		t.Fatalf("writes = %q, want pu", writer.writes)
+	}
+}
+
+func TestPublishThrottleStateRejectsStoppedThrottler(t *testing.T) {
+	sink := &recordingFFmpegLogSink{}
+	session := &TranscodeSession{opts: TranscodeOpts{SessionID: "session-throttle-owner", FFmpegLogSink: sink}}
+	stopped := NewTranscodeThrottler(session, &recordingWriteCloser{}, 60, 2)
+	active := NewTranscodeThrottler(session, &recordingWriteCloser{}, 60, 2)
+	session.throttler = active
+
+	if session.publishThrottleState(context.Background(), stopped, "stale pause", true, 120) {
+		t.Fatal("stopped throttler published a state transition")
+	}
+	if session.throttlePaused || sink.events != 0 {
+		t.Fatalf("stale transition changed paused=%t or emitted %d events", session.throttlePaused, sink.events)
+	}
+
+	if !session.publishThrottleState(context.Background(), active, "active pause", true, 120) {
+		t.Fatal("active throttler did not publish its state transition")
+	}
+	if !session.throttlePaused || sink.events != 1 || sink.message != "active pause" {
+		t.Fatalf("active transition = paused %t, events %d, message %q", session.throttlePaused, sink.events, sink.message)
 	}
 }
 

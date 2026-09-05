@@ -2961,6 +2961,7 @@ func main() {
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
 			SessionSyncer:   deps.SessionSyncer,
+			FFmpegLogSink:   playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		}
 
 		// Wire direct dependencies when DB is available.

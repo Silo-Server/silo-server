@@ -413,6 +413,19 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 const playbackTranscodeDirSettingKey = "playback.transcode_dir"
 const downloadArtifactDirSettingKey = "download.artifact_dir"
 
+// Playback segment retention and throttling settings are shared by the
+// configuration loader and the live playback handlers. Keep their safe
+// defaults here so every execution path applies the same resource bounds.
+const (
+	PlaybackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
+	TranscodeThrottleEnabledSettingKey = "enable_transcode_throttle"
+	TranscodeThrottleSecondsSettingKey = "transcode_throttle_seconds"
+
+	DefaultPlaybackSegmentRetentionSeconds = 120
+	DefaultTranscodeThrottleEnabled        = true
+	DefaultTranscodeThrottleSeconds        = 120
+)
+
 // DefaultTranscodeDir is the fallback playback.transcode_dir; download
 // artifacts default to a sibling directory (see EffectiveDownloadArtifactDir).
 const DefaultTranscodeDir = "/tmp/silo-transcode"
@@ -502,7 +515,7 @@ func setDefaults() *configRaw {
 		Playback: PlaybackConfig{
 			FFmpegPath:                   "",
 			TranscodeDir:                 DefaultTranscodeDir,
-			SegmentRetentionSeconds:      600,
+			SegmentRetentionSeconds:      DefaultPlaybackSegmentRetentionSeconds,
 			HWAccel:                      "auto",
 			ChapterThumbnailWorkers:      1,
 			ChapterThumbnailExecution:    "local",

@@ -2,6 +2,7 @@
 package playback
 
 import (
+	"context"
 	"io"
 	"log"
 	"sync"
@@ -14,6 +15,10 @@ const (
 
 	// minThresholdSeconds is the minimum allowed throttle threshold.
 	minThresholdSeconds = 60
+
+	// throttleResumeDivisor creates enough hysteresis that a fast encoder does
+	// not bounce between pause and resume around the forward-buffer boundary.
+	throttleResumeDivisor = 2
 )
 
 // TranscodeThrottler pauses and resumes an FFmpeg process by sending
@@ -100,7 +105,7 @@ func (t *TranscodeThrottler) CheckOnce() {
 	gap := gapSegments * segmentDuration
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	event := ""
 
 	// Never pause on output the current ffmpeg process did not produce. A
 	// manifest left behind by an earlier generation in the same output
@@ -114,18 +119,31 @@ func (t *TranscodeThrottler) CheckOnce() {
 			log.Printf("playback: throttler resuming ffmpeg (produced output predates current generation)")
 			t.sendResume()
 			t.paused = false
+			event = "ffmpeg throttle resumed"
+		}
+		t.mu.Unlock()
+		if event != "" {
+			t.session.publishThrottleState(context.Background(), t, event, false, gap)
 		}
 		return
 	}
 
+	resumeThresholdSeconds := t.thresholdSeconds / throttleResumeDivisor
 	if gap >= t.thresholdSeconds && !t.paused {
 		log.Printf("playback: throttler pausing ffmpeg (gap=%ds, threshold=%ds)", gap, t.thresholdSeconds)
 		t.sendPause()
 		t.paused = true
-	} else if gap < t.thresholdSeconds && t.paused {
+		event = "ffmpeg throttle paused"
+	} else if gap <= resumeThresholdSeconds && t.paused {
 		log.Printf("playback: throttler resuming ffmpeg (gap=%ds, threshold=%ds)", gap, t.thresholdSeconds)
 		t.sendResume()
 		t.paused = false
+		event = "ffmpeg throttle resumed"
+	}
+	paused := t.paused
+	t.mu.Unlock()
+	if event != "" {
+		t.session.publishThrottleState(context.Background(), t, event, paused, gap)
 	}
 }
 

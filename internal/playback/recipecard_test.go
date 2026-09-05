@@ -20,6 +20,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		SourceVideoCodec:         "hevc",
 		SourceVideoProfile:       "Main 10",
 		SourceVideoBitDepth:      10,
+		SourceVideoResolution:    "1920x800",
 		SoftwareVideoDecode:      true,
 		ToneMapPolicy:            tonemap.PolicyHardwareThenSoftware,
 		ToneMapMode:              tonemap.ModeHardware,
@@ -29,28 +30,31 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		ToneMapPreflightRequired: true,
 		ToneMapSourceRevision:    revision,
 		ToneMapDVConfigPresent:   true, ToneMapDVBLCompatIDPresent: true, ToneMapDVBLPresent: true, ToneMapDVRPUPresent: true,
-		VideoBitstreamFilter:   "dovi_rpu=strip=1",
-		VideoSampleEntry:       VideoSampleEntryDVH1,
-		SeekSeconds:            900,
-		StreamOriginSeconds:    896,
-		CopySeekAnchorResolved: true,
-		TargetResolution:       "1080p",
-		TargetCodecVideo:       "h264",
-		TargetCodecAudio:       "aac",
-		SourceAudioChannels:    6,
-		TargetAudioChannels:    1,
-		TargetAudioBitrateKbps: 96,
-		SegmentDuration:        2,
-		StartSegmentNumber:     450,
-		HWAccel:                "qsv",
-		HWDevice:               "/dev/dri/renderD128",
-		SubtitleTrackIndex:     3,
-		SubtitleBurnIn:         true,
-		SubtitleCodec:          "hdmv_pgs_subtitle",
-		AudioTrackIndex:        1,
-		TargetBitrateKbps:      8000,
-		TotalDuration:          7200,
-		FastStart:              true,
+		VideoBitstreamFilter:     "dovi_rpu=strip=1",
+		VideoSampleEntry:         VideoSampleEntryDVH1,
+		SeekSeconds:              900,
+		StreamOriginSeconds:      896,
+		CopySeekAnchorResolved:   true,
+		TargetResolution:         "1080p",
+		TargetCodecVideo:         "h264",
+		TargetCodecAudio:         "aac",
+		SourceAudioChannels:      6,
+		TargetAudioChannels:      1,
+		TargetAudioBitrateKbps:   96,
+		SegmentDuration:          2,
+		ThrottlePolicyConfigured: true,
+		ThrottleEnabled:          true,
+		ThrottleThresholdSeconds: 120,
+		StartSegmentNumber:       450,
+		HWAccel:                  "qsv",
+		HWDevice:                 "/dev/dri/renderD128",
+		SubtitleTrackIndex:       3,
+		SubtitleBurnIn:           true,
+		SubtitleCodec:            "hdmv_pgs_subtitle",
+		AudioTrackIndex:          1,
+		TargetBitrateKbps:        8000,
+		TotalDuration:            7200,
+		FastStart:                true,
 	}
 
 	card := NewRecipeCard(42, "profile-1", 77, "", opts)
@@ -104,8 +108,33 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	if got.SourceVideoProfile != "Main 10" || got.SourceVideoBitDepth != 10 {
 		t.Errorf("source video facts lost in round trip: profile=%q bit_depth=%d", got.SourceVideoProfile, got.SourceVideoBitDepth)
 	}
+	if got.SourceVideoResolution != "1920x800" {
+		t.Errorf("SourceVideoResolution = %q, want 1920x800", got.SourceVideoResolution)
+	}
+	if !got.ThrottlePolicyConfigured || !got.ThrottleEnabled || got.ThrottleThresholdSeconds != 120 {
+		t.Errorf("throttle policy lost in round trip: %+v", got)
+	}
 	if got.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("FFmpegPath not re-supplied: %q", got.FFmpegPath)
+	}
+}
+
+func TestRecipeCardTokenPreservesTranscodeResourceFacts(t *testing.T) {
+	card := NewRecipeCard(42, "profile-1", 77, "http://node", TranscodeOpts{
+		SessionID:                "session-1",
+		InputPath:                "/media/movie.mkv",
+		SourceVideoResolution:    "1920x800",
+		ThrottlePolicyConfigured: true,
+		ThrottleEnabled:          true,
+		ThrottleThresholdSeconds: 120,
+	})
+
+	restored := RecipeCardFromClaims(ptr(card.ToClaims()))
+	if restored.SourceVideoResolution != "1920x800" {
+		t.Fatalf("SourceVideoResolution = %q, want 1920x800", restored.SourceVideoResolution)
+	}
+	if !restored.ThrottlePolicyConfigured || !restored.ThrottleEnabled || restored.ThrottleThresholdSeconds != 120 {
+		t.Fatalf("throttle policy lost in token: %+v", restored)
 	}
 }
 

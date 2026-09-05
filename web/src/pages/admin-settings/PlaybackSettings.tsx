@@ -266,6 +266,10 @@ export default function PlaybackSettings() {
   const isDirty = form.isDirty;
   const anyDirty = (keys: readonly string[]) => keys.some((key) => isDirty(key));
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
+  const transcodingEnabled = form.getValue("playback.transcode_enabled") === "true";
+  const transcodeThrottleEnabled = form.getValue("enable_transcode_throttle") === "true";
+  const transcodeSegmentCleanupDisabled =
+    form.getValue("playback.segment_retention_seconds") === "0";
 
   const detection = hwAccel === "none" ? undefined : hwDetection.data;
   const detectedLabel = describeDetection(detection);
@@ -315,6 +319,13 @@ export default function PlaybackSettings() {
             label="Transcoding"
             type="toggle"
             description="Off serves only files clients can already play."
+            status={
+              transcodingEnabled && !transcodeThrottleEnabled ? (
+                <SettingFieldStatus tone="warn">
+                  Resource protection disabled — enable Throttle transcoding in Advanced
+                </SettingFieldStatus>
+              ) : undefined
+            }
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_enabled")}
@@ -330,7 +341,7 @@ export default function PlaybackSettings() {
               { value: "videotoolbox", label: "VideoToolbox (macOS)" },
               { value: "none", label: "Software" },
             ]}
-            description="Auto picks the best device this server can see."
+            description="Auto picks the best device. If startup fails, it keeps GPU encoding with CPU decoding before falling back to software."
             status={hwAccelStatus}
             value={hwAccel}
             onChange={(v) => form.setValue("playback.hw_accel", v)}
@@ -451,16 +462,32 @@ export default function PlaybackSettings() {
             <SettingField
               label="Throttle transcoding"
               type="toggle"
-              description="Pause encoding once the client is far enough ahead."
+              description={
+                "Pauses FFmpeg once enough media is ready instead of " +
+                "generating the whole title at once."
+              }
+              status={
+                transcodeThrottleEnabled ? (
+                  <SettingFieldStatus tone="ok">Recommended protection enabled</SettingFieldStatus>
+                ) : (
+                  <SettingFieldStatus tone="warn">
+                    Strongly recommended to limit CPU, GPU, and temporary disk usage
+                  </SettingFieldStatus>
+                )
+              }
               value={form.getValue("enable_transcode_throttle")}
               onChange={(v) => form.setValue("enable_transcode_throttle", v)}
               restartRequired={restartKeys.has("enable_transcode_throttle")}
             />
-            {form.getValue("enable_transcode_throttle") === "true" && (
+            {transcodeThrottleEnabled && (
               <SettingField
                 label="Buffer ahead"
                 type="number"
                 unit="seconds"
+                hint={
+                  "Keeps playback smooth while bounding work done ahead of " +
+                  "the viewer. 120 seconds is recommended."
+                }
                 value={form.getValue("transcode_throttle_seconds")}
                 onChange={(v) => form.setValue("transcode_throttle_seconds", v)}
                 restartRequired={restartKeys.has("transcode_throttle_seconds")}
@@ -470,7 +497,18 @@ export default function PlaybackSettings() {
               label="Transcode back buffer"
               type="number"
               unit="seconds"
-              hint="Keeps this much already-downloaded media for instant backward seeking, then reclaims older transcode segments. Use 0 to disable cleanup; enabled values must be at least 120 seconds. Pair with transcode throttling to bound both behind- and ahead-of-client disk usage."
+              hint={
+                "Keeps a short rewind window, then removes older segments. " +
+                "The entire temporary cache is deleted when playback ends and " +
+                "regenerated next time. 120 seconds is recommended; 0 disables cleanup."
+              }
+              status={
+                transcodeSegmentCleanupDisabled ? (
+                  <SettingFieldStatus tone="warn">
+                    Cleanup disabled: temporary transcode storage can grow for the full title
+                  </SettingFieldStatus>
+                ) : undefined
+              }
               value={form.getValue("playback.segment_retention_seconds")}
               onChange={(v) => form.setValue("playback.segment_retention_seconds", v)}
               restartRequired={restartKeys.has("playback.segment_retention_seconds")}

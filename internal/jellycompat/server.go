@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -92,7 +93,8 @@ type Dependencies struct {
 	PresignTTL      time.Duration
 
 	// Playback
-	SessionMgr SessionManagerInterface
+	SessionMgr    SessionManagerInterface
+	FFmpegLogSink playback.FFmpegLogSink
 	// SessionSyncer flushes native session-manager state into the shared
 	// admin live-session table right after compat playback starts/stops, so
 	// the activity dashboard doesn't wait for the periodic reconciler tick.

@@ -186,6 +186,28 @@ func TestChapterThumbnailSoftwareToneMapDefaultsDisabled(t *testing.T) {
 	}
 }
 
+func TestTranscodeResourceBoundsDefaultEnabled(t *testing.T) {
+	effective := EffectiveAdminSettings(nil)
+	if got := effective[TranscodeThrottleEnabledSettingKey]; got != "true" {
+		t.Fatalf("transcode throttle default = %q, want true", got)
+	}
+	if got := effective[TranscodeThrottleSecondsSettingKey]; got != "120" {
+		t.Fatalf("transcode throttle buffer = %q, want 120", got)
+	}
+	if got := effective[PlaybackSegmentRetentionSettingKey]; got != "120" {
+		t.Fatalf("transcode segment retention = %q, want 120", got)
+	}
+}
+
+func TestTranscodeThrottleExplicitOptOutIsPreserved(t *testing.T) {
+	effective := EffectiveAdminSettings(map[string]string{
+		TranscodeThrottleEnabledSettingKey: "false",
+	})
+	if got := effective[TranscodeThrottleEnabledSettingKey]; got != "false" {
+		t.Fatalf("transcode throttle = %q, want explicit false", got)
+	}
+}
+
 // TestTranscodeToneMapPoliciesDefaultDisabled verifies tone mapping remains opt-in.
 func TestTranscodeToneMapPoliciesDefaultDisabled(t *testing.T) {
 	effective := EffectiveAdminSettings(nil)
@@ -241,7 +263,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "theme.catalog_url", value: "http://raw.githubusercontent.com/Silo-Server/silo-themes/main/catalog.json"},
 		{key: "theme.catalog_url", value: "https://example.com/catalog.json"},
 		{key: "redis.url", value: "not-a-url"},
-		{key: "playback.segment_retention_seconds", value: "119"},
+		{key: PlaybackSegmentRetentionSettingKey, value: "119"},
 		{key: "scanner.max_concurrent_libraries", value: "0"},
 		{key: "scanner.max_concurrent_scoped", value: "-1"},
 		{key: "scanner.empty_trash_after_scan", value: "sometimes"},
@@ -267,7 +289,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 func TestNormalizeAdminSettingAcceptsSegmentRetentionBounds(t *testing.T) {
 	for _, value := range []string{"0", "120", "86400"} {
 		t.Run(value, func(t *testing.T) {
-			got, err := NormalizeAdminSetting("playback.segment_retention_seconds", value)
+			got, err := NormalizeAdminSetting(PlaybackSegmentRetentionSettingKey, value)
 			if err != nil {
 				t.Fatalf("NormalizeAdminSetting: %v", err)
 			}

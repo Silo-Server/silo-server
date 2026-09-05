@@ -38,8 +38,8 @@ func TestLoadFromDBMetadataPresignExpiryRejectsInvalidDuration(t *testing.T) {
 func TestLoadFromDBRejectsInvalidSegmentRetention(t *testing.T) {
 	for _, value := range []string{"-1", "119", "86401"} {
 		t.Run(value, func(t *testing.T) {
-			_, err := LoadFromDB(map[string]string{playbackSegmentRetentionSettingKey: value})
-			if err == nil || !strings.Contains(err.Error(), playbackSegmentRetentionSettingKey) {
+			_, err := LoadFromDB(map[string]string{PlaybackSegmentRetentionSettingKey: value})
+			if err == nil || !strings.Contains(err.Error(), PlaybackSegmentRetentionSettingKey) {
 				t.Fatalf("LoadFromDB() error = %v, want retention bounds error", err)
 			}
 		})
@@ -217,7 +217,7 @@ func TestYAMLToSettingsMapPreservesExplicitlyDisabledSegmentRetention(t *testing
 playback:
   segment_retention_seconds: 0
 `)
-	if got := m[playbackSegmentRetentionSettingKey]; got != "0" {
+	if got := m[PlaybackSegmentRetentionSettingKey]; got != "0" {
 		t.Fatalf("segment retention = %q, want explicit disable", got)
 	}
 }

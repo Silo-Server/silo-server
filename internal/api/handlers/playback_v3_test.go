@@ -3640,6 +3640,59 @@ func TestPrepareLocalTransportV3ReturnsStableTerminalWhenFFmpegExitsBeforeReady(
 	}
 }
 
+type automaticLocalTransportPipelineStubV3 struct {
+	stages []playback.TranscodeOpts
+	index  int
+}
+
+func (pipeline *automaticLocalTransportPipelineStubV3) Current() playback.TranscodeOpts {
+	return pipeline.stages[pipeline.index]
+}
+
+func (pipeline *automaticLocalTransportPipelineStubV3) AdvanceAfterFailure(string) bool {
+	if pipeline.index+1 >= len(pipeline.stages) {
+		return false
+	}
+	pipeline.index++
+	return true
+}
+
+func TestRetryAutomaticLocalPlaybackTransportV3ContinuesAfterSpawnFailures(t *testing.T) {
+	pipeline := &automaticLocalTransportPipelineStubV3{stages: []playback.TranscodeOpts{
+		{HWAccel: "nvenc"},
+		{HWAccel: "nvenc", SoftwareVideoDecode: true},
+		{HWAccel: playback.HWAccelNone, SoftwareVideoDecode: true},
+	}}
+	initialFailure := &localTransportStartupFailureV3{cause: errors.New("full hardware spawn failed"), failedToStart: true}
+	attempts := make([]playback.TranscodeOpts, 0, 2)
+	wantSession := &playback.TranscodeSession{}
+	start := func(_ context.Context, opts playback.TranscodeOpts) (*playback.TranscodeSession, *localTransportStartupFailureV3) {
+		attempts = append(attempts, opts)
+		if len(attempts) == 1 {
+			return nil, &localTransportStartupFailureV3{cause: errors.New("hybrid spawn failed"), failedToStart: true}
+		}
+		return wantSession, nil
+	}
+
+	session, failure := retryAutomaticLocalPlaybackTransportV3(
+		context.Background(), "session-auto-spawn", pipeline, initialFailure, start)
+	if failure != nil {
+		t.Fatalf("retry automatic transport: %v", failure.cause)
+	}
+	if session != wantSession {
+		t.Fatal("retry returned the wrong successful session")
+	}
+	if len(attempts) != 2 {
+		t.Fatalf("attempt count = %d, want 2 fallback attempts", len(attempts))
+	}
+	if !attempts[0].SoftwareVideoDecode || attempts[0].HWAccel != "nvenc" {
+		t.Fatalf("first fallback = %+v, want CPU decode with GPU encode", attempts[0])
+	}
+	if !attempts[1].SoftwareVideoDecode || attempts[1].HWAccel != playback.HWAccelNone {
+		t.Fatalf("second fallback = %+v, want full software", attempts[1])
+	}
+}
+
 func TestPrepareLocalTransportV3RemuxOmitsToneMapOnlyDolbyVisionEvidence(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())

@@ -1298,8 +1298,13 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 			want: "qsv",
 		},
 		{
-			name: "unvalidated nvenc upload falls back to software encode",
+			name: "nvenc keeps hardware encode with software decode",
 			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "h264", SoftwareVideoDecode: true, TargetCodecVideo: "h264"},
+			want: "nvenc",
+		},
+		{
+			name: "nvenc keeps frozen tone map fallback unchanged",
+			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "h264", SoftwareVideoDecode: true, TargetCodecVideo: "h264", ToneMapMode: tonemap.ModeHardware},
 			want: "none",
 		},
 	}
@@ -1310,6 +1315,85 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 			t.Parallel()
 			if got := resolveEffectiveTranscodeHWAccel(tt.opts); got != tt.want {
 				t.Fatalf("resolveEffectiveTranscodeHWAccel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildFFmpegArgs_H264High10NVENCUsesSoftwareDecodeUpload(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:           "/media/high10.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-high10-nvenc",
+		SourceVideoCodec:    "h264",
+		SourceVideoProfile:  "High 10",
+		SourceVideoBitDepth: 10,
+		TargetCodecVideo:    "h264",
+		TargetCodecAudio:    "aac",
+		SegmentDuration:     2,
+		HWAccel:             "nvenc",
+		HWDevice:            "2",
+		TargetResolution:    "720p",
+	})
+
+	joined := strings.Join(args, " ")
+	for _, required := range []string{
+		"-init_hw_device cuda=cu:2 -filter_hw_device cu",
+		"-c:v h264_nvenc",
+		"-vf format=nv12,hwupload_cuda,scale_cuda=w=-2:h=720:format=nv12",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("High 10 NVENC recipe missing %q: %s", required, joined)
+		}
+	}
+	for _, forbidden := range []string{"-hwaccel cuda", "-c:v libx264", "hwdownload"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("High 10 NVENC recipe unexpectedly contains %q: %s", forbidden, joined)
+		}
+	}
+}
+
+func TestBuildFFmpegArgs_H264High10NVENCBurnInUsesSoftwareFrames(t *testing.T) {
+	for _, subtitle := range []struct {
+		name  string
+		codec string
+		want  string
+	}{
+		{
+			name:  "text",
+			codec: "ass",
+			want:  "-vf format=yuv420p,scale=-2:720,subtitles=filename='/media/high10.mkv':si=0,format=nv12,hwupload_cuda",
+		},
+		{
+			name:  "bitmap",
+			codec: "hdmv_pgs_subtitle",
+			want:  "-filter_complex [0:v:0]format=yuv420p[vmain];[vmain][0:s:0]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]",
+		},
+	} {
+		t.Run(subtitle.name, func(t *testing.T) {
+			args := buildFFmpegArgs(TranscodeOpts{
+				InputPath:           "/media/high10.mkv",
+				OutputDir:           "/tmp/out",
+				SessionID:           "session-high10-nvenc-" + subtitle.name,
+				SourceVideoCodec:    "h264",
+				SourceVideoProfile:  "High 10",
+				SourceVideoBitDepth: 10,
+				TargetCodecVideo:    "h264",
+				TargetCodecAudio:    "aac",
+				SegmentDuration:     2,
+				HWAccel:             "nvenc",
+				TargetResolution:    "720p",
+				SubtitleTrackIndex:  0,
+				SubtitleBurnIn:      true,
+				SubtitleCodec:       subtitle.codec,
+			})
+
+			joined := strings.Join(args, " ")
+			if !strings.Contains(joined, subtitle.want) {
+				t.Fatalf("High 10 NVENC burn-in missing %q: %s", subtitle.want, joined)
+			}
+			if strings.Contains(joined, "hwdownload") || strings.Contains(joined, "-hwaccel cuda") {
+				t.Fatalf("High 10 NVENC burn-in must use software-decoded frames: %s", joined)
 			}
 		})
 	}

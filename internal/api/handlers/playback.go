@@ -2039,19 +2039,14 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 
 // maybeStartThrottler reads throttle settings and starts the throttler if enabled.
 func (h *PlaybackHandler) maybeStartThrottler(ctx context.Context, session *playback.TranscodeSession) {
-	if h.SettingsRepo == nil {
-		return
-	}
-	enableThrottle, _ := h.SettingsRepo.Get(ctx, "enable_transcode_throttle")
-	if enableThrottle != "true" {
-		return
-	}
-	thresholdStr, _ := h.SettingsRepo.Get(ctx, "transcode_throttle_seconds")
-	threshold := 300 // default
-	if v, err := strconv.Atoi(thresholdStr); err == nil && v > 0 {
-		threshold = v
-	}
-	session.StartThrottler(threshold)
+	enabled, thresholdSeconds := h.transcodeThrottleSettings(ctx)
+	session.ConfigureThrottler(ctx, enabled, thresholdSeconds)
+}
+
+// transcodeThrottleSettings resolves live values while keeping protective
+// defaults when the settings store is absent, unavailable, or incomplete.
+func (h *PlaybackHandler) transcodeThrottleSettings(ctx context.Context) (bool, int) {
+	return config.ResolveTranscodeThrottleSettings(ctx, h.SettingsRepo)
 }
 
 // findAlternateFile finds another file version for the same content. It

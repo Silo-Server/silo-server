@@ -93,8 +93,12 @@ type Claims struct {
 	SourceVideoCodec           string  `json:"svc,omitempty"`
 	SourceVideoProfile         string  `json:"svp,omitempty"`
 	SourceVideoBitDepth        int     `json:"svb,omitempty"`
+	SourceVideoResolution      string  `json:"svr,omitempty"`
 	SourceAudioChannels        int     `json:"sach,omitempty"`
 	SoftwareVideoDecode        bool    `json:"svd,omitempty"`
+	ThrottlePolicyConfigured   bool    `json:"tpc,omitempty"`
+	ThrottleEnabled            bool    `json:"tpe,omitempty"`
+	ThrottleThresholdSeconds   int     `json:"tps,omitempty"`
 	ToneMapPolicy              string  `json:"tmp,omitempty"`
 	ToneMapMode                string  `json:"tmm,omitempty"`
 	ToneMapSourceKind          string  `json:"tms,omitempty"`

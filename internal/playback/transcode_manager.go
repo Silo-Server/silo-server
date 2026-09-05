@@ -889,7 +889,13 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	if startTranscode == nil {
 		startTranscode = StartTranscode
 	}
-	transcodeSession, err := startTranscode(ctx, opts)
+	var transcodeSession *TranscodeSession
+	var err error
+	if strings.EqualFold(strings.TrimSpace(opts.HWAccel), hwAccelAuto) {
+		transcodeSession, err = startReadyTranscode(ctx, opts, ManifestStartupTimeout, startTranscode)
+	} else {
+		transcodeSession, err = startTranscode(ctx, opts)
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil, err

@@ -40,14 +40,16 @@ type TranscodeOpts struct {
 	subtitleFilterInputPath string
 	// OutputSubdir is the signed, root-relative reconstruction directory. Empty
 	// retains the legacy flat {session_id} layout.
-	OutputSubdir         string
-	TranscodeTransportID string
-	SessionID            string
-	SourceVideoCodec     string
-	SourceVideoProfile   string
-	SourceVideoBitDepth  int
-	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
-	VideoSampleEntry     string // allowlisted copy-HLS sample entry: dvh1 or hvc1
+	OutputSubdir          string
+	TranscodeTransportID  string
+	SessionID             string
+	PlaybackSessionID     string
+	SourceVideoCodec      string
+	SourceVideoProfile    string
+	SourceVideoBitDepth   int
+	SourceVideoResolution string
+	VideoBitstreamFilter  string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
+	VideoSampleEntry      string // allowlisted copy-HLS sample entry: dvh1 or hvc1
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
 	CopyVideoMPEGTS bool
@@ -59,26 +61,28 @@ type TranscodeOpts struct {
 	StreamOriginSeconds float64
 	// CopySeekAnchorResolved distinguishes a valid zero-second origin from
 	// older/shared recipes that never resolved a copy seek anchor.
-	CopySeekAnchorResolved  bool
-	TargetResolution        string // e.g., 1080p, 720p
-	TargetCodecVideo        string // e.g., h264 (or hevc if allowed)
-	TargetCodecAudio        string // e.g., aac
-	SegmentDuration         int    // seconds, default 6
-	SegmentRetentionSeconds int    // downloaded media retained behind the client; 0 disables pruning
-	StartSegmentNumber      int    // -hls_segment_start_number, default 0
-	FFmpegPath              string // optional explicit ffmpeg binary path
-	HWAccel                 string // auto, qsv, vaapi, nvenc, videotoolbox, none
-	HWDevice                string // e.g., /dev/dri/renderD128 (default if empty)
+	CopySeekAnchorResolved   bool
+	TargetResolution         string // e.g., 1080p, 720p
+	TargetCodecVideo         string // e.g., h264 (or hevc if allowed)
+	TargetCodecAudio         string // e.g., aac
+	SegmentDuration          int    // seconds, default 6
+	SegmentRetentionSeconds  int    // downloaded media retained behind the client; 0 disables pruning
+	ThrottlePolicyConfigured bool
+	ThrottleEnabled          bool
+	ThrottleThresholdSeconds int
+	StartSegmentNumber       int    // -hls_segment_start_number, default 0
+	FFmpegPath               string // optional explicit ffmpeg binary path
+	HWAccel                  string // auto, qsv, vaapi, nvenc, videotoolbox, none
+	HWDevice                 string // e.g., /dev/dri/renderD128 (default if empty)
 	// AvoidHWDevice asks the initial multi-device allocator to prefer any other
 	// present render device. It is a process-local startup hint used after an
 	// early GPU failure; the selected concrete device remains fully reserved and
 	// is the value frozen into the session recipe.
 	AvoidHWDevice string
 	// SoftwareVideoDecode keeps a hardware encoder while decoding the source
-	// on the CPU. Intel's VAAPI/QSV decoders cannot accept 10-bit AVC, but the
-	// decoded frames can still be converted to NV12, uploaded, and encoded by
-	// QSV/VAAPI. The flag is frozen into recipe cards so restarts do not put the
-	// unsupported hardware decoder back.
+	// on the CPU. Unsupported decoder inputs can still be converted to NV12,
+	// uploaded, and encoded by QSV, VAAPI, NVENC, or VideoToolbox. The flag is
+	// frozen into recipe cards so restarts do not restore the failed decoder.
 	SoftwareVideoDecode        bool
 	ToneMapPolicy              tonemap.Policy
 	ToneMapMode                tonemap.Mode
@@ -199,6 +203,11 @@ type TranscodeSession struct {
 	restartCount         int
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
+	ffmpegArgs           []string
+	throttleConfigured   bool
+	throttleEnabled      bool
+	throttleThreshold    int
+	throttlePaused       bool
 	restartHook          func(context.Context)
 	// generationStartedAt is when the currently-owning ffmpeg process was
 	// spawned. Output in the shared directory older than this timestamp was
@@ -369,6 +378,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}
 
 	args := buildFFmpegArgs(opts)
+	s.ffmpegArgs = append([]string(nil), args...)
 	bin := opts.FFmpegPath
 	if bin == "" {
 		bin = ffmpegBinary()
@@ -853,11 +863,10 @@ func resolveEffectiveTranscodeHWAccelContext(ctx context.Context, opts Transcode
 			return transcodeHWNone
 		}
 	}
-	// The bundled CUDA software-decode upload path has not been validated.
-	// Prefer the established libx264 fallback over selecting a decoder known
-	// not to accept this source. Intel QSV/VAAPI have the explicit upload paths
-	// below and retain hardware encoding.
-	if opts.SoftwareVideoDecode && hwAccel == transcodeHWNVENC {
+	// Hardware tone-map recipes are capability-validated as a complete decode,
+	// filter, and encode graph. Do not splice the ordinary CUDA upload path into
+	// that frozen graph; its owner must replan a complete software recipe.
+	if opts.SoftwareVideoDecode && hwAccel == transcodeHWNVENC && opts.ToneMapMode != "" {
 		return HWAccelNone
 	}
 	return hwAccel
@@ -1009,6 +1018,12 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
 		}
 	case transcodeHWNVENC:
+		if opts.SoftwareVideoDecode {
+			if hwDevice := strings.TrimSpace(opts.HWDevice); hwDevice != "" {
+				args = append(args, "-init_hw_device", "cuda=cu:"+hwDevice, "-filter_hw_device", "cu")
+			}
+			return append(args, "-noautorotate")
+		}
 		args = append(args,
 			"-hwaccel", "cuda",
 			"-hwaccel_output_format", "cuda",
@@ -1206,6 +1221,8 @@ func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 		return append(args, "-vf", qsvSoftwareDecodeFilter(opts.TargetResolution))
 	case opts.HWAccel == "vaapi" && opts.SoftwareVideoDecode:
 		return append(args, "-vf", vaapiSoftwareDecodeFilter(opts.TargetResolution))
+	case opts.HWAccel == transcodeHWNVENC && opts.SoftwareVideoDecode:
+		return append(args, "-vf", nvencSoftwareDecodeFilter(opts.TargetResolution))
 	case opts.HWAccel == "qsv":
 		return append(args, "-vf", qsvScaleFilter(opts.TargetResolution))
 	case opts.HWAccel == "vaapi":
@@ -1570,9 +1587,14 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 			cpuFilters += "," + scale
 		}
 		if opts.HWAccel == transcodeHWNVENC {
-			// Download to CPU for the overlay, then re-upload to CUDA.
-			graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
-				",format=nv12,hwupload_cuda[vout]"
+			if opts.SoftwareVideoDecode {
+				graph = "[0:v:0]format=yuv420p[vmain];[vmain]" + cpuFilters +
+					",format=nv12,hwupload_cuda[vout]"
+			} else {
+				// Download to CPU for the overlay, then re-upload to CUDA.
+				graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
+					",format=nv12,hwupload_cuda[vout]"
+			}
 		} else {
 			// CPU encoding: overlay directly on decoded frames.
 			graph = "[0:v:0]" + cpuFilters + "[vout]"
@@ -1641,8 +1663,13 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload"
 		args = append(args, "-vf", vf)
 	case transcodeHWNVENC:
-		// NVENC/CUDA: download to CPU for subtitle rendering, then upload back.
-		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload_cuda"
+		// NVENC/CUDA renders subtitles on the CPU and uploads the result. A
+		// software-decoded source is already in CPU memory and needs no download.
+		prefix := "hwdownload,format=yuv420p,"
+		if opts.SoftwareVideoDecode {
+			prefix = "format=yuv420p,"
+		}
+		vf := prefix + cpuFilters + ",format=nv12,hwupload_cuda"
 		args = append(args, "-vf", vf)
 	default:
 		// CPU encoding: filters run directly on decoded frames.
@@ -1766,6 +1793,13 @@ func nvencScaleFilter(res string) string {
 	default:
 		return "scale_cuda=format=nv12"
 	}
+}
+
+// nvencSoftwareDecodeFilter uploads CPU-decoded NV12 frames before CUDA scale
+// and NVENC encode, avoiding hardware decoder limitations without losing GPU
+// acceleration for the expensive output stages.
+func nvencSoftwareDecodeFilter(res string) string {
+	return "format=nv12,hwupload_cuda," + nvencScaleFilter(res)
 }
 
 // filterPathReplacer escapes special characters in file paths for ffmpeg filter syntax.
@@ -2966,7 +3000,7 @@ func (s *TranscodeSession) restart(
 	}
 
 	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, strings.Join(args, " "))
-	s.logFFmpegEvent(ctx, "ffmpeg process restart", "")
+	s.logFFmpegAttemptEvent(ctx, opts, args, "ffmpeg process restart", "")
 
 	// As on initial start, the caller bounds synchronous validation; the new
 	// FFmpeg process keeps running after the segment request completes.
@@ -3006,7 +3040,7 @@ func (s *TranscodeSession) restart(
 		s.waitErr = err
 		s.mu.Unlock()
 		close(flight.done)
-		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
+		s.logFFmpegAttemptEvent(ctx, opts, args, "ffmpeg process exit error", err.Error())
 		return fmt.Errorf("restart ffmpeg: %w", err)
 	}
 
@@ -3017,6 +3051,7 @@ func (s *TranscodeSession) restart(
 	s.cmd = cmd
 	s.cancel = cancel
 	s.opts = opts
+	s.ffmpegArgs = append(s.ffmpegArgs[:0], args...)
 	s.running = true
 	s.restarting = nil
 	s.stdinPipe = stdinPipe
@@ -3517,13 +3552,39 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
 	if s.stdinPipe == nil || thresholdSeconds <= 0 {
+		s.throttleEnabled = false
+		s.throttleThreshold = 0
 		s.mu.Unlock()
 		return
 	}
 	t := NewTranscodeThrottler(s, s.stdinPipe, thresholdSeconds, s.opts.SegmentDuration)
 	s.throttler = t
+	s.throttleEnabled = true
+	s.throttleThreshold = t.thresholdSeconds
+	s.throttlePaused = false
 	s.mu.Unlock()
 	t.Start()
+}
+
+// ConfigureThrottler applies the resolved live resource policy and records one
+// diagnostic event. Recording disabled policies matters: an absent throttler
+// and an old server otherwise look identical in the Activity debug view.
+func (s *TranscodeSession) ConfigureThrottler(ctx context.Context, enabled bool, thresholdSeconds int) {
+	s.StopThrottler()
+	s.mu.Lock()
+	s.throttleConfigured = true
+	s.mu.Unlock()
+
+	if enabled {
+		s.StartThrottler(thresholdSeconds)
+	} else {
+		s.mu.Lock()
+		s.throttleEnabled = false
+		s.throttleThreshold = 0
+		s.throttlePaused = false
+		s.mu.Unlock()
+	}
+	s.logFFmpegEvent(ctx, "ffmpeg diagnostic snapshot", "")
 }
 
 // StopThrottler stops the throttler if one is running.
@@ -3535,6 +3596,42 @@ func (s *TranscodeSession) StopThrottler() {
 	if t != nil {
 		t.Stop()
 	}
+	s.mu.Lock()
+	if s.throttler == nil {
+		s.throttlePaused = false
+	}
+	s.mu.Unlock()
+}
+
+// publishThrottleState records a transition only while owner is still the
+// session's active throttler. This prevents a stopped goroutine from restoring
+// stale paused state or emitting a misleading Activity event.
+func (s *TranscodeSession) publishThrottleState(
+	ctx context.Context,
+	owner *TranscodeThrottler,
+	message string,
+	paused bool,
+	gapSeconds int,
+) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	if s.throttler != owner {
+		s.mu.Unlock()
+		return false
+	}
+	s.throttlePaused = paused
+	sink := s.opts.FFmpegLogSink
+	sessionID := s.ffmpegLogSessionIDLocked()
+	attrs := s.ffmpegAttrsLocked()
+	attrs.ThrottlePaused = &paused
+	attrs.ThrottleGapSeconds = gapSeconds
+	s.mu.Unlock()
+	if sink != nil {
+		sink.WriteEvent(ctx, sessionID, attrs, message)
+	}
+	return true
 }
 
 type ffmpegStderrWriter struct {
@@ -3590,7 +3687,7 @@ func (s *TranscodeSession) flushStderr(ctx context.Context) {
 }
 
 func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
-	if s == nil || s.opts.FFmpegLogSink == nil {
+	if s == nil {
 		return
 	}
 
@@ -3604,7 +3701,12 @@ func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	sink := s.opts.FFmpegLogSink
+	sessionID := s.ffmpegLogSessionIDLocked()
+	if sink == nil {
+		s.mu.Unlock()
+		return
+	}
 
 	if s.stderrLinesLogged >= maxPersistedFFmpegLines || s.stderrBytesLogged+len(trimmed) > maxPersistedFFmpegBytes {
 		s.stderrDroppedLines++
@@ -3612,8 +3714,11 @@ func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
 			s.stderrCapLogged = true
 			attrs := s.ffmpegAttrsLocked()
 			attrs.DroppedLines = s.stderrDroppedLines
-			s.opts.FFmpegLogSink.WriteEvent(ctx, s.opts.SessionID, attrs, "ffmpeg stderr logging capped")
+			s.mu.Unlock()
+			sink.WriteEvent(ctx, sessionID, attrs, "ffmpeg stderr logging capped")
+			return
 		}
+		s.mu.Unlock()
 		return
 	}
 
@@ -3622,18 +3727,81 @@ func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
 	s.stderrLineIndex++
 	attrs := s.ffmpegAttrsLocked()
 	attrs.LineIndex = s.stderrLineIndex
-	s.opts.FFmpegLogSink.WriteLine(ctx, s.opts.SessionID, attrs, trimmed)
+	s.mu.Unlock()
+	sink.WriteLine(ctx, sessionID, attrs, trimmed)
 }
 
 func (s *TranscodeSession) logFFmpegEvent(ctx context.Context, message, exitError string) {
-	if s == nil || s.opts.FFmpegLogSink == nil {
+	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	attrs := s.ffmpegAttrsLocked()
+	sink := s.opts.FFmpegLogSink
+	sessionID := s.ffmpegLogSessionIDLocked()
+	attrs := s.ffmpegEventAttrsLocked()
 	attrs.ExitError = exitError
 	s.mu.Unlock()
-	s.opts.FFmpegLogSink.WriteEvent(ctx, s.opts.SessionID, attrs, message)
+	if sink != nil {
+		sink.WriteEvent(ctx, sessionID, attrs, message)
+	}
+}
+
+// logFFmpegAttemptEvent records a replacement recipe before it becomes the
+// session's active recipe, preserving failed restart commands for diagnosis.
+func (s *TranscodeSession) logFFmpegAttemptEvent(
+	ctx context.Context,
+	opts TranscodeOpts,
+	args []string,
+	message string,
+	exitError string,
+) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	sink := s.opts.FFmpegLogSink
+	sessionID := s.ffmpegLogSessionIDLocked()
+	attrs := s.ffmpegEventAttrsForLocked(opts, args)
+	attrs.ExitError = exitError
+	s.mu.Unlock()
+	if sink != nil {
+		sink.WriteEvent(ctx, sessionID, attrs, message)
+	}
+}
+
+// ffmpegEventAttrsLocked captures the active recipe and runtime state.
+func (s *TranscodeSession) ffmpegEventAttrsLocked() FFmpegLogAttrs {
+	args := s.ffmpegArgs
+	if len(args) == 0 {
+		args = buildFFmpegArgs(s.opts)
+	}
+	return s.ffmpegEventAttrsForLocked(s.opts, args)
+}
+
+// ffmpegEventAttrsForLocked combines an attempted recipe with the session's
+// current segment and resource-policy counters.
+func (s *TranscodeSession) ffmpegEventAttrsForLocked(opts TranscodeOpts, args []string) FFmpegLogAttrs {
+	attrs := s.ffmpegAttrsLocked()
+	attrs.NodeType = opts.NodeType
+	attrs.ExecutionMode = opts.ExecutionMode
+	attrs.InputPath = opts.InputPath
+	attrs.OutputDir = opts.OutputDir
+	attrs.TargetResolution = opts.TargetResolution
+	attrs.TargetVideoCodec = opts.TargetCodecVideo
+	attrs.TargetAudioCodec = opts.TargetCodecAudio
+	attrs.HWAccel = opts.HWAccel
+	attrs.SeekSeconds = opts.SeekSeconds
+	attrs.StartSegmentNumber = opts.StartSegmentNumber
+	diagnostics := ffmpegDiagnosticsOf(opts, args)
+	diagnostics.SegmentGeneration = s.segmentGeneration
+	diagnostics.LastRequestedSegment = s.lastRequestedSegment
+	diagnostics.LastCompletedSegment = s.lastCompletedSegment
+	diagnostics.ThrottleConfigured = s.throttleConfigured
+	diagnostics.ThrottleEnabled = s.throttleEnabled
+	diagnostics.ThrottleThresholdSeconds = s.throttleThreshold
+	diagnostics.ThrottlePaused = s.throttlePaused
+	attrs.Diagnostics = &diagnostics
+	return attrs
 }
 
 func (s *TranscodeSession) logWaitResult(ctx context.Context, waitErr error) {
@@ -3659,6 +3827,13 @@ func (s *TranscodeSession) ffmpegAttrsLocked() FFmpegLogAttrs {
 		RestartCount:       s.restartCount,
 		DroppedLines:       s.stderrDroppedLines,
 	}
+}
+
+func (s *TranscodeSession) ffmpegLogSessionIDLocked() string {
+	if sessionID := strings.TrimSpace(s.opts.PlaybackSessionID); sessionID != "" {
+		return sessionID
+	}
+	return s.opts.SessionID
 }
 
 func formatWaitError(err error) string {

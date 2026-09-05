@@ -38,10 +38,12 @@ import (
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
 	SessionID                  string                 `json:"session_id"`
+	PlaybackSessionID          string                 `json:"playback_session_id,omitempty"`
 	InputPath                  string                 `json:"input_path"`
 	SourceVideoCodec           string                 `json:"source_video_codec"`
 	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
 	SourceVideoBitDepth        int                    `json:"source_video_bit_depth,omitempty"`
+	SourceVideoResolution      string                 `json:"source_video_resolution,omitempty"`
 	SourceAudioChannels        int                    `json:"source_audio_channels,omitempty"`
 	AudioRecipeVersion         string                 `json:"audio_recipe_version,omitempty"`
 	CopyFMP4RecipeVersion      string                 `json:"copy_fmp4_recipe_version,omitempty"`
@@ -70,6 +72,9 @@ type TranscodeStartRequest struct {
 	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps"`
 	SegmentDuration            int                    `json:"segment_duration"`
+	ThrottlePolicyConfigured   bool                   `json:"throttle_policy_configured,omitempty"`
+	ThrottleEnabled            bool                   `json:"throttle_enabled,omitempty"`
+	ThrottleThresholdSeconds   int                    `json:"throttle_threshold_seconds,omitempty"`
 	HWAccel                    string                 `json:"hw_accel"`
 	AudioTrackIndex            int                    `json:"audio_track_index"`
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
@@ -81,10 +86,11 @@ type TranscodeStartRequest struct {
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
 type TranscodeStartResponse struct {
-	SessionID   string       `json:"session_id"`
-	Status      string       `json:"status"`
-	HWAccel     string       `json:"hw_accel,omitempty"`
-	ToneMapMode tonemap.Mode `json:"tone_map_mode,omitempty"`
+	SessionID           string       `json:"session_id"`
+	Status              string       `json:"status"`
+	HWAccel             string       `json:"hw_accel,omitempty"`
+	SoftwareVideoDecode bool         `json:"software_video_decode,omitempty"`
+	ToneMapMode         tonemap.Mode `json:"tone_map_mode,omitempty"`
 	// AudioRecipeVersion attests the exact byte-affecting audio recipe the node
 	// understood. An old node omits it, allowing current callers to stop the job
 	// before publishing bytes from a silently ignored SourceAudioChannels field.
@@ -534,6 +540,11 @@ func (s *Server) activeSessionIDs() map[string]struct{} {
 
 func (s *Server) SetFFmpegLogSink(sink playback.FFmpegLogSink) {
 	s.ffmpegSink = sink
+}
+
+func (s *Server) configureTranscodeResourcePolicy(ctx context.Context, session *playback.TranscodeSession) {
+	opts := session.Opts()
+	session.ConfigureThrottler(ctx, opts.ThrottleEnabled, opts.ThrottleThresholdSeconds)
 }
 
 // noteSessionAccessLocked records an access for a registered job. Callers must
@@ -1389,9 +1400,11 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		InputPath:                  req.InputPath,
 		OutputDir:                  outputDir,
 		SessionID:                  req.SessionID,
+		PlaybackSessionID:          req.PlaybackSessionID,
 		SourceVideoCodec:           req.SourceVideoCodec,
 		SourceVideoProfile:         req.SourceVideoProfile,
 		SourceVideoBitDepth:        req.SourceVideoBitDepth,
+		SourceVideoResolution:      req.SourceVideoResolution,
 		SourceAudioChannels:        req.SourceAudioChannels,
 		SoftwareVideoDecode:        req.SoftwareVideoDecode,
 		ToneMapPolicy:              req.ToneMapPolicy,
@@ -1419,6 +1432,9 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		TargetBitrateKbps:          req.TargetBitrateKbps,
 		SegmentDuration:            req.SegmentDuration,
 		SegmentRetentionSeconds:    cfg.Playback.SegmentRetentionSeconds,
+		ThrottlePolicyConfigured:   true,
+		ThrottleEnabled:            config.DefaultTranscodeThrottleEnabled,
+		ThrottleThresholdSeconds:   config.DefaultTranscodeThrottleSeconds,
 		FFmpegPath:                 cfg.Playback.FFmpegPath,
 		HWAccel:                    req.HWAccel,
 		// This node's configured device (or device list — StartTranscode
@@ -1435,9 +1451,18 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ExecutionMode:      "transcode_node",
 		FFmpegLogSink:      s.ffmpegSink,
 	}
+	if opts.PlaybackSessionID == "" {
+		opts.PlaybackSessionID = opts.SessionID
+	}
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel
+	}
+	if req.ThrottlePolicyConfigured {
+		opts.ThrottleEnabled = req.ThrottleEnabled
+		if req.ThrottleThresholdSeconds > 0 {
+			opts.ThrottleThresholdSeconds = req.ThrottleThresholdSeconds
+		}
 	}
 	if toneMapRecipeRequested(opts) {
 		if err := s.resolveToneMapRecipe(r.Context(), &opts); err != nil {
@@ -1479,10 +1504,16 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 
-	session, err := playback.StartTranscode(r.Context(), opts)
+	var session *playback.TranscodeSession
+	var err error
+	if req.RequireReady {
+		session, err = playback.StartReadyTranscode(r.Context(), opts, TranscodeStartReadinessTimeout)
+	} else {
+		session, err = playback.StartTranscode(r.Context(), opts)
+	}
 	if err != nil {
 		unlock()
-		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", opts.PlaybackSessionID)
 		if isToneMapRecipeError(err) {
 			writeToneMapRecipeError(w, err)
 		} else {
@@ -1490,42 +1521,11 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if req.RequireReady {
-		if _, err := session.WaitForManifest(TranscodeStartReadinessTimeout); err != nil {
-			wasRunning := session.IsRunning()
-			_ = session.Close()
-			// Mirror the API server's local-transport retry: an early death
-			// under VideoToolbox retries once in software (there is no
-			// alternate render device to move to), so a hardware encoder
-			// session this Mac cannot create does not fail clustered
-			// playback while CPU encoding was available.
-			retryAccel := playback.StartupRetryHWAccel(opts)
-			if wasRunning || retryAccel == opts.HWAccel {
-				unlock()
-				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-				return
-			}
-			slog.WarnContext(r.Context(), "transcode crashed during startup; retrying with software encoding",
-				"component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-			retryOpts := opts
-			retryOpts.HWAccel = retryAccel
-			session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
-			if err != nil {
-				unlock()
-				slog.ErrorContext(r.Context(), "start transcode retry", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "failed to start transcode", http.StatusInternalServerError)
-				return
-			}
-			if _, retryErr := session.WaitForManifest(TranscodeStartReadinessTimeout); retryErr != nil {
-				_ = session.Close()
-				unlock()
-				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", retryErr, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-				return
-			}
-		}
-	}
+	effectiveOpts := session.Opts()
+	session.SetRestartHook(func(ctx context.Context) {
+		s.configureTranscodeResourcePolicy(ctx, session)
+	})
+	s.configureTranscodeResourcePolicy(r.Context(), session)
 
 	s.mu.Lock()
 	s.sessions[req.SessionID] = session
@@ -1557,6 +1557,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SessionID:             req.SessionID,
 		Status:                "started",
 		HWAccel:               effectiveHWAccel,
+		SoftwareVideoDecode:   effectiveOpts.SoftwareVideoDecode,
 		ToneMapMode:           session.Opts().ToneMapMode,
 		AudioRecipeVersion:    req.AudioRecipeVersion,
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
@@ -1734,6 +1735,11 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	opts.HWAccel = cfg.Playback.HWAccel
 	opts.HWDevice = cfg.Playback.HWDevice
 	opts.SegmentRetentionSeconds = cfg.Playback.SegmentRetentionSeconds
+	if !opts.ThrottlePolicyConfigured {
+		opts.ThrottlePolicyConfigured = true
+		opts.ThrottleEnabled = config.DefaultTranscodeThrottleEnabled
+		opts.ThrottleThresholdSeconds = config.DefaultTranscodeThrottleSeconds
+	}
 	opts.NodeType = "transcode"
 	opts.ExecutionMode = "transcode_node"
 	if toneMapRecipeRequested(opts) {
@@ -1790,7 +1796,13 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		opts.SeekSeconds = float64(requestedSegment * card.SegmentDuration)
 	}
 
-	session, err := playback.StartTranscode(r.Context(), opts)
+	autoRequested := strings.EqualFold(strings.TrimSpace(opts.HWAccel), "auto")
+	var session *playback.TranscodeSession
+	if autoRequested {
+		session, err = playback.StartReadyTranscode(r.Context(), opts, playback.ManifestStartupTimeout)
+	} else {
+		session, err = playback.StartTranscode(r.Context(), opts)
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
 			"session", sessionID, "playback_session_id", sessionID)
@@ -1803,33 +1815,39 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// media as permanently missing. Mirror handleStart's software retry for
 	// the accel StartupRetryHWAccel would change; other accels keep the
 	// existing register-immediately behavior.
-	if retryAccel := playback.StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
-		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
-			if session.IsRunning() {
-				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
-					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
-			} else {
-				// Keep the shared output directory: the retry writes into it.
-				_ = session.CloseProcess()
-				slog.WarnContext(r.Context(), "reconstructed transcode crashed during startup; retrying with software encoding",
-					"component", "transcodenode", "error", waitErr, "session", sessionID, "playback_session_id", sessionID)
-				retryOpts := opts
-				retryOpts.HWAccel = retryAccel
-				session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
-				if err != nil {
-					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
-						"session", sessionID, "playback_session_id", sessionID)
-					return nil, err
-				}
-				if _, retryErr := session.WaitForManifest(playback.ManifestStartupTimeout); retryErr != nil {
-					_ = session.Close()
-					slog.ErrorContext(r.Context(), "reconstructed software retry failed readiness check", "component", "transcodenode", "error", retryErr,
-						"session", sessionID, "playback_session_id", sessionID)
-					return nil, retryErr
+	if !autoRequested {
+		if retryAccel := playback.StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
+			if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
+				if session.IsRunning() {
+					slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
+						"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
+				} else {
+					// Keep the shared output directory: the retry writes into it.
+					_ = session.CloseProcess()
+					slog.WarnContext(r.Context(), "reconstructed transcode crashed during startup; retrying with software encoding",
+						"component", "transcodenode", "error", waitErr, "session", sessionID, "playback_session_id", sessionID)
+					retryOpts := opts
+					retryOpts.HWAccel = retryAccel
+					session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
+					if err != nil {
+						slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
+							"session", sessionID, "playback_session_id", sessionID)
+						return nil, err
+					}
+					if _, retryErr := session.WaitForManifest(playback.ManifestStartupTimeout); retryErr != nil {
+						_ = session.Close()
+						slog.ErrorContext(r.Context(), "reconstructed software retry failed readiness check", "component", "transcodenode", "error", retryErr,
+							"session", sessionID, "playback_session_id", sessionID)
+						return nil, retryErr
+					}
 				}
 			}
 		}
 	}
+	session.SetRestartHook(func(ctx context.Context) {
+		s.configureTranscodeResourcePolicy(ctx, session)
+	})
+	s.configureTranscodeResourcePolicy(r.Context(), session)
 
 	// Yield to a winner registered by another path; close only the duplicate ffmpeg,
 	// never the shared output directory the winner is actively serving.

@@ -75,6 +75,7 @@ type RecipeCard struct {
 	SourceVideoCodec           string                 `json:"source_video_codec,omitempty"`
 	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
 	SourceVideoBitDepth        int                    `json:"source_video_bit_depth,omitempty"`
+	SourceVideoResolution      string                 `json:"source_video_resolution,omitempty"`
 	SourceAudioChannels        int                    `json:"source_audio_channels,omitempty"`
 	SoftwareVideoDecode        bool                   `json:"software_video_decode,omitempty"`
 	ToneMapPolicy              tonemap.Policy         `json:"tone_map_policy,omitempty"`
@@ -101,6 +102,9 @@ type RecipeCard struct {
 	TargetAudioChannels        int                    `json:"target_audio_channels,omitempty"`
 	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
 	SegmentDuration            int                    `json:"segment_duration"`
+	ThrottlePolicyConfigured   bool                   `json:"throttle_policy_configured,omitempty"`
+	ThrottleEnabled            bool                   `json:"throttle_enabled,omitempty"`
+	ThrottleThresholdSeconds   int                    `json:"throttle_threshold_seconds,omitempty"`
 	StartSegmentNumber         int                    `json:"start_segment_number"`
 	HWAccel                    string                 `json:"hw_accel,omitempty"`
 	HWDevice                   string                 `json:"hw_device,omitempty"`
@@ -169,6 +173,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SourceVideoCodec:           opts.SourceVideoCodec,
 		SourceVideoProfile:         opts.SourceVideoProfile,
 		SourceVideoBitDepth:        opts.SourceVideoBitDepth,
+		SourceVideoResolution:      opts.SourceVideoResolution,
 		SourceAudioChannels:        opts.SourceAudioChannels,
 		SoftwareVideoDecode:        opts.SoftwareVideoDecode,
 		ToneMapPolicy:              opts.ToneMapPolicy,
@@ -194,6 +199,9 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		TargetAudioChannels:        opts.TargetAudioChannels,
 		TargetAudioBitrateKbps:     opts.TargetAudioBitrateKbps,
 		SegmentDuration:            opts.SegmentDuration,
+		ThrottlePolicyConfigured:   opts.ThrottlePolicyConfigured,
+		ThrottleEnabled:            opts.ThrottleEnabled,
+		ThrottleThresholdSeconds:   opts.ThrottleThresholdSeconds,
 		StartSegmentNumber:         opts.StartSegmentNumber,
 		HWAccel:                    opts.HWAccel,
 		HWDevice:                   opts.HWDevice,
@@ -253,21 +261,23 @@ func (c RecipeCard) VideoStreamCopy() bool {
 	return strings.EqualFold(strings.TrimSpace(c.TargetCodecVideo), "copy")
 }
 
-// TranscodeOpts rebuilds the encode parameters for a reconstruct. outputDir,
-// ffmpegPath and logSink are supplied by the caller from live config because
-// they are environment-specific and not pinned in the card. ToneMapFilter may
-// also be empty after token reconstruction and is resolved from live capability
-// data before the transcode starts.
+// TranscodeOpts rebuilds the encode parameters and resource policy for a
+// reconstruct. outputDir, ffmpegPath and logSink are supplied by the caller
+// from live config because they are environment-specific and not pinned in the
+// card. ToneMapFilter may also be empty after token reconstruction and is
+// resolved from live capability data before the transcode starts.
 func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLogSink) TranscodeOpts {
 	return TranscodeOpts{
 		InputPath:                  c.InputPath,
 		OutputSubdir:               c.OutputSubdir,
 		OutputDir:                  outputDir,
 		SessionID:                  c.SessionID,
+		PlaybackSessionID:          c.SessionID,
 		TranscodeTransportID:       c.TranscodeTransportID,
 		SourceVideoCodec:           c.SourceVideoCodec,
 		SourceVideoProfile:         c.SourceVideoProfile,
 		SourceVideoBitDepth:        c.SourceVideoBitDepth,
+		SourceVideoResolution:      c.SourceVideoResolution,
 		SourceAudioChannels:        c.SourceAudioChannels,
 		SoftwareVideoDecode:        c.SoftwareVideoDecode,
 		ToneMapPolicy:              c.ToneMapPolicy,
@@ -294,6 +304,9 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		TargetAudioChannels:        c.TargetAudioChannels,
 		TargetAudioBitrateKbps:     c.TargetAudioBitrateKbps,
 		SegmentDuration:            c.SegmentDuration,
+		ThrottlePolicyConfigured:   c.ThrottlePolicyConfigured,
+		ThrottleEnabled:            c.ThrottleEnabled,
+		ThrottleThresholdSeconds:   c.ThrottleThresholdSeconds,
 		StartSegmentNumber:         c.StartSegmentNumber,
 		FFmpegPath:                 ffmpegPath,
 		HWAccel:                    c.HWAccel,
@@ -376,8 +389,12 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		SourceVideoCodec:           c.SourceVideoCodec,
 		SourceVideoProfile:         c.SourceVideoProfile,
 		SourceVideoBitDepth:        c.SourceVideoBitDepth,
+		SourceVideoResolution:      c.SourceVideoResolution,
 		SourceAudioChannels:        sourceAudioChannels,
 		SoftwareVideoDecode:        c.SoftwareVideoDecode,
+		ThrottlePolicyConfigured:   c.ThrottlePolicyConfigured,
+		ThrottleEnabled:            c.ThrottleEnabled,
+		ThrottleThresholdSeconds:   c.ThrottleThresholdSeconds,
 		ToneMapPolicy:              string(c.ToneMapPolicy),
 		ToneMapMode:                string(c.ToneMapMode),
 		ToneMapSourceKind:          string(c.ToneMapSourceKind),
@@ -458,8 +475,12 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		SourceVideoCodec:           c.SourceVideoCodec,
 		SourceVideoProfile:         c.SourceVideoProfile,
 		SourceVideoBitDepth:        c.SourceVideoBitDepth,
+		SourceVideoResolution:      c.SourceVideoResolution,
 		SourceAudioChannels:        c.SourceAudioChannels,
 		SoftwareVideoDecode:        c.SoftwareVideoDecode,
+		ThrottlePolicyConfigured:   c.ThrottlePolicyConfigured,
+		ThrottleEnabled:            c.ThrottleEnabled,
+		ThrottleThresholdSeconds:   c.ThrottleThresholdSeconds,
 		ToneMapPolicy:              tonemap.Policy(c.ToneMapPolicy),
 		ToneMapMode:                tonemap.Mode(c.ToneMapMode),
 		ToneMapSourceKind:          tonemap.SourceKind(c.ToneMapSourceKind),

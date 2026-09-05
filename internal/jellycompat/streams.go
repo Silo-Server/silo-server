@@ -2516,22 +2516,26 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	}
 
 	opts := playback.TranscodeOpts{
-		SessionID:           upstreamSessionID,
-		InputPath:           file.FilePath,
-		SourceVideoCodec:    sourceVideoCodec,
-		SourceVideoProfile:  sourceVideoProfile,
-		SourceVideoBitDepth: sourceVideoBitDepth,
-		OutputDir:           filepath.Join(h.TranscodeDir, upstreamSessionID),
-		SeekSeconds:         initialSeekSeconds,
-		StartSegmentNumber:  startSegmentNumber,
-		TargetCodecVideo:    compatTargetVideoCodec,
-		TargetCodecAudio:    compatTargetAudioCodec,
-		FFmpegPath:          h.FFmpegPath,
-		HWAccel:             h.HWAccel,
-		AudioTrackIndex:     audioTrackIndex,
-		SourceAudioChannels: sourceAudioChannels,
-		TotalDuration:       float64(source.Version.Duration),
-		FastStart:           true,
+		SessionID:             upstreamSessionID,
+		InputPath:             file.FilePath,
+		SourceVideoCodec:      sourceVideoCodec,
+		SourceVideoProfile:    sourceVideoProfile,
+		SourceVideoBitDepth:   sourceVideoBitDepth,
+		SourceVideoResolution: file.Resolution,
+		OutputDir:             filepath.Join(h.TranscodeDir, upstreamSessionID),
+		SeekSeconds:           initialSeekSeconds,
+		StartSegmentNumber:    startSegmentNumber,
+		TargetCodecVideo:      compatTargetVideoCodec,
+		TargetCodecAudio:      compatTargetAudioCodec,
+		FFmpegPath:            h.FFmpegPath,
+		HWAccel:               h.HWAccel,
+		AudioTrackIndex:       audioTrackIndex,
+		SourceAudioChannels:   sourceAudioChannels,
+		TotalDuration:         float64(source.Version.Duration),
+		FastStart:             true,
+		NodeType:              "integrated",
+		ExecutionMode:         "jellyfin_compat",
+		FFmpegLogSink:         h.FFmpegLogSink,
 	}
 	opts.SegmentRetentionSeconds = h.segmentRetentionSeconds()
 	if sourceAudioChannels > 0 {
@@ -2592,6 +2596,8 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		h.tm.CloseTranscodeSessionIf(upstreamSessionID, existing, "")
 	}
 	manifestDeadline := time.Now().Add(compatManifestStartupTimeout)
+	autoPipeline := playback.NewAutoTranscodePipeline(ctx, opts)
+	opts = autoPipeline.Current()
 	transcodeSession, err := playback.StartTranscode(ctx, opts)
 	if err != nil && downgradeCompatLocalToneMap(&opts, toneMapCapabilities, autoVideoToolboxBitrate) {
 		transcodeSession, err = playback.StartTranscode(ctx, opts)
@@ -2643,7 +2649,23 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				return nil, fallbackErr
 			}
 		}
+	} else if autoPipeline.Enabled() {
+		var adopted bool
+		transcodeSession, adopted, err = h.waitForAutoTranscodeSession(
+			ctx,
+			upstreamSessionID,
+			source,
+			autoPipeline,
+			transcodeSession,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if adopted {
+			return transcodeSession, nil
+		}
 	}
+	h.maybeStartThrottler(ctx, transcodeSession)
 	if h.compatLocalTranscodeReady != nil {
 		h.compatLocalTranscodeReady(transcodeSession)
 	}
@@ -2676,6 +2698,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// Register the exit monitor and persist the reconstruction recipe (shared with
 	// the remote path). On a failed compat-store write roll back this abandoned
 	// transcode rather than leaking it.
+	transcodeSession.SetRestartHook(func(ctx context.Context) {
+		h.maybeStartThrottler(ctx, transcodeSession)
+		h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
+	})
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {
@@ -2686,6 +2712,65 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	publishUnlock()
 
 	return transcodeSession, nil
+}
+
+func (h *PlaybackHandler) waitForAutoTranscodeSession(
+	ctx context.Context,
+	upstreamSessionID string,
+	source PlaybackMediaSource,
+	pipeline *playback.AutoTranscodePipeline,
+	session *playback.TranscodeSession,
+) (*playback.TranscodeSession, bool, error) {
+	for {
+		if _, err := session.WaitForManifest(compatManifestStartupTimeout); err == nil {
+			pipeline.RememberSuccess()
+			return session, false, nil
+		} else if session.IsRunning() {
+			cleanupUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+			h.tm.CloseTranscodeSessionIf(upstreamSessionID, session, "")
+			cleanupUnlock()
+			return nil, false, err
+		} else {
+			failedDevice := session.Opts().HWDevice
+			if !pipeline.AdvanceAfterFailure(failedDevice) {
+				cleanupUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+				h.tm.CloseTranscodeSessionIf(upstreamSessionID, session, "")
+				cleanupUnlock()
+				return nil, false, err
+			}
+
+			replaceUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+			if live := h.tm.GetTranscodeSession(upstreamSessionID); live != session {
+				replaceUnlock()
+				if live != nil && compatTranscodeSessionUsesToneMapMode(live, "") {
+					if compatLiveTranscodeMatchesAudioSource(live, source) {
+						return live, true, nil
+					}
+					return nil, false, errCompatRecipeSourceMismatch
+				}
+				return nil, false, playback.ErrSessionSuperseded
+			}
+
+			h.tm.CloseTranscodeSessionIf(upstreamSessionID, session, "")
+			nextOpts := pipeline.Current()
+			slog.WarnContext(ctx, "automatic compat transcode failed during startup; trying safer path",
+				"component", "jellycompat",
+				"playback_session_id", upstreamSessionID,
+				"failed_device", failedDevice,
+				"next_hw_accel", nextOpts.HWAccel,
+				"next_software_decode", nextOpts.SoftwareVideoDecode,
+				"error", err,
+			)
+			replacement, startErr := playback.StartTranscode(ctx, nextOpts)
+			if startErr != nil {
+				replaceUnlock()
+				return nil, false, startErr
+			}
+			h.tm.RegisterTranscodeSession(upstreamSessionID, replacement)
+			replaceUnlock()
+			session = replacement
+		}
+	}
 }
 
 // downgradeCompatLocalToneMap removes the bitrate synthesized solely for a

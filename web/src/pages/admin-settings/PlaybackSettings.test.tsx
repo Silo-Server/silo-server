@@ -383,6 +383,59 @@ describe("PlaybackSettings transcode tone mapping", () => {
   });
 });
 
+describe("PlaybackSettings transcode resource bounds", () => {
+  beforeEach(expandAdvanced);
+
+  it("keeps the throttle recommendation visible while Advanced is closed", () => {
+    localStorage.clear();
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "auto",
+        "playback.transcode_enabled": "true",
+        enable_transcode_throttle: "false",
+      }),
+    );
+
+    const text = parse(renderToStaticMarkup(<PlaybackSettings />)).textContent ?? "";
+
+    expect(text).toContain("Resource protection disabled");
+    expect(text).not.toContain("FFmpeg path");
+  });
+
+  it("strongly recommends throttling and segment cleanup when disabled", () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "auto",
+        enable_transcode_throttle: "false",
+        "playback.segment_retention_seconds": "0",
+      }),
+    );
+
+    const text = parse(renderToStaticMarkup(<PlaybackSettings />)).textContent ?? "";
+
+    expect(text).toContain("Strongly recommended to limit CPU, GPU, and temporary disk usage");
+    expect(text).toContain("temporary transcode storage can grow for the full title");
+  });
+
+  it("explains the bounded session cache when throttling is enabled", () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "auto",
+        enable_transcode_throttle: "true",
+        transcode_throttle_seconds: "120",
+        "playback.segment_retention_seconds": "120",
+      }),
+    );
+
+    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
+    const text = container.textContent ?? "";
+
+    expect(text).toContain("Recommended protection enabled");
+    expect(text).toContain("The entire temporary cache is deleted when playback ends");
+    expect(labelled(container, "Buffer ahead")).toHaveAttribute("value", "120");
+  });
+});
+
 describe("PlaybackSettings path defaults", () => {
   beforeEach(expandAdvanced);
 

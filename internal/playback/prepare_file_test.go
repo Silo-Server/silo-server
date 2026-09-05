@@ -76,10 +76,10 @@ func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
 			forbidden: []string{"-hwaccel vaapi"},
 		},
 		{
-			name:      "nvenc falls back to software encode",
+			name:      "nvenc keeps hardware encode with software decode upload",
 			hwAccel:   "nvenc",
-			want:      []string{"-c:v libx264", "-vf scale=-2:720"},
-			forbidden: []string{"-hwaccel cuda", "h264_nvenc", "scale_cuda"},
+			want:      []string{"-c:v h264_nvenc", "format=nv12,hwupload_cuda,scale_cuda=w=-2:h=720:format=nv12"},
+			forbidden: []string{"-hwaccel cuda", "libx264", "hwdownload"},
 		},
 		{
 			name:      "videotoolbox keeps hardware encode with software decode",

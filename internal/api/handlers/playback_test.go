@@ -239,6 +239,38 @@ func (r testPlaybackSettingsRepo) Get(_ context.Context, key string) (string, er
 	return r.values[key], nil
 }
 
+func TestTranscodeThrottleSettingsUseProtectiveDefaults(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+
+	enabled, thresholdSeconds := handler.transcodeThrottleSettings(context.Background())
+	if !enabled {
+		t.Fatal("transcode throttle defaulted to disabled")
+	}
+	if thresholdSeconds != config.DefaultTranscodeThrottleSeconds {
+		t.Fatalf(
+			"transcode throttle threshold = %d, want %d",
+			thresholdSeconds,
+			config.DefaultTranscodeThrottleSeconds,
+		)
+	}
+}
+
+func TestTranscodeThrottleSettingsPreserveExplicitValues(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
+		config.TranscodeThrottleEnabledSettingKey: "false",
+		config.TranscodeThrottleSecondsSettingKey: "240",
+	}}
+
+	enabled, thresholdSeconds := handler.transcodeThrottleSettings(context.Background())
+	if enabled {
+		t.Fatal("transcode throttle ignored explicit opt-out")
+	}
+	if thresholdSeconds != 240 {
+		t.Fatalf("transcode throttle threshold = %d, want 240", thresholdSeconds)
+	}
+}
+
 type allowAllPlaybackItemAccess struct{}
 
 func (allowAllPlaybackItemAccess) EnsureAccessible(

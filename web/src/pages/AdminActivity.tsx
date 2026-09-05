@@ -41,6 +41,10 @@ import {
   type ToneMapSummary,
 } from "@/pages/adminActivityPresentation";
 import {
+  buildTranscodeDebugModel,
+  type TranscodeDebugModel,
+} from "@/pages/adminActivityTranscodeDebug";
+import {
   Table,
   TableBody,
   TableCell,
@@ -578,15 +582,31 @@ function StreamRow({
   );
   const logsHref = `/admin/logs?playback_session_id=${encodeURIComponent(session.session_id)}&focus=playback`;
   const ffmpegLogsHref = `${logsHref}&component=ffmpeg`;
-  const ffmpegLogs = useOperationalLogs(
+  const ffmpegDiagnostics = useOperationalLogs(
     {
       playback_session_id: session.session_id,
       component: "ffmpeg",
-      limit: 12,
+      q: "ffmpeg diagnostic snapshot",
+      limit: 1,
     },
     ffmpegOpen,
   );
-  const ffmpegRows = ffmpegLogs.data?.entries ?? [];
+  const ffmpegThrottle = useOperationalLogs(
+    {
+      playback_session_id: session.session_id,
+      component: "ffmpeg",
+      q: "ffmpeg throttle",
+      limit: 1,
+    },
+    ffmpegOpen,
+  );
+  const ffmpegRows = [
+    ...(ffmpegThrottle.data?.entries ?? []),
+    ...(ffmpegDiagnostics.data?.entries ?? []),
+  ].sort((left, right) => {
+    const timestampOrder = Date.parse(right.timestamp) - Date.parse(left.timestamp);
+    return timestampOrder || right.id - left.id;
+  });
   const expandedOpen = detailsOpen || ffmpegOpen;
 
   const toggleDetails = () => {
@@ -970,8 +990,8 @@ function StreamRow({
           toneMapping={toneMap?.detail ?? null}
           showFFmpeg={ffmpegOpen}
           rows={ffmpegRows}
-          isLoading={ffmpegLogs.isLoading}
-          isFetching={ffmpegLogs.isFetching}
+          isLoading={ffmpegDiagnostics.isLoading || ffmpegThrottle.isLoading}
+          isFetching={ffmpegDiagnostics.isFetching || ffmpegThrottle.isFetching}
           logsHref={`${logsHref}&component=ffmpeg`}
         />
       )}
@@ -1066,6 +1086,8 @@ function PlaybackExpandedPanel({
   isFetching: boolean;
   logsHref: string;
 }) {
+  const debug = buildTranscodeDebugModel(session, rows);
+
   return (
     <div className="terminal-surface border-border/50 bg-card border-t px-4 py-3">
       <div className="mb-2 flex items-center justify-between gap-3">
@@ -1125,6 +1147,7 @@ function PlaybackExpandedPanel({
               Open full FFmpeg logs
             </Link>
           </div>
+          <TranscodeDebugPanel model={debug} />
           <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
             {isLoading ? (
               <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
@@ -1174,6 +1197,71 @@ function PlaybackExpandedPanel({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Show operator-friendly diagnostics while preserving the complete raw data. */
+function TranscodeDebugPanel({ model }: { model: TranscodeDebugModel }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
+      <div className="border-b border-[var(--terminal-border)]/50 px-4 py-3">
+        <div className="text-[10px] font-semibold tracking-[0.18em] text-[var(--terminal-muted)] uppercase">
+          Transcode diagnostics
+        </div>
+        <div className="mt-1 text-[11px] text-[var(--terminal-muted)]">
+          Effective FFmpeg recipe, execution path, and resource policy for this session.
+        </div>
+      </div>
+
+      {model.sections.length > 0 ? (
+        <div className="grid gap-px bg-[var(--terminal-border)]/40 sm:grid-cols-2 xl:grid-cols-3">
+          {model.sections.map((section) => (
+            <div key={section.title} className="bg-[var(--terminal-bg)] px-4 py-3">
+              <div className="mb-2 text-[10px] font-semibold tracking-[0.16em] text-[var(--terminal-muted)] uppercase">
+                {section.title}
+              </div>
+              <div className="grid gap-1.5">
+                {section.facts.map((fact) => (
+                  <div
+                    key={fact.key}
+                    className={`grid min-w-0 gap-2 ${fact.wide ? "grid-cols-1" : "grid-cols-[7rem_1fr]"}`}
+                  >
+                    <span className="text-[10px] text-[var(--terminal-muted)]">{fact.label}</span>
+                    <span className="min-w-0 font-mono text-[10px] leading-4 break-words text-[var(--terminal-fg)]">
+                      {fact.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="px-4 py-4 text-[11px] text-[var(--terminal-muted)]">
+          Waiting for FFmpeg diagnostic events…
+        </div>
+      )}
+
+      {model.command ? (
+        <details className="border-t border-[var(--terminal-border)]/50">
+          <summary className="cursor-pointer px-4 py-2.5 text-[11px] font-medium text-[var(--terminal-fg)]">
+            Exact FFmpeg command
+          </summary>
+          <pre className="max-h-56 overflow-auto border-t border-[var(--terminal-border)]/30 px-4 py-3 font-mono text-[10px] leading-5 break-all whitespace-pre-wrap text-[var(--terminal-fg)]">
+            {model.command}
+          </pre>
+        </details>
+      ) : null}
+
+      <details className="border-t border-[var(--terminal-border)]/50">
+        <summary className="cursor-pointer px-4 py-2.5 text-[11px] font-medium text-[var(--terminal-fg)]">
+          Raw diagnostic attributes
+        </summary>
+        <pre className="max-h-72 overflow-auto border-t border-[var(--terminal-border)]/30 px-4 py-3 font-mono text-[10px] leading-5 break-all whitespace-pre-wrap text-[var(--terminal-fg)]">
+          {JSON.stringify(model.attrs, null, 2)}
+        </pre>
+      </details>
     </div>
   );
 }
