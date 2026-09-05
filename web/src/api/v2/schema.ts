@@ -1087,7 +1087,7 @@ export interface components {
        */
       password: string;
       /**
-       * @description Authentication provider id from listAuthProviders; empty selects the default
+       * @description Authentication provider id exactly as listAuthProviders advertises it; unbounded because plugin ids are composite. Empty selects the default
        * @example
        */
       provider?: string;

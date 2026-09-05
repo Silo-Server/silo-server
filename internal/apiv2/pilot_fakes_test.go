@@ -469,9 +469,12 @@ type fakeSessionService struct {
 	setupDone bool
 	signupOn  bool
 	err       error
+	// lastLogin is the input the most recent Login received.
+	lastLogin handlers.LoginInput
 }
 
 func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
+	f.lastLogin = in
 	if f.err != nil {
 		return handlers.TokenPairView{}, f.err
 	}

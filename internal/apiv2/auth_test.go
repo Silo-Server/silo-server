@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +25,20 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":"pw","remember":true}`, nil), TypeValidationFailed)
+	// A plugin provider id is composite and can be long; every id discovery
+	// advertises must reach the service rather than fail the schema.
 	deps := pilotDeps(nil, nil)
+	sessions := &fakeSessionService{}
+	deps.Sessions = sessions
+	longProvider := "plugin:" + strings.Repeat("silo-plugin-auth-enterprise-directory-", 2) + "0123456789abcdef:openid-connect-enterprise-directory"
+	if len(longProvider) <= 64 {
+		t.Fatalf("provider id %q is not long enough to exercise the bound", longProvider)
+	}
+	rec = do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":"pw","provider":"`+longProvider+`"}`, nil)
+	if rec.Code != 200 || sessions.lastLogin.Provider != longProvider {
+		t.Fatalf("%d %s provider=%q", rec.Code, rec.Body.String(), sessions.lastLogin.Provider)
+	}
+	deps = pilotDeps(nil, nil)
 	deps.Sessions = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":"pw"}`, nil), TypeDependencyUnavailable)
 }

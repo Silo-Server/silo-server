@@ -19,7 +19,7 @@ type LoginInput struct {
 	Body struct {
 		Username string `json:"username" minLength:"1" maxLength:"254" doc:"Login name or, for providers that accept it, email" example:"alice"`
 		Password string `json:"password" minLength:"1" maxLength:"1024" doc:"Account password" example:"correct horse battery staple"`
-		Provider string `json:"provider,omitempty" maxLength:"64" doc:"Authentication provider id from listAuthProviders; empty selects the default" example:""`
+		Provider string `json:"provider,omitempty" doc:"Authentication provider id exactly as listAuthProviders advertises it; unbounded because plugin ids are composite. Empty selects the default" example:""`
 	}
 }
 
