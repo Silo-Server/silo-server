@@ -85,7 +85,10 @@ export function normalizeProfileSectionOverridesResponse(
 export function useHomeSections(enabled = true) {
   return useQuery({
     queryKey: sectionKeys.home(),
-    queryFn: () => api<SectionsResponse>("/home/sections"),
+    queryFn: ({ signal }): Promise<SectionsResponse> =>
+      v2("GET /api/v2/home/sections", { signal }).then((data) => ({
+        sections: data.sections.map(sectionFromV2),
+      })),
     staleTime: 5 * 60 * 1000,
     enabled,
   });
@@ -101,8 +104,19 @@ export function useHomeLayout() {
   });
 }
 
-export function fetchHomeSectionItems(sectionId: string, options?: RequestInit) {
-  return api<HomeSectionItemsResponse>(`/home/sections/${sectionId}/items`, options);
+/**
+ * Fetches one home section with its items. Answers in the same `{ section }`
+ * shape as the library section fetch so the section caches and refresh
+ * helpers treat both alike.
+ */
+export function fetchHomeSectionItems(
+  sectionId: string,
+  options?: { signal?: AbortSignal },
+): Promise<HomeSectionItemsResponse> {
+  return v2("GET /api/v2/home/sections/{id}/items", {
+    path: { id: sectionId },
+    signal: options?.signal,
+  }).then((section) => ({ section: sectionFromV2(section) }));
 }
 
 /**

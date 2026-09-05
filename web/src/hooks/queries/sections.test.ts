@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import getHomeSectionItemsOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_ok.json";
 import getLibrarySectionItemsOk from "../../../../contracts/api/v2/fixtures/get_library_section_items_ok.json";
 
 const mocks = vi.hoisted(() => ({
@@ -21,13 +22,28 @@ import {
 } from "./sections";
 
 describe("sections query helpers", () => {
-  it("fetches home section items from the home section items endpoint", async () => {
-    const options = { cache: "no-store" } satisfies RequestInit;
-    mocks.api.mockResolvedValue({ section: { items: [] } });
+  beforeEach(() => {
+    mocks.api.mockReset();
+    mocks.fetchWithSession.mockReset();
+  });
 
-    await fetchHomeSectionItems("section-1", options);
+  it("fetches home section items from the v2 home section and keeps the { section } shape", async () => {
+    mocks.fetchWithSession.mockResolvedValue({
+      res: new Response(JSON.stringify(getHomeSectionItemsOk), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+      requestProfileId: "p-owner",
+      requestProfileToken: null,
+    });
 
-    expect(mocks.api).toHaveBeenCalledWith("/home/sections/section-1/items", options);
+    const response = await fetchHomeSectionItems("continue_watching");
+
+    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe(
+      "/api/v2/home/sections/continue_watching/items",
+    );
+    expect(response.section.id).toBe("continue_watching");
+    expect(response.section.items[0]?.content_id).toBe("movie:heat-1995");
   });
 
   it("fetches library section items from the v2 library section and keeps the { section } shape", async () => {
