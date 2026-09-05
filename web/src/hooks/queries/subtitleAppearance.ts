@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
-import { ApiClientError } from "@/api/client";
 import {
+  isSettingValueMissing,
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
@@ -68,7 +68,7 @@ export function useSubtitleAppearanceSetting() {
       // Nothing stored at this scope is the state a reset asks for, so the
       // canonical DELETE's 404 is success, matching how the legacy per-device
       // delete behaved.
-      if (error instanceof ApiClientError && error.status === 404) return;
+      if (isSettingValueMissing(error)) return;
       throw error;
     }
   }, [clearValue]);

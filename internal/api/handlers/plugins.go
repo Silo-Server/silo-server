@@ -144,10 +144,10 @@ type pluginCatalogResponse struct {
 	RepoURL            string                   `json:"repo_url,omitempty"`
 	Presentation       *pluginPresentationJSON  `json:"presentation,omitempty"`
 	Capabilities       []pluginCapabilityJSON   `json:"capabilities"`
-	GlobalConfigSchema []pluginConfigSchemaJSON `json:"global_config_schema"`
-	UserConfigSchema   []pluginConfigSchemaJSON `json:"user_config_schema"`
-	Routes             []pluginRouteJSON        `json:"routes"`
-	Assets             []pluginAssetJSON        `json:"assets"`
+	GlobalConfigSchema []PluginConfigSchemaView `json:"global_config_schema"`
+	UserConfigSchema   []PluginConfigSchemaView `json:"user_config_schema"`
+	Routes             []PluginRouteView        `json:"routes"`
+	Assets             []PluginAssetView        `json:"assets"`
 	Metadata           map[string]any           `json:"metadata,omitempty"`
 }
 
@@ -167,10 +167,10 @@ type pluginInstallationResponse struct {
 	Presentation       *pluginPresentationJSON  `json:"presentation,omitempty"`
 	UpdatesPaused      bool                     `json:"updates_paused"`
 	Capabilities       []pluginCapabilityJSON   `json:"capabilities"`
-	GlobalConfigSchema []pluginConfigSchemaJSON `json:"global_config_schema"`
-	UserConfigSchema   []pluginConfigSchemaJSON `json:"user_config_schema"`
-	Routes             []pluginRouteJSON        `json:"routes"`
-	Assets             []pluginAssetJSON        `json:"assets"`
+	GlobalConfigSchema []PluginConfigSchemaView `json:"global_config_schema"`
+	UserConfigSchema   []PluginConfigSchemaView `json:"user_config_schema"`
+	Routes             []PluginRouteView        `json:"routes"`
+	Assets             []PluginAssetView        `json:"assets"`
 	Metadata           map[string]any           `json:"metadata,omitempty"`
 	GlobalConfigs      []pluginConfigValueJSON  `json:"global_configs"`
 	AuthBindings       []pluginAuthBindingJSON  `json:"auth_bindings"`
@@ -201,7 +201,7 @@ type pluginPresentationJSON struct {
 	LicenseSPDX         string `json:"license_spdx"`
 }
 
-type pluginConfigSchemaJSON = plugins.ConfigSchemaView
+type PluginConfigSchemaView = plugins.ConfigSchemaView
 type pluginAdminFormJSON = plugins.AdminFormView
 type pluginAdminFormFieldJSON = plugins.AdminFormFieldView
 type pluginAdminFormSectionJSON = plugins.AdminFormSectionView
@@ -212,11 +212,11 @@ type pluginCapabilityJSON struct {
 	DisplayName   string                   `json:"display_name"`
 	Description   string                   `json:"description"`
 	Subscriptions []string                 `json:"subscriptions,omitempty"`
-	ConfigSchema  []pluginConfigSchemaJSON `json:"config_schema,omitempty"`
+	ConfigSchema  []PluginConfigSchemaView `json:"config_schema,omitempty"`
 	Metadata      map[string]any           `json:"metadata,omitempty"`
 }
 
-type pluginRouteJSON struct {
+type PluginRouteView struct {
 	ID              string `json:"id"`
 	Method          string `json:"method"`
 	Path            string `json:"path"`
@@ -227,7 +227,7 @@ type pluginRouteJSON struct {
 	StaticAsset     bool   `json:"static_asset"`
 }
 
-type pluginAssetJSON struct {
+type PluginAssetView struct {
 	Path        string `json:"path"`
 	ContentType string `json:"content_type"`
 	Integrity   string `json:"integrity"`
@@ -257,13 +257,13 @@ type pluginTaskBindingJSON struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
-type pluginUserSettingsSummary struct {
+type PluginUserSettingsView struct {
 	ID               int                      `json:"id"`
 	PluginID         string                   `json:"plugin_id"`
 	Version          string                   `json:"version"`
-	UserConfigSchema []pluginConfigSchemaJSON `json:"user_config_schema"`
-	Routes           []pluginRouteJSON        `json:"routes"`
-	Assets           []pluginAssetJSON        `json:"assets"`
+	UserConfigSchema []PluginConfigSchemaView `json:"user_config_schema"`
+	Routes           []PluginRouteView        `json:"routes"`
+	Assets           []PluginAssetView        `json:"assets"`
 	// Category is the manifest's optional slash-delimited grouping path
 	// (e.g. "Tools/Utilities") used to group plugin entries in the
 	// user-facing Apps navigation. Empty (omitted) when the manifest
@@ -272,12 +272,7 @@ type pluginUserSettingsSummary struct {
 }
 
 type pluginUserSettingsListResponse struct {
-	Installations []pluginUserSettingsSummary `json:"installations"`
-}
-
-type pluginUserSettingsDetailResponse struct {
-	Installation pluginUserSettingsSummary `json:"installation"`
-	Values       map[string]string         `json:"values"`
+	Installations []PluginUserSettingsView `json:"installations"`
 }
 
 type pluginTaskBindingUpdateResponse struct {
@@ -1166,16 +1161,25 @@ func manifestHasUserNavigableRoute(manifest *pluginv1.PluginManifest) bool {
 }
 
 func (h *PluginHandler) HandleListUserPluginSettings(w http.ResponseWriter, r *http.Request) {
-	installations, err := h.installations.ListEnabled(r.Context())
+	views, err := h.ListUserPluginSettings(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "listing enabled plugin installations", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plugin settings")
+		writeAPIError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, pluginUserSettingsListResponse{Installations: views})
+}
 
-	response := pluginUserSettingsListResponse{
-		Installations: make([]pluginUserSettingsSummary, 0, len(installations)),
+// ListUserPluginSettings lists the enabled, non-builtin installations that
+// expose user settings or a user-navigable route. v1 GET /settings/plugins
+// and v2 listPluginSettings both answer from it; the slice is never nil.
+func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUserSettingsView, error) {
+	installations, err := h.installations.ListEnabled(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing enabled plugin installations", "component", "api", "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list plugin settings")
 	}
+
+	views := make([]PluginUserSettingsView, 0, len(installations))
 	for _, installation := range installations {
 		// The reserved builtin row has no manifest on disk; without this skip
 		// the whole user-scoped settings list would 500.
@@ -1184,17 +1188,15 @@ func (h *PluginHandler) HandleListUserPluginSettings(w http.ResponseWriter, r *h
 		}
 		manifest, err := plugins.LoadManifestFile(plugins.InstalledManifestPath(installation.InstallPath))
 		if err != nil {
-			slog.ErrorContext(r.Context(), "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
-			return
+			slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
 		}
 		if len(manifest.GetUserConfigSchema()) == 0 && !manifestHasUserNavigableRoute(manifest) {
 			continue
 		}
-		response.Installations = append(response.Installations, toUserPluginSettingsSummary(installation, manifest))
+		views = append(views, toUserPluginSettingsSummary(installation, manifest))
 	}
-
-	writeJSON(w, http.StatusOK, response)
+	return views, nil
 }
 
 func (h *PluginHandler) HandleGetUserPluginSettings(w http.ResponseWriter, r *http.Request) {
@@ -1204,23 +1206,42 @@ func (h *PluginHandler) HandleGetUserPluginSettings(w http.ResponseWriter, r *ht
 		return
 	}
 
-	installation, manifest, err := h.loadUserConfigInstallation(w, r, id)
+	view, err := h.GetUserPluginSettings(r.Context(), apimw.GetUserID(r.Context()), id)
 	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
-	userID := apimw.GetUserID(r.Context())
-	values, err := h.userConfig.Get(r.Context(), userID, id)
+	writeJSON(w, http.StatusOK, view)
+}
+
+// PluginUserSettingsDetailView is one installation's user settings surface
+// plus the account's stored values for it.
+type PluginUserSettingsDetailView struct {
+	Installation PluginUserSettingsView `json:"installation"`
+	Values       map[string]string      `json:"values"`
+}
+
+// GetUserPluginSettings answers the installation's user settings surface and
+// the account's values. v1 GET /settings/plugins/{installation_id} and v2
+// getPluginSettings both answer from it; an installation that is unknown,
+// disabled, builtin, or without user settings is a 404.
+func (h *PluginHandler) GetUserPluginSettings(ctx context.Context, userID, installationID int) (PluginUserSettingsDetailView, error) {
+	installation, manifest, err := h.loadUserConfigInstallation(ctx, installationID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "loading plugin user config", "component", "api", "installation_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
-		return
+		return PluginUserSettingsDetailView{}, err
 	}
 
-	writeJSON(w, http.StatusOK, pluginUserSettingsDetailResponse{
+	values, err := h.userConfig.Get(ctx, userID, installationID)
+	if err != nil {
+		slog.ErrorContext(ctx, "loading plugin user config", "component", "api", "installation_id", installationID, "error", err)
+		return PluginUserSettingsDetailView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
+	}
+
+	return PluginUserSettingsDetailView{
 		Installation: toUserPluginSettingsSummary(installation, manifest),
 		Values:       values,
-	})
+	}, nil
 }
 
 func (h *PluginHandler) HandlePutUserPluginSettings(w http.ResponseWriter, r *http.Request) {
@@ -1230,7 +1251,8 @@ func (h *PluginHandler) HandlePutUserPluginSettings(w http.ResponseWriter, r *ht
 		return
 	}
 
-	if _, _, err := h.loadUserConfigInstallation(w, r, id); err != nil {
+	if _, _, err := h.loadUserConfigInstallation(r.Context(), id); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
@@ -1240,44 +1262,53 @@ func (h *PluginHandler) HandlePutUserPluginSettings(w http.ResponseWriter, r *ht
 		return
 	}
 
-	userID := apimw.GetUserID(r.Context())
-	if err := h.userConfig.Set(r.Context(), userID, id, req.Values); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+	if err := h.SetUserPluginSettings(r.Context(), apimw.GetUserID(r.Context()), id, req.Values); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// SetUserPluginSettings replaces the account's values for the installation
+// after the same installation checks the read performs. v1 PUT
+// /settings/plugins/{installation_id} and v2 updatePluginSettings both go
+// through it; a value the plugin's schema rejects is a 400 naming values.
+func (h *PluginHandler) SetUserPluginSettings(ctx context.Context, userID, installationID int, values map[string]string) error {
+	if _, _, err := h.loadUserConfigInstallation(ctx, installationID); err != nil {
+		return err
+	}
+	if err := h.userConfig.Set(ctx, userID, installationID, values); err != nil {
+		return fieldError("values", err.Error())
+	}
+	return nil
+}
+
+// loadUserConfigInstallation resolves an installation that exposes user
+// settings. Every refusal is a *APIError the caller renders.
 func (h *PluginHandler) loadUserConfigInstallation(
-	w http.ResponseWriter,
-	r *http.Request,
+	ctx context.Context,
 	installationID int,
 ) (*plugins.Installation, *pluginv1.PluginManifest, error) {
-	installation, err := h.installations.GetByID(r.Context(), installationID)
+	installation, err := h.installations.GetByID(ctx, installationID)
 	if err != nil {
 		if errors.Is(err, plugins.ErrInstallationNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
-			return nil, nil, err
+			return nil, nil, &APIError{Status: http.StatusNotFound, Code: policyErrorNotFound, Message: "Plugin installation not found", cause: err}
 		}
-		slog.ErrorContext(r.Context(), "loading plugin installation", "component", "api", "installation_id", installationID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin installation")
-		return nil, nil, err
+		slog.ErrorContext(ctx, "loading plugin installation", "component", "api", "installation_id", installationID, "error", err)
+		return nil, nil, &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal, Message: "Failed to load plugin installation", cause: err}
 	}
 	if !installation.Enabled || installation.IsBuiltin() {
-		writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
-		return nil, nil, plugins.ErrInstallationNotFound
+		return nil, nil, &APIError{Status: http.StatusNotFound, Code: policyErrorNotFound, Message: "Plugin installation not found", cause: plugins.ErrInstallationNotFound}
 	}
 
-	manifest, err := h.loadInstallationManifest(r.Context(), installation)
+	manifest, err := h.loadInstallationManifest(ctx, installation)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "loading plugin manifest", "component", "api", "installation_id", installationID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
-		return nil, nil, err
+		slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installationID, "error", err)
+		return nil, nil, &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal, Message: "Failed to load plugin settings", cause: err}
 	}
 	if len(manifest.GetUserConfigSchema()) == 0 && !manifestHasUserNavigableRoute(manifest) {
-		writeError(w, http.StatusNotFound, "not_found", "Plugin installation does not expose user settings")
-		return nil, nil, plugins.ErrInstallationNotFound
+		return nil, nil, &APIError{Status: http.StatusNotFound, Code: policyErrorNotFound, Message: "Plugin installation does not expose user settings", cause: plugins.ErrInstallationNotFound}
 	}
 
 	return installation, manifest, nil
@@ -1390,10 +1421,10 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	}
 
 	var (
-		globalConfigSchema []pluginConfigSchemaJSON
-		userConfigSchema   []pluginConfigSchemaJSON
-		routes             []pluginRouteJSON
-		assets             []pluginAssetJSON
+		globalConfigSchema []PluginConfigSchemaView
+		userConfigSchema   []PluginConfigSchemaView
+		routes             []PluginRouteView
+		assets             []PluginAssetView
 		metadata           map[string]any
 		sourceKind         = plugins.RepositorySourceExternal
 		repositoryName     string
@@ -1495,8 +1526,8 @@ func toPluginCatalogSettingsResponse(settings plugins.CatalogSettings) pluginCat
 func toUserPluginSettingsSummary(
 	installation *plugins.Installation,
 	manifest *pluginv1.PluginManifest,
-) pluginUserSettingsSummary {
-	return pluginUserSettingsSummary{
+) PluginUserSettingsView {
+	return PluginUserSettingsView{
 		ID:               installation.ID,
 		PluginID:         installation.PluginID,
 		Version:          installation.Version,
@@ -1507,7 +1538,7 @@ func toUserPluginSettingsSummary(
 	}
 }
 
-func configSchemasToJSON(schemas []*pluginv1.ConfigSchema) []pluginConfigSchemaJSON {
+func configSchemasToJSON(schemas []*pluginv1.ConfigSchema) []PluginConfigSchemaView {
 	return plugins.ConfigSchemaViews(schemas)
 }
 
@@ -1534,13 +1565,13 @@ func capabilitiesToJSON(descriptors []*pluginv1.CapabilityDescriptor) []pluginCa
 	return response
 }
 
-func routesToJSON(routes []*pluginv1.HttpRouteDescriptor) []pluginRouteJSON {
-	response := make([]pluginRouteJSON, 0, len(routes))
+func routesToJSON(routes []*pluginv1.HttpRouteDescriptor) []PluginRouteView {
+	response := make([]PluginRouteView, 0, len(routes))
 	for _, route := range routes {
 		if route == nil {
 			continue
 		}
-		response = append(response, pluginRouteJSON{
+		response = append(response, PluginRouteView{
 			ID:              route.GetId(),
 			Method:          route.GetMethod(),
 			Path:            route.GetPath(),
@@ -1554,13 +1585,13 @@ func routesToJSON(routes []*pluginv1.HttpRouteDescriptor) []pluginRouteJSON {
 	return response
 }
 
-func assetsToJSON(assets []*pluginv1.PackagedAsset) []pluginAssetJSON {
-	response := make([]pluginAssetJSON, 0, len(assets))
+func assetsToJSON(assets []*pluginv1.PackagedAsset) []PluginAssetView {
+	response := make([]PluginAssetView, 0, len(assets))
 	for _, asset := range assets {
 		if asset == nil {
 			continue
 		}
-		response = append(response, pluginAssetJSON{
+		response = append(response, PluginAssetView{
 			Path:        asset.GetPath(),
 			ContentType: asset.GetContentType(),
 			Integrity:   asset.GetIntegrity(),

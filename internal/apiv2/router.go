@@ -3,6 +3,7 @@ package apiv2
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -95,6 +96,27 @@ type Dependencies struct {
 	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
+	// SettingsContract answers the settings capability document
+	// (*handlers.SettingValuesHandler).
+	SettingsContract SettingsContractService
+	// Settings answers overlay defaults and device-scoped settings
+	// (*handlers.SettingsHandler).
+	Settings SettingsService
+	// PluginSettings answers per-installation user plugin settings
+	// (*handlers.PluginHandler).
+	PluginSettings PluginSettingsService
+	// SettingValues answers the explicit and effective setting values of the
+	// settings contract (*handlers.SettingValuesHandler).
+	SettingValues SettingValuesService
+	// AudioPreferences reads and writes per-series audio preferences
+	// (*handlers.AudioPrefHandler).
+	AudioPreferences AudioPreferenceService
+	// LibraryPlaybackPreferences reads and writes per-library playback
+	// preferences (*handlers.LibraryPlaybackPrefHandler).
+	LibraryPlaybackPreferences LibraryPlaybackPreferenceService
+	// SubtitlePreferences reads and writes per-series subtitle preferences
+	// (*handlers.SubtitlePrefHandler).
+	SubtitlePreferences SubtitlePreferenceService
 	// ProfileSections reads and writes a profile's home-row overrides
 	// (*handlers.SectionHandler).
 	ProfileSections ProfileSectionService
@@ -474,6 +496,66 @@ type LibraryService interface {
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.
 type AdminUserService interface {
 	ListAdminUsersPage(ctx context.Context, afterID, limit int) ([]handlers.AdminUserView, bool, error)
+}
+
+// SettingsContractService is the slice of *handlers.SettingValuesHandler
+// getSettingsContractCapabilities uses.
+type SettingsContractService interface {
+	Capabilities(ctx context.Context) (handlers.SettingsCapabilitiesView, error)
+}
+
+// SettingsService is the slice of *handlers.SettingsHandler the overlay and
+// subtitle-appearance operations use.
+type SettingsService interface {
+	OverlayConfig(ctx context.Context) handlers.OverlayConfigView
+	EffectiveSubtitleAppearance(ctx context.Context, userID int, profileID string, device handlers.DeviceMetadata) (handlers.EffectiveSubtitleAppearanceView, error)
+	SetDeviceSetting(ctx context.Context, cmd handlers.DeviceSettingCommand, value string) error
+	DeleteDeviceSetting(ctx context.Context, cmd handlers.DeviceSettingCommand) error
+}
+
+// PluginSettingsService is the slice of *handlers.PluginHandler the plugin
+// settings operations use.
+type PluginSettingsService interface {
+	ListUserPluginSettings(ctx context.Context) ([]handlers.PluginUserSettingsView, error)
+	GetUserPluginSettings(ctx context.Context, userID, installationID int) (handlers.PluginUserSettingsDetailView, error)
+	SetUserPluginSettings(ctx context.Context, userID, installationID int, values map[string]string) error
+}
+
+// SettingValuesService is the slice of *handlers.SettingValuesHandler the
+// setting value operations use: the request-free core of the v1 values API.
+type SettingValuesService interface {
+	ContractRevision() int
+	GetSettingValue(ctx context.Context, userID int, req handlers.SettingIdentityRequest) (handlers.SettingValueView, error)
+	ListSettingValues(ctx context.Context, userID int, keys []string, req handlers.SettingIdentityRequest) ([]handlers.ExplicitSettingValueView, error)
+	SetSettingValue(ctx context.Context, userID int, req handlers.SettingIdentityRequest, value json.RawMessage) (handlers.SettingValueView, error)
+	DeleteSettingValue(ctx context.Context, userID int, req handlers.SettingIdentityRequest) error
+	SetNavigationShortcut(ctx context.Context, userID int, profileID string, item json.RawMessage, present bool) (handlers.SettingValueView, error)
+	ResolveEffectiveSettings(ctx context.Context, userID int, q handlers.EffectiveSettingsQuery) ([]handlers.EffectiveSettingValueView, error)
+	ResolveEffectiveSettingContexts(ctx context.Context, userID int, q handlers.EffectiveSettingsQuery, contexts []handlers.EffectiveContextRequest) ([]handlers.EffectiveSettingContextView, error)
+}
+
+// AudioPreferenceService is the slice of *handlers.AudioPrefHandler the
+// audio preference operations use.
+type AudioPreferenceService interface {
+	GetAudioPreferenceCanonical(ctx context.Context, userID int, profileID, seriesID string) (userstore.AudioPreference, error)
+	SetAudioPreference(ctx context.Context, userID int, pref userstore.AudioPreference) error
+	DeleteAudioPreference(ctx context.Context, userID int, profileID, seriesID string) error
+}
+
+// SubtitlePreferenceService is the slice of *handlers.SubtitlePrefHandler the
+// subtitle preference operations use.
+type SubtitlePreferenceService interface {
+	GetSubtitlePreferenceCanonical(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error)
+	SetSubtitlePreferenceCanonical(ctx context.Context, userID int, pref userstore.SubtitlePreference) error
+	DeleteSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) error
+}
+
+// LibraryPlaybackPreferenceService is the slice of
+// *handlers.LibraryPlaybackPrefHandler the library preference operations use.
+type LibraryPlaybackPreferenceService interface {
+	ListLibraryPlaybackPreferencesCanonical(ctx context.Context, userID int, profileID string) ([]userstore.LibraryPlaybackPreference, error)
+	PatchLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int, patch handlers.LibraryPlaybackPrefPatch) error
+	DeleteLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int) error
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

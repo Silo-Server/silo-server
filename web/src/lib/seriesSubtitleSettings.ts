@@ -44,7 +44,7 @@ export function seriesSubtitleSettingValues(selection: {
   };
 }
 
-/** The canonical values path addressing one key at one series. */
-export function seriesSubtitleSettingPath(key: SettingKey, seriesId: string): string {
-  return `/settings/values/${key}?scope=profile_series&series_id=${encodeURIComponent(seriesId)}`;
+/** The canonical values identity addressing one series: the profile_series scope at that series. */
+export function seriesSubtitleSettingIdentity(seriesId: string) {
+  return { scope: "profile_series" as const, series_id: seriesId };
 }

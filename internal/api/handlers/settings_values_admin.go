@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -121,8 +123,9 @@ func (h *SettingValuesHandler) adminTargetStore(
 func (h *SettingValuesHandler) adminIdentityFromRequest(
 	w http.ResponseWriter, r *http.Request,
 ) (userstore.SettingIdentity, bool) {
-	key, scope, ok := h.keyedScopeFromRequest(w, r)
-	if !ok {
+	key, scope, err := h.keyedScopeFor(chi.URLParam(r, "key"), r.URL.Query().Get("scope"))
+	if err != nil {
+		writeAPIError(w, err)
 		return userstore.SettingIdentity{}, false
 	}
 
@@ -153,5 +156,10 @@ func (h *SettingValuesHandler) adminIdentityFromRequest(
 		}
 	}
 
-	return h.completeIdentity(w, r.Context(), query, identity)
+	completed, err := h.completeIdentityFor(r.Context(), query.Get("library_id"), query.Get("series_id"), identity)
+	if err != nil {
+		writeAPIError(w, err)
+		return userstore.SettingIdentity{}, false
+	}
+	return completed, true
 }

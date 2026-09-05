@@ -202,6 +202,14 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		"GET " + Prefix + "/profiles/household/sessions", "POST " + Prefix + "/profiles/{id}/verify-pin",
 		"PUT " + Prefix + "/profiles/{id}/avatar", "DELETE " + Prefix + "/profiles/{id}/avatar",
 		"GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
+		"GET " + Prefix + "/settings/contract", "GET " + Prefix + "/settings/contract/capabilities", "GET " + Prefix + "/settings/overlay-config",
+		"GET " + Prefix + "/settings/subtitle-appearance/effective", "PUT " + Prefix + "/settings/device/subtitle-appearance", "DELETE " + Prefix + "/settings/device/subtitle-appearance",
+		"GET " + Prefix + "/settings/plugins", "GET " + Prefix + "/settings/plugins/{installation_id}", "PUT " + Prefix + "/settings/plugins/{installation_id}",
+		"GET " + Prefix + "/settings/values", "GET " + Prefix + "/settings/values/effective", "POST " + Prefix + "/settings/values/effective",
+		"PUT " + Prefix + "/settings/values/nav.shortcuts/item", "GET " + Prefix + "/settings/values/{key}", "PUT " + Prefix + "/settings/values/{key}", "DELETE " + Prefix + "/settings/values/{key}",
+		"GET " + Prefix + "/audio-prefs/{series_id}", "PUT " + Prefix + "/audio-prefs/{series_id}", "DELETE " + Prefix + "/audio-prefs/{series_id}",
+		"GET " + Prefix + "/subtitle-prefs/{series_id}", "PUT " + Prefix + "/subtitle-prefs/{series_id}", "DELETE " + Prefix + "/subtitle-prefs/{series_id}",
+		"GET " + Prefix + "/library-playback-prefs", "PATCH " + Prefix + "/library-playback-prefs/{library_id}", "DELETE " + Prefix + "/library-playback-prefs/{library_id}",
 	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
@@ -272,9 +280,14 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 			o := humaOp(http.MethodPost, Prefix+"/x", "postX", "x", "")
 			o.MaxBodyBytes = 10
 			return o
-		}(), Class: ClassPublic},
-		"negative body limit": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic, MaxBodyBytes: -1},
-		"perm class":          {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPermissionGated},
+		}(), Class: ClassPublic, RetrySafety: RetrySafetyNaturalIdempotent},
+		"negative body limit": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic, MaxBodyBytes: -1, RetrySafety: RetrySafetyNaturalIdempotent},
+		// Retry safety is a required declaration on every mutation and
+		// meaningless on a read.
+		"mutation without retry safety": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic},
+		"unknown retry safety":          {Operation: humaOp(http.MethodDelete, Prefix+"/x", "deleteX", "x", ""), Class: ClassPublic, RetrySafety: RetrySafety("retry_later")},
+		"read with retry safety":        {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPublic, RetrySafety: RetrySafetyNaturalIdempotent},
+		"perm class":                    {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPermissionGated},
 	}
 	for name, op := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -291,9 +304,10 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 	t.Run("item-scoped permission with an id parameter", func(t *testing.T) {
 		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
 			Register(reg, Operation{
-				Operation:  humaOp(http.MethodPatch, Prefix+"/items/{id}", "patchItem", "x", ""),
-				Class:      ClassPermissionGated,
-				Permission: policy.PermissionMetadataCuration,
+				Operation:   humaOp(http.MethodPatch, Prefix+"/items/{id}", "patchItem", "x", ""),
+				Class:       ClassPermissionGated,
+				Permission:  policy.PermissionMetadataCuration,
+				RetrySafety: RetrySafetyNaturalIdempotent,
 			}, func(context.Context, *struct {
 				ID string `path:"id"`
 			}) (*probeOutput, error) {

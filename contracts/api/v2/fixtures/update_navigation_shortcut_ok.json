@@ -1,0 +1,17 @@
+{
+  "key": "nav.shortcuts",
+  "scope": "profile",
+  "profile_id": "p-owner",
+  "value": {
+    "items": [
+      {
+        "type": "library",
+        "library_id": 3,
+        "label": "Movies"
+      }
+    ]
+  },
+  "revision": 2,
+  "updated_at": "2026-01-02T03:04:05.678Z"
+}
+

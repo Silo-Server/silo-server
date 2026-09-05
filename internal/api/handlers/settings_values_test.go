@@ -2098,7 +2098,7 @@ func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testi
 		DisabledLibraryIDs: []int{12},
 		MaxContentRating:   "PG-13",
 	}))
-	observed := handler.observedLanguageSuggestions(req, []settingsresolve.Effective{{
+	observed := handler.observedLanguageSuggestions(req.Context(), []settingsresolve.Effective{{
 		Key: settingskeys.CatalogMetadataLanguage,
 	}})
 
@@ -2123,7 +2123,7 @@ func TestObservedLanguageSuggestionsSkipsPlaybackKeys(t *testing.T) {
 	handler.SetLanguageSuggestionSource(source)
 
 	req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
-	observed := handler.observedLanguageSuggestions(req, []settingsresolve.Effective{
+	observed := handler.observedLanguageSuggestions(req.Context(), []settingsresolve.Effective{
 		{Key: settingskeys.PlaybackAudioLanguage},
 		{Key: settingskeys.PlaybackSubtitleLanguage},
 	})
@@ -2133,5 +2133,43 @@ func TestObservedLanguageSuggestionsSkipsPlaybackKeys(t *testing.T) {
 	}
 	if source.calls != 0 {
 		t.Fatalf("catalog scans = %d, want 0 for playback-only requests", source.calls)
+	}
+}
+
+func TestEffectiveContextsPreservesV2TokensAndLegacyNormalization(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	keys := []string{"ui.custom_css", "ui.custom_css"}
+	contexts := []EffectiveContextRequest{{ContextID: " row-1 ", SeriesID: "s1"}, {ContextID: "row-1", SeriesID: "s2"}}
+	views, err := handler.ResolveEffectiveSettingContexts(t.Context(), 1, EffectiveSettingsQuery{
+		ActiveProfileID: "profile-1", Keys: keys,
+	}, contexts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 2 {
+		t.Fatalf("contexts = %d", len(views))
+	}
+	for i, view := range views {
+		if view.ContextID != contexts[i].ContextID {
+			t.Fatalf("context id = %q, want %q", view.ContextID, contexts[i].ContextID)
+		}
+		if len(view.Settings) != 2 || view.Settings[0].Key != keys[0] || view.Settings[1].Key != keys[1] {
+			t.Fatalf("settings = %+v; want both requested keys in order", view.Settings)
+		}
+	}
+	req := valuesRequest(http.MethodPost, "/settings/values/effective", []byte(`{"keys":["ui.custom_css","ui.custom_css"],"contexts":[{"context_id":" row-1 ","series_id":"s1"}]}`))
+	rec := httptest.NewRecorder()
+	handler.HandlePostEffective(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("v1 status %d: %s", rec.Code, rec.Body.String())
+	}
+	var legacy struct {
+		Contexts []effectiveContextResponse `json:"contexts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy.Contexts) != 1 || legacy.Contexts[0].ContextID != "row-1" || len(legacy.Contexts[0].Settings) != 1 {
+		t.Fatalf("v1 normalization changed: %+v", legacy.Contexts)
 	}
 }

@@ -190,6 +190,11 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	// v2Wiring observes the sealed v2 dependency set right before
+	// apiv2.NewHandler consumes it; tests only. It is the one way to assert
+	// that a v1 handler reached the v2 listener, since NewRouter returns a
+	// sealed handler.
+	v2Wiring               func(apiv2.Dependencies)
 	OnServerSettingUpdated func(ctx context.Context, key, value string)
 	RequestServerRestart   func(ctx context.Context) error
 	ServerRestartStatus    *handlers.ServerRestartStatusTracker
@@ -878,6 +883,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var collectionHandler *handlers.CollectionHandler
 	var settingsHandler *handlers.SettingsHandler
 	var settingValuesHandler *handlers.SettingValuesHandler
+	// userPluginSettingsHandler is the plugin handler the user-scoped
+	// /settings/plugins routes are registered on; v2 shares it.
+	var userPluginSettingsHandler *handlers.PluginHandler
 	var deviceHandler *handlers.DeviceHandler
 	var homeDismissalHandler *handlers.HomeDismissalHandler
 	var subtitlePrefHandler *handlers.SubtitlePrefHandler
@@ -1877,6 +1885,24 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// contracts/api/v2/openapi.json, not by an inventory row. All v2
 	// operations register at build regardless of the wiring here: a gate the
 	// wiring lacks makes its operations fail closed, never disappear.
+	// The user-scoped plugin settings handler is built here, before the v2
+	// dependencies are sealed, so v2 shares the same instance the v1
+	// /settings/plugins routes register below. Constructing it inside that
+	// route group left v2 with a nil service and every plugin-settings
+	// operation answering 503.
+	if deps.PluginUserConfig != nil && deps.PluginService != nil {
+		userPluginSettingsHandler = handlers.NewPluginHandler(
+			plugins.NewRepositoryStore(deps.DB),
+			plugins.NewInstallationStore(deps.DB),
+			plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher),
+			deps.PluginService,
+			deps.PluginUserConfig,
+			deps.PluginHTTPProxy,
+			metadata.NewChainRepository(deps.DB),
+			deps.PluginImageResolver,
+			restartStatus,
+		)
+	}
 	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
 	// The pilot operations call the v1 handlers' extracted business logic;
 	// a typed nil must not become a non-nil interface, so each is set only
@@ -1898,11 +1924,33 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if adminHandler != nil {
 		v2deps.AdminUsers = adminHandler
 	}
+	if settingValuesHandler != nil {
+		v2deps.SettingsContract = settingValuesHandler
+		v2deps.SettingValues = settingValuesHandler
+	}
+	if settingsHandler != nil {
+		v2deps.Settings = settingsHandler
+	}
+	if userPluginSettingsHandler != nil {
+		v2deps.PluginSettings = userPluginSettingsHandler
+	}
+	if audioPrefHandler != nil {
+		v2deps.AudioPreferences = audioPrefHandler
+	}
+	if libraryPlaybackPrefHandler != nil {
+		v2deps.LibraryPlaybackPreferences = libraryPlaybackPrefHandler
+	}
+	if subtitlePrefHandler != nil {
+		v2deps.SubtitlePreferences = subtitlePrefHandler
+	}
 	if sectionHandler != nil {
 		v2deps.ProfileSections = sectionHandler
 	}
 	if sectionSettingsHandler != nil {
 		v2deps.SectionFlags = sectionSettingsHandler
+	}
+	if deps.v2Wiring != nil {
+		deps.v2Wiring(v2deps)
 	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
@@ -2627,20 +2675,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				if settingsHandler != nil {
 					r.Route("/settings", func(r chi.Router) {
 						if deps.PluginUserConfig != nil && deps.PluginService != nil {
-							pluginHandler := handlers.NewPluginHandler(
-								plugins.NewRepositoryStore(deps.DB),
-								plugins.NewInstallationStore(deps.DB),
-								plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher),
-								deps.PluginService,
-								deps.PluginUserConfig,
-								deps.PluginHTTPProxy,
-								metadata.NewChainRepository(deps.DB),
-								deps.PluginImageResolver,
-								restartStatus,
-							)
-							r.Get("/plugins", pluginHandler.HandleListUserPluginSettings)
-							r.Get("/plugins/{installation_id}", pluginHandler.HandleGetUserPluginSettings)
-							r.Put("/plugins/{installation_id}", pluginHandler.HandlePutUserPluginSettings)
+							r.Get("/plugins", userPluginSettingsHandler.HandleListUserPluginSettings)
+							r.Get("/plugins/{installation_id}", userPluginSettingsHandler.HandleGetUserPluginSettings)
+							r.Put("/plugins/{installation_id}", userPluginSettingsHandler.HandlePutUserPluginSettings)
 						}
 						r.Get("/", settingsHandler.HandleListSettings)
 						r.Get("/overlay-config", settingsHandler.HandleGetOverlayConfig)

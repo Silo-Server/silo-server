@@ -3,15 +3,15 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 
-import { ApiClientError } from "@/api/client";
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { DEFAULT_SUBTITLE_APPEARANCE } from "@/lib/subtitleAppearance";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { useSubtitleAppearanceSetting } from "./subtitleAppearance";
 
-const apiMock = vi.hoisted(() => vi.fn());
-vi.mock("@/api/client", async () => {
-  const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
-  return { ...actual, api: apiMock };
+const v2Mock = vi.hoisted(() => vi.fn());
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: v2Mock };
 });
 
 function createHarness() {
@@ -28,18 +28,20 @@ function createHarness() {
 function effectiveResponse(value: unknown, source: string) {
   return {
     revision: 1,
-    settings: [{ key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, value, source }],
+    items: [
+      { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, value, source, definition_revision: 1 },
+    ],
   };
 }
 
 describe("useSubtitleAppearanceSetting", () => {
   beforeEach(() => {
-    apiMock.mockReset();
+    v2Mock.mockReset();
   });
 
   it("saves the device override at profile_device scope", async () => {
-    apiMock.mockImplementation((path: string) => {
-      if (path.startsWith("/settings/values/effective")) {
+    v2Mock.mockImplementation((operation: string) => {
+      if (operation === "GET /api/v2/settings/values/effective") {
         return Promise.resolve(effectiveResponse(DEFAULT_SUBTITLE_APPEARANCE, "default"));
       }
       return Promise.resolve(undefined);
@@ -51,21 +53,22 @@ describe("useSubtitleAppearanceSetting", () => {
 
     await result.current.save({ ...DEFAULT_SUBTITLE_APPEARANCE, fontSize: "xlarge" });
 
-    const write = apiMock.mock.calls.find(([path]) => (path as string).includes("?scope="));
-    expect(write?.[0]).toBe(
-      `/settings/values/${SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE}?scope=profile_device`,
+    const write = v2Mock.mock.calls.find(
+      ([operation]) => operation !== "GET /api/v2/settings/values/effective",
     );
-    expect(write?.[1]).toMatchObject({ method: "PUT" });
-    // The contract types this value as an object, so the body carries the
-    // object itself rather than the JSON-encoded string the legacy route took.
-    expect(JSON.parse((write?.[1] as RequestInit).body as string)).toEqual({
-      value: { ...DEFAULT_SUBTITLE_APPEARANCE, fontSize: "xlarge" },
+    expect(write?.[0]).toBe("PUT /api/v2/settings/values/{key}");
+    expect(write?.[1]).toMatchObject({
+      path: { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE },
+      query: { scope: "profile_device" },
+      // The contract types this value as an object, so the body carries the
+      // object itself rather than the JSON-encoded string the legacy route took.
+      body: { value: { ...DEFAULT_SUBTITLE_APPEARANCE, fontSize: "xlarge" } },
     });
   });
 
   it("resets by clearing the device row so the profile value applies again", async () => {
-    apiMock.mockImplementation((path: string) => {
-      if (path.startsWith("/settings/values/effective")) {
+    v2Mock.mockImplementation((operation: string) => {
+      if (operation === "GET /api/v2/settings/values/effective") {
         return Promise.resolve(effectiveResponse(DEFAULT_SUBTITLE_APPEARANCE, "profile_device"));
       }
       return Promise.resolve(undefined);
@@ -77,15 +80,18 @@ describe("useSubtitleAppearanceSetting", () => {
 
     await result.current.reset();
 
-    const write = apiMock.mock.calls.find(([path]) => (path as string).includes("?scope="));
-    expect(write?.[0]).toBe(
-      `/settings/values/${SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE}?scope=profile_device`,
+    const write = v2Mock.mock.calls.find(
+      ([operation]) => operation !== "GET /api/v2/settings/values/effective",
     );
-    expect(write?.[1]).toMatchObject({ method: "DELETE" });
+    expect(write?.[0]).toBe("DELETE /api/v2/settings/values/{key}");
+    expect(write?.[1]).toMatchObject({
+      path: { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE },
+      query: { scope: "profile_device" },
+    });
   });
 
   it("reports no device override when the value resolved from a wider scope", async () => {
-    apiMock.mockResolvedValue(effectiveResponse(DEFAULT_SUBTITLE_APPEARANCE, "profile"));
+    v2Mock.mockResolvedValue(effectiveResponse(DEFAULT_SUBTITLE_APPEARANCE, "profile"));
 
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useSubtitleAppearanceSetting(), { wrapper });
@@ -97,14 +103,12 @@ describe("useSubtitleAppearanceSetting", () => {
   });
 
   it("treats a reset with nothing stored as already done", async () => {
-    apiMock.mockImplementation((path: string, options?: RequestInit) => {
-      if (path.startsWith("/settings/values/effective")) {
+    v2Mock.mockImplementation((operation: string) => {
+      if (operation === "GET /api/v2/settings/values/effective") {
         return Promise.resolve(effectiveResponse(DEFAULT_SUBTITLE_APPEARANCE, "profile_device"));
       }
-      if (options?.method === "DELETE") {
-        return Promise.reject(
-          new ApiClientError(404, "not_found", "No value is set at this scope"),
-        );
+      if (operation.startsWith("DELETE ")) {
+        return Promise.reject(v2Problem(404, "not_found", "No value is set at this scope"));
       }
       return Promise.resolve(undefined);
     });

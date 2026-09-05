@@ -167,6 +167,47 @@ func (s *PostgresUserStore) ListAllSettingValues(ctx context.Context) ([]usersto
 	return values, rows.Err()
 }
 
+// ListSettingValuesByScope returns every explicit value one profile has
+// stored at one profile-anchored scope for the given keys, in the same order
+// as ListAllSettingValues. The predicate is a prefix of
+// user_setting_values_resolution_idx (user_id, profile_id, key, scope), so
+// the read touches only the matching rows.
+func (s *PostgresUserStore) ListSettingValuesByScope(
+	ctx context.Context,
+	profileID string,
+	scope settingscontract.Scope,
+	keys []string,
+) ([]userstore.SettingValue, error) {
+	if err := userstore.ValidateScopeListing(profileID, scope); err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+settingValueColumns+`
+		FROM user_setting_values
+		WHERE user_id = $1 AND profile_id = $2 AND scope = $3 AND key = ANY($4::text[])
+		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(client_family, ''), COALESCE(device_id, ''),
+		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
+		s.userID, profileID, string(scope), keys,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing setting values by scope: %w", err)
+	}
+	defer rows.Close()
+
+	var values []userstore.SettingValue
+	for rows.Next() {
+		value, err := scanSettingValue(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning setting value: %w", err)
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (s *PostgresUserStore) UpsertSettingValue(
 	ctx context.Context,
 	id userstore.SettingIdentity,

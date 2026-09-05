@@ -181,6 +181,7 @@ func registerProfileSections(reg *Registry) {
 		Operation:      replace,
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.replaceProfileSectionOverrides)
 
@@ -189,6 +190,7 @@ func registerProfileSections(reg *Registry) {
 			"Delete the acting profile's section overrides for one page, restoring the admin layout."),
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.resetProfileSectionOverrides)
 
@@ -228,7 +230,7 @@ func overridesQuery(ctx context.Context, in SectionOverridesScopeInput) (handler
 		n, err := intOfID(in.LibraryID)
 		if err != nil || n <= 0 {
 			return q, nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: locationLibraryID, Code: codeInvalid, Detail: "expected a library identifier"})
+				WithErrors(ProblemError{Location: locationLibraryID, Code: codeInvalid, Detail: detailLibraryIDInvalid})
 		}
 		libraryID = &n
 		q.LibraryID = strconv.Itoa(n)

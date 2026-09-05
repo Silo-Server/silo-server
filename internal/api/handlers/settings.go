@@ -30,7 +30,7 @@ import (
 // fresh to within the window.
 const deviceSeenThrottle = 5 * time.Minute
 
-const subtitleAppearanceSettingKey = "subtitle_appearance"
+const SubtitleAppearanceSettingKey = "subtitle_appearance"
 const (
 	legacyAndroidNextUpPromptSettingKey = "player.next_up_prompt_seconds"
 	canonicalNextUpPromptSettingKey     = "playback.next_up_prompt_seconds"
@@ -126,7 +126,7 @@ type effectiveSettingsResponse struct {
 	Settings []effectiveSettingResponse `json:"settings"`
 }
 
-type effectiveSubtitleAppearanceResponse struct {
+type EffectiveSubtitleAppearanceView struct {
 	Key               string `json:"key"`
 	ProfileID         string `json:"profile_id,omitempty"`
 	GlobalValue       string `json:"global_value"`
@@ -195,10 +195,10 @@ var settingsRegistry = map[string]settingSpec{
 		DefaultValue: "30",
 		Validate:     validateIntRange(canonicalNextUpPromptSettingKey, 0, 120),
 	},
-	subtitleAppearanceSettingKey: {
+	SubtitleAppearanceSettingKey: {
 		Scope:        scopeDevice,
 		DefaultValue: "",
-		Validate:     validateJSONSetting(subtitleAppearanceSettingKey),
+		Validate:     validateJSONSetting(SubtitleAppearanceSettingKey),
 	},
 	libraryPageStateSettingKey: {
 		Scope:        scopeDevice,
@@ -475,20 +475,16 @@ func (h *SettingsHandler) HandleSetDeviceSetting(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	key := chi.URLParam(r, "key")
-	device := deviceMetadataFromRequest(r)
-
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
+	cmd := DeviceSettingCommand{
+		UserID:    userID,
+		ProfileID: profileID,
+		Device:    deviceMetadataFromRequest(r),
+		Key:       chi.URLParam(r, "key"),
 	}
-	key = canonicalDeviceSettingKey(key)
-	if !keyUsesDeviceScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeDevice))
-		return
-	}
-	if device.DeviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Device id is required")
+	// The target is judged before the body is read, as it always was, so a
+	// request that is wrong in both ways is refused for the same reason.
+	if err := validateDeviceSettingTarget(&cmd); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
@@ -497,31 +493,103 @@ func (h *SettingsHandler) HandleSetDeviceSetting(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if err := validateRegisteredSetting(key, req.Value, scopeDevice); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	entry := userstore.DeviceSettingEntry{
-		ProfileID:      profileID,
-		DeviceID:       device.DeviceID,
-		DeviceName:     device.DeviceName,
-		DevicePlatform: device.DevicePlatform,
-		Key:            key,
-		Value:          req.Value,
-	}
-	if err := h.syncLegacyDeviceSetting(r.Context(), store, userID, entry, &req.Value); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set device setting")
+	if err := h.SetDeviceSetting(r.Context(), cmd, req.Value); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeviceSettingCommand is one device-scoped setting write or delete: the
+// account, the acting profile, the device the client declared in its headers,
+// and the setting key.
+type DeviceSettingCommand struct {
+	UserID    int
+	ProfileID string
+	Device    DeviceMetadata
+	Key       string
+}
+
+// validateDeviceSettingTarget canonicalizes the key and refuses a target v1
+// refuses: an empty or non-device key, or a request that names no device.
+func validateDeviceSettingTarget(cmd *DeviceSettingCommand) error {
+	if cmd.Key == "" {
+		return fieldError("key", "Setting key is required")
+	}
+	cmd.Key = canonicalDeviceSettingKey(cmd.Key)
+	if !keyUsesDeviceScope(cmd.Key) {
+		return fieldError("key", fmt.Sprintf("%s is not a %s setting", cmd.Key, scopeDevice))
+	}
+	if cmd.Device.DeviceID == "" {
+		return fieldError("device_id", "Device id is required")
+	}
+	return nil
+}
+
+// DeviceMetadataFromHeaders reads the device headers the v1 routes read, with
+// the same clamps.
+func DeviceMetadataFromHeaders(h http.Header) DeviceMetadata {
+	return NewDeviceMetadata(h.Get(deviceIDHeader), h.Get(deviceNameHeader), h.Get(devicePlatformHeader))
+}
+
+// NewDeviceMetadata applies the header clamps to already-read values.
+func NewDeviceMetadata(id, name, platform string) DeviceMetadata {
+	return DeviceMetadata{
+		DeviceID:       clampHeaderValue(id, 128),
+		DeviceName:     clampHeaderValue(name, 120),
+		DevicePlatform: clampHeaderValue(platform, 40),
+	}
+}
+
+// SetDeviceSetting validates and stores a device-scoped setting for the
+// acting profile, keeping the canonical runtime settings in sync. v1 PUT
+// /settings/device/{key} and v2 updateSubtitleAppearanceDeviceOverride both
+// go through it; a *APIError is a decision the caller renders.
+func (h *SettingsHandler) SetDeviceSetting(ctx context.Context, cmd DeviceSettingCommand, value string) error {
+	if err := validateDeviceSettingTarget(&cmd); err != nil {
+		return err
+	}
+	if err := validateRegisteredSetting(cmd.Key, value, scopeDevice); err != nil {
+		return fieldError("value", err.Error())
+	}
+	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entry := userstore.DeviceSettingEntry{
+		ProfileID:      cmd.ProfileID,
+		DeviceID:       cmd.Device.DeviceID,
+		DeviceName:     cmd.Device.DeviceName,
+		DevicePlatform: cmd.Device.DevicePlatform,
+		Key:            cmd.Key,
+		Value:          value,
+	}
+	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, &value); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set device setting")
+	}
+	return nil
+}
+
+// DeleteDeviceSetting removes a device-scoped setting for the acting profile
+// (and its legacy alias row), refreshing the device registry as the v1 route
+// does. v1 DELETE /settings/device/{key} and v2
+// deleteSubtitleAppearanceDeviceOverride both go through it.
+func (h *SettingsHandler) DeleteDeviceSetting(ctx context.Context, cmd DeviceSettingCommand) error {
+	if err := validateDeviceSettingTarget(&cmd); err != nil {
+		return err
+	}
+	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	h.registerRequestDevice(ctx, store, cmd.ProfileID, cmd.Device)
+
+	entry := userstore.DeviceSettingEntry{ProfileID: cmd.ProfileID, DeviceID: cmd.Device.DeviceID, Key: cmd.Key}
+	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, nil); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
+	}
+	return nil
 }
 
 // HandleDeleteDeviceSetting handles DELETE /settings/device/{key}.
@@ -531,33 +599,14 @@ func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
-	key := chi.URLParam(r, "key")
-	device := deviceMetadataFromRequest(r)
-
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
+	cmd := DeviceSettingCommand{
+		UserID:    userID,
+		ProfileID: profileID,
+		Device:    deviceMetadataFromRequest(r),
+		Key:       chi.URLParam(r, "key"),
 	}
-	key = canonicalDeviceSettingKey(key)
-	if !keyUsesDeviceScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeDevice))
-		return
-	}
-	if device.DeviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Device id is required")
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-	h.registerRequestDevice(r.Context(), store, profileID, device)
-
-	entry := userstore.DeviceSettingEntry{ProfileID: profileID, DeviceID: device.DeviceID, Key: key}
-	if err := h.syncLegacyDeviceSetting(r.Context(), store, userID, entry, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
+	if err := h.DeleteDeviceSetting(r.Context(), cmd); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
@@ -776,23 +825,34 @@ func (h *SettingsHandler) HandleGetEffectiveSubtitleAppearance(w http.ResponseWr
 	if !ok {
 		return
 	}
-	device := deviceMetadataFromRequest(r)
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	resp, err := h.EffectiveSubtitleAppearance(r.Context(), userID, profileID, deviceMetadataFromRequest(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-	h.registerRequestDevice(r.Context(), store, profileID, device)
-
-	resolved, err := h.resolveEffectiveSetting(r.Context(), store, profileID, device, subtitleAppearanceSettingKey)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get setting")
+		writeAPIError(w, err)
 		return
 	}
 
-	resp := effectiveSubtitleAppearanceResponse{
-		Key:               subtitleAppearanceSettingKey,
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// EffectiveSubtitleAppearance resolves the subtitle_appearance setting for
+// the acting profile on the declared device (device override over the
+// profile-wide value), refreshing the device registry as a side effect. v1
+// GET /settings/subtitle_appearance/effective and v2
+// getEffectiveSubtitleAppearance both answer from it.
+func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userID int, profileID string, device DeviceMetadata) (EffectiveSubtitleAppearanceView, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return EffectiveSubtitleAppearanceView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	h.registerRequestDevice(ctx, store, profileID, device)
+
+	resolved, err := h.resolveEffectiveSetting(ctx, store, profileID, device, SubtitleAppearanceSettingKey)
+	if err != nil {
+		return EffectiveSubtitleAppearanceView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to get setting")
+	}
+
+	return EffectiveSubtitleAppearanceView{
+		Key:               SubtitleAppearanceSettingKey,
 		ProfileID:         resolved.ProfileID,
 		GlobalValue:       resolved.UserValue,
 		DeviceValue:       resolved.DeviceValue,
@@ -802,26 +862,24 @@ func (h *SettingsHandler) HandleGetEffectiveSubtitleAppearance(w http.ResponseWr
 		DeviceName:        resolved.DeviceName,
 		DevicePlatform:    resolved.DevicePlatform,
 		UpdatedAt:         resolved.UpdatedAt,
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	}, nil
 }
 
 // HandleSetSubtitleAppearanceDeviceOverride handles PUT /settings/device/subtitle_appearance.
 func (h *SettingsHandler) HandleSetSubtitleAppearanceDeviceOverride(w http.ResponseWriter, r *http.Request) {
 	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", subtitleAppearanceSettingKey)
+	routeCtx.URLParams.Add("key", SubtitleAppearanceSettingKey)
 	h.HandleSetDeviceSetting(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx)))
 }
 
 // HandleDeleteSubtitleAppearanceDeviceOverride handles DELETE /settings/device/subtitle_appearance.
 func (h *SettingsHandler) HandleDeleteSubtitleAppearanceDeviceOverride(w http.ResponseWriter, r *http.Request) {
 	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", subtitleAppearanceSettingKey)
+	routeCtx.URLParams.Add("key", SubtitleAppearanceSettingKey)
 	h.HandleDeleteDeviceSetting(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx)))
 }
 
-type requestDeviceMetadata struct {
+type DeviceMetadata struct {
 	DeviceID       string
 	DeviceName     string
 	DevicePlatform string
@@ -836,19 +894,15 @@ func activeProfileIDFromRequest(w http.ResponseWriter, r *http.Request) (string,
 	return profileID, true
 }
 
-func deviceMetadataFromRequest(r *http.Request) requestDeviceMetadata {
-	return requestDeviceMetadata{
-		DeviceID:       clampHeaderValue(r.Header.Get(deviceIDHeader), 128),
-		DeviceName:     clampHeaderValue(r.Header.Get(deviceNameHeader), 120),
-		DevicePlatform: clampHeaderValue(r.Header.Get(devicePlatformHeader), 40),
-	}
+func deviceMetadataFromRequest(r *http.Request) DeviceMetadata {
+	return DeviceMetadataFromHeaders(r.Header)
 }
 
 func (h *SettingsHandler) registerRequestDevice(
 	ctx context.Context,
 	store userstore.UserStore,
 	profileID string,
-	device requestDeviceMetadata,
+	device DeviceMetadata,
 ) {
 	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(device.DeviceID) == "" {
 		return
@@ -999,7 +1053,7 @@ func getDeviceSettingWithLegacyFallback(
 }
 
 func usesLegacyUserFallback(key string) bool {
-	return key == subtitleAppearanceSettingKey
+	return key == SubtitleAppearanceSettingKey
 }
 
 func validateEnumSetting(key string, allowed ...string) func(string) error {
@@ -1103,7 +1157,7 @@ func (h *SettingsHandler) resolveEffectiveSetting(
 	ctx context.Context,
 	store userstore.UserStore,
 	profileID string,
-	device requestDeviceMetadata,
+	device DeviceMetadata,
 	key string,
 ) (effectiveSettingResponse, error) {
 	requestedKey := key
@@ -1224,8 +1278,8 @@ func isCardQuickActionMode(v string) bool {
 	return false
 }
 
-// overlayConfigResponse is returned by GET /settings/overlay-config.
-type overlayConfigResponse struct {
+// OverlayConfigView is returned by GET /settings/overlay-config.
+type OverlayConfigView struct {
 	Enabled             bool   `json:"enabled"`
 	Defaults            string `json:"defaults,omitempty"`
 	QuickActionsEnabled bool   `json:"quick_actions_enabled"`
@@ -1238,27 +1292,33 @@ type overlayConfigResponse struct {
 // an explicit ui.card_overlays_enabled / ui.card_quick_actions_enabled profile
 // setting overrides them in either direction.
 func (h *SettingsHandler) HandleGetOverlayConfig(w http.ResponseWriter, r *http.Request) {
-	resp := overlayConfigResponse{
+	w.Header().Set("Cache-Control", "private, no-cache")
+	writeJSON(w, http.StatusOK, h.OverlayConfig(r.Context()))
+}
+
+// OverlayConfig reads the server-wide overlay defaults. v1 GET
+// /settings/overlay-config and v2 getOverlayConfig both answer from it; a
+// missing server-settings reader yields the built-in defaults.
+func (h *SettingsHandler) OverlayConfig(ctx context.Context) OverlayConfigView {
+	resp := OverlayConfigView{
 		Enabled:             true,
 		QuickActionsEnabled: false,
 		QuickActionsDefault: defaultCardQuickActionMode,
 	}
 
 	if h.serverSettings != nil {
-		if v, _ := h.serverSettings.Get(r.Context(), "overlays.enabled"); v == "false" {
+		if v, _ := h.serverSettings.Get(ctx, "overlays.enabled"); v == "false" {
 			resp.Enabled = false
 		}
-		if v, _ := h.serverSettings.Get(r.Context(), "defaults.card_overlays"); v != "" {
+		if v, _ := h.serverSettings.Get(ctx, "defaults.card_overlays"); v != "" {
 			resp.Defaults = v
 		}
-		if v, _ := h.serverSettings.Get(r.Context(), "defaults.card_quick_actions_enabled"); v == "true" {
+		if v, _ := h.serverSettings.Get(ctx, "defaults.card_quick_actions_enabled"); v == "true" {
 			resp.QuickActionsEnabled = true
 		}
-		if v, _ := h.serverSettings.Get(r.Context(), "defaults.card_quick_actions"); isCardQuickActionMode(v) {
+		if v, _ := h.serverSettings.Get(ctx, "defaults.card_quick_actions"); isCardQuickActionMode(v) {
 			resp.QuickActionsDefault = v
 		}
 	}
-
-	w.Header().Set("Cache-Control", "private, no-cache")
-	writeJSON(w, http.StatusOK, resp)
+	return resp
 }

@@ -119,10 +119,6 @@ describe("DeviceSettings capability discovery", () => {
       "batched effective reads are missing",
       { ...compatibleCapabilities, supports_batched_effective: undefined },
     ],
-    [
-      "idempotent writes are missing",
-      { ...compatibleCapabilities, supports_idempotent_writes: undefined },
-    ],
     ["revision is missing", { ...compatibleCapabilities, revision: undefined }],
   ])("does not request all settings when the %s", (_case, capabilities) => {
     mocks.capabilities.data = capabilities as SettingsCapabilities;
@@ -134,6 +130,22 @@ describe("DeviceSettings capability discovery", () => {
     );
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("Editable device defaults")).not.toBeInTheDocument();
+  });
+
+  it("still requests settings when the server reports no idempotent writes", () => {
+    // The v2 write operations carry no mutation id, so replay support is not
+    // a precondition for reading or editing device defaults.
+    mocks.capabilities.data = {
+      ...compatibleCapabilities,
+      supports_idempotent_writes: undefined,
+    } as SettingsCapabilities;
+
+    render(<DeviceSettings />);
+
+    expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true }),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("enables only revision-supported keys when the full capability contract matches", () => {

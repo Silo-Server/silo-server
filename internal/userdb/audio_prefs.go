@@ -17,6 +17,11 @@ func SetAudioPreference(db *sql.DB, pref AudioPreference) error {
 }
 
 func setAudioPreference(exec preferenceSettingsExecutor, pref AudioPreference) error {
+	// Same default pgstore applies: an empty UpdatedAt is "now", never an
+	// empty string a later read cannot parse.
+	if pref.UpdatedAt == "" {
+		pref.UpdatedAt = nowUTC()
+	}
 	signatureJSON, err := userstore.MarshalAudioTrackSignature(pref.TrackSignature)
 	if err != nil {
 		return fmt.Errorf("marshaling audio track signature for profile %q series %q: %w",

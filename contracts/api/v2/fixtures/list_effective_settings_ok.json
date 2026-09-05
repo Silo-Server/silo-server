@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "key": "ui.theme",
+      "value": "cinema-light",
+      "source": "profile",
+      "definition_revision": 3,
+      "updated_at": "2026-01-02T03:04:05.678Z",
+      "source_context": {
+        "profile_id": "p-owner"
+      },
+      "scope": "profile",
+      "profile_id": "p-owner"
+    },
+    {
+      "key": "playback.preferred_quality",
+      "value": "auto",
+      "source": "default",
+      "definition_revision": 3
+    }
+  ],
+  "revision": 8
+}
+

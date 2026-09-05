@@ -208,7 +208,6 @@ describe("serialized sidebar pin writes", () => {
       invalidateOnSettled: false,
       item: { type: "section", library_id: 42, section_id: "b", label: "B" },
       present: true,
-      mutationId: expect.any(String),
     });
 
     writes[1]!.resolve({});
@@ -216,7 +215,6 @@ describe("serialized sidebar pin writes", () => {
     expect(mocks.mutateAsync.mock.calls[2]![0]).toMatchObject({
       item: { type: "collection", library_id: 42, collection_id: "c", label: "C" },
       present: true,
-      mutationId: expect.any(String),
     });
     writes[2]!.resolve({});
     await waitFor(() => expect(result.current.pins.pins["42"]).toHaveLength(1));
@@ -241,16 +239,11 @@ describe("serialized sidebar pin writes", () => {
     expect(mocks.mutateAsync.mock.calls[0]![0]).toMatchObject({
       item: { type: "collection", library_id: 42, collection_id: "a", label: "A" },
       present: true,
-      mutationId: expect.any(String),
     });
     expect(mocks.mutateAsync.mock.calls[1]![0]).toMatchObject({
       item: { type: "collection", library_id: 42, collection_id: "a", label: "A" },
       present: false,
-      mutationId: expect.any(String),
     });
-    expect(mocks.mutateAsync.mock.calls[1]![0].mutationId).not.toBe(
-      mocks.mutateAsync.mock.calls[0]![0].mutationId,
-    );
   });
 
   it("orders the same target across separate hook instances", async () => {

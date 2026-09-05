@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { PlayerConfig } from "../context/PlayerConfigContext";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
 import type { PlayerSubtitleInfo } from "../types";
-import { buildSubtitleChoiceRequests } from "./subtitleChoicePersistence";
+import {
+  buildSubtitleChoiceRequests,
+  sendSubtitleChoiceRequest,
+  type SubtitleChoiceRequest,
+} from "./subtitleChoicePersistence";
 
 const TRACKS: PlayerSubtitleInfo[] = [
   {
@@ -18,13 +24,11 @@ const TRACKS: PlayerSubtitleInfo[] = [
   },
 ];
 
-function canonicalWrites(requests: ReturnType<typeof buildSubtitleChoiceRequests>) {
-  return requests.filter((request) => request.path.startsWith("/settings/values/"));
-}
-
-/** The key one canonical write addresses, parsed back out of its path. */
-function keyOf(path: string): string {
-  return decodeURIComponent(path.slice("/settings/values/".length).split("?")[0]!);
+function canonicalWrites(requests: SubtitleChoiceRequest[]) {
+  return requests.filter(
+    (request): request is Extract<SubtitleChoiceRequest, { kind: "setting" }> =>
+      request.kind === "setting",
+  );
 }
 
 describe("buildSubtitleChoiceRequests", () => {
@@ -37,12 +41,12 @@ describe("buildSubtitleChoiceRequests", () => {
     });
 
     const canonical = canonicalWrites(requests);
-    expect(canonical.map((request) => keyOf(request.path))).toEqual([
+    expect(canonical.map((request) => request.key)).toEqual([
       SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
       SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
     ]);
     for (const request of canonical) {
-      expect(request.path).toContain("scope=profile_series&series_id=series-1");
+      expect(request.identity).toEqual({ scope: "profile_series", series_id: "series-1" });
     }
     expect(canonical[0]?.body).toEqual({ value: "ja" });
     expect(canonical[1]?.body).toEqual({ value: "always" });
@@ -61,7 +65,7 @@ describe("buildSubtitleChoiceRequests", () => {
         tracks: TRACKS,
         showForcedSubtitles,
       });
-      expect(canonicalWrites(requests).map((request) => keyOf(request.path))).not.toContain(
+      expect(canonicalWrites(requests).map((request) => request.key)).not.toContain(
         SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
       );
     }
@@ -76,7 +80,7 @@ describe("buildSubtitleChoiceRequests", () => {
       index: 0,
       tracks: TRACKS,
       showForcedSubtitles: false,
-    }).filter((request) => request.path.startsWith("/subtitle-prefs/"));
+    }).filter((request) => request.kind === "subtitle_preference");
 
     expect(legacy?.body).toMatchObject({
       subtitle_language: "ja",
@@ -124,9 +128,7 @@ describe("buildSubtitleChoiceRequests", () => {
     });
 
     expect(canonicalWrites(requests)[0]?.body).toEqual({ value: "es" });
-    expect(
-      requests.find((request) => request.path.startsWith("/subtitle-prefs/"))?.body,
-    ).toMatchObject({
+    expect(requests.find((request) => request.kind === "subtitle_preference")?.body).toMatchObject({
       subtitle_language: "es",
       subtitle_track_index: 4,
       track_signature: {
@@ -151,11 +153,11 @@ describe("buildSubtitleChoiceRequests", () => {
       }),
     );
     const stored: StoredSettingRow[] = requests.map((request) => ({
-      key: keyOf(request.path),
+      key: request.key,
       scope: "profile_series",
       profileId: "profile-1",
       seriesId: "series-1",
-      value: (request.body as { value: unknown }).value,
+      value: request.body.value,
     }));
     stored.push({
       key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
@@ -170,5 +172,57 @@ describe("buildSubtitleChoiceRequests", () => {
     });
     expect(forced?.value).toBe(false);
     expect(forced?.source).toBe("profile");
+  });
+});
+
+describe("sendSubtitleChoiceRequest", () => {
+  const config: PlayerConfig = {
+    apiBaseUrl: "https://silo.example/api/v1",
+    getAccessToken: () => "token-1",
+    getProfileId: () => "profile-1",
+    getProfileToken: () => "profile-token-1",
+    getDeviceId: () => "web-player-device",
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends canonical settings and track preferences through v2 from one PlayerConfig", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const requests = buildSubtitleChoiceRequests({
+      seriesId: "series/1",
+      index: null,
+      tracks: TRACKS,
+      showForcedSubtitles: true,
+    });
+    for (const request of requests) {
+      await sendSubtitleChoiceRequest(config, request);
+    }
+
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url, init]) => `${init.method} ${url}`)).toEqual([
+      `PUT https://silo.example/api/v2/settings/values/${SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE}?scope=profile_series&series_id=series%2F1`,
+      `PUT https://silo.example/api/v2/settings/values/${SETTING_KEYS.PLAYBACK_SUBTITLE_MODE}?scope=profile_series&series_id=series%2F1`,
+      "PUT https://silo.example/api/v2/subtitle-prefs/series%2F1",
+    ]);
+    const [, v2Init] = calls[2]!;
+    expect(JSON.parse(v2Init.body as string)).toEqual({
+      subtitle_language: "",
+      subtitle_track_index: -1,
+      subtitle_mode: "off",
+      show_forced_subtitles: true,
+    });
+    for (const [, init] of calls) {
+      expect(init.headers).toMatchObject({
+        Authorization: "Bearer token-1",
+        "X-Profile-Id": "profile-1",
+        "X-Profile-Token": "profile-token-1",
+        "X-Silo-Device-Id": "web-player-device",
+        "Content-Type": "application/json",
+      });
+    }
   });
 });

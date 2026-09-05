@@ -1,12 +1,8 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  api,
-  ApiClientError,
-  apiWithProfileRequestContext,
-  isProfileRequestContextCurrent,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+import { isProfileRequestContextCurrent, type ProfileRequestContextSnapshot } from "@/api/client";
+import { v2, V2ProblemError, type V2Query, type V2Result } from "@/api/v2/request";
+import type { paths } from "@/api/v2/schema";
 import { storage } from "@/utils/storage";
 import {
   SETTING_DEFINITIONS,
@@ -65,38 +61,78 @@ export interface SettingIdentity {
  */
 export type ProfileAuthSnapshot = ProfileRequestContextSnapshot;
 
-export interface EffectiveSetting<T = unknown> {
+type EffectiveSettingV2 = V2Result<"GET /api/v2/settings/values/effective">["items"][number];
+
+/**
+ * One resolved setting as the v2 contract returns it, with the key narrowed
+ * to the vendored manifest and the source/scope narrowed to the ladder this
+ * client knows. The contract leaves those as open strings because legacy
+ * stored rows can hold values outside the enum; the narrowing happens once,
+ * in the query function, so every screen reads the typed shape.
+ */
+export type EffectiveSetting<T = unknown> = Omit<
+  EffectiveSettingV2,
+  "key" | "value" | "stored_value" | "source" | "scope" | "library_id" | "definition_revision"
+> & {
   key: SettingKey;
   value: T;
-  source: SettingSource;
   /** Present only when policy narrowed the answer; this is what the user chose. */
   stored_value?: T;
-  constrained?: boolean;
-  constraint_kind?: "ceiling" | "floor" | "allowlist" | "locked";
-  /** Advisory values: contract floor, deployment-observed tags, and current value. */
-  suggested_values?: string[];
+  source: SettingSource;
   /** The scope holding the value, so a reset can target it exactly. */
   scope?: SettingScope;
-  client_family?: "tv" | "mobile" | "tablet" | "desktop" | "web";
+  /** The contract renders ids as strings; the app addresses libraries by number. */
   library_id?: number;
-  series_id?: string;
-}
-
-interface EffectiveResponse {
-  settings: EffectiveSetting[];
-  revision: number;
-}
+  definition_revision?: number;
+};
 
 /** The cache shape one effective-settings query resolves to. */
 export type EffectiveSettingsMap = Partial<Record<SettingKey, EffectiveSetting>>;
 
-function identityQuery(identity: SettingIdentity): string {
-  const params = new URLSearchParams({ scope: identity.scope });
-  if (identity.libraryId !== undefined) params.set("library_id", String(identity.libraryId));
-  if (identity.seriesId !== undefined) params.set("series_id", identity.seriesId);
-  if (identity.deviceId !== undefined) params.set("device_id", identity.deviceId);
-  if (identity.profileId !== undefined) params.set("profile_id", identity.profileId);
-  return params.toString();
+const SETTING_SCOPES: readonly SettingScope[] = [
+  "account",
+  "profile",
+  "profile_device",
+  "profile_client",
+  "profile_library",
+  "profile_series",
+];
+const KNOWN_SETTING_KEYS = new Set<string>(Object.values(SETTING_KEYS));
+
+function isSettingScope(value: string | undefined): value is SettingScope {
+  return value !== undefined && (SETTING_SCOPES as readonly string[]).includes(value);
+}
+
+/**
+ * Narrow one v2 effective-setting item onto the client's closed vocabularies.
+ * The contract leaves key, source and scope as open strings (a newer server may
+ * add values); an item this client does not know is dropped rather than
+ * asserted, so callers never see a key outside SETTING_KEYS.
+ */
+function effectiveSettingFromV2(item: EffectiveSettingV2): EffectiveSetting | undefined {
+  if (!KNOWN_SETTING_KEYS.has(item.key)) return undefined;
+  const source: SettingSource | undefined =
+    item.source === "default" ? "default" : isSettingScope(item.source) ? item.source : undefined;
+  if (source === undefined) return undefined;
+  return {
+    ...item,
+    key: item.key as SettingKey,
+    source,
+    scope: isSettingScope(item.scope) ? item.scope : undefined,
+    library_id: item.library_id === undefined ? undefined : Number(item.library_id),
+  };
+}
+
+type SettingIdentityQuery = V2Query<"PUT /api/v2/settings/values/{key}">;
+
+function identityQuery(identity: SettingIdentity): SettingIdentityQuery {
+  return {
+    scope: identity.scope,
+    library_id: identity.libraryId === undefined ? undefined : String(identity.libraryId),
+    series_id: identity.seriesId,
+    device_id: identity.deviceId,
+    profile_id: identity.profileId,
+  };
 }
 
 function activeProfileId() {
@@ -159,19 +195,19 @@ export function useEffectiveSettings(options?: {
   return useQuery({
     queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds, deviceId, profileId }),
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (keys?.length) params.set("keys", keys.join(","));
-      if (libraryIds?.length) params.set("library_ids", libraryIds.join(","));
-      if (seriesIds?.length) params.set("series_ids", seriesIds.join(","));
-      if (deviceId) params.set("device_id", deviceId);
-      if (profileId) params.set("profile_id", profileId);
-      const query = params.toString();
-      const result = await api<EffectiveResponse>(
-        `/settings/values/effective${query ? `?${query}` : ""}`,
-      );
+      const result = await v2("GET /api/v2/settings/values/effective", {
+        query: {
+          keys: keys?.length ? [...keys] : undefined,
+          library_ids: libraryIds?.length ? libraryIds.map(String) : undefined,
+          series_ids: seriesIds?.length ? [...seriesIds] : undefined,
+          device_id: deviceId || undefined,
+          profile_id: profileId || undefined,
+        },
+      });
       const byKey: EffectiveSettingsMap = {};
-      for (const setting of result.settings) {
-        byKey[setting.key] = setting;
+      for (const item of result.items) {
+        const setting = effectiveSettingFromV2(item);
+        if (setting) byKey[setting.key] = setting;
       }
       return byKey;
     },
@@ -204,16 +240,25 @@ export function useSettingValue<T = unknown>(
   };
 }
 
+/** The HTTP status of a documented v2 problem, or null for anything else (transport, network). */
+export function settingMutationStatus(error: unknown): number | null {
+  return error instanceof V2ProblemError ? error.status : null;
+}
+
 export function isDefinitiveSettingMutationRejection(error: unknown): boolean {
   // Ordinary 4xx responses reject the request before applying it. A 408 or
   // 5xx can be emitted by the server or a gateway after the mutation reached
   // the handler, so those remain ambiguous and require reconciliation.
-  return (
-    error instanceof ApiClientError &&
-    error.status >= 400 &&
-    error.status < 500 &&
-    error.status !== 408
-  );
+  const status = settingMutationStatus(error);
+  return status !== null && status >= 400 && status < 500 && status !== 408;
+}
+
+/**
+ * Whether a write or clear failed because nothing is stored at that scope.
+ * For a reset that is the requested state, not a failure.
+ */
+export function isSettingValueMissing(error: unknown): boolean {
+  return settingMutationStatus(error) === 404;
 }
 
 function shouldReconcileAfterMutationError(error: unknown): boolean {
@@ -245,13 +290,10 @@ export function useSetSettingValue() {
       key,
       value,
       identity,
-      mutationId,
     }: {
       key: SettingKey;
       value: unknown;
       identity: SettingIdentity;
-      /** Optional idempotency key; a retry with the same id replays rather than re-applying. */
-      mutationId?: string;
       /**
        * Whole-document editors may serialize several optimistic writes and
        * invalidate once their queue drains. Intermediate refetches would
@@ -260,13 +302,10 @@ export function useSetSettingValue() {
        */
       invalidateOnSettled?: boolean;
     }) =>
-      api(`/settings/values/${key}?${identityQuery(identity)}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...(mutationId ? { "X-Silo-Mutation-Id": mutationId } : {}),
-        },
-        body: JSON.stringify({ value }),
+      v2("PUT /api/v2/settings/values/{key}", {
+        path: { key },
+        query: identityQuery(identity),
+        body: { value },
       }),
     onSuccess: (_data, variables) => {
       if (variables.invalidateOnSettled === false) return;
@@ -298,32 +337,23 @@ export function useSetNavigationShortcutPresence() {
     async ({
       item,
       present,
-      mutationId,
       profileAuth,
       invalidateOnSettled,
     }: {
       item: ShortcutTarget;
       present: boolean;
-      /** Stable across retries of this desired-state operation. */
-      mutationId: string;
       /** Profile id and matching PIN token captured with this intent. */
       profileAuth: ProfileAuthSnapshot;
       /** A local serialized editor can defer refetching until its queue drains. */
       invalidateOnSettled?: boolean;
     }) => {
       try {
-        return await apiWithProfileRequestContext(
-          `/settings/values/nav.shortcuts/item`,
-          profileAuth,
-          {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Silo-Mutation-Id": mutationId,
-            },
-            body: JSON.stringify({ item, present }),
-          },
-        );
+        return await v2("PUT /api/v2/settings/values/nav.shortcuts/item", {
+          // The contract types the item as an open object; the shortcut's
+          // members are fixed by the nav.shortcuts definition it lands in.
+          body: { item: { ...item }, present },
+          profileContext: profileAuth,
+        });
       } finally {
         if (invalidateOnSettled !== false && isProfileRequestContextCurrent(profileAuth)) {
           void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
@@ -345,17 +375,14 @@ export function useClearSettingValue() {
 
   return useMutation({
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
-      api(`/settings/values/${key}?${identityQuery(identity)}`, { method: "DELETE" }),
+      v2("DELETE /api/v2/settings/values/{key}", { path: { key }, query: identityQuery(identity) }),
     onSuccess: (_data, variables) => {
       return invalidateSettingValueQueries(qc, variables.identity);
     },
     onError: (error, variables) => {
       // DELETE is idempotent for reset callers: a 404 means another client
       // already cleared the value, so stale effective caches must catch up.
-      if (
-        shouldReconcileAfterMutationError(error) ||
-        (error instanceof ApiClientError && error.status === 404)
-      ) {
+      if (shouldReconcileAfterMutationError(error) || isSettingValueMissing(error)) {
         return invalidateSettingValueQueries(qc, variables.identity);
       }
     },
@@ -367,19 +394,38 @@ export function useClearSettingValue() {
  * client built against a newer manifest hides definitions the connected server
  * does not know rather than offering a choice it will refuse.
  */
-export interface SettingsCapabilities {
-  api_version: number;
-  revision: number;
-  contract_etag: string;
-  /** Effective reads can resolve the provider's key batch atomically. */
-  supports_batched_effective?: boolean;
-  /** Persisted/retried writes can replay one mutation id without re-applying. */
-  supports_idempotent_writes?: boolean;
-  /** Added alongside the semantic nav.shortcuts item endpoint. */
-  supports_atomic_shortcuts?: boolean;
-}
+export type SettingsCapabilities = Pick<
+  V2Result<"GET /api/v2/settings/contract/capabilities">,
+  "api_version" | "revision" | "contract_etag"
+> &
+  Partial<
+    Pick<
+      V2Result<"GET /api/v2/settings/contract/capabilities">,
+      "supports_batched_effective" | "supports_idempotent_writes" | "supports_atomic_shortcuts"
+    >
+  >;
 
-/** Whether this server can safely read and write one vendored definition. */
+/**
+ * Whether the v2 write operations declare the X-Silo-Mutation-Id header. v1
+ * honored it for idempotent replay; the v2 operations declare no such header
+ * yet, so this client sends none and must not claim replay semantics. The
+ * constant is typed from the generated contract: when the header lands on
+ * both writes, this line stops compiling until the writes forward the id.
+ */
+type MutationIDHeader = "X-Silo-Mutation-Id";
+type SettingValueWriteHeaders =
+  paths["/api/v2/settings/values/{key}"]["put"]["parameters"]["header"];
+type NavigationShortcutWriteHeaders =
+  paths["/api/v2/settings/values/nav.shortcuts/item"]["put"]["parameters"]["header"];
+const V2_WRITES_DECLARE_MUTATION_ID: MutationIDHeader extends keyof SettingValueWriteHeaders &
+  keyof NavigationShortcutWriteHeaders
+  ? true
+  : false = false;
+
+/**
+ * Whether this server can safely read and write one vendored definition. The
+ * writes are plain desired-state PUTs, so idempotent replay is not required.
+ */
 export function settingsCapabilitiesSupportKey(
   capabilities: SettingsCapabilities | undefined,
   key: SettingKey,
@@ -387,8 +433,7 @@ export function settingsCapabilitiesSupportKey(
   return (
     capabilities?.api_version === SETTINGS_API_VERSION &&
     capabilities.revision >= SETTING_DEFINITIONS[key].introducedIn &&
-    capabilities.supports_batched_effective === true &&
-    capabilities.supports_idempotent_writes === true
+    capabilities.supports_batched_effective === true
   );
 }
 
@@ -408,7 +453,16 @@ export function settingsCapabilitiesSupportAtomicShortcuts(
 export function useSettingsCapabilities() {
   return useQuery({
     queryKey: [...settingsKeys.all, "capabilities"] as const,
-    queryFn: () => api<SettingsCapabilities>("/settings/contract/capabilities"),
+    queryFn: async (): Promise<SettingsCapabilities> => {
+      const capabilities = await v2("GET /api/v2/settings/contract/capabilities");
+      // The server's flag describes the v1 header. Report replay only when
+      // the v2 writes this client uses can actually carry a mutation id.
+      return {
+        ...capabilities,
+        supports_idempotent_writes:
+          V2_WRITES_DECLARE_MUTATION_ID && capabilities.supports_idempotent_writes,
+      };
+    },
     staleTime: 30 * 60 * 1000,
   });
 }

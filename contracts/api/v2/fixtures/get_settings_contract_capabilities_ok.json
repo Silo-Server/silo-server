@@ -1,0 +1,18 @@
+{
+  "api_version": 1,
+  "revision": 12,
+  "contract_etag": "\"etag-12\"",
+  "definition_count": 40,
+  "scopes": [
+    "account",
+    "profile"
+  ],
+  "client_families": [
+    "tv",
+    "web"
+  ],
+  "supports_batched_effective": true,
+  "supports_idempotent_writes": true,
+  "supports_atomic_shortcuts": true
+}
+
