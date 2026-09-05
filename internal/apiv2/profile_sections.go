@@ -181,7 +181,7 @@ func registerProfileSections(reg *Registry) {
 		Operation:      replace,
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
-		RetrySafety:    RetrySafetyNaturalIdempotent,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.replaceProfileSectionOverrides)
 

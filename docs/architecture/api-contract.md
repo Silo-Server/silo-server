@@ -431,12 +431,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
-  needs them, and the field is never advertised unimplemented. Inventory answer: all 224
-  tier-1 ported mutation rows (218 distinct operations) are classified (122
-  `natural_idempotent`, 27 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 8
-  `durable_dispatch`, 37 `non_retryable`, 0 `idempotency_key`, counted per distinct
-  operation) and no residual
-  group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
+  tier-1 ported mutation rows (219 distinct operations) are classified (111
+  `natural_idempotent`, 26 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 10
+  `durable_dispatch`, 48 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
   first call never touched (node force-reload, per node and fleet-wide), a token-issuing
@@ -459,12 +458,18 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   command that re-runs its side effect on every call (watch-together selection and
   suggestion promotion, which reset playback and clear member sessions each time;
   metadata-match-queue retry, which schedules another run once the first is leased; node
-  capability reprobe, which holds the GPU gate through a multi-minute cold build); each
-  note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
-  (email-address verification; favorites, watchlist, and rating add and remove, and the
-  taste seed, whose store converges but whose provider dispatch or recommendation refresh
-  fires unconditionally) name the outbox or change-gated claim the v2 port must add before
-  their retry is safe. Thirty-six rows carry a `DEFECT` note where v1 gates on
+  capability reprobe, which holds the GPU gate through a multi-minute cold build), or a
+  delete or replace that converges only while nothing intervenes: a delayed retry after a
+  lost response destroys a resource re-created after the first success (email-address
+  clear, push-device unregister, library and collection poster delete, profile avatar
+  delete, Discord unlink, collection item add and remove, profile section overrides
+  replace), so each stays `non_retryable` until its owning section guards the resource
+  with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
+  (email-address verification; favorites, watchlist, and rating add and remove; taste seed;
+  account and node deletion) name the durable dispatch or cleanup the v2 port must add before
+  their retry is safe. The existing v2 profile creation and deletion operations remain
+  `non_retryable` until their durable identity and cleanup defects are fixed. Forty rows
+  carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
   sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
@@ -481,7 +486,12 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
   field presence rather than on an effective change, the provider device-auth poll, whose
   completion check is a plain read ahead of the plugin call, admin user update, whose
-  password branch re-hashes and revokes every session on each attempt, library creation,
+  password branch re-hashes and revokes every session on each attempt, profile creation,
+  whose name and limit checks run in application code with no unique index on the
+  account-scoped name, account deletion, whose impersonation-session revocation follows
+  the commit, node deletion, whose pool invalidation follows the commit, and profile
+  deletion, whose object and device cleanup cannot resume after the row disappears,
+  library creation,
   whose seeding and initial scan run after the insert without a transaction, and the
   library provider chain, whose matcher wake fires unconditionally after the save); their
   v2 port must move the gate

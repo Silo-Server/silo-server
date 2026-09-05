@@ -206,7 +206,7 @@ func registerProfiles(reg *Registry) {
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
-		RetrySafety:    RetrySafetyUniqueConstraint,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.createProfile)
 
@@ -251,7 +251,7 @@ func registerProfiles(reg *Registry) {
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
-		RetrySafety:    RetrySafetyNaturalIdempotent,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.deleteProfile)
 
@@ -302,13 +302,15 @@ func registerProfiles(reg *Registry) {
 		Operation: humaOp(http.MethodDelete, Prefix+"/profiles/{id}/avatar", "deleteProfileAvatar", "profiles",
 			"Remove a profile's uploaded avatar; a preset avatar is left as is."),
 		// As v1 DELETE /profiles/{id}/avatar: any signed-in caller on the
-		// account; idempotent, a profile with no upload is left unchanged.
+		// account; a profile with no upload is left unchanged. Non-retryable:
+		// a delayed retry would clear an avatar uploaded after the first
+		// success (ledger row note).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
-		RetrySafety:    RetrySafetyNaturalIdempotent,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.deleteProfileAvatar)
 }
