@@ -1,12 +1,15 @@
 package apiv2
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -212,6 +215,64 @@ func TestListProgressCursor(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress?limit=1&status=completed&cursor="+url.QueryEscape(first.Page.NextCursor), "", owner), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress?limit=1&cursor="+url.QueryEscape(first.Page.NextCursor), "", with(bearer(memberToken), "X-Profile-Id", "p-primary")), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress?cursor=nonsense", "", owner), TypeInvalidCursor)
+}
+
+// policyResolver is fakeResolver with a mutable access policy, so a test can
+// change what the viewer may see between two pages.
+type policyResolver struct{ scope *access.Scope }
+
+func (r policyResolver) Resolve(ctx context.Context, in access.ResolveInput) (access.Scope, error) {
+	scope, err := fakeResolver{}.Resolve(ctx, in)
+	if err != nil {
+		return scope, err
+	}
+	scope.AllowedLibraryIDs = r.scope.AllowedLibraryIDs
+	scope.DisabledLibraryIDs = r.scope.DisabledLibraryIDs
+	scope.MaxContentRating = r.scope.MaxContentRating
+	scope.PolicyRevision = r.scope.PolicyRevision
+	return scope, nil
+}
+
+// TestListProgressCursorBoundToViewerPolicy: the listing is access-filtered,
+// so a cursor minted under one policy is refused once the policy changes;
+// otherwise rows that became visible before the key would be skipped.
+func TestListProgressCursorBoundToViewerPolicy(t *testing.T) {
+	policy := &access.Scope{AllowedLibraryIDs: []int{3, 1}, PolicyRevision: 7, MaxContentRating: "PG-13"}
+	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
+	deps.ViewerAccess = apimw.NewViewerAccessMiddleware(policyResolver{scope: policy})
+	h := newTestHandler(t, deps)
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	rec := do(t, h, http.MethodGet, "/api/v2/progress?limit=1", "", owner)
+	first := decodeProgress(t, rec.Body)
+	if rec.Code != 200 || !first.Page.HasMore || first.Page.NextCursor == "" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	next := "/api/v2/progress?limit=1&cursor=" + url.QueryEscape(first.Page.NextCursor)
+
+	// Same policy (order of the allowlist is irrelevant): the cursor works.
+	policy.AllowedLibraryIDs = []int{1, 3}
+	if rec := do(t, h, http.MethodGet, next, "", owner); rec.Code != 200 {
+		t.Fatalf("unchanged policy: %d %s", rec.Code, rec.Body.String())
+	}
+	for name, change := range map[string]func(){
+		"allowed libraries":  func() { policy.AllowedLibraryIDs = []int{1, 3, 5} },
+		"disabled libraries": func() { policy.DisabledLibraryIDs = []int{2} },
+		"content rating":     func() { policy.MaxContentRating = "R" },
+		"policy revision":    func() { policy.PolicyRevision = 8 },
+	} {
+		change()
+		requireProblem(t, do(t, h, http.MethodGet, next, "", owner), TypeInvalidCursor)
+		// A fresh first page under the new policy paginates again.
+		rec := do(t, h, http.MethodGet, "/api/v2/progress?limit=1", "", owner)
+		page := decodeProgress(t, rec.Body)
+		if rec.Code != 200 || page.Page.NextCursor == "" {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		if rec := do(t, h, http.MethodGet, "/api/v2/progress?limit=1&cursor="+url.QueryEscape(page.Page.NextCursor), "", owner); rec.Code != 200 {
+			t.Fatalf("%s: reissued cursor: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
 }
 
 func TestListProgressValidation(t *testing.T) {

@@ -91,10 +91,12 @@ func (reg *Registry) listProgress(ctx context.Context, cursors *Cursors, in *Pro
 	}
 	scope := CursorScope{
 		OperationID: opListProgress,
-		Security:    strconv.Itoa(claims.UserID) + "/" + profileID,
-		Filter:      in.Status + "|" + string(in.LibraryID),
-		Sort:        "-updated_at,-media_item_id",
-		Tiebreaker:  "media_item_id",
+		// The listing is access-filtered, so the cursor also dies with the
+		// viewer policy it was minted under.
+		Security:   strconv.Itoa(claims.UserID) + "/" + profileID + "/" + viewerScopeDigest(ctx),
+		Filter:     in.Status + "|" + string(in.LibraryID),
+		Sort:       "-updated_at,-media_item_id",
+		Tiebreaker: "media_item_id",
 	}
 	var after *userstore.ProgressKey
 	if in.Cursor != "" {

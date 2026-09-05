@@ -460,8 +460,9 @@ and a server-added unique tiebreaker when needed. Unknown filter or sort fields 
 Potentially large or mutable collections use `limit` plus an opaque `cursor`, returning the
 accepted `page.next_cursor` and `page.has_more` fields. The default limit is 50 and the global
 maximum is 200; an operation may set a lower maximum. Cursors are URL-safe, tamper-resistant, and
-bound to the operation, security scope, filters, effective sort, and unique tiebreaker. Clients do
-not decode or construct them. Malformed, tampered, or context-mismatched cursors receive `400`
+bound to the operation, security scope, filters, effective sort, and unique tiebreaker, and to the
+viewer's effective access policy where the collection is access-filtered. Clients do not decode or
+construct them. Malformed, tampered, or context-mismatched cursors receive `400`
 with the invalid-cursor problem type. Cursors contain no credentials or sensitive metadata in
 reversibly encoded unsigned form.
 
@@ -910,7 +911,8 @@ Two findings from the pilot are now settled for every later section:
   raw body. The pilot mutation is naturally idempotent and is not `If-Match` protected;
   optimistic concurrency stays opt-in per operation.
 - **Cursor pagination replaces offset.** `listProgress` takes `limit` (default 50, maximum 200)
-  and an opaque `cursor` bound to the operation, account, profile, filters, and sort; `offset`
+  and an opaque `cursor` bound to the operation, account, profile, effective access policy,
+  filters, and sort; `offset`
   and the v1 `since` parameter are refused with the unknown-query-parameter `422`. The cursor
   is a keyset (`updated_at`, `media_item_id`) of the last entry emitted, so a row whose
   `updated_at` moves during playback is neither repeated nor lets an older row slip past, and
