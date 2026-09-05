@@ -18182,8 +18182,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "domain_identity",
-      "retry_safety_note": "One impersonation session per admin, state-gated (409 already_impersonating); a retry resolves to the active session."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Not a converging PUT: each submission opens a new impersonation session for the target; the only gate is that the caller is not already impersonating. A duplicate leaves an unused session that expires or RevokeAllByImpersonator revokes; nothing external fires."
     },
     {
       "listener": "api",
@@ -21222,7 +21222,7 @@
       },
       "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
       "retry_safety": "unique_constraint",
-      "retry_safety_note": "Username and email are unique on users; a duplicate after commit fails with duplicate, so the invite-code use is counted once."
+      "retry_safety_note": "DEFECT: username and email are unique on users, but v1 redeems the invite code (use_count+1) before CreateAccount, outside a transaction and without refund, so a retry double-counts the use. The v2 port must redeem inside the account-creation transaction."
     },
     {
       "listener": "api",
@@ -21291,7 +21291,7 @@
       },
       "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
       "retry_safety": "unique_constraint",
-      "retry_safety_note": "Username and email are unique on users; a duplicate after commit fails with duplicate, so the invite-code use is counted once."
+      "retry_safety_note": "DEFECT: username and email are unique on users, but v1 redeems the invite code (use_count+1) before CreateAccount, outside a transaction and without refund, so a retry double-counts the use. The v2 port must redeem inside the account-creation transaction."
     },
     {
       "listener": "api",
