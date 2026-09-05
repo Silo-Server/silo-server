@@ -18127,7 +18127,8 @@
       },
       "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
       "concurrency": "if_match",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "DEFECT: the row converges, but a password field is re-hashed on every attempt and revokes every session whenever present, so a retry after a lost response also revokes a login the user made in between. The v2 port must apply the precondition and the revocation atomically, gated on the revision."
     },
     {
       "listener": "api",
@@ -29399,7 +29400,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint"
+      "retry_safety": "unique_constraint",
+      "retry_safety_note": "DEFECT: the path uniqueness resolves a retry to the existing row, but SeedDefaults, SetChain, and the initial scan run after the insert with no transaction, so a node death in between leaves a library the retry cannot finish initialising. The v2 port must resume initialisation for the existing row."
     },
     {
       "listener": "api",
@@ -30691,7 +30693,8 @@
       },
       "notes": "Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
       "concurrency": "if_match",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "DEFECT: the chain converges, but the handler wakes the metadata matcher unconditionally after SetChain, so a retry after the first wake is leased schedules another pipeline, and a node death between save and wake records no run. The v2 port must dispatch the wake durably and only on a change."
     },
     {
       "listener": "api",
