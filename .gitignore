@@ -55,7 +55,15 @@ docs/superpowers/
 
 
 # Local agent/tooling state
-/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/unslop/
+/.agents/skills/unslop/*
+!/.agents/skills/unslop/SKILL.md
+!/.agents/skills/unslop/references/
+/.agents/skills/unslop/references/*
+!/.agents/skills/unslop/references/patterns.md
 /.claude/
 # Skills may carry per-developer state next to their instructions (the global
 # *.local.md rule above covers notes; these cover tokens and run state).

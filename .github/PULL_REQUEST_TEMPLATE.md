@@ -1,3 +1,5 @@
+<!-- Agents: apply .agents/skills/unslop/SKILL.md to the title and body before posting. -->
+
 ## Problem
 
 Related issue: #NNN
@@ -11,8 +13,11 @@ Why this approach? Note alternatives or tradeoffs worth knowing about.
 
 ## Validation
 
-Paste the actual commands and results. Name anything not run or not passing.
-Include screenshots or recordings for visible UI changes.
+Summarize the relevant checks and results. Name required checks that were not run
+or did not pass. Include a short output excerpt only when it explains a failure.
+<!-- Do not include private domains, hostnames, IPs, Tailscale or Report Shelf URLs,
+local paths, credentials, personal data, or private media details. Attach screenshots
+or recordings only when the user explicitly requests them. -->
 
 ## Risks
 
