@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/precondition_failed",
+  "title": "Precondition failed",
+  "status": 412,
+  "detail": "A resource already exists at this identifier.",
+  "instance": "urn:silo:request:000000000000000000000040"
+}
+

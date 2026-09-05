@@ -350,13 +350,74 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Request IDs.** v1 routes set no request-ID response header; v2 sets `X-Request-ID` from the
   same context value `apimw.RequestID` already stored, so the request log, activity log, and the
   Problem Details `instance` name the same request.
+- **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
+  DELETE only), `Conditional` (GET, HEAD only) or `CreateOnly` (PUT only, exclusive with
+  `Guarded`); `Register` panics when a guarded input does not bind a string
+  `header:"If-Match"` and a string `header:"If-None-Match"` (the second precondition RFC
+  9110 13.2.2 evaluates after the first; an input that did not bind it would let the field
+  be dropped and a forbidden write applied) or its output a string `header:"ETag"` (a
+  guarded DELETE answers a bodyless `204` and nothing else: its output declares no `ETag`
+  of any type, no body, and no `Status`, its `DefaultStatus` is unset or `204`, and its
+  `Responses` declares no other `2xx`), when a conditional input does not bind
+  `header:"If-None-Match"` and `header:"If-Match"` with a string `ETag` and an int `Status`
+  on the output, and when a create-only input does not bind `header:"If-None-Match"` and
+  `header:"If-Match"` with a string `ETag` on the output. On a read or a create-only write
+  the `If-Match` is optional but, when present, is evaluated first (RFC 9110 13.2.2): a tag
+  not matching the current representation, or any tag against a missing resource, is
+  `412`, so a stale precondition can never fall through to a `200`, `304`, or create. Header fields and the conditional `Status` count only as direct exported struct
+  fields spelled canonically (`If-Match`, `If-None-Match`, `ETag`) with no Huma binding or
+  validation tag (a `default` would turn an absent `If-Match` into an overwrite instead of
+  `428`, a `required` would answer a framework `422` in its place), and exactly one field
+  may bind a given header: Huma binds and writes no header
+  from an embedded struct or an unexported field, and a second binding of another type
+  would be written last or panic the 304 path, so either shape is refused rather than
+  silently wrong. A guarded handler
+  treats `If-Match: *` as a deliberate overwrite through the compare-and-update as well:
+  a race lost to a writer who left the resource in place is retried against the latest
+  version, however many writers land, with `If-None-Match` and the domain rule judged again
+  against that latest row on every retry; a race lost to a delete is `412` with no `ETag`,
+  and only an exact tag turns a lost race into `412` with the current `ETag`. A create-only
+  handler that loses its write evaluates `If-None-Match` again against the latest state and
+  retries while the condition holds, so only a state that falsifies the condition is `412`. `TestGuardedOperationsAreMarkedIfMatch`
+  reconciles both directions, requires the marking only on a row eligible to carry it
+  (tier-1, ported, PUT/PATCH/DELETE, so a redesigned or replaced row that names a guarded
+  operation is not caught between two rules), and refuses a guarded operation that maps to
+  no legacy row unless `guardedWithoutLegacyRow` names it with a reason. A
+  guarded operation documents `412` and `428`, a required `If-Match` parameter, an optional
+  `If-None-Match` parameter, and the `ETag` header on every `2xx`
+  (except a guarded DELETE's `204`, which carries none) and on the `412`; a conditional read
+  documents `304` with `ETag`, `412` with `ETag`, and an optional `If-Match` parameter; a
+  create-only PUT documents `412` with `ETag`, optional `If-Match` and `If-None-Match`
+  parameters and `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
+  `x-silo-create-only` so a reader can enumerate them. The router joins repeated `If-Match`
+  and `If-None-Match` lines into one comma-separated list before the input is bound (RFC
+  9110 5.3), so a tag on a second line is evaluated, and rewrites a present but empty field
+  to an empty list so it is `412` (an empty list matches nothing) rather than the `428` an
+  absent field earns.
+  `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(scope, id, version)`
+  (strong, quoted, opaque; the scope keeps redacted representations from sharing a
+  validator, the resource id keeps two resources at one version from sharing one through a
+  SHA-256 binding over a length-prefixed encoding, since ids may be client-selected, and the
+  version source must be monotonic across delete and recreate at the same id, so a
+  validator minted for one resource or its deleted predecessor never matches another),
+  `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),
+  `StrongMatch` / `WeakMatch`, `EvaluateIfMatch` (nil, `428`, `412` with the current `ETag`, or
+  `400 malformed_request` without echoing the value), `EvaluateGuardedPreconditions` (the RFC
+  9110 13.2.2 order for a mutation that binds both fields: `If-Match` first, then an
+  `If-None-Match` whose match or `*` is `412`), `EvaluateReadPreconditions` and
+  `EvaluateCreateOnlyPreconditions` (the same order for a read and a create-only write, with
+  an optional `If-Match`), `EvaluateIfNoneMatch` and `NotModified`
+  for `304`, `EvaluateCreateOnly` for `If-None-Match: *`, and the `ErrStaleVersion` sentinel a
+  storage compare-and-update returns, mapped by `StaleVersionProblem`. The handler loads
+  first (`404` before any precondition), evaluates, then writes. The ledger's optional
+  `concurrency: if_match` field names the rows that will register `Guarded`; the gate limits
+  it to tier-1 ported mutation rows and reconciles every guarded registration against it. No
+  production resource is guarded yet; the first section that guards one adds its row version.
 - **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
   yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
-  tracked on #882: opt-in optimistic concurrency (strong ETag, `If-Match`, the `428`/`412`
-  separation, and RFC parser conformance tests); per-operation mutation retry / idempotency
-  classification; the durable `202` job acceptance and its monitor/cancel shape; the
-  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
-  sunset headers.
+  tracked on #882: per-operation mutation retry / idempotency classification; the durable
+  `202` job acceptance and its monitor/cancel shape; the atomic-versus-per-item bulk contract;
+  and the RFC 9745 / RFC 8594 deprecation, link, and sunset headers.
 
 ### Problem Details
 
@@ -662,10 +723,19 @@ change, and includes the current ETag when the caller remains authorized to see 
 is missing or intentionally hidden returns `404` before precondition evaluation; a request that
 passes its precondition but conflicts with current domain state returns `409`.
 
-Successful protected reads and mutations return the current ETag, and first-party clients handle
-`412` by fetching the canonical representation and offering reload, comparison, or a deliberate
-overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
-Conditional reads may return `304`. V2 does not add a generic response-body revision; a body
+Successful protected reads and mutations return the current ETag, except a protected `DELETE`,
+whose bodyless `204` has no representation left to validate and carries none. First-party
+clients handle `412` by fetching the canonical representation and offering reload, comparison,
+or a deliberate overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
+Conditional reads may return `304`. A response that carries an `ETag` is served identity-encoded
+whatever `Accept-Encoding` asked for: a strong validator names the representation data including
+its content coding (RFC 9110 8.8.1), so the listener's compression layer skips validator-bearing v2
+responses (`apiv2.IdentityEncoded`) rather than letting a gzip body and an identity body share one
+strong tag or rewriting the tag per coding. The tag a client received is therefore the tag it echoes
+in `If-Match` or `If-None-Match`, whichever coding it accepts; responses without a validator
+compress as usual. A request whose `Accept-Encoding` excludes identity (`identity;q=0`, or `*;q=0`
+without a positive `identity` entry, RFC 9110 12.5.3) is answered `406 not_acceptable` on a
+validator-bearing operation rather than with a coding the client refused. V2 does not add a generic response-body revision; a body
 revision exists only for a domain requirement such as capability invalidation or future offline
 synchronization. The implementation follows RFC 9110 parsing and precedence, including lists,
 optional whitespace, wildcard rules, and strong comparison, independent of Huma helper behavior.
@@ -988,7 +1058,10 @@ the source of truth, and every v1 `PUT` since the sync existed mirrors into cano
 legacy-only row is data written before the sync. And
 a member the seam rejects
 (`audio_language` on audio, any of the four on the library patch, a non-integer `library_id`)
-is a `422` naming it where v1 answered `400`.
+is a `422` naming it where v1 answered `400`. None of the nine registers `Guarded`, `Conditional` or `CreateOnly`: a
+per-profile playback preference is in the plan's "progress, playback" carve-out that keeps
+domain behavior rather than a row version, so the `PUT`s and `PATCH` are unconditional
+last-write-wins replacements, the reads carry no `ETag`, and the ledger rows say `Not if_match`.
 
 ## v1 lifecycle and release sequence
 
