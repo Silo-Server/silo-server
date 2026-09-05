@@ -276,7 +276,17 @@ type embeddedConditionalDocOutput struct {
 func registerConcurrencyDocProbes(reg *Registry) {
 	current := RenderETag(1, "doc")
 	Register(reg, Operation{
-		Operation:   humaOp(http.MethodGet, Prefix+"/docprobe/{id}", "getDocProbe", "probe", "conditional"),
+		Operation: func() huma.Operation {
+			o := humaOp(http.MethodGet, Prefix+"/docprobe/{id}", "getDocProbe", "probe", "conditional")
+			// A registration may declare its own 304 (a polled job adds
+			// Retry-After); documentConcurrencyResponses merges ETag into
+			// it rather than replacing it.
+			o.Responses = map[string]*huma.Response{"304": {
+				Description: "Still current; poll again after Retry-After.",
+				Headers:     map[string]*huma.Header{"Retry-After": {Schema: &huma.Schema{Type: "integer"}}},
+			}}
+			return o
+		}(),
 		Class:       ClassPublic,
 		Conditional: true,
 	}, func(_ context.Context, in *struct {
@@ -414,6 +424,9 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	}
 	if get.Responses["200"].Headers["ETag"] == nil || get.Responses["304"].Headers["ETag"] == nil || len(get.Responses["304"].Content) != 0 {
 		t.Fatalf("get responses: %+v", get.Responses)
+	}
+	if get.Responses["304"].Headers["Retry-After"] == nil {
+		t.Fatalf("a pre-declared 304 lost its own header: %+v", get.Responses["304"])
 	}
 	if _, ok := get.Responses["412"]; ok {
 		t.Fatal("a conditional read must not document 412")
@@ -568,6 +581,14 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		"create-only and guarded": {func() Operation { op := createOnly(http.MethodPut); op.Guarded = true; return op }(), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*okOut, error) { return nil, nil })
 		}, "exclusive"},
+		"guarded with non-string If-None-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *struct {
+				IfMatch     string `header:"If-Match"`
+				IfNoneMatch int    `header:"If-None-Match"`
+			}) (*okOut, error) {
+				return nil, nil
+			})
+		}, "must bind it as a string"},
 		"guarded with unexported If-Match": {guarded(http.MethodPut), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *unexportedIn) (*okOut, error) { return nil, nil })
 		}, "If-Match"},

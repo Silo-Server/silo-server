@@ -381,7 +381,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   to an empty list so it is `412` (an empty list matches nothing) rather than the `428` an
   absent field earns.
   `internal/apiv2/precondition.go` is the RFC 9110 layer: `RenderETag(version, scope)` (strong,
-  quoted, opaque; the scope keeps redacted representations from sharing a validator),
+  quoted, opaque; the scope keeps redacted representations from sharing a validator; the
+  version source must be monotonic across delete and recreate at the same id, so a
+  validator minted for a deleted resource never matches its successor),
   `ParseEntityTag` / `ParseETagList` (8.8.3 grammar and the 5.6.1 `#`-list rule),
   `StrongMatch` / `WeakMatch`, `EvaluateIfMatch` (nil, `428`, `412` with the current `ETag`, or
   `400 malformed_request` without echoing the value), `EvaluateGuardedPreconditions` (the RFC

@@ -77,7 +77,7 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.Conditional {
 		op.Extensions[extConditional] = true
 	}
-	if op.Guarded && declaresHeader(input, ifNoneMatchField) {
+	if op.Guarded && declaresHeaderString(input, ifNoneMatchField) {
 		op.Parameters = append(op.Parameters, ifNoneMatchGuardedParam())
 	}
 	if op.CreateOnly {
@@ -219,9 +219,20 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 		}
 	}
 	if op.Conditional {
-		registered.Responses[strconv.Itoa(http.StatusNotModified)] = &huma.Response{
-			Description: "The representation named by If-None-Match is current; no body.",
-			Headers:     map[string]*huma.Header{etagField: etag()},
+		// Merge into a 304 the registration already declares (with its
+		// own description or headers, such as Retry-After on a polled
+		// job) rather than replacing it.
+		key := strconv.Itoa(http.StatusNotModified)
+		resp := registered.Responses[key]
+		if resp == nil {
+			resp = &huma.Response{Description: "The representation named by If-None-Match is current; no body."}
+			registered.Responses[key] = resp
+		}
+		if resp.Headers == nil {
+			resp.Headers = map[string]*huma.Header{}
+		}
+		if resp.Headers[etagField] == nil {
+			resp.Headers[etagField] = etag()
 		}
 	}
 	for status, resp := range registered.Responses {

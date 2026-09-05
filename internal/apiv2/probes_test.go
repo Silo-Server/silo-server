@@ -181,6 +181,12 @@ type guardedProbeRow struct {
 type guardedProbeStore struct {
 	mu   sync.Mutex
 	rows map[string]guardedProbeRow
+	// lastVersion remembers the version a deleted id reached, so a
+	// recreation continues the sequence instead of restarting at 1: an
+	// ETag minted for the old resource must never validate the new one.
+	// A real store gets the same guarantee from a monotonic version source
+	// that survives the row (a sequence, or a generation column).
+	lastVersion map[string]int64
 	// afterGet runs after each of the next afterGetRemaining Gets return
 	// their row and before the caller's compare-and-update: the test's way
 	// to land a concurrent writer in the window the precondition exists to
@@ -240,7 +246,7 @@ func (s *guardedProbeStore) Create(id string, name string) (guardedProbeRow, err
 	if _, ok := s.rows[id]; ok {
 		return guardedProbeRow{}, ErrStaleVersion
 	}
-	row := guardedProbeRow{Name: name, Version: 1}
+	row := guardedProbeRow{Name: name, Version: s.lastVersion[id] + 1}
 	s.rows[id] = row
 	return row, nil
 }
@@ -250,7 +256,10 @@ func (s *guardedProbeStore) Create(id string, name string) (guardedProbeRow, err
 func (s *guardedProbeStore) Upsert(id string, name string) guardedProbeRow {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	row := s.rows[id]
+	row, ok := s.rows[id]
+	if !ok {
+		row.Version = s.lastVersion[id]
+	}
 	row.Name = name
 	row.Version++
 	s.rows[id] = row
@@ -264,6 +273,10 @@ func (s *guardedProbeStore) Delete(id string, expected int64) error {
 	if !ok || row.Version != expected {
 		return ErrStaleVersion
 	}
+	if s.lastVersion == nil {
+		s.lastVersion = map[string]int64{}
+	}
+	s.lastVersion[id] = row.Version
 	delete(s.rows, id)
 	return nil
 }

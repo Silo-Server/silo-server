@@ -277,6 +277,11 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 		if !declaresHeaderString(in, ifMatchField) {
 			return fmt.Errorf("guarded: input must declare a string field with `header:\"%s\"`", ifMatchField)
 		}
+		if declaresHeader(in, ifNoneMatchField) && !declaresHeaderString(in, ifNoneMatchField) {
+			// The optional second precondition is an entity-tag list the
+			// RFC parser reads; a typed binding would reject or mangle it.
+			return fmt.Errorf("guarded: an input that binds `header:\"%s\"` must bind it as a string", ifNoneMatchField)
+		}
 		if op.Method == http.MethodDelete {
 			// The deleted representation has no validator: a guarded DELETE
 			// answers a bodyless 204 and nothing else, so the output must

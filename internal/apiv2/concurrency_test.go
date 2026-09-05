@@ -399,8 +399,37 @@ func TestCreateOnlyProbeReEvaluatesAfterRace(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create after a winning delete: status %d body %s", rec.Code, rec.Body.String())
 	}
-	if row, _ := store.Get("a"); row.Name != "recreated" || row.Version != 1 {
+	if row, _ := store.Get("a"); row.Name != "recreated" || row.Version != 2 {
 		t.Fatalf("row = %+v", row)
+	}
+}
+
+// TestETagNeverRevalidatesAcrossRecreate: a validator minted for a resource
+// that was then deleted must not match the resource later recreated at the
+// same id, or a stale If-Match could overwrite the new one and a stale
+// If-None-Match could answer 304 for a different representation.
+func TestETagNeverRevalidatesAcrossRecreate(t *testing.T) {
+	h, store := guardedHandler(t)
+	old := RenderETag(1, guardedProbeScope).String()
+	rec := do(t, h, http.MethodDelete, "/api/v2/probe/guarded/a", "", map[string]string{"If-Match": old})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/a", `{"name":"reborn"}`, map[string]string{"If-None-Match": "*"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("recreate: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("ETag"); got == old {
+		t.Fatalf("recreated resource reuses the deleted resource's ETag %q", got)
+	}
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/guarded/a", `{"name":"clobber"}`, map[string]string{"If-Match": old})
+	requireProblem(t, rec, TypePreconditionFailed)
+	if row, _ := store.Get("a"); row.Name != "reborn" {
+		t.Fatalf("stale tag overwrote the recreated resource: %+v", row)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/probe/guarded/a", "", map[string]string{"If-None-Match": old})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stale If-None-Match answered %d for a different representation", rec.Code)
 	}
 }
 
