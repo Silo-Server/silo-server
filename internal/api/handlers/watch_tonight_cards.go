@@ -507,3 +507,12 @@ func parseExcludeIDs(raw []string) map[string]struct{} {
 	}
 	return ids
 }
+
+// Card is the section card the swipe card wraps.
+func (c swipeCardResponse) Card() SectionItemView { return c.sectionItemResponse }
+
+// NewWatchTonightCardView wraps a card with its source and cast; the v2
+// tests build views with it since the embedded card is unexported.
+func NewWatchTonightCardView(card SectionItemView, source string, cast []WatchTonightCastMemberView) WatchTonightCardView {
+	return swipeCardResponse{sectionItemResponse: card, WatchTonightSource: source, Runtime: card.Runtime, Cast: cast}
+}

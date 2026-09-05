@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -461,6 +462,13 @@ type RecommendationService interface {
 	ForYouRowCards(ctx context.Context, userID int, profileID string, limit int, filter catalogpkg.AccessFilter) ([]handlers.DiscoverRowView, error)
 	Discover(ctx context.Context, userID int, profileID string, filter catalogpkg.AccessFilter) (handlers.DiscoverView, error)
 	Section(ctx context.Context, userID int, profileID, kind, key string, limit int, filter catalogpkg.AccessFilter) (handlers.SectionDetailView, error)
+	SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error)
+	SimilarUsersCards(ctx context.Context, userID int, profileID string, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error)
+	TasteProfile(ctx context.Context, userID int, profileID string) recommendations.TasteProfileSummary
+	TasteSeedItems(ctx context.Context, userID int, profileID string, filter catalogpkg.AccessFilter, limit, offset int) (items []handlers.SectionItemView, candidates int, err error)
+	SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string) (int, error)
+	WatchTonight(ctx context.Context, userID int, profileID string, filter catalogpkg.AccessFilter, limit int) (handlers.WatchTonightView, error)
+	WatchTonightCards(ctx context.Context, userID int, profileID string, filter catalogpkg.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

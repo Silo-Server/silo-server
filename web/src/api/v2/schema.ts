@@ -633,6 +633,125 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/recommendations/similar-users": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Cards profiles with similar taste liked. */
+    get: operations["listSimilarUsersLiked"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/recommendations/similar/{item_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Cards similar to the item by content; not personalised beyond the acting profile's access. */
+    get: operations["listSimilar"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/recommendations/taste-profile": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The acting profile's taste summary; empty members until the engine has computed one. */
+    get: operations["getTasteProfile"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/recommendations/taste-seed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record the picked items as the acting profile's favourites and queue a taste-profile refresh. */
+    post: operations["createTasteSeed"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/recommendations/taste-seed/items": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** A page of cards for the taste-seeding picker, most recognisable first. */
+    get: operations["listTasteSeedItems"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/recommendations/watch-tonight": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The acting profile's Watch Tonight list: in-progress and next-up items merged with taste candidates, best first. */
+    get: operations["getWatchTonight"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/recommendations/watch-tonight/cards": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** A page of Watch Tonight swipe cards with cast, in continue or discover mode, minus the identifiers already swiped. */
+    get: operations["listWatchTonightCards"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/system/info": {
     parameters: {
       query?: never;
@@ -2467,6 +2586,38 @@ export interface components {
        */
       openapi: string;
     };
+    TasteProfile: {
+      /** @description Empty, never null */
+      favorite_directors: string[];
+      /** @description How many signals of each kind (rated, favorited, watched, …) fed the profile; empty, never null */
+      signal_counts: {
+        [key: string]: number;
+      };
+      /** @description Strongest genres, best first; empty, never null */
+      top_genres: string[];
+      /**
+       * Format: date-time
+       * @description When the profile was last computed; absent until it has been
+       */
+      updated_at?: string;
+    };
+    TasteSeedResult: {
+      /**
+       * Format: int64
+       * @description Picks recorded as favourites by this submission
+       * @example 3
+       */
+      added: number;
+    };
+    TasteSeedSubmission: {
+      /**
+       * @description Picked catalog identifiers; each is recorded as a favourite
+       * @example [
+       *       "movie:heat-1995"
+       *     ]
+       */
+      item_ids: string[];
+    };
     UnmatchedItem: {
       /** @example movie:heat-1995 */
       content_id: string;
@@ -2540,6 +2691,275 @@ export interface components {
       items: components["schemas"]["UserCollection"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+    };
+    WatchTonight: {
+      /**
+       * @description True when the profile has no taste profile and nothing in progress, so the list is a generic fallback
+       * @example false
+       */
+      is_cold: boolean;
+      /** @description Best first; empty, never null */
+      items: components["schemas"]["WatchTonightItem"][];
+    };
+    WatchTonightCard: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      added_at?: string;
+      backdrop_thumbhash?: string;
+      /** @description Presigned, short-lived */
+      backdrop_url?: string;
+      /** @description Section-specific badges (new, returning, …) */
+      badges?: string[];
+      /** @description Up to four cast members; empty, never null */
+      cast: components["schemas"]["WatchTonightCastMember"][];
+      /**
+       * @description Deterministic catalog identifier
+       * @example movie:heat-1995
+       */
+      content_id: string;
+      /** @example R */
+      content_rating?: string;
+      /** Format: double */
+      duration_seconds?: number;
+      /** Format: int64 */
+      episode_number?: number;
+      /** @description Empty, never null */
+      genres: string[];
+      /** @description On a continue-watching card: in_progress or next_up */
+      item_source?: string;
+      /** @description Empty, never null */
+      keywords: string[];
+      /** @description Calendar date, YYYY-MM-DD */
+      last_air_date?: string;
+      /** @description Presigned, short-lived */
+      logo_url?: string;
+      /** Format: int64 */
+      manga_chapter_count?: number;
+      /** Format: int64 */
+      manga_volume_count?: number;
+      networks?: string[];
+      /** @example en */
+      original_language?: string;
+      /** @description Technical badges of the best file */
+      overlay_summary?: components["schemas"]["CatalogItemOverlay"];
+      overview?: string;
+      /** @description The item to play when the card is a series or season; absent when the item plays itself */
+      play_content_id?: string;
+      /**
+       * Format: double
+       * @description Resume position on a continue-watching card
+       */
+      position_seconds?: number;
+      poster_thumbhash?: string;
+      /** @description Presigned, short-lived */
+      poster_url?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      progress_updated_at?: string;
+      /** Format: double */
+      rating_imdb?: number;
+      /** Format: int64 */
+      rating_rt_audience?: number;
+      /** Format: int64 */
+      rating_rt_critic?: number;
+      /** Format: double */
+      rating_tmdb?: number;
+      /**
+       * @description Calendar date, YYYY-MM-DD
+       * @example 1995-12-15
+       */
+      release_date?: string;
+      /**
+       * Format: int64
+       * @description Minutes
+       * @example 170
+       */
+      runtime?: number;
+      /** Format: int64 */
+      season_number?: number;
+      /** @description Owning series of an episode or season */
+      series_id?: string;
+      series_title?: string;
+      /** @description Airing state of a series */
+      show_status?: string;
+      /** @description The values the listing was sorted by */
+      sort_metrics?: components["schemas"]["CatalogItemSortMetrics"];
+      /**
+       * @description Metadata match state of the item
+       * @example matched
+       */
+      status: string;
+      studios?: string[];
+      /** @example Heat */
+      title: string;
+      /**
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
+       * @example movie
+       */
+      type: string;
+      upcoming_event?: components["schemas"]["CatalogItemUpcomingEvent"];
+      /** @description The viewer's flags; absent without a profile */
+      user_state?: components["schemas"]["CatalogItemUserState"];
+      /**
+       * @description Which pool the card came from
+       * @example recommendation
+       * @enum {string}
+       */
+      watch_tonight_source: "continue_watching" | "next_up" | "recommendation";
+      /** @description Sibling editions of the same work */
+      work_formats?: components["schemas"]["CatalogWorkFormat"][];
+      /** @description The work (book) an audiobook or ebook edition belongs to */
+      work_id?: string;
+      work_title?: string;
+      /**
+       * Format: int64
+       * @example 1995
+       */
+      year?: number;
+    };
+    WatchTonightCardPage: {
+      /**
+       * @description Whether more cards remain beyond this page
+       * @example true
+       */
+      has_more: boolean;
+      /**
+       * @description True when the cards are a generic fallback rather than taste-driven
+       * @example false
+       */
+      is_cold: boolean;
+      /** @description Empty, never null */
+      items: components["schemas"]["WatchTonightCard"][];
+    };
+    WatchTonightCastMember: {
+      /** @example Lt. Vincent Hanna */
+      character?: string;
+      /** @example Al Pacino */
+      name: string;
+      /** @description Presigned, short-lived */
+      photo_url?: string;
+    };
+    WatchTonightItem: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      added_at?: string;
+      backdrop_thumbhash?: string;
+      /** @description Presigned, short-lived */
+      backdrop_url?: string;
+      /** @description Section-specific badges (new, returning, …) */
+      badges?: string[];
+      /**
+       * @description Deterministic catalog identifier
+       * @example movie:heat-1995
+       */
+      content_id: string;
+      /** @example R */
+      content_rating?: string;
+      /** Format: double */
+      duration_seconds?: number;
+      /** Format: int64 */
+      episode_number?: number;
+      /** @description Empty, never null */
+      genres: string[];
+      /** @description On a continue-watching card: in_progress or next_up */
+      item_source?: string;
+      /** @description Empty, never null */
+      keywords: string[];
+      /** @description Calendar date, YYYY-MM-DD */
+      last_air_date?: string;
+      /** @description Presigned, short-lived */
+      logo_url?: string;
+      /** Format: int64 */
+      manga_chapter_count?: number;
+      /** Format: int64 */
+      manga_volume_count?: number;
+      networks?: string[];
+      /** @example en */
+      original_language?: string;
+      /** @description Technical badges of the best file */
+      overlay_summary?: components["schemas"]["CatalogItemOverlay"];
+      overview?: string;
+      /** @description The item to play when the card is a series or season; absent when the item plays itself */
+      play_content_id?: string;
+      /**
+       * Format: double
+       * @description Resume position on a continue-watching card
+       */
+      position_seconds?: number;
+      poster_thumbhash?: string;
+      /** @description Presigned, short-lived */
+      poster_url?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      progress_updated_at?: string;
+      /** Format: double */
+      rating_imdb?: number;
+      /** Format: int64 */
+      rating_rt_audience?: number;
+      /** Format: int64 */
+      rating_rt_critic?: number;
+      /** Format: double */
+      rating_tmdb?: number;
+      /**
+       * @description Calendar date, YYYY-MM-DD
+       * @example 1995-12-15
+       */
+      release_date?: string;
+      /**
+       * Format: int64
+       * @description Minutes
+       * @example 170
+       */
+      runtime?: number;
+      /** Format: int64 */
+      season_number?: number;
+      /** @description Owning series of an episode or season */
+      series_id?: string;
+      series_title?: string;
+      /** @description Airing state of a series */
+      show_status?: string;
+      /** @description The values the listing was sorted by */
+      sort_metrics?: components["schemas"]["CatalogItemSortMetrics"];
+      /**
+       * @description Metadata match state of the item
+       * @example matched
+       */
+      status: string;
+      studios?: string[];
+      /** @example Heat */
+      title: string;
+      /**
+       * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
+       * @example movie
+       */
+      type: string;
+      upcoming_event?: components["schemas"]["CatalogItemUpcomingEvent"];
+      /** @description The viewer's flags; absent without a profile */
+      user_state?: components["schemas"]["CatalogItemUserState"];
+      /**
+       * @description Which pool the card came from
+       * @example recommendation
+       * @enum {string}
+       */
+      watch_tonight_source: "continue_watching" | "next_up" | "recommendation";
+      /** @description Sibling editions of the same work */
+      work_formats?: components["schemas"]["CatalogWorkFormat"][];
+      /** @description The work (book) an audiobook or ebook edition belongs to */
+      work_id?: string;
+      work_title?: string;
+      /**
+       * Format: int64
+       * @example 1995
+       */
+      year?: number;
     };
   };
   responses: never;
@@ -7299,6 +7719,805 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RecommendationRow"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listSimilarUsersLiked: {
+    parameters: {
+      query?: {
+        /** @description Cards to answer; default 20, maximum 50 */
+        limit?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogItemCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listSimilar: {
+    parameters: {
+      query?: {
+        /** @description Cards to answer; default 20, maximum 50 */
+        limit?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The item similar items are drawn from */
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogItemCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getTasteProfile: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TasteProfile"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createTasteSeed: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TasteSeedSubmission"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TasteSeedResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listTasteSeedItems: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Cards per page; default 30, maximum 60 */
+        limit?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogItemCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getWatchTonight: {
+    parameters: {
+      query?: {
+        /** @description Cards to answer; default 5, maximum 20 */
+        limit?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WatchTonight"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listWatchTonightCards: {
+    parameters: {
+      query: {
+        /** @description Catalog identifiers already swiped, repeated (exclude_ids=a&exclude_ids=b) */
+        exclude_ids?: string[];
+        /** @description Discover-mode genre filter, repeated (genres=Crime&genres=Thriller); each must be a known genre */
+        genres?: string[];
+        /** @description Cards per page; default 12, maximum 20 */
+        limit?: number;
+        /** @description continue answers in-progress and next-up cards; discover answers taste candidates */
+        mode: "continue" | "discover";
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WatchTonightCardPage"];
         };
       };
       /** @description Bad Request */

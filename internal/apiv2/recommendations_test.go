@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
 // fakeRecommendations records the last call and answers the shared fake card.
@@ -18,6 +19,14 @@ type fakeRecommendations struct {
 	lastDays, lastLimit int
 	lastKind, lastKey   string
 	emptyForYou         bool
+	emptyTaste          bool
+	lastOffset          int
+	seedCandidates      int
+	lastSeedIDs         []string
+	lastMode            string
+	lastGenres          []string
+	lastExclude         map[string]struct{}
+	cardsHasMore        bool
 }
 
 func fakeRecommendationRow() handlers.DiscoverRowView {
@@ -82,6 +91,52 @@ func (f *fakeRecommendations) Section(_ context.Context, _ int, _, kind, key str
 		return handlers.SectionDetailView{Kind: kind, Key: key, Items: []handlers.SectionItemView{}}, nil
 	}
 	return handlers.SectionDetailView{Kind: kind, Key: key, Type: "genre_sampler", Label: "Popular in Crime", Items: []handlers.SectionItemView{fakeCard()}}, nil
+}
+
+func (f *fakeRecommendations) SimilarCards(_ context.Context, _ int, _, itemID string, limit int, _ catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
+	f.lastItemID, f.lastDays = itemID, 0
+	return f.cards(limit)
+}
+
+func (f *fakeRecommendations) SimilarUsersCards(_ context.Context, _ int, _ string, limit int, _ catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
+	f.lastItemID, f.lastDays = "", 0
+	return f.cards(limit)
+}
+
+func (f *fakeRecommendations) TasteProfile(_ context.Context, _ int, _ string) recommendations.TasteProfileSummary {
+	if f.emptyTaste {
+		return recommendations.TasteProfileSummary{}
+	}
+	return recommendations.TasteProfileSummary{TopGenres: []string{"Crime", "Thriller"}, FavoriteDirectors: []string{"Michael Mann"}, SignalCounts: map[string]int{"rated": 4, "favorited": 2}, UpdatedAt: "2026-01-02T03:04:05Z"}
+}
+
+func (f *fakeRecommendations) TasteSeedItems(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, limit, offset int) ([]handlers.SectionItemView, int, error) {
+	if f.err != nil {
+		return nil, 0, f.err
+	}
+	f.lastLimit, f.lastOffset = limit, offset
+	return []handlers.SectionItemView{fakeCard()}, f.seedCandidates, nil
+}
+
+func (f *fakeRecommendations) SubmitTasteSeed(_ context.Context, _ int, _ string, itemIDs []string) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	f.lastSeedIDs = itemIDs
+	return len(itemIDs), nil
+}
+
+func (f *fakeRecommendations) WatchTonight(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, limit int) (handlers.WatchTonightView, error) {
+	if f.err != nil {
+		return handlers.WatchTonightView{}, f.err
+	}
+	f.lastLimit = limit
+	return handlers.WatchTonightView{Items: []handlers.WatchTonightItemView{fakeWatchTonightItem()}, IsCold: true}, nil
+}
+
+func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView {
+	f.lastMode, f.lastGenres, f.lastExclude, f.lastLimit = mode, genres, excludeIDs, limit
+	return handlers.WatchTonightCardsView{Cards: []handlers.WatchTonightCardView{fakeWatchTonightCard()}, HasMore: f.cardsHasMore}
 }
 
 func recommendationDeps(t *testing.T) (Dependencies, *fakeRecommendations) {
@@ -237,4 +292,196 @@ func TestRecommendationSection(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/popular", "", nil), TypeAuthenticationRequired)
 	fake.err = &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Section not found"}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/popular", "", viewerHeaders()), TypeNotFound)
+}
+
+func TestRecommendationSimilarLists(t *testing.T) {
+	deps, fake := recommendationDeps(t)
+	h := newTestHandler(t, deps)
+	for _, tc := range []struct {
+		path   string
+		limit  int
+		itemID string
+	}{
+		{path: "/api/v2/recommendations/similar/movie:heat-1995?limit=12", limit: 12, itemID: "movie:heat-1995"},
+		{path: "/api/v2/recommendations/similar-users", limit: 20},
+		{path: "/api/v2/recommendations/similar-users?limit=5", limit: 5},
+	} {
+		rec := do(t, h, http.MethodGet, tc.path, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", tc.path, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Items []map[string]json.RawMessage `json:"items"`
+			Page  *PageInfo                    `json:"page"`
+		}
+		decodeJSON(t, rec.Body, &body)
+		if len(body.Items) != 1 || body.Page != nil {
+			t.Fatalf("%s: body = %s", tc.path, rec.Body.String())
+		}
+		requireFakeCard(t, body.Items[0])
+		if fake.lastLimit != tc.limit || fake.lastItemID != tc.itemID {
+			t.Fatalf("%s: seam got limit=%d item=%q", tc.path, fake.lastLimit, fake.lastItemID)
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/similar/movie:heat-1995?limit=51", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/similar-users?offset=5", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/similar-users", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/similar/movie:heat-1995", "", nil), TypeAuthenticationRequired)
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to fetch similar items"}
+	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/similar/movie:heat-1995", "", viewerHeaders()), TypeInternalError)
+	if strings.Contains(p.Detail, "similar") {
+		t.Fatalf("internal detail leaked: %q", p.Detail)
+	}
+	deps.Recommendations = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/similar-users", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+func TestRecommendationTasteProfile(t *testing.T) {
+	deps, fake := recommendationDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/recommendations/taste-profile", "", viewerHeaders())
+	want := `{"top_genres":["Crime","Thriller"],"favorite_directors":["Michael Mann"],"signal_counts":{"favorited":2,"rated":4},"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
+	if rec.Code != 200 || rec.Body.String() != want {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	fake.emptyTaste = true
+	rec = do(t, h, http.MethodGet, "/api/v2/recommendations/taste-profile", "", viewerHeaders())
+	if rec.Code != 200 || rec.Body.String() != `{"top_genres":[],"favorite_directors":[],"signal_counts":{}}`+"\n" {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-profile?limit=1", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-profile", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-profile", "", nil), TypeAuthenticationRequired)
+	deps.Recommendations = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/taste-profile", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+func TestRecommendationTasteSeed(t *testing.T) {
+	deps, fake := recommendationDeps(t)
+	h := newTestHandler(t, deps)
+	fake.seedCandidates = 2
+	rec := do(t, h, http.MethodGet, "/api/v2/recommendations/taste-seed/items?limit=2", "", viewerHeaders())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	var page struct {
+		Items []map[string]json.RawMessage `json:"items"`
+		Page  PageInfo                     `json:"page"`
+	}
+	decodeJSON(t, rec.Body, &page)
+	if len(page.Items) != 1 || !page.Page.HasMore || page.Page.NextCursor == "" || fake.lastLimit != 2 || fake.lastOffset != 0 {
+		t.Fatalf("body = %s, seam got limit=%d offset=%d", rec.Body.String(), fake.lastLimit, fake.lastOffset)
+	}
+	requireFakeCard(t, page.Items[0])
+	first := page.Page.NextCursor
+	fake.seedCandidates = 1
+	rec = do(t, h, http.MethodGet, "/api/v2/recommendations/taste-seed/items?limit=2&cursor="+first, "", viewerHeaders())
+	if rec.Code != 200 || !strings.HasSuffix(rec.Body.String(), `"page":{"has_more":false}}`+"\n") || fake.lastOffset != 2 {
+		t.Fatalf("second page: %d %s offset=%d", rec.Code, rec.Body.String(), fake.lastOffset)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-seed/items?limit=1&cursor="+first+"x", "", viewerHeaders()), TypeInvalidCursor)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-seed/items?offset=30", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-seed/items?limit=61", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-seed/items", "", bearer(memberToken)), TypeValidationFailed)
+
+	rec = do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{"item_ids":["movie:heat-1995","movie:collateral-2004"]}`, viewerHeaders())
+	if rec.Code != 200 || rec.Body.String() != `{"added":2}`+"\n" || len(fake.lastSeedIDs) != 2 {
+		t.Fatal(rec.Code, rec.Body.String(), fake.lastSeedIDs)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{"item_ids":[]}`, viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{}`, viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{"item_ids":["movie:heat-1995"],"replace":true}`, viewerHeaders()), TypeValidationFailed)
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{"item_ids":["movie:heat-1995"," "]}`, viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.item_ids[1]" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{"item_ids":["movie:heat-1995"]}`, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{"item_ids":["movie:heat-1995"]}`, nil), TypeAuthenticationRequired)
+	fake.err = &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "User store unavailable"}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/recommendations/taste-seed", `{"item_ids":["movie:heat-1995"]}`, viewerHeaders()), TypeDependencyUnavailable)
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to fetch taste seed candidates"}
+	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/taste-seed/items", "", viewerHeaders()), TypeInternalError)
+	if strings.Contains(p.Detail, "taste") {
+		t.Fatalf("internal detail leaked: %q", p.Detail)
+	}
+}
+
+func TestRecommendationWatchTonight(t *testing.T) {
+	deps, fake := recommendationDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight", "", viewerHeaders())
+	if rec.Code != 200 || fake.lastLimit != 5 {
+		t.Fatal(rec.Code, rec.Body.String(), fake.lastLimit)
+	}
+	var body struct {
+		Items  []map[string]json.RawMessage `json:"items"`
+		IsCold bool                         `json:"is_cold"`
+	}
+	decodeJSON(t, rec.Body, &body)
+	if len(body.Items) != 1 || !body.IsCold || string(body.Items[0]["watch_tonight_source"]) != `"next_up"` || string(body.Items[0]["item_source"]) != `"next_up"` {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	requireFakeCard(t, body.Items[0])
+	if rec = do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight?limit=20", "", viewerHeaders()); rec.Code != 200 || fake.lastLimit != 20 {
+		t.Fatal(rec.Code, fake.lastLimit)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight?limit=21", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight", "", nil), TypeAuthenticationRequired)
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to fetch recommendations"}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight", "", viewerHeaders()), TypeInternalError)
+	deps.Recommendations = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/watch-tonight", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+func TestRecommendationWatchTonightCards(t *testing.T) {
+	deps, fake := recommendationDeps(t)
+	h := newTestHandler(t, deps)
+	fake.cardsHasMore = true
+	rec := do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover&genres=Crime&genres=Thriller&genres=Crime&exclude_ids=movie:a&exclude_ids=movie:b&limit=3", "", viewerHeaders())
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	var body struct {
+		Items   []map[string]json.RawMessage `json:"items"`
+		HasMore bool                         `json:"has_more"`
+		IsCold  bool                         `json:"is_cold"`
+	}
+	decodeJSON(t, rec.Body, &body)
+	if len(body.Items) != 1 || !body.HasMore || body.IsCold {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	requireFakeCard(t, body.Items[0])
+	if string(body.Items[0]["cast"]) != `[{"name":"Al Pacino","character":"Lt. Vincent Hanna"}]` || string(body.Items[0]["watch_tonight_source"]) != `"recommendation"` {
+		t.Fatalf("card = %s", rec.Body.String())
+	}
+	if fake.lastMode != "discover" || strings.Join(fake.lastGenres, ",") != "Crime,Thriller" || len(fake.lastExclude) != 2 || fake.lastLimit != 3 {
+		t.Fatalf("seam got mode=%q genres=%v exclude=%v limit=%d", fake.lastMode, fake.lastGenres, fake.lastExclude, fake.lastLimit)
+	}
+	if rec = do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=continue", "", viewerHeaders()); rec.Code != 200 || fake.lastMode != "continue" || fake.lastGenres != nil || fake.lastExclude != nil || fake.lastLimit != 12 {
+		t.Fatal(rec.Code, fake.lastMode, fake.lastGenres, fake.lastExclude, fake.lastLimit)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=random", "", viewerHeaders()), TypeValidationFailed)
+	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover&genres=Crime&genres=Noir", "", viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.genres[1]" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover&limit=21", "", viewerHeaders()), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", nil), TypeAuthenticationRequired)
+	deps.Recommendations = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+func fakeWatchTonightItem() handlers.WatchTonightItemView {
+	card := fakeCard()
+	card.ItemSource = "next_up"
+	return handlers.NewWatchTonightItemView(card, "next_up")
+}
+
+func fakeWatchTonightCard() handlers.WatchTonightCardView {
+	card := fakeCard()
+	card.ItemSource = "recommendation"
+	return handlers.NewWatchTonightCardView(card, "recommendation", []handlers.WatchTonightCastMemberView{{Name: "Al Pacino", Character: "Lt. Vincent Hanna"}})
 }

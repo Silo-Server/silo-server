@@ -262,4 +262,5 @@ var libraryViewOperationIDs = []string{
 // catalog-recommendations section registers.
 var recommendationOperationIDs = []string{
 	"listBecauseWatched", "getDiscover", "getForYouMain", "listForYouRows", "listPopular", "listRecentlyAdded", "getRecommendationSection",
+	"listSimilar", "listSimilarUsersLiked", "getTasteProfile", opListTasteSeedItems, "createTasteSeed", "getWatchTonight", "listWatchTonightCards",
 }

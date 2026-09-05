@@ -417,3 +417,12 @@ func (h *RecommendationsHandler) buildSectionItem(ctx context.Context, mi *model
 	}
 	return item
 }
+
+// Card is the section card the Watch Tonight item wraps.
+func (i watchTonightItemResponse) Card() SectionItemView { return i.sectionItemResponse }
+
+// NewWatchTonightItemView wraps a card with its Watch Tonight source; the
+// v2 tests build views with it since the embedded card is unexported.
+func NewWatchTonightItemView(card SectionItemView, source string) WatchTonightItemView {
+	return watchTonightItemResponse{sectionItemResponse: card, WatchTonightSource: source}
+}
