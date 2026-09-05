@@ -1,7 +1,7 @@
 import { MemoryRouter } from "react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { SectionItem } from "@/api/types";
 
@@ -232,6 +232,93 @@ describe("HeroBanner", () => {
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts only the active and two adjacent backdrop requests, including wraparound", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <HeroBanner
+          items={Array.from({ length: 10 }, (_, index) =>
+            movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+          )}
+        />
+      </MemoryRouter>,
+    );
+    const images = Array.from(container.querySelectorAll("img"));
+
+    expect(images.map((image) => image.getAttribute("src"))).toEqual([
+      "/movie-0.jpg",
+      "/movie-1.jpg",
+      "/movie-9.jpg",
+    ]);
+    expect(images[0]).toHaveAttribute("fetchpriority", "high");
+    expect(images.slice(1).every((image) => image.getAttribute("fetchpriority") === "low")).toBe(
+      true,
+    );
+  });
+
+  it("loads neighbors on next and previous navigation and preserves loaded backdrops", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <HeroBanner
+          items={Array.from({ length: 10 }, (_, index) =>
+            movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+          )}
+        />
+      </MemoryRouter>,
+    );
+    const loadedNeighbor = container.querySelector('img[src="/movie-9.jpg"]')!;
+    fireEvent.load(loadedNeighbor);
+    const sources = () =>
+      Array.from(container.querySelectorAll("img"), (image) => image.getAttribute("src"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-2.jpg", "/movie-9.jpg"]);
+    expect(container.querySelector('img[src="/movie-9.jpg"]')).toBe(loadedNeighbor);
+    expect(container.querySelector('img[fetchpriority="high"]')).toHaveAttribute(
+      "src",
+      "/movie-1.jpg",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-8.jpg", "/movie-9.jpg"]);
+    expect(container.querySelector('img[fetchpriority="high"]')).toHaveAttribute(
+      "src",
+      "/movie-9.jpg",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-9.jpg"]);
+  });
+
+  it("does not eagerly load a replacement URL on a distant loaded slide", () => {
+    const slides = Array.from({ length: 10 }, (_, index) =>
+      movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+    );
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <HeroBanner items={slides} />
+      </MemoryRouter>,
+    );
+    fireEvent.load(container.querySelector('img[src="/movie-9.jpg"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    rerender(
+      <MemoryRouter>
+        <HeroBanner
+          items={slides.map((slide, index) =>
+            index === 9 ? { ...slide, backdrop_url: "/replacement.jpg" } : slide,
+          )}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector('img[src="/replacement.jpg"]')).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
+    const replacement = container.querySelector('img[src="/replacement.jpg"]');
+    expect(replacement).toHaveClass("opacity-0");
+    fireEvent.load(replacement!);
+    expect(replacement).toHaveClass("opacity-100");
   });
 
   it("does not retain outgoing backdrop motion for reduced motion", () => {
