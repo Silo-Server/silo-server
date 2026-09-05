@@ -81,3 +81,16 @@ func TestSQLiteAddFavoriteAtReportsInsertion(t *testing.T) {
 func TestSQLiteDatedMarkWatchedBatchAtomic(t *testing.T) {
 	storetest.RunDatedMarkWatchedBatch(t, newConformanceStore(t))
 }
+
+func TestSQLiteAtomicJellycompatProgressHistoryRollback(t *testing.T) {
+	store, ok := newConformanceStore(t).(*SQLiteUserStore)
+	if !ok {
+		t.Fatal("SQLite fixture unavailable")
+	}
+	for _, operation := range []string{"INSERT", "UPDATE"} {
+		if _, err := store.db.Exec("CREATE TRIGGER fail_progress_" + operation + " BEFORE " + operation + " ON watch_progress WHEN NEW.position_seconds = 321 BEGIN SELECT RAISE(ABORT, 'forced progress failure'); END"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	storetest.RunAtomicJellycompatProgress(t, store)
+}

@@ -1032,6 +1032,12 @@ func (s *PostgresUserStore) AddHistory(ctx context.Context, entry userstore.Watc
 }
 
 func (s *PostgresUserStore) AddVisibleHistory(ctx context.Context, entry userstore.WatchHistoryEntry) (userstore.WatchHistoryEntry, error) {
+	return s.addVisibleHistory(ctx, s.pool, entry)
+}
+
+func (s *PostgresUserStore) addVisibleHistory(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, entry userstore.WatchHistoryEntry) (userstore.WatchHistoryEntry, error) {
 	if entry.ID == "" {
 		entry.ID = generateUUID()
 	}
@@ -1046,7 +1052,7 @@ func (s *PostgresUserStore) AddVisibleHistory(ctx context.Context, entry usersto
 		return entry, fmt.Errorf("marshaling watch identity: %w", err)
 	}
 	var watchedAt time.Time
-	if err := s.pool.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 		WITH visible AS (
 			SELECT
 				CASE
@@ -1299,6 +1305,17 @@ func (s *PostgresUserStore) RemoveHistoryItems(
 	}
 	defer tx.Rollback(ctx)
 
+	if err := s.removeHistoryItems(ctx, tx, profileID, mediaItemIDs, removedAt); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit remove history items: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresUserStore) removeHistoryItems(ctx context.Context, tx pgx.Tx, profileID string, mediaItemIDs []string, removedAt time.Time) error {
 	if _, err := tx.Exec(ctx, `
 		WITH target(media_item_id) AS (
 			SELECT unnest($3::text[])
@@ -1347,9 +1364,6 @@ func (s *PostgresUserStore) RemoveHistoryItems(
 		return fmt.Errorf("deleting removed progress rows: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit remove history items: %w", err)
-	}
 	return nil
 }
 

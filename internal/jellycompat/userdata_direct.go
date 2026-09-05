@@ -399,29 +399,21 @@ func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Ses
 		if req.LastPlayedDate != nil {
 			date = *req.LastPlayedDate
 		}
+
 		if req.Played != nil {
 			played = *req.Played
 			if req.PlaybackPositionTicks == nil && req.PlayedPercentage == nil {
 				position = 0
 			}
-			if !played {
-				if err := s.MarkUnplayed(ctx, session, contentID); err != nil {
-					return err
-				}
-			}
-			if played {
-				if err := s.MarkPlayedBatchAt(ctx, session, []string{contentID}, date); err != nil {
-					return err
-				}
-			}
 		}
-		writer, ok := store.(jellycompatProgressWriter)
-		if !ok {
-			return fmt.Errorf("explicit user progress updates unavailable")
+		if s.watchState == nil {
+			return fmt.Errorf("watch state service unavailable")
 		}
-		if err := writer.SetJellycompatProgress(ctx, session.ProfileID, contentID, position, duration, played, date); err != nil {
+		edit := userstore.JellycompatProgressEdit{MediaItemID: contentID, PositionSeconds: position, DurationSeconds: duration, Completed: played, EventAt: date}
+		if err := s.watchState.RecordJellycompatProgress(ctx, session.StreamAppUserID, session.ProfileID, edit, req.Played); err != nil {
 			return err
 		}
+
 	}
 	if req.IsFavorite != nil {
 		if *req.IsFavorite {
@@ -435,10 +427,6 @@ func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Ses
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 	return nil
-}
-
-type jellycompatProgressWriter interface {
-	SetJellycompatProgress(context.Context, string, string, float64, float64, bool, time.Time) error
 }
 
 func jellycompatProgressDates(ctx context.Context, store userstore.UserStore, profile string, ids []string) (map[string]string, error) {

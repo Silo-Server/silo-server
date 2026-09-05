@@ -3,22 +3,16 @@ package pgstore
 import (
 	"context"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/jackc/pgx/v5"
 )
 
-// SetJellycompatProgress applies an explicit user edit, including historical
-// dates. Import tombstones must not suppress a new interactive edit.
-// A transaction-local marker tells the stamp trigger that an unchanged event_at
-// is still explicitly supplied. The write timestamp and synced_seq advance.
-func (s *PostgresUserStore) SetJellycompatProgress(ctx context.Context, profileID, itemID string, position, duration float64, completed bool, date time.Time) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+func (s *PostgresUserStore) setJellycompatProgress(ctx context.Context, tx pgx.Tx, profileID, itemID string, position, duration float64, completed bool, date time.Time) error {
 	if _, err := tx.Exec(ctx, "SELECT set_config('silo.explicit_progress_event_time', 'on', true)"); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO user_watch_progress
+	_, err := tx.Exec(ctx, `INSERT INTO user_watch_progress
  (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at, event_at)
  SELECT $1,$2,$3,$4,$5,$6,GREATEST(clock_timestamp(), COALESCE((SELECT hidden_before + interval '1 second' FROM user_history_hidden_items WHERE user_id=$1 AND profile_id=$2 AND media_item_id=$3), clock_timestamp())),$7
  ON CONFLICT(user_id,profile_id,media_item_id) DO UPDATE SET
@@ -28,7 +22,7 @@ func (s *PostgresUserStore) SetJellycompatProgress(ctx context.Context, profileI
 	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (s *PostgresUserStore) ListJellycompatProgressDates(ctx context.Context, profileID string, ids []string) (map[string]string, error) {
@@ -47,4 +41,28 @@ func (s *PostgresUserStore) ListJellycompatProgressDates(ctx context.Context, pr
 		dates[id] = date.UTC().Format(time.RFC3339Nano)
 	}
 	return dates, rows.Err()
+}
+
+func (s *PostgresUserStore) ApplyJellycompatProgress(ctx context.Context, profileID string, edit userstore.JellycompatProgressEdit) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if edit.ClearHistory {
+		if err := s.removeHistoryItems(ctx, tx, profileID, []string{edit.MediaItemID}, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	if edit.History != nil {
+		entry := *edit.History
+		entry.ProfileID, entry.MediaItemID = profileID, edit.MediaItemID
+		if _, err := s.addVisibleHistory(ctx, tx, entry); err != nil {
+			return err
+		}
+	}
+	if err := s.setJellycompatProgress(ctx, tx, profileID, edit.MediaItemID, edit.PositionSeconds, edit.DurationSeconds, edit.Completed, edit.EventAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

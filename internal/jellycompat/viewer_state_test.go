@@ -66,6 +66,20 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 	if dto.PlaybackPositionTicks != 70000000 {
 		t.Fatalf("explicit rewatch position lost: %+v", dto)
 	}
+
+	dto = run(`{"Played":true,"PlayedPercentage":25}`)
+	if !dto.Played || dto.PlaybackPositionTicks != 15000000000 {
+		t.Fatalf("percentage edit lost state: %+v", dto)
+	}
+	beforeDateEdit, err := store.ListHistory(t.Context(), "profile-1", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dto = run(`{"LastPlayedDate":"2023-01-01T00:00:00Z"}`)
+	afterDateEdit, err := store.ListHistory(t.Context(), "profile-1", 10, 0)
+	if err != nil || len(afterDateEdit) != len(beforeDateEdit) || dto.PlaybackPositionTicks != 15000000000 || dto.LastPlayedDate != "2023-01-01T00:00:00Z" {
+		t.Fatalf("date-only edit changed history/progress: %+v %v", dto, err)
+	}
 	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00Z"}`)
 	if dto.Played || dto.PlaybackPositionTicks != 50000000 || dto.LastPlayedDate != "2024-01-01T00:00:00Z" {
 		t.Fatalf("historical edit suppressed: %+v", dto)
@@ -206,7 +220,7 @@ func TestCulturesIncludesLanguageCodes(t *testing.T) {
 
 type failingProgressStore struct{ userstore.UserStore }
 
-func (failingProgressStore) SetJellycompatProgress(context.Context, string, string, float64, float64, bool, time.Time) error {
+func (failingProgressStore) ApplyJellycompatProgress(context.Context, string, userstore.JellycompatProgressEdit) error {
 	return errors.New("progress write unavailable")
 }
 
@@ -222,6 +236,7 @@ func TestUserDataFailureAndInaccessibleItemDoNotReportSuccess(t *testing.T) {
 	id := codec.EncodeStringID(EncodedIDItem, "movie-1")
 	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 	service := &directUserDataService{storeProvider: compatTestUserStoreProvider{store: failingProgressStore{store}}}
+	service.watchState = watchstate.NewService(service.storeProvider)
 	h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
 	rec := httptest.NewRecorder()
 	h.HandleUpdateUserData(rec, viewerRequest("POST", "/", `{"PlaybackPositionTicks":10000000}`, "itemId", id, session))
@@ -325,6 +340,45 @@ type batchOnlyViewerStore struct {
 	userstore.WatchedBatchWriter
 }
 
+var errIndividualViewerWrite = errors.New("individual viewer-state write forbidden")
+
+func (batchOnlyViewerStore) MarkWatched(context.Context, string, string, float64) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) MarkProgressBatch(context.Context, string, []string, time.Time) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) SetProgress(context.Context, string, string, float64, float64, userstore.ProgressThresholds) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) SetProgressAt(context.Context, string, string, float64, float64, bool, time.Time) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) UpdateProgress(context.Context, string, string, float64, float64, userstore.ProgressThresholds) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) ApplyJellycompatProgress(context.Context, string, userstore.JellycompatProgressEdit) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error {
+	return errIndividualViewerWrite
+}
+
+func (batchOnlyViewerStore) SetProgressIfNewer(context.Context, string, string, float64, float64, bool, time.Time) (bool, error) {
+	return false, errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) ClearProgress(context.Context, string, string) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) ClearProgressBatch(context.Context, string, []string, time.Time) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) UpdateProgressHints(context.Context, string, string, userstore.VersionHints) error {
+	return errIndividualViewerWrite
+}
+func (batchOnlyViewerStore) AddHistoryIfMissing(context.Context, userstore.WatchHistoryEntry) (bool, error) {
+	return false, errIndividualViewerWrite
+}
 func TestDatedPlayedBatchNeedsNoIndividualProgressRewrites(t *testing.T) {
 	store := newJellycompatUserStore(t)
 	batch, ok := store.(userstore.WatchedBatchWriter)

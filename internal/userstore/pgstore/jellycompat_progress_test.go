@@ -1,9 +1,12 @@
 package pgstore
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/storetest"
 )
 
@@ -14,7 +17,7 @@ func TestJellycompatProgressExplicitHistoricalEdit(t *testing.T) {
 	var previousSequence int64
 	var previousWrite time.Time
 	for _, played := range []bool{true, false} {
-		if err := store.SetJellycompatProgress(t.Context(), "compat-profile", "compat-item", 123, 600, played, date); err != nil {
+		if err := store.ApplyJellycompatProgress(t.Context(), "compat-profile", userstore.JellycompatProgressEdit{MediaItemID: "compat-item", PositionSeconds: 123, DurationSeconds: 600, Completed: played, EventAt: date}); err != nil {
 			t.Fatalf("set explicit progress played=%v: %v", played, err)
 		}
 		progress, err := store.GetProgress(t.Context(), "compat-profile", "compat-item")
@@ -47,7 +50,7 @@ func TestJellycompatProgressExplicitHistoricalEdit(t *testing.T) {
 	if progress, err := store.GetProgress(t.Context(), "compat-profile", "compat-item"); err != nil || progress != nil {
 		t.Fatalf("expected hidden progress: %+v %v", progress, err)
 	}
-	if err := store.SetJellycompatProgress(t.Context(), "compat-profile", "compat-item", 222, 600, false, date); err != nil {
+	if err := store.ApplyJellycompatProgress(t.Context(), "compat-profile", userstore.JellycompatProgressEdit{MediaItemID: "compat-item", PositionSeconds: 222, DurationSeconds: 600, EventAt: date}); err != nil {
 		t.Fatal(err)
 	}
 	if progress, err := store.GetProgress(t.Context(), "compat-profile", "compat-item"); err != nil || progress == nil || progress.PositionSeconds != 222 {
@@ -75,4 +78,16 @@ func TestJellycompatProgressExplicitHistoricalEdit(t *testing.T) {
 func TestDatedMarkWatchedBatchAtomic(t *testing.T) {
 	pool, userID := newConstraintTestUser(t)
 	storetest.RunDatedMarkWatchedBatch(t, newStore(pool, userID))
+}
+
+func TestAtomicJellycompatProgressHistoryRollback(t *testing.T) {
+	pool, userID := newConstraintTestUser(t)
+	constraint := fmt.Sprintf("test_progress_failure_%d", userID)
+	if _, err := pool.Exec(t.Context(), fmt.Sprintf("ALTER TABLE user_watch_progress ADD CONSTRAINT %s CHECK (user_id <> %d OR position_seconds <> 321) NOT VALID", constraint, userID)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "ALTER TABLE user_watch_progress DROP CONSTRAINT "+constraint)
+	})
+	storetest.RunAtomicJellycompatProgress(t, newStore(pool, userID))
 }

@@ -575,3 +575,31 @@ func formatWatchedAt(watchedAt time.Time) string {
 	}
 	return watchedAt.UTC().Format(time.RFC3339)
 }
+
+// RecordJellycompatProgress commits the leaf's explicit state and its optional
+// played/unplayed history mutation before notifying watch providers.
+func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, profileID string, edit userstore.JellycompatProgressEdit, played *bool) error {
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	writer, ok := store.(userstore.JellycompatProgressEditor)
+	if !ok {
+		return fmt.Errorf("atomic user progress updates unavailable")
+	}
+	if played != nil {
+		edit.ClearHistory = !*played
+		if *played {
+			entry := userstore.WatchHistoryEntry{ProfileID: profileID, MediaItemID: edit.MediaItemID, WatchedAt: formatWatchedAt(edit.EventAt), Completed: true, Source: userstore.WatchHistorySourceJellycompat}
+			s.applyStableIdentity(ctx, &entry)
+			edit.History = &entry
+		}
+	}
+	if err := writer.ApplyJellycompatProgress(ctx, profileID, edit); err != nil {
+		return err
+	}
+	if played != nil && *played {
+		s.notifyWatchedCompleted(ctx, userID, profileID, []string{edit.MediaItemID})
+	}
+	return nil
+}
