@@ -464,69 +464,68 @@ func GetProgress(db *sql.DB, profileID, mediaItemID string) (*WatchProgress, err
 	return &wp, nil
 }
 
-// ListProgress returns paginated progress entries, filterable by status.
-// Valid status values: "in_progress", "completed", "all" (or empty string for all).
-func ListProgress(db *sql.DB, profileID string, status string, limit, offset int) ([]WatchProgress, error) {
-	var query string
-	var args []any
+// progressListSelect is the projection, profile scope (first ? = profile_id),
+// and hidden-item exclusion every status listing shares; callers append the
+// status predicate, any window predicate, ORDER BY, and LIMIT.
+const progressListSelect = `
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+		FROM watch_progress
+		WHERE profile_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM hidden_history_items hhi
+			WHERE hhi.profile_id = watch_progress.profile_id
+			  AND hhi.media_item_id = watch_progress.media_item_id
+			  AND watch_progress.updated_at <= hhi.hidden_before
+		  )`
 
+// progressStatusPredicate is the `AND ...` clause for a status filter; empty
+// for "all" or "".
+func progressStatusPredicate(status string) string {
 	switch status {
 	case "in_progress":
 		// position_seconds > 0 (not completed = 0): completed rows hold
 		// position 0, so a rewatch of a watched item has completed = 1 with
 		// a live resume point and belongs in Continue Watching.
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM watch_progress
-			WHERE profile_id = ? AND position_seconds > 0
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM hidden_history_items hhi
-				WHERE hhi.profile_id = watch_progress.profile_id
-				  AND hhi.media_item_id = watch_progress.media_item_id
-				  AND watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT ? OFFSET ?
-		`
-		args = []any{profileID, limit, offset}
+		return " AND position_seconds > 0"
 	case "completed":
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM watch_progress
-			WHERE profile_id = ? AND completed = 1
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM hidden_history_items hhi
-				WHERE hhi.profile_id = watch_progress.profile_id
-				  AND hhi.media_item_id = watch_progress.media_item_id
-				  AND watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT ? OFFSET ?
-		`
-		args = []any{profileID, limit, offset}
-	default: // "all" or ""
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM watch_progress
-			WHERE profile_id = ?
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM hidden_history_items hhi
-				WHERE hhi.profile_id = watch_progress.profile_id
-				  AND hhi.media_item_id = watch_progress.media_item_id
-				  AND watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT ? OFFSET ?
-		`
-		args = []any{profileID, limit, offset}
+		return " AND completed = 1"
+	default:
+		return ""
 	}
+}
 
+// ListProgress returns paginated progress entries, filterable by status.
+// Valid status values: "in_progress", "completed", "all" (or empty string for all).
+func ListProgress(db *sql.DB, profileID string, status string, limit, offset int) ([]WatchProgress, error) {
+	query := progressListSelect + progressStatusPredicate(status) + `
+		ORDER BY updated_at DESC
+		LIMIT ? OFFSET ?`
+	return queryProgressRows(db, query, profileID, limit, offset)
+}
+
+// ListProgressPage pages by keyset over (updated_at DESC, media_item_id DESC).
+// updated_at is RFC 3339 UTC text at whole-second precision, so text order is
+// time order and the key string compares exactly. The comparison is spelled
+// out rather than written as a row value so it does not depend on the linked
+// SQLite supporting row values.
+func ListProgressPage(db *sql.DB, profileID string, status string, after *userstore.ProgressKey, limit int) ([]WatchProgress, error) {
+	args := []any{profileID}
+	query := progressListSelect + progressStatusPredicate(status)
+	if after != nil {
+		query += `
+		  AND (updated_at < ? OR (updated_at = ? AND media_item_id < ?))`
+		args = append(args, after.UpdatedAt, after.UpdatedAt, after.MediaItemID)
+	}
+	args = append(args, limit)
+	query += `
+		ORDER BY updated_at DESC, media_item_id DESC
+		LIMIT ?`
+	return queryProgressRows(db, query, args...)
+}
+
+func queryProgressRows(db *sql.DB, query string, args ...any) ([]WatchProgress, error) {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing progress: %w", err)

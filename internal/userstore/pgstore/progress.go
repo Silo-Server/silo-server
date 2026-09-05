@@ -623,67 +623,41 @@ func (s *PostgresUserStore) GetProgress(ctx context.Context, profileID, mediaIte
 	return wp, nil
 }
 
-func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error) {
-	var query string
-	var args []any
+// progressListSelect is the projection, profile scope, and hidden-item
+// exclusion every status listing shares ($1 = user_id, $2 = profile_id);
+// callers append the status predicate, any window predicate, ORDER BY, and
+// LIMIT.
+const progressListSelect = `
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+		FROM user_watch_progress
+		WHERE user_id = $1 AND profile_id = $2
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = user_watch_progress.user_id
+			  AND hhi.profile_id = user_watch_progress.profile_id
+			  AND hhi.media_item_id = user_watch_progress.media_item_id
+			  AND user_watch_progress.updated_at <= hhi.hidden_before
+		  )`
 
+// progressStatusPredicate is the `AND ...` clause for a status filter; empty
+// for the full listing.
+func progressStatusPredicate(status string) string {
 	switch status {
 	case "in_progress":
 		// position_seconds > 0 (not completed = FALSE): completed rows hold
 		// position 0, so a rewatch of a watched item has completed = TRUE with
 		// a live resume point and belongs in Continue Watching.
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM user_watch_progress
-			WHERE user_id = $1 AND profile_id = $2 AND position_seconds > 0
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM user_history_hidden_items hhi
-				WHERE hhi.user_id = user_watch_progress.user_id
-				  AND hhi.profile_id = user_watch_progress.profile_id
-				  AND hhi.media_item_id = user_watch_progress.media_item_id
-				  AND user_watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT $3 OFFSET $4`
-		args = []any{s.userID, profileID, limit, offset}
+		return " AND position_seconds > 0"
 	case "completed":
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM user_watch_progress
-			WHERE user_id = $1 AND profile_id = $2 AND completed = TRUE
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM user_history_hidden_items hhi
-				WHERE hhi.user_id = user_watch_progress.user_id
-				  AND hhi.profile_id = user_watch_progress.profile_id
-				  AND hhi.media_item_id = user_watch_progress.media_item_id
-				  AND user_watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT $3 OFFSET $4`
-		args = []any{s.userID, profileID, limit, offset}
+		return " AND completed = TRUE"
 	default:
-		query = `
-			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
-			FROM user_watch_progress
-			WHERE user_id = $1 AND profile_id = $2
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM user_history_hidden_items hhi
-				WHERE hhi.user_id = user_watch_progress.user_id
-				  AND hhi.profile_id = user_watch_progress.profile_id
-				  AND hhi.media_item_id = user_watch_progress.media_item_id
-				  AND user_watch_progress.updated_at <= hhi.hidden_before
-			  )
-			ORDER BY updated_at DESC
-			LIMIT $3 OFFSET $4`
-		args = []any{s.userID, profileID, limit, offset}
+		return ""
 	}
+}
 
+func (s *PostgresUserStore) queryProgressRows(ctx context.Context, query string, args ...any) ([]userstore.WatchProgress, error) {
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing progress: %w", err)
@@ -702,6 +676,38 @@ func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status 
 		return nil, fmt.Errorf("iterating progress rows: %w", err)
 	}
 	return results, nil
+}
+
+func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error) {
+	query := progressListSelect + progressStatusPredicate(status) + `
+		ORDER BY updated_at DESC
+		LIMIT $3 OFFSET $4`
+	return s.queryProgressRows(ctx, query, s.userID, profileID, limit, offset)
+}
+
+// ListProgressPage pages by keyset. The column keeps microseconds but the
+// WatchProgress.UpdatedAt string the key is built from is whole seconds
+// (timeToString), so both the sort and the comparison run on
+// date_trunc('second', updated_at): the key then round-trips exactly and a
+// sub-second neighbor is never skipped or repeated. Ties within a second are
+// broken by media_item_id, which the primary key makes unique per profile.
+func (s *PostgresUserStore) ListProgressPage(ctx context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
+	args := []any{s.userID, profileID}
+	query := progressListSelect + progressStatusPredicate(status)
+	if after != nil {
+		updatedAt, err := time.Parse(time.RFC3339Nano, after.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parsing progress key: %w", err)
+		}
+		args = append(args, updatedAt, after.MediaItemID)
+		query += fmt.Sprintf(`
+		  AND (date_trunc('second', updated_at), media_item_id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(`
+		ORDER BY date_trunc('second', updated_at) DESC, media_item_id DESC
+		LIMIT $%d`, len(args))
+	return s.queryProgressRows(ctx, query, args...)
 }
 
 // ListProgressFiltered mirrors the status branches of ListProgress and AND-s in

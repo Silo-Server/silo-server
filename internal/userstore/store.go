@@ -68,6 +68,13 @@ type UserStore interface {
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
+	// ListProgressPage is the keyset form of ListProgress: the same status
+	// predicate and hidden-item exclusion, ordered by (updated_at DESC,
+	// media_item_id DESC), returning at most limit rows strictly after the key
+	// in that order (nil = from the newest row). Rows whose updated_at moves
+	// past the key between calls are neither repeated nor cause gaps, which the
+	// offset form cannot promise while playback keeps reordering the set.
+	ListProgressPage(ctx context.Context, profileID, status string, after *ProgressKey, limit int) ([]WatchProgress, error)
 	// ListProgressFiltered is ListProgress with an additional SQL pre-filter on
 	// the backing catalog item's type and/or library, so the watched-items path
 	// no longer scans the whole status set before discarding non-matching rows.

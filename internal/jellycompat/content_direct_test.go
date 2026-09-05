@@ -339,6 +339,9 @@ func (s *progressCountingStore) GetProgress(context.Context, string, string) (*u
 func (s *progressCountingStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListProgressPage(context.Context, string, string, *userstore.ProgressKey, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
