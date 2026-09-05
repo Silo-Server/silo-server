@@ -27,6 +27,7 @@ import {
   fetchAdminLibraries,
   fetchLibraryMetadataMatchQueuePage,
   fetchUnmatchedLibraryItemsPage,
+  useUnmatchedLibraryItems,
   useCheckLibraryMount,
   useCreateLibrary,
   useDeleteLibrary,
@@ -34,6 +35,7 @@ import {
   useLibraryMetadataMatchQueueDetail,
   useLibraryProviders,
   useLibraryRoots,
+  useSkippedLibraryRoots,
   flattenLibraryRoots,
   LIBRARY_ROOTS_PAGE_LIMIT,
   useRefreshLibraryMetadata,
@@ -203,14 +205,18 @@ describe("library admin hooks on the v2 contract", () => {
       });
     });
 
-    const { result } = renderHook(() => useLibraryRoots(1, "ambiguous"), {
+    const { result } = renderHook(() => useLibraryRoots(1, "ambiguous", { search: " Heat " }), {
       wrapper: createWrapper(),
     });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
 
-    // Only the first page loads up front.
+    // Only the first page loads up front, with the trimmed search sent to the server.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestsOf(fetchMock)[0]?.url.searchParams.get("state")).toBe("ambiguous");
+    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("q")).toBe("Heat");
     expect(result.current.hasNextPage).toBe(true);
     expect(result.current.data?.pages[0]?.total).toBe(3);
     expect(flattenLibraryRoots(result.current.data).map((r) => r.root_path)).toEqual([
@@ -242,11 +248,93 @@ describe("library admin hooks on the v2 contract", () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     rerender({ enabled: true });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestsOf(fetchMock)[0]?.url.searchParams.get("q")).toBeNull();
   });
 
-  it("resolves a numeric unmatched-items page by following cursors", async () => {
+  it("restarts library roots paging from the first page when the search changes", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url.searchParams.get("q") === "heat") {
+        return jsonResponse({
+          items: [{ ...listLibraryRootsOk.items[0], root_path: "/media/movies/Heat" }],
+          page: { has_more: false },
+          total: 1,
+        });
+      }
+      if (url.searchParams.get("cursor") === null) return jsonResponse(listLibraryRootsOk);
+      return jsonResponse({
+        items: [{ ...listLibraryRootsOk.items[0], root_path: "/media/movies/Blade Runner" }],
+        page: { has_more: false },
+        total: 3,
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ search }: { search: string }) => useLibraryRoots(1, "ambiguous", { search }),
+      { wrapper: createWrapper(), initialProps: { search: "" } },
+    );
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+
+    rerender({ search: "heat" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    const last = requestsOf(fetchMock)[2]?.url.searchParams;
+    expect(last?.get("q")).toBe("heat");
+    expect(last?.get("cursor")).toBeNull();
+    expect(flattenLibraryRoots(result.current.data).map((r) => r.root_path)).toEqual([
+      "/media/movies/Heat",
+    ]);
+  });
+
+  it("defers skipped roots and sends search on each bounded page", async () => {
+    const fetchMock = stubFetch((url) =>
+      jsonResponse({
+        items: [],
+        page: url.searchParams.has("cursor")
+          ? { has_more: false }
+          : { has_more: true, next_cursor: "next" },
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useSkippedLibraryRoots({ enabled, search: " Extras " }),
+      { wrapper: createWrapper(), initialProps: { enabled: false } },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const request of requestsOf(fetchMock)) {
+      expect(request.url.searchParams.get("q")).toBe("Extras");
+      expect(request.url.searchParams.get("limit")).toBe("50");
+    }
+  });
+
+  it("restarts stale IDs with server-side search", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(listStaleIdsOk));
+    const { result, rerender } = renderHook(({ search }) => useStaleMediaIDs({ search }), {
+      wrapper: createWrapper(),
+      initialProps: { search: "" },
+    });
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    rerender({ search: " Lost " });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("q")).toBe("Lost");
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("cursor")).toBeNull();
+  });
+
+  it("fetches an unmatched-items page by cursor with the server-side search", async () => {
     const fetchMock = stubFetch((url) => {
       expect(url.pathname).toBe("/api/v2/libraries/unmatched-items");
       expect(url.searchParams.get("q")).toBe("a");
@@ -258,14 +346,61 @@ describe("library admin hooks on the v2 contract", () => {
       });
     });
 
-    const first = await fetchUnmatchedLibraryItemsPage(0, "a");
+    const first = await fetchUnmatchedLibraryItemsPage("a");
     expect(first.items.map((i) => i.title)).toEqual(["Alpha"]);
     expect(first.total).toBe(listUnmatchedItemsOk.total);
     expect(first.items[0]?.library_id).toBe(1);
+    expect(first.nextCursor).toBe(listUnmatchedItemsOk.page.next_cursor);
 
-    const second = await fetchUnmatchedLibraryItemsPage(1, "a");
+    // A later page is requested with its cursor directly, not by replaying earlier pages.
+    const second = await fetchUnmatchedLibraryItemsPage("a", first.nextCursor);
     expect(second.items.map((i) => i.title)).toEqual(["Beta"]);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(second.nextCursor).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.get("cursor")).toBe(
+      listUnmatchedItemsOk.page.next_cursor,
+    );
+  });
+
+  it("retains the unmatched-items cursor chain across refetches", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url.searchParams.get("cursor") === null) return jsonResponse(listUnmatchedItemsOk);
+      return jsonResponse({
+        items: [{ ...listUnmatchedItemsOk.items[0], content_id: "movie:b", title: "Beta" }],
+        page: { has_more: false },
+        total: listUnmatchedItemsOk.total,
+      });
+    });
+
+    const { result } = renderHook(() => useUnmatchedLibraryItems(" a "), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
+    expect(result.current.data?.pages).toHaveLength(1);
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await result.current.refetch();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    // The refetch replays exactly the loaded pages with their stored cursors
+    // and the trimmed search term; it never walks from the first page to
+    // rebuild the chain.
+    expect(
+      requestsOf(fetchMock).map((r) => [
+        r.url.searchParams.get("q"),
+        r.url.searchParams.get("cursor"),
+      ]),
+    ).toEqual([
+      ["a", null],
+      ["a", listUnmatchedItemsOk.page.next_cursor],
+      ["a", null],
+      ["a", listUnmatchedItemsOk.page.next_cursor],
+    ]);
+    expect(result.current.data?.pages[1]?.items[0]?.title).toBe("Beta");
   });
 
   it("decodes the matcher backlog detail with the page fields the section reads", async () => {
@@ -301,7 +436,10 @@ describe("library admin hooks on the v2 contract", () => {
     const { result } = renderHook(() => useLibraryMetadataMatchQueueDetail(1), {
       wrapper: createWrapper(),
     });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
     expect(result.current.data?.pages).toHaveLength(1);
     await result.current.fetchNextPage();
     await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
@@ -354,7 +492,10 @@ describe("library admin hooks on the v2 contract", () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     rerender({ enabled: true });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toBeDefined();
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.current.hasNextPage).toBe(true);
     expect(flattenStaleMediaIDs(result.current.data).map((s) => s.library_id)).toEqual(

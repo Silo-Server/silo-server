@@ -480,7 +480,7 @@ var traitOnlyRules = []authRule{
 // is listed so a genuinely new middleware stands out as unclassified.
 var infrastructureMiddleware = []string{
 	"apimw.RequestID", mwRequestID, "middleware.Recoverer", "apimw.RequestLogger", "apimw.Metrics",
-	"httpstream.CompressExcept", "clientip.Middleware", "activitylog.NewMiddleware",
+	"httpstream.CompressExcept", "httpstream.CompressWithExclusions", "clientip.Middleware", "activitylog.NewMiddleware",
 }
 
 func classifyAuth(middleware []string) (string, []string) {

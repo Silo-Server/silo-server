@@ -273,7 +273,11 @@
         "owner": { "$ref": "#/$defs/owner" },
         "review_state": { "$ref": "#/$defs/reviewState" },
         "v2": { "$ref": "#/$defs/v2" },
-        "notes": { "type": "string" }
+        "notes": { "type": "string" },
+        "concurrency": {
+          "enum": ["if_match"],
+          "description": "Optional, curated. if_match marks a resource with demonstrated lost-update risk whose v2 operation is registered Guarded (docs/architecture/api-contract.md, \"Optimistic concurrency\"): PUT/PATCH/DELETE require If-Match, a missing field is 428, a stale tag is 412. Allowed only on tier-1 ported rows whose method is PUT, PATCH or DELETE (the methods a Guarded v2 operation may use); internal/contractledger enforces that and reconciles the set against the v2 registry in both directions."
+        }
       },
       "allOf": [
         {

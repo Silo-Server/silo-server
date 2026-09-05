@@ -95,8 +95,11 @@ const (
 
 // profileUpdateNullable names the members whose null is a clearing value;
 // null on any other member is a type failure.
+// memberAvatar is the profile member the avatar operations address.
+const memberAvatar = "avatar"
+
 var profileUpdateNullable = map[string]bool{
-	"avatar": true, "pin": true, "max_content_rating": true, "language": true,
+	memberAvatar: true, "pin": true, "max_content_rating": true, "language": true,
 	"preferred_metadata_language": true, "subtitle_language": true, fieldMaxPlaybackQuality: true,
 }
 

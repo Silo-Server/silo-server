@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,18 +23,19 @@ type fakeLibraryAdmin struct {
 	roots     []handlers.LibraryRootView
 	unmatched []handlers.UnmatchedItemView
 	// lastCreate, lastUpdate, lastReorder, lastOverride record commands.
-	lastCreate   *handlers.LibraryCreateRequest
-	lastUpdate   *handlers.LibraryUpdateRequest
-	lastUpdateID int
-	lastUserID   int
-	lastReorder  []catalogpkg.FolderReorderEntry
-	lastOverride *handlers.RootOverrideUpsertRequest
-	lastDelete   *handlers.RootOverrideDeleteRequest
-	lastRematch  string
-	lastRootsQ   [4]int // libraryID, limit, offset, len(state)
-	lastSearch   string
-	lastLimit    int
-	lastOffset   int
+	lastCreate      *handlers.LibraryCreateRequest
+	lastUpdate      *handlers.LibraryUpdateRequest
+	lastUpdateID    int
+	lastUserID      int
+	lastReorder     []catalogpkg.FolderReorderEntry
+	lastOverride    *handlers.RootOverrideUpsertRequest
+	lastDelete      *handlers.RootOverrideDeleteRequest
+	lastRematch     string
+	lastRootsQ      [4]int // libraryID, limit, offset, len(state)
+	lastRootsSearch string
+	lastSearch      string
+	lastLimit       int
+	lastOffset      int
 	// stage B commands.
 	lastRefreshMode adminjob.LibraryRefreshMode
 	lastPosterType  string
@@ -156,19 +158,29 @@ func (f *fakeLibraryAdmin) ReorderLibraries(_ context.Context, entries []catalog
 	return f.err
 }
 
-func (f *fakeLibraryAdmin) ListLibraryRoots(_ context.Context, libraryID int, state string, limit, offset int) ([]handlers.LibraryRootView, int, error) {
+func (f *fakeLibraryAdmin) ListLibraryRoots(_ context.Context, libraryID int, state, search string, limit, offset int) ([]handlers.LibraryRootView, int, error) {
 	if f.err != nil {
 		return nil, 0, f.err
 	}
 	f.lastRootsQ = [4]int{libraryID, limit, offset, len(state)}
+	f.lastRootsSearch = search
 	if libraryID != 1 {
 		return nil, 0, notFoundLibrary()
 	}
-	end := min(offset+limit, len(f.roots))
-	if offset > len(f.roots) {
-		return []handlers.LibraryRootView{}, len(f.roots), nil
+	roots := f.roots
+	if search != "" {
+		roots = nil
+		for _, root := range f.roots {
+			if strings.Contains(strings.ToLower(root.RootPath), strings.ToLower(search)) || strings.Contains(strings.ToLower(root.Title), strings.ToLower(search)) {
+				roots = append(roots, root)
+			}
+		}
 	}
-	return f.roots[offset:end], len(f.roots), nil
+	end := min(offset+limit, len(roots))
+	if offset > len(roots) {
+		return []handlers.LibraryRootView{}, len(roots), nil
+	}
+	return roots[offset:end], len(roots), nil
 }
 
 func (f *fakeLibraryAdmin) SetRootOverride(_ context.Context, userID int, req handlers.RootOverrideUpsertRequest) error {
@@ -196,18 +208,25 @@ func (f *fakeLibraryAdmin) DeleteRootOverride(_ context.Context, req handlers.Ro
 	return nil
 }
 
-func (f *fakeLibraryAdmin) ListSkippedRoots(context.Context) ([]handlers.SkippedRootView, error) {
+func (f *fakeLibraryAdmin) ListSkippedRoots(_ context.Context, search string, limit, offset int) ([]handlers.SkippedRootView, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return []handlers.SkippedRootView{{LibraryID: 1, LibraryName: "Movies", RootPath: "/media/movies/Extras", Reason: "no_media_files", SampleFilePath: "/media/movies/Extras/a.txt", FileCount: 3, FirstSeenAt: fixedTime(), LastSeenAt: fixedTime()}}, nil
+	all := []handlers.SkippedRootView{{LibraryID: 1, LibraryName: "Movies", RootPath: "/media/movies/Extras", Reason: "no_media_files", SampleFilePath: "/media/movies/Extras/a.txt", FileCount: 3, FirstSeenAt: fixedTime(), LastSeenAt: fixedTime()}}
+	f.lastSearch, f.lastLimit, f.lastOffset = search, limit, offset
+	for i := range 2 {
+		root := all[0]
+		root.RootPath += strconv.Itoa(i)
+		all = append(all, root)
+	}
+	return all[min(offset, len(all)):min(offset+limit, len(all))], nil
 }
 
-func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, limit, offset int) ([]handlers.StaleMediaIDView, error) {
+func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	f.lastLimit, f.lastOffset = limit, offset
+	f.lastLimit, f.lastOffset, f.lastSearch = limit, offset, search
 	all := []handlers.StaleMediaIDView{
 		{ContentID: "movie:heat-1995", LibraryID: 1, LibraryName: "Movies", Title: "Heat", Year: 1995, ContentType: "movie", Provider: "tmdb", ProviderID: "949",
 			FirstSeenAt: "2026-01-02T03:04:05Z", LastSeenAt: "2026-01-02T03:04:05Z", FirstSeen: fixedTime(), LastSeen: fixedTime()},
@@ -215,6 +234,15 @@ func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, limit, offset int) ([
 			FirstSeenAt: "2026-01-02T03:04:05Z", LastSeenAt: "2026-01-02T03:04:05Z", FirstSeen: fixedTime(), LastSeen: fixedTime()},
 		{ContentID: "series:lost-2004", LibraryID: 0, LibraryName: "", Title: "Lost", Year: 2004, ContentType: "series", Provider: "tvdb", ProviderID: "73739",
 			FirstSeenAt: "2026-01-02T03:04:05Z", LastSeenAt: "2026-01-02T03:04:05Z", FirstSeen: fixedTime(), LastSeen: fixedTime()},
+	}
+	if search != "" {
+		matches := all[:0]
+		for _, row := range all {
+			if strings.Contains(strings.ToLower(row.Title), strings.ToLower(search)) {
+				matches = append(matches, row)
+			}
+		}
+		all = matches
 	}
 	if offset > len(all) {
 		return []handlers.StaleMediaIDView{}, nil
@@ -545,8 +573,17 @@ func TestListLibraryRoots(t *testing.T) {
 	if string(second.Items[0]["active_override"]) != `{"forced_title":"Heat","forced_year":1995,"note":"checked"}` {
 		t.Fatalf("override = %s", second.Items[0]["active_override"])
 	}
-	// A cursor is bound to its filter.
+	// The search is server-side over the whole listing: a root on a later
+	// page is found without paging to it, and the total counts the matches.
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/roots?library_id=1&limit=2&q=%20HEAT%20", "", bearer(adminToken))
+	var found rootPage
+	decodeJSON(t, rec.Body, &found)
+	if len(found.Items) != 1 || found.Page.HasMore || found.Total != 1 || string(found.Items[0]["title"]) != `"Heat"` || fake.lastRootsSearch != "HEAT" {
+		t.Fatalf("search = %s (%q)", rec.Body.String(), fake.lastRootsSearch)
+	}
+	// A cursor is bound to its filters, the search included.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/roots?library_id=1&state=ambiguous&cursor="+first.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/roots?library_id=1&limit=2&q=x&cursor="+first.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/roots?library_id=1&offset=2", "", bearer(adminToken)), TypeValidationFailed)
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/roots", "", bearer(adminToken)), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.library_id" {
@@ -591,7 +628,7 @@ func TestRootOverride(t *testing.T) {
 func TestListSkippedRootsAndStaleIDs(t *testing.T) {
 	deps, fake := libraryDeps(t)
 	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots", "", bearer(adminToken))
+	rec := do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots?limit=1", "", bearer(adminToken))
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
@@ -678,4 +715,30 @@ func TestAdminJobOfInstants(t *testing.T) {
 	if job.StartedAt == nil || job.StartedAt.String() != "2026-01-02T03:05:05.678Z" || job.CompletedAt != nil || string(job.ResultPayload) != `{}` {
 		t.Fatalf("job = %+v", job)
 	}
+}
+
+func TestDiagnosticsSearchAndSkippedPagination(t *testing.T) {
+	deps, fake := libraryDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots?limit=2&q=Extras", "", bearer(adminToken))
+	var page rootPage
+	decodeJSON(t, rec.Body, &page)
+	if rec.Code != 200 || len(page.Items) != 2 || !page.Page.HasMore || fake.lastLimit != 3 || fake.lastSearch != "Extras" {
+		t.Fatalf("first page: %d %s", rec.Code, rec.Body.String())
+	}
+	cursor := page.Page.NextCursor
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots?q=other&cursor="+cursor, "", bearer(adminToken)), TypeInvalidCursor)
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots?limit=2&q=Extras&cursor="+cursor, "", bearer(adminToken))
+	decodeJSON(t, rec.Body, &page)
+	if len(page.Items) != 1 || page.Page.HasMore || fake.lastOffset != 2 {
+		t.Fatalf("last page: %s", rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=1&q=%20Lost%20", "", bearer(adminToken))
+	decodeJSON(t, rec.Body, &page)
+	if len(page.Items) != 1 || page.Page.HasMore || fake.lastSearch != "Lost" || string(page.Items[0]["title"]) != `"Lost"` {
+		t.Fatalf("search beyond first page: %s", rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=1", "", bearer(adminToken))
+	decodeJSON(t, rec.Body, &page)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?q=Lost&cursor="+page.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
 }

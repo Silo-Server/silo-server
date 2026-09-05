@@ -417,8 +417,10 @@ func (h *LibraryHandler) ReorderLibraries(ctx context.Context, entries []catalog
 }
 
 // ListLibraryRoots pages the scanned roots of one library, with the active
-// override and matched catalog item of each, plus the unpaged total.
-func (h *LibraryHandler) ListLibraryRoots(ctx context.Context, libraryID int, state string, limit, offset int) ([]LibraryRootView, int, error) {
+// override and matched catalog item of each, plus the unpaged total. A
+// non-empty search keeps only roots whose path, title or sample file path
+// contains it, case-insensitively; v1 passes none.
+func (h *LibraryHandler) ListLibraryRoots(ctx context.Context, libraryID int, state, search string, limit, offset int) ([]LibraryRootView, int, error) {
 	if h.ScannedGroupRepo == nil || h.folderRepo == nil {
 		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Group snapshots not configured")
 	}
@@ -427,7 +429,7 @@ func (h *LibraryHandler) ListLibraryRoots(ctx context.Context, libraryID int, st
 		return nil, 0, apiError(http.StatusNotFound, "not_found", "Library not found")
 	}
 
-	groups, total, err := h.ScannedGroupRepo.ListByFolder(ctx, libraryID, state, limit, offset)
+	groups, total, err := h.ScannedGroupRepo.ListByFolder(ctx, libraryID, state, search, limit, offset)
 	if err != nil {
 		slog.ErrorContext(ctx, "listing scanned groups", "component", "api", "library_id", libraryID, "error", err)
 		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to list roots")
@@ -590,9 +592,9 @@ func (h *LibraryHandler) DeleteRootOverride(ctx context.Context, req RootOverrid
 	return nil
 }
 
-// ListSkippedRoots answers every root the scanner skipped, with its
-// library's name. Without a skipped-root store the list is empty.
-func (h *LibraryHandler) ListSkippedRoots(ctx context.Context) ([]SkippedRootView, error) {
+// ListSkippedRoots pages skipped roots with their library names and searches
+// before pagination. A zero limit preserves the unpaginated v1 listing.
+func (h *LibraryHandler) ListSkippedRoots(ctx context.Context, search string, limit, offset int) ([]SkippedRootView, error) {
 	if h.SkippedRootRepo == nil {
 		return []SkippedRootView{}, nil
 	}
@@ -605,7 +607,12 @@ func (h *LibraryHandler) ListSkippedRoots(ctx context.Context) ([]SkippedRootVie
 	for _, folder := range folders {
 		folderNames[folder.ID] = folder.Name
 	}
-	roots, err := h.SkippedRootRepo.ListAll(ctx)
+	var roots []*models.SkippedMediaRoot
+	if limit > 0 {
+		roots, err = h.SkippedRootRepo.ListPage(ctx, search, limit, offset)
+	} else {
+		roots, err = h.SkippedRootRepo.ListAll(ctx)
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "listing skipped roots", "component", "api", "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list skipped roots")
@@ -631,12 +638,12 @@ func (h *LibraryHandler) ListSkippedRoots(ctx context.Context) ([]SkippedRootVie
 // page cut in the database (pass limit+1 to probe for a following page); a
 // zero limit answers the whole list the way v1 renders it. Without a
 // stale-id store the list is empty.
-func (h *LibraryHandler) ListStaleIDs(ctx context.Context, limit, offset int) ([]StaleMediaIDView, error) {
+func (h *LibraryHandler) ListStaleIDs(ctx context.Context, search string, limit, offset int) ([]StaleMediaIDView, error) {
 	if h.StaleIDRepo == nil {
 		return []StaleMediaIDView{}, nil
 	}
 	if limit > 0 {
-		return h.listStaleIDPage(ctx, limit, offset)
+		return h.listStaleIDPage(ctx, search, limit, offset)
 	}
 	staleIDs, err := h.StaleIDRepo.ListAll(ctx)
 	if err != nil {
@@ -734,8 +741,8 @@ func (h *LibraryHandler) ListStaleIDs(ctx context.Context, limit, offset int) ([
 	return resp, nil
 }
 
-func (h *LibraryHandler) listStaleIDPage(ctx context.Context, limit, offset int) ([]StaleMediaIDView, error) {
-	rows, err := h.StaleIDRepo.ListActionable(ctx, limit, offset)
+func (h *LibraryHandler) listStaleIDPage(ctx context.Context, search string, limit, offset int) ([]StaleMediaIDView, error) {
+	rows, err := h.StaleIDRepo.ListActionable(ctx, limit, offset, search)
 	if err != nil {
 		slog.ErrorContext(ctx, "listing stale media IDs", "component", "api", "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list stale IDs")

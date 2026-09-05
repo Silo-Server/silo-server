@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,6 +247,7 @@ type LibraryRootListInput struct {
 	LimitParam
 	LibraryID ID     `query:"library_id" required:"true" doc:"The library whose roots to list" example:"1"`
 	State     string `query:"state" doc:"Only roots in this inference state" example:"ambiguous"`
+	Query     string `query:"q" doc:"Case-insensitive substring over root path, title and sample file path" example:"heat"`
 	Cursor    string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
 
@@ -292,6 +294,12 @@ type SkippedRoot struct {
 }
 
 // SkippedRootCollectionOutput is the listSkippedRoots response.
+type SkippedRootListInput struct {
+	LimitParam
+	Query  string `query:"q" doc:"Substring over root path, library name or reason"`
+	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
+}
+
 type SkippedRootCollectionOutput struct {
 	Body SkippedRootCollection
 }
@@ -317,6 +325,7 @@ type StaleMediaID struct {
 
 // StaleMediaIDListInput is the listStaleIds query.
 type StaleMediaIDListInput struct {
+	Query string `query:"q" doc:"Substring over title, provider, provider ID or library name"`
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -533,6 +542,7 @@ const (
 	opListLibraryRoots     = "listLibraryRoots"
 	opListUnmatchedItems   = "listUnmatchedItems"
 	opListStaleIDs         = "listStaleIds"
+	opListSkippedRoots     = "listSkippedRoots"
 	tiebreakerContentID    = "content_id"
 	locationBodyLibraryID  = locationBody + ".library_id"
 	locationQueryLibraryID = "query.library_id"
@@ -594,8 +604,10 @@ func registerLibraries(reg *Registry) {
 	deleteOverride.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, admin(deleteOverride), reg.deleteRootOverride)
 
-	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/skipped-roots", "listSkippedRoots", "libraries",
-		"List every root the scanner skipped, across libraries.")), reg.listSkippedRoots)
+	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/skipped-roots", opListSkippedRoots, "libraries",
+		"Page roots the scanner skipped, across libraries.")), func(ctx context.Context, in *SkippedRootListInput) (*SkippedRootCollectionOutput, error) {
+		return reg.listSkippedRoots(ctx, cursors, in)
+	})
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/stale-ids", opListStaleIDs, "libraries",
 		"List provider identifiers that no longer resolve, with the items carrying them, a page at a time.")), func(ctx context.Context, in *StaleMediaIDListInput) (*StaleMediaIDCollectionOutput, error) {
@@ -652,7 +664,7 @@ const opGetMetadataMatchQueue = "getMetadataMatchQueue"
 // room for the multipart framing around it.
 const (
 	maxPosterBytes     = 10 << 20
-	posterFormOverhead = 4 << 10
+	posterFormOverhead = 1 << 20
 )
 
 func (reg *Registry) confirmEmptyRootCleanup(ctx context.Context, in *LibraryIDInput) (*EmptyRootCleanupOutput, error) {
@@ -1200,10 +1212,11 @@ func (reg *Registry) listLibraryRoots(ctx context.Context, cursors *Cursors, in 
 		return nil, p
 	}
 	state := strings.TrimSpace(in.State)
+	search := strings.TrimSpace(in.Query)
 	scope := CursorScope{
 		OperationID: opListLibraryRoots,
 		Security:    strconv.Itoa(userID),
-		Filter:      "library_id=" + strconv.Itoa(libID) + "&state=" + state,
+		Filter:      url.Values{"library_id": {strconv.Itoa(libID)}, "state": {state}, "q": {search}}.Encode(),
 		Sort:        "store",
 		Tiebreaker:  "store",
 	}
@@ -1211,7 +1224,7 @@ func (reg *Registry) listLibraryRoots(ctx context.Context, cursors *Cursors, in 
 	if p != nil {
 		return nil, p
 	}
-	views, total, err := svc.ListLibraryRoots(ctx, libID, state, in.Limit+1, offset)
+	views, total, err := svc.ListLibraryRoots(ctx, libID, state, search, in.Limit+1, offset)
 	if err != nil {
 		return nil, libraryProblem(err)
 	}
@@ -1273,14 +1286,27 @@ func (reg *Registry) deleteRootOverride(ctx context.Context, in *RootOverrideDel
 	return nil, nil
 }
 
-func (reg *Registry) listSkippedRoots(ctx context.Context, _ *struct{}) (*SkippedRootCollectionOutput, error) {
+func (reg *Registry) listSkippedRoots(ctx context.Context, cursors *Cursors, in *SkippedRootListInput) (*SkippedRootCollectionOutput, error) {
 	svc, p := reg.libraryAdmin()
 	if p != nil {
 		return nil, p
 	}
-	views, err := svc.ListSkippedRoots(ctx)
+	userID, p := actingUserID(ctx)
+	if p != nil {
+		return nil, p
+	}
+	scope := CursorScope{OperationID: opListSkippedRoots, Security: strconv.Itoa(userID), Filter: strings.TrimSpace(in.Query), Sort: "last_seen_at", Tiebreaker: "library_id,root_path"}
+	offset, p := decodeOffset(cursors, scope, in.Cursor)
+	if p != nil {
+		return nil, p
+	}
+	views, err := svc.ListSkippedRoots(ctx, strings.TrimSpace(in.Query), in.Limit+1, offset)
 	if err != nil {
 		return nil, libraryProblem(err)
+	}
+	views, next, p := offsetPage(cursors, scope, len(views), in.Limit, offset, views)
+	if p != nil {
+		return nil, p
 	}
 	items := make([]SkippedRoot, 0, len(views))
 	for _, v := range views {
@@ -1295,7 +1321,7 @@ func (reg *Registry) listSkippedRoots(ctx context.Context, _ *struct{}) (*Skippe
 			LastSeenAt:     NewInstant(v.LastSeenAt),
 		})
 	}
-	return &SkippedRootCollectionOutput{Body: SkippedRootCollection{Collection: NewCollection(items)}}, nil
+	return &SkippedRootCollectionOutput{Body: SkippedRootCollection{Collection: Paginated(items, next)}}, nil
 }
 
 func (reg *Registry) listStaleIDs(ctx context.Context, cursors *Cursors, in *StaleMediaIDListInput) (*StaleMediaIDCollectionOutput, error) {
@@ -1307,12 +1333,12 @@ func (reg *Registry) listStaleIDs(ctx context.Context, cursors *Cursors, in *Sta
 	if p != nil {
 		return nil, p
 	}
-	scope := CursorScope{OperationID: opListStaleIDs, Security: strconv.Itoa(userID), Sort: "last_seen_at", Tiebreaker: tiebreakerContentID}
+	scope := CursorScope{OperationID: opListStaleIDs, Security: strconv.Itoa(userID), Filter: strings.TrimSpace(in.Query), Sort: "last_seen_at", Tiebreaker: tiebreakerContentID}
 	offset, p := decodeOffset(cursors, scope, in.Cursor)
 	if p != nil {
 		return nil, p
 	}
-	views, err := svc.ListStaleIDs(ctx, in.Limit+1, offset)
+	views, err := svc.ListStaleIDs(ctx, strings.TrimSpace(in.Query), in.Limit+1, offset)
 	if err != nil {
 		return nil, libraryProblem(err)
 	}

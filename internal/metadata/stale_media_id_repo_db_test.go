@@ -85,10 +85,21 @@ func TestStaleMediaIDRepository_ListActionable_MatchesPredicate(t *testing.T) {
 	}
 
 	repo := NewStaleMediaIDRepository(pool)
+	searched, err := repo.ListActionable(ctx, 1, 0, id(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searched) != 1 || searched[0].ProviderID != id(4) {
+		t.Fatalf("provider search before paging: %+v", searched)
+	}
+	searched, err = repo.ListActionable(ctx, 1, 0, "nonexistent-"+id(8))
+	if err != nil || len(searched) != 0 {
+		t.Fatalf("unmatched search: %+v %v", searched, err)
+	}
 	got := map[string]bool{}
 	const page = 2
 	for offset := 0; ; offset += page {
-		rows, err := repo.ListActionable(ctx, page+1, offset)
+		rows, err := repo.ListActionable(ctx, page+1, offset, "")
 		if err != nil {
 			t.Fatalf("ListActionable(offset %d): %v", offset, err)
 		}

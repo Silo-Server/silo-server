@@ -6611,6 +6611,19 @@
             }
           },
           {
+            "description": "Case-insensitive substring over root path, title and sample file path",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Case-insensitive substring over root path, title and sample file path",
+              "examples": [
+                "heat"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "description": "Opaque cursor from page.next_cursor",
             "explode": false,
             "in": "query",
@@ -7125,6 +7138,43 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Substring over root path, library name or reason",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Substring over root path, library name or reason",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7234,7 +7284,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List every root the scanner skipped, across libraries.",
+        "summary": "Page roots the scanner skipped, across libraries.",
         "tags": [
           "libraries"
         ],
@@ -7266,6 +7316,16 @@
               "examples": [
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Substring over title, provider, provider ID or library name",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Substring over title, provider, provider ID or library name",
               "type": "string"
             }
           },

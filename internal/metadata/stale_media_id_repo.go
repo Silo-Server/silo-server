@@ -230,7 +230,7 @@ const actionableStaleIDWhere = `
 // items, most recent sighting first; the caller passes limit+1 to probe for
 // a following page. The predicate runs in SQL so the page is cut there
 // rather than after loading every row.
-func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offset int) ([]ActionableStaleMediaID, error) {
+func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offset int, search string) ([]ActionableStaleMediaID, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT s.content_id, s.provider, s.provider_id, s.first_seen_at, s.last_seen_at,
 		       COALESCE(mi.title, ''), COALESCE(mi.year, 0), COALESCE(mi.type, ''),
@@ -245,9 +245,10 @@ func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offs
 			LIMIT 1
 		) lib ON true
 		WHERE `+actionableStaleIDWhere+`
+		AND ($3 = '' OR strpos(lower(COALESCE(mi.title, '')), lower($3)) > 0 OR strpos(lower(s.provider), lower($3)) > 0 OR strpos(lower(s.provider_id), lower($3)) > 0 OR strpos(lower(COALESCE(lib.folder_name, '')), lower($3)) > 0)
 		ORDER BY s.last_seen_at DESC, s.content_id ASC, s.provider ASC, s.provider_id ASC
 		LIMIT $1 OFFSET $2
-	`, limit, offset)
+	`, limit, offset, search)
 	if err != nil {
 		return nil, fmt.Errorf("listing actionable stale media IDs: %w", err)
 	}

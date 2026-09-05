@@ -1,7 +1,8 @@
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useAdminLibraries: vi.fn(),
@@ -86,6 +87,16 @@ vi.mock("@/hooks/queries/admin/scans", () => ({
 
 import AdminLibraries from "./AdminLibraries";
 
+// unmatchedItemsResult shapes the infinite-query result the unmatched-items
+// section reads: one loaded page with no further cursor.
+const unmatchedItemsResult = (items: unknown[]) => ({
+  data: { pages: [{ items, total: items.length, nextCursor: undefined }], pageParams: [undefined] },
+  hasNextPage: false,
+  fetchNextPage: vi.fn(),
+  isFetching: false,
+  isLoading: false,
+});
+
 // renderPage wraps the page in the providers it needs at runtime: a
 // QueryClientProvider for the (mocked) TanStack hooks, and a MemoryRouter for
 // the <Link>s inside AdminLibraries. Without QueryClientProvider, even fully
@@ -102,6 +113,7 @@ const renderPage = () => {
 };
 
 describe("AdminLibraries", () => {
+  afterEach(cleanup);
   beforeEach(() => {
     const mutate = vi.fn();
     const queryState = {
@@ -132,7 +144,7 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useSkippedLibraryRoots.mockReturnValue({
-      data: [],
+      data: { pages: [{ roots: [] }] },
       isLoading: false,
     });
     mocks.useStaleMediaIDs.mockReturnValue({
@@ -174,10 +186,7 @@ describe("AdminLibraries", () => {
       repositories: [],
       isLoading: false,
     });
-    mocks.useUnmatchedLibraryItems.mockReturnValue({
-      data: { items: [], total: 0 },
-      isLoading: false,
-    });
+    mocks.useUnmatchedLibraryItems.mockReturnValue(unmatchedItemsResult([]));
     mocks.useCancelLibraryScans.mockReturnValue(queryState);
     mocks.useCancelAdminJob.mockReturnValue(queryState);
     mocks.useLibraryRoots.mockReturnValue({
@@ -377,7 +386,7 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("Stale External IDs");
     expect(markup).not.toContain("Re-match");
     // The section is collapsed on mount, so the first page is not requested yet.
-    expect(mocks.useStaleMediaIDs).toHaveBeenCalledWith({ enabled: false });
+    expect(mocks.useStaleMediaIDs).toHaveBeenCalledWith({ enabled: false, search: "" });
   });
 
   it("hides Stale External IDs once the first page confirms there are none", () => {
@@ -394,24 +403,82 @@ describe("AdminLibraries", () => {
     expect(markup).not.toContain("Stale External IDs");
   });
 
+  it.each(["search", "first", "previous"])(
+    "cancels a pending Last traversal after %s",
+    async (action) => {
+      const item = {
+        content_id: "movie:fixture",
+        library_id: 1,
+        title: "Fixture",
+        year: 1995,
+        content_type: "movie",
+        library_name: "Movies",
+        status: "unmatched",
+      };
+      const pages = [0, 1].map((n) => ({
+        items: [{ ...item, content_id: `movie:${n}`, title: `Page ${n}` }],
+        total: 40,
+        nextCursor: `cursor-${n}`,
+      }));
+      type Result = { data: { pages: typeof pages }; hasNextPage: boolean };
+      let complete!: (result: Result) => void;
+      const pending = new Promise<Result>((resolve) => {
+        complete = resolve;
+      });
+      const fetchNextPage = vi
+        .fn()
+        .mockReturnValueOnce(pending)
+        .mockResolvedValue({ data: { pages: [...pages, ...pages] }, hasNextPage: false });
+      mocks.useUnmatchedLibraryItems.mockReturnValue({
+        data: { pages },
+        hasNextPage: true,
+        isFetching: false,
+        fetchNextPage,
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <AdminLibraries />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      fireEvent.click(screen.getByText("Unmatched Items"));
+      fireEvent.click(screen.getByTitle("Next page"));
+      expect(screen.getByText("Page 1")).toBeDefined();
+      fireEvent.click(screen.getByTitle("Last page"));
+      expect(fetchNextPage).toHaveBeenCalledTimes(1);
+      if (action === "search") {
+        fireEvent.change(
+          screen.getByPlaceholderText("Search all unmatched items by title, library, or type..."),
+          { target: { value: "new search" } },
+        );
+      } else {
+        fireEvent.click(screen.getByTitle(action === "first" ? "First page" : "Previous page"));
+      }
+      await act(async () => {
+        complete({ data: { pages: pages.concat(pages.slice(0, 1)) }, hasNextPage: true });
+        await pending;
+      });
+      expect(fetchNextPage).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Page 0")).toBeDefined();
+    },
+  );
+
   it("renders an unmatched items section collapsed by default when unmatched items exist", () => {
-    mocks.useUnmatchedLibraryItems.mockReturnValue({
-      data: {
-        items: [
-          {
-            content_id: "movie-99",
-            title: "Unknown Film",
-            year: 0,
-            content_type: "movie",
-            library_id: 1,
-            library_name: "Movies",
-            status: "unmatched",
-          },
-        ],
-        total: 1,
-      },
-      isLoading: false,
-    });
+    mocks.useUnmatchedLibraryItems.mockReturnValue(
+      unmatchedItemsResult([
+        {
+          content_id: "movie-99",
+          title: "Unknown Film",
+          year: 0,
+          content_type: "movie",
+          library_id: 1,
+          library_name: "Movies",
+          status: "unmatched",
+        },
+      ]),
+    );
 
     const markup = renderPage();
 
@@ -421,18 +488,24 @@ describe("AdminLibraries", () => {
 
   it("renders the Troubleshooting section collapsed by default when skipped roots exist", () => {
     mocks.useSkippedLibraryRoots.mockReturnValue({
-      data: [
-        {
-          library_id: 1,
-          library_name: "Movies",
-          root_path: "/media/movies/Unknown Movie",
-          reason: "missing_provider_ids",
-          file_count: 2,
-          sample_file_path: "/media/movies/Unknown Movie/movie.mkv",
-          first_seen_at: "2026-03-23T20:00:00Z",
-          last_seen_at: "2026-03-23T21:00:00Z",
-        },
-      ],
+      data: {
+        pages: [
+          {
+            roots: [
+              {
+                library_id: 1,
+                library_name: "Movies",
+                root_path: "/media/movies/Unknown Movie",
+                reason: "missing_provider_ids",
+                file_count: 2,
+                sample_file_path: "/media/movies/Unknown Movie/movie.mkv",
+                first_seen_at: "2026-03-23T20:00:00Z",
+                last_seen_at: "2026-03-23T21:00:00Z",
+              },
+            ],
+          },
+        ],
+      },
       isLoading: false,
     });
 

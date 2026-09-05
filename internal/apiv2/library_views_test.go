@@ -390,6 +390,13 @@ func TestUploadLibraryPoster(t *testing.T) {
 	if fake.lastPosterType != "image/png" || fake.lastPosterSize != 64 {
 		t.Fatalf("seam got %q %d", fake.lastPosterType, fake.lastPosterSize)
 	}
+	// At-limit posters allow client-controlled multipart headers larger than 4 KiB.
+	body, ct = posterForm(t, "poster", "image/png", maxPosterBytes)
+	body = strings.Replace(body, "filename=\"poster.png\"", "filename=\""+strings.Repeat("a", 8<<10)+".png\"", 1)
+	rec = do(t, h, http.MethodPut, "/api/v2/libraries/1/poster", body, with(bearer(adminToken), "Content-Type", ct))
+	if rec.Code != http.StatusOK || fake.lastPosterSize != maxPosterBytes {
+		t.Fatalf("at-limit poster: %d %s", rec.Code, rec.Body.String())
+	}
 	// A JSON body on a multipart operation is the unsupported media type.
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/libraries/1/poster", `{}`, bearer(adminToken)), TypeUnsupportedMediaType)
 	// The wrong field name and an unsupported image type are validation failures.

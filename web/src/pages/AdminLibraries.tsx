@@ -6,7 +6,6 @@ import type {
   Library,
   LibraryMountCheckResponse,
   LibraryRoot,
-  LibrarySkippedRoot,
   ScanRun,
   StaleMediaID,
   UnmatchedLibraryItem,
@@ -166,7 +165,6 @@ export default function AdminLibraries() {
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
-  const { data: skippedRoots = [] } = useSkippedLibraryRoots();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingLib, setEditingLib] = useState<Library | null>(null);
   const [confirmDeleteLib, setConfirmDeleteLib] = useState<Library | null>(null);
@@ -768,7 +766,7 @@ export default function AdminLibraries() {
           <UnmatchedItemsSection />
           <MetadataMatcherQueuesSection libraries={libraries} />
           <AmbiguousRootsSection libraries={libraries} />
-          {skippedRoots.length > 0 ? <SkippedRootsSection skippedRoots={skippedRoots} /> : null}
+          <SkippedRootsSection />
           <StaleIDsSection />
         </TabsContent>
 
@@ -1411,32 +1409,27 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
   const [editingRoot, setEditingRoot] = useState<LibraryRoot | null>(null);
   const effectiveSelectedLibraryId = selectedLibraryId ?? libraries[0]?.id;
   // The listing is paged on demand: the first page loads when the section
   // opens and "Load more" fetches the rest, so a large library does not make
-  // the server walk every root on mount.
+  // the server walk every root on mount. The search is server-side and spans
+  // every page, so a root on a later page is found without loading it; a new
+  // search term restarts paging from the first page.
   const {
     data: rootPages,
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous", { enabled: open });
+  } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous", {
+    enabled: open,
+    search: debouncedSearch,
+  });
   const roots = useMemo(() => flattenLibraryRoots(rootPages), [rootPages]);
   const totalRoots = rootPages?.pages[0]?.total ?? 0;
 
-  const filteredRoots = useMemo(() => {
-    if (!search) return roots;
-    const q = search.toLowerCase();
-    return roots.filter(
-      (root) =>
-        root.root_path.toLowerCase().includes(q) ||
-        root.title.toLowerCase().includes(q) ||
-        (root.sample_file_path ?? "").toLowerCase().includes(q),
-    );
-  }, [roots, search]);
-
-  const pag = usePagination(filteredRoots);
+  const pag = usePagination(roots);
 
   if (libraries.length === 0) {
     return null;
@@ -1498,7 +1491,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredRoots.length === 0 ? (
+            {roots.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
                   No ambiguous roots for this library.
@@ -1764,22 +1757,19 @@ function RootOverrideDialog({
 
 type SkippedSortField = "root_path" | "library" | "reason" | "first_seen" | "last_seen";
 
-function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoot[] }) {
+function SkippedRootsSection() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
+  const { data, hasNextPage, fetchNextPage, isFetchingNextPage } = useSkippedLibraryRoots({
+    enabled: open,
+    search: debouncedSearch,
+  });
+  const skippedRoots = useMemo(() => data?.pages.flatMap((page) => page.roots) ?? [], [data]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const { sortField, sortDir, toggle } = useSort<SkippedSortField>("last_seen", "desc");
 
-  const filtered = useMemo(() => {
-    if (!search) return skippedRoots;
-    const q = search.toLowerCase();
-    return skippedRoots.filter(
-      (r) =>
-        r.root_path.toLowerCase().includes(q) ||
-        r.library_name.toLowerCase().includes(q) ||
-        r.reason.toLowerCase().includes(q),
-    );
-  }, [skippedRoots, search]);
+  const filtered = skippedRoots;
 
   const sorted = useMemo(() => {
     const cmp = sortDir === "asc" ? 1 : -1;
@@ -1940,6 +1930,16 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
         </Table>
       </div>
       <PaginationBar {...pag} />
+      {hasNextPage ? (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
+          {isFetchingNextPage ? "Loading..." : "Load more"}
+        </Button>
+      ) : null}
     </CollapsibleDiagnosticsSection>
   );
 }
@@ -1948,17 +1948,52 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
 
 function UnmatchedItemsSection() {
   const [open, setOpen] = useState(false);
+  const navigationVersion = useRef(0);
+  useEffect(
+    () => () => {
+      navigationVersion.current++;
+    },
+    [],
+  );
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
   const [matchItem, setMatchItem] = useState<UnmatchedLibraryItem | null>(null);
-  const { data } = useUnmatchedLibraryItems(page, debouncedSearch);
-  const total = data?.total ?? 0;
+  // The listing is an infinite query that retains each loaded page's cursor:
+  // `page` indexes the loaded pages, Next fetches only when the next page is
+  // not loaded yet, and a refetch refreshes the loaded pages in place.
+  const { data, hasNextPage, fetchNextPage, isFetching } =
+    useUnmatchedLibraryItems(debouncedSearch);
+  const loadedPages = data?.pages ?? [];
+  const total = loadedPages[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / UNMATCHED_PAGE_SIZE));
-  const clamped = Math.min(page, totalPages - 1);
+  const clamped = Math.min(page, Math.max(loadedPages.length - 1, 0), totalPages - 1);
   const rangeStart = total === 0 ? 0 : clamped * UNMATCHED_PAGE_SIZE + 1;
   const rangeEnd = Math.min((clamped + 1) * UNMATCHED_PAGE_SIZE, total);
-  const items = data?.items ?? [];
+  const items = loadedPages[clamped]?.items ?? [];
+  const canNext = !isFetching && (clamped + 1 < loadedPages.length || hasNextPage);
+  const showPage = (index: number) => {
+    const version = ++navigationVersion.current;
+    if (index < loadedPages.length) {
+      setPage(index);
+      return;
+    }
+    // The page is not loaded yet: extend the cursor chain up to it, one
+    // request per missing page, then show it.
+    void (async () => {
+      let pages = loadedPages.length;
+      let more = hasNextPage;
+      while (pages <= index && more) {
+        const result = await fetchNextPage();
+        if (navigationVersion.current !== version) return;
+        const loaded = result.data?.pages.length ?? pages;
+        if (loaded === pages) break;
+        pages = loaded;
+        more = result.hasNextPage;
+      }
+      setPage(Math.max(0, pages - 1));
+    })();
+  };
 
   // Hide the section only when there are genuinely no unmatched items and no
   // active search — keep it mounted while searching so the box and the
@@ -1982,6 +2017,7 @@ function UnmatchedItemsSection() {
           onChange={(e) => {
             // Search is server-side and spans the whole table; jump back to
             // the first page so results start at the top as the query changes.
+            navigationVersion.current++;
             setSearch(e.target.value);
             setPage(0);
           }}
@@ -2050,11 +2086,11 @@ function UnmatchedItemsSection() {
           rangeStart={rangeStart}
           rangeEnd={rangeEnd}
           canPrev={clamped > 0}
-          canNext={clamped < totalPages - 1}
-          first={() => setPage(0)}
-          prev={() => setPage((p) => Math.max(0, p - 1))}
-          next={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-          last={() => setPage(totalPages - 1)}
+          canNext={canNext}
+          first={() => showPage(0)}
+          prev={() => showPage(Math.max(0, clamped - 1))}
+          next={() => showPage(clamped + 1)}
+          last={() => showPage(totalPages - 1)}
         />
       )}
       {matchItem && (
@@ -2083,6 +2119,7 @@ type StaleSortField = "title" | "year" | "library" | "provider" | "first_seen" |
 function StaleIDsSection() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
   const [matchItem, setMatchItem] = useState<StaleMediaID | null>(null);
   const { sortField, sortDir, toggle } = useSort<StaleSortField>("last_seen", "desc");
   // The listing is paged on demand: the first page loads when the section
@@ -2094,20 +2131,10 @@ function StaleIDsSection() {
     fetchNextPage,
     isFetchingNextPage,
     isFetched,
-  } = useStaleMediaIDs({ enabled: open });
+  } = useStaleMediaIDs({ enabled: open, search: debouncedSearch });
   const staleIDs = useMemo(() => flattenStaleMediaIDs(stalePages), [stalePages]);
 
-  const filtered = useMemo(() => {
-    if (!search) return staleIDs;
-    const q = search.toLowerCase();
-    return staleIDs.filter(
-      (s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.provider_id.toLowerCase().includes(q) ||
-        s.provider.toLowerCase().includes(q) ||
-        s.library_name.toLowerCase().includes(q),
-    );
-  }, [staleIDs, search]);
+  const filtered = staleIDs;
 
   const sorted = useMemo(() => {
     const cmp = sortDir === "asc" ? 1 : -1;
@@ -2134,7 +2161,7 @@ function StaleIDsSection() {
   const pag = usePagination(sorted);
 
   // Nothing to show once the first page confirms the table is empty.
-  if (isFetched && staleIDs.length === 0 && !hasNextPage) {
+  if (isFetched && !open && !search && staleIDs.length === 0 && !hasNextPage) {
     return null;
   }
 

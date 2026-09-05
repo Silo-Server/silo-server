@@ -300,7 +300,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every root the scanner skipped, across libraries. */
+    /** Page roots the scanner skipped, across libraries. */
     get: operations["listSkippedRoots"];
     put?: never;
     post?: never;
@@ -5446,6 +5446,8 @@ export interface operations {
         library_id: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Case-insensitive substring over root path, title and sample file path */
+        q?: string;
         /** @description Only roots in this inference state */
         state?: string;
       };
@@ -5816,7 +5818,14 @@ export interface operations {
   };
   listSkippedRoots: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over root path, library name or reason */
+        q?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;
@@ -5927,6 +5936,8 @@ export interface operations {
         cursor?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Substring over title, provider, provider ID or library name */
+        q?: string;
       };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */

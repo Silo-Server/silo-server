@@ -16,7 +16,6 @@ import type {
   LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
-  LibrarySkippedRoot,
   StaleMediaID,
   LibraryProviderChainResponse,
   ScanResponse,
@@ -226,13 +225,30 @@ export function useReorderLibraries() {
   });
 }
 
-export function useSkippedLibraryRoots() {
-  return useQuery({
-    queryKey: adminKeys.librarySkippedRoots(),
-    queryFn: ({ signal }): Promise<LibrarySkippedRoot[]> =>
-      v2("GET /api/v2/libraries/skipped-roots", { signal }).then((page) =>
-        page.items.map(skippedRootFromV2),
-      ),
+export function useSkippedLibraryRoots({
+  enabled = true,
+  search = "",
+}: { enabled?: boolean; search?: string } = {}) {
+  const query = search.trim();
+  return useInfiniteQuery({
+    queryKey: [...adminKeys.librarySkippedRoots(), query],
+    queryFn: async ({ pageParam, signal }) => {
+      const page = await v2("GET /api/v2/libraries/skipped-roots", {
+        query: {
+          limit: 50,
+          ...(query ? { q: query } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        signal,
+      });
+      return {
+        roots: page.items.map(skippedRootFromV2),
+        nextCursor: page.page?.has_more ? page.page.next_cursor : undefined,
+      };
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    enabled,
     staleTime: ADMIN_STALE_TIME,
   });
 }
@@ -251,11 +267,13 @@ export interface LibraryRootsPage {
 /**
  * Fetches one page of a library's observed roots. Every page makes the server
  * reload the library's overrides and item-group claims, so callers page on
- * demand rather than walking the whole listing up front.
+ * demand rather than walking the whole listing up front. The search is
+ * server-side over root path, title and sample file path across every page.
  */
 export async function fetchLibraryRootsPage(
   libraryId: number,
   state?: string,
+  search?: string,
   cursor?: string,
   signal?: AbortSignal,
 ): Promise<LibraryRootsPage> {
@@ -264,6 +282,7 @@ export async function fetchLibraryRootsPage(
       library_id: String(libraryId),
       limit: LIBRARY_ROOTS_PAGE_LIMIT,
       ...(state ? { state } : {}),
+      ...(search ? { q: search } : {}),
       ...(cursor === undefined ? {} : { cursor }),
     },
     signal,
@@ -278,17 +297,19 @@ export async function fetchLibraryRootsPage(
 /**
  * Pages a library's observed roots by cursor. The first page loads only while
  * `enabled` holds (the diagnostics section that shows the rows is collapsed
- * by default); further pages load through `fetchNextPage`.
+ * by default); further pages load through `fetchNextPage`. A change of
+ * `search` is a new query key, so paging restarts from the first page.
  */
 export function useLibraryRoots(
   libraryId?: number,
   state?: string,
-  { enabled = true }: { enabled?: boolean } = {},
+  { enabled = true, search = "" }: { enabled?: boolean; search?: string } = {},
 ) {
+  const trimmed = search.trim();
   return useInfiniteQuery({
-    queryKey: adminKeys.libraryRoots(libraryId, state),
+    queryKey: adminKeys.libraryRoots(libraryId, state, trimmed),
     queryFn: ({ pageParam, signal }) =>
-      fetchLibraryRootsPage(libraryId ?? 0, state, pageParam, signal),
+      fetchLibraryRootsPage(libraryId ?? 0, state, trimmed, pageParam, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: enabled && !!libraryId,
@@ -311,7 +332,9 @@ export function useUpsertLibraryRootOverride() {
         body: { ...override, library_id: String(library_id) },
       }),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryRoots(variables.library_id) });
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "libraries", "roots", variables.library_id],
+      });
       toast.success("Root override saved");
     },
     onError: (err) => {
@@ -328,7 +351,9 @@ export function useDeleteLibraryRootOverride() {
         query: { library_id: String(body.library_id), root_path: body.root_path },
       }),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryRoots(variables.library_id) });
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "libraries", "roots", variables.library_id],
+      });
       toast.success("Root override removed");
     },
     onError: (err) => {
@@ -352,10 +377,12 @@ export interface StaleMediaIDsPage {
 export async function fetchStaleMediaIDsPage(
   cursor?: string,
   signal?: AbortSignal,
+  search = "",
 ): Promise<StaleMediaIDsPage> {
   const page = await v2("GET /api/v2/libraries/stale-ids", {
     query: {
       limit: STALE_MEDIA_IDS_PAGE_LIMIT,
+      ...(search ? { q: search } : {}),
       ...(cursor === undefined ? {} : { cursor }),
     },
     signal,
@@ -371,10 +398,14 @@ export async function fetchStaleMediaIDsPage(
  * while `enabled` holds (the diagnostics section that shows the rows is
  * collapsed by default); further pages load through `fetchNextPage`.
  */
-export function useStaleMediaIDs({ enabled = true }: { enabled?: boolean } = {}) {
+export function useStaleMediaIDs({
+  enabled = true,
+  search = "",
+}: { enabled?: boolean; search?: string } = {}) {
+  const query = search.trim();
   return useInfiniteQuery({
-    queryKey: adminKeys.staleMediaIDs(),
-    queryFn: ({ pageParam, signal }) => fetchStaleMediaIDsPage(pageParam, signal),
+    queryKey: [...adminKeys.staleMediaIDs(), query],
+    queryFn: ({ pageParam, signal }) => fetchStaleMediaIDsPage(pageParam, signal, query),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled,
@@ -812,49 +843,48 @@ const UNMATCHED_PAGE_SIZE = 10;
 export interface UnmatchedLibraryItemsPage {
   items: UnmatchedLibraryItem[];
   total: number;
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
 }
 
 /**
- * Fetches page `page` of the unmatched-item listing. v2 is cursor paginated
- * and the admin table keeps a page number for its range label and total, so
- * the hook walks cursors from the first page to reach the requested one.
+ * Fetches one page of the unmatched-item listing; `cursor` is the previous
+ * page's `nextCursor`. The search is server-side and spans the whole table.
  */
 export async function fetchUnmatchedLibraryItemsPage(
-  page: number,
   search: string,
+  cursor?: string,
   signal?: AbortSignal,
 ): Promise<UnmatchedLibraryItemsPage> {
-  let cursor: string | undefined;
-  let index = 0;
-  for (;;) {
-    const result = await v2("GET /api/v2/libraries/unmatched-items", {
-      query: {
-        limit: UNMATCHED_PAGE_SIZE,
-        ...(search ? { q: search } : {}),
-        ...(cursor === undefined ? {} : { cursor }),
-      },
-      signal,
-    });
-    if (
-      index >= page ||
-      !result.page?.has_more ||
-      !result.page.next_cursor ||
-      result.page.next_cursor === cursor
-    ) {
-      return { items: result.items.map(unmatchedItemFromV2), total: result.total };
-    }
-    index += 1;
-    cursor = result.page.next_cursor;
-  }
+  const result = await v2("GET /api/v2/libraries/unmatched-items", {
+    query: {
+      limit: UNMATCHED_PAGE_SIZE,
+      ...(search ? { q: search } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return {
+    items: result.items.map(unmatchedItemFromV2),
+    total: result.total,
+    nextCursor:
+      result.page?.has_more && result.page.next_cursor ? result.page.next_cursor : undefined,
+  };
 }
 
-export function useUnmatchedLibraryItems(page = 0, search = "") {
+/**
+ * Pages the unmatched-item listing by cursor. The loaded pages keep their
+ * cursors, so opening page N costs one request and a refetch refreshes the
+ * loaded pages in place instead of walking the chain from the first page.
+ */
+export function useUnmatchedLibraryItems(search = "") {
   const trimmed = search.trim();
-  return useQuery({
-    queryKey: adminKeys.unmatchedItems(page, trimmed),
-    queryFn: ({ signal }) => fetchUnmatchedLibraryItemsPage(page, trimmed, signal),
+  return useInfiniteQuery({
+    queryKey: adminKeys.unmatchedItems(trimmed),
+    queryFn: ({ pageParam, signal }) => fetchUnmatchedLibraryItemsPage(trimmed, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     staleTime: ADMIN_STALE_TIME,
-    placeholderData: (prev) => prev,
   });
 }
 
