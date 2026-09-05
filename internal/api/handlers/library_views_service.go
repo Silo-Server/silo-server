@@ -68,11 +68,34 @@ type LibraryCollectionTabEntryView = libraryTabCollection
 // LibraryCollectionTabUngroupedView is the tab's ungrouped collections.
 type LibraryCollectionTabUngroupedView = libraryTabUngrouped
 
+// requireViewableLibrary is the gate every profile-scoped section read
+// shares: the viewer scope must admit the library and, when a folder
+// repository is wired, the library must exist. Both refusals are the same
+// not_found so a restricted profile cannot probe which libraries exist, and
+// an unrestricted one is not handed a fabricated default layout for an id
+// that was never a library.
+func (h *SectionHandler) requireViewableLibrary(ctx context.Context, libraryID int) error {
+	if !viewerCanAccessLibrary(ctx, libraryID) {
+		return apiError(http.StatusNotFound, "not_found", "Library not found")
+	}
+	if h.FolderRepo == nil {
+		return nil
+	}
+	if _, err := h.FolderRepo.GetByID(ctx, libraryID); err != nil {
+		if errors.Is(err, catalog.ErrFolderNotFound) {
+			return apiError(http.StatusNotFound, "not_found", "Library not found")
+		}
+		slog.ErrorContext(ctx, "loading library for section read", "component", "api", "library_id", libraryID, "error", err)
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load library")
+	}
+	return nil
+}
+
 // LibraryLayout answers the library's section layout for the profile on
 // the context.
 func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int) (SectionLayoutView, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return SectionLayoutView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return SectionLayoutView{}, err
 	}
 	resolved, _, _, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
@@ -95,8 +118,8 @@ func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int) (Sect
 
 // LibrarySections answers every section of the library with its items.
 func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, viewer SectionViewer) (SectionsView, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return SectionsView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return SectionsView{}, err
 	}
 	resolved, accessFilter, profileID, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
@@ -111,8 +134,8 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 
 // LibrarySectionItems answers one section of the library with its items.
 func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer) (SectionView, error) {
-	if !viewerCanAccessLibrary(ctx, libraryID) {
-		return SectionView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
+		return SectionView{}, err
 	}
 	resolved, accessFilter, profileID, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {

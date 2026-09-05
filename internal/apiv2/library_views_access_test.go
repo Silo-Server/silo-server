@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
@@ -102,4 +103,25 @@ func TestLibraryViewsAdmitAllowedLibraryDB(t *testing.T) {
 	}
 	policy.AllowedLibraryIDs = []int{libraryID + 1}
 	requireProblem(t, do(t, h, http.MethodGet, base+"/layout", "", viewerHeaders()), TypeNotFound)
+}
+
+// TestLibraryViewsRefuseUnknownLibraryDB: an unrestricted profile (no library
+// allowlist) still gets not_found from every section read of a library id
+// that does not exist, instead of a fabricated default layout. The same
+// handler answers 200 for a library that does exist, so the refusal is the
+// existence check and not the scope check.
+func TestLibraryViewsRefuseUnknownLibraryDB(t *testing.T) {
+	pool := viewerAccessTestPool(t)
+	libraryID := seedLibrary(t, pool, fmt.Sprintf("scope-unknown-%d", time.Now().UnixNano()))
+	policy := &access.Scope{}
+	svc := handlers.NewSectionHandler(sections.NewRepository(pool), sections.NewFetcher(pool))
+	svc.FolderRepo = catalogpkg.NewFolderRepository(pool)
+	h := newTestHandler(t, scopedViewerDeps(t, policy, svc, &fakeLibraryViews{}))
+	if rec := do(t, h, http.MethodGet, fmt.Sprintf("/api/v2/library/%d/layout", libraryID), "", viewerHeaders()); rec.Code != 200 {
+		t.Fatalf("existing library: %d %s", rec.Code, rec.Body.String())
+	}
+	const missing = "/api/v2/library/999999"
+	for _, path := range []string{missing + "/layout", missing + "/sections", missing + "/sections/x/items"} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
+	}
 }
