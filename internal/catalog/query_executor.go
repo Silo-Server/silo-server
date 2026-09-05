@@ -13,6 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+const querySortTitle = "title"
+
 type QueryExecutor struct {
 	Pool  *pgxpool.Pool
 	Scope string
@@ -433,7 +435,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		// paths. Only the built-in episode relation guarantees the unique IDs
 		// and simple, deterministic title sort required by deferred hydration.
 		deferEpisodeHydration: isEpisodeCatalogScope(effectiveScope) && offset > 0 &&
-			NormalizeQuerySort(def.Sort).Field == "title" && len(sortPlan.Joins) == 0 && len(ctes) == 0,
+			NormalizeQuerySort(def.Sort).Field == querySortTitle && len(sortPlan.Joins) == 0 && len(ctes) == 0,
 	}, nil
 }
 
