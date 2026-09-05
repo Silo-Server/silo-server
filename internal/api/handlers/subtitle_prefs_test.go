@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -299,5 +300,32 @@ func TestSetSubtitlePreferenceCanonicalWithoutAnyOverrideClearsForced(t *testing
 	legacy, err := store.GetSubtitlePreference(ctx, "profile-1", "series-1")
 	if err != nil || legacy == nil || legacy.HasShowForcedSubtitles {
 		t.Fatalf("legacy row = %+v, %v; want one without a forced override", legacy, err)
+	}
+}
+
+// TestSetSubtitlePreferenceCanonicalStampsUpdatedAtOnSQLite guards the v2
+// seam against the SQLite store: updateSubtitlePreference sends no UpdatedAt,
+// and a read after the write must carry a parseable timestamp, not the empty
+// string.
+func TestSetSubtitlePreferenceCanonicalStampsUpdatedAtOnSQLite(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
+	ctx := newAuthorizedPlaybackContext()
+
+	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1",
+		SubtitleLanguage: "ja", SubtitleTrackIndex: 2, SubtitleMode: "always",
+	}); err != nil {
+		t.Fatalf("SetSubtitlePreferenceCanonical: %v", err)
+	}
+	pref, err := handler.GetSubtitlePreference(ctx, 1, "profile-1", "series-1")
+	if err != nil {
+		t.Fatalf("GetSubtitlePreference: %v", err)
+	}
+	if pref.UpdatedAt == "" {
+		t.Fatal("updated_at is empty after a v2-seam write")
+	}
+	if ts, err := time.Parse(time.RFC3339Nano, pref.UpdatedAt); err != nil || ts.IsZero() {
+		t.Fatalf("updated_at %q is not a valid RFC3339 instant: %v", pref.UpdatedAt, err)
 	}
 }

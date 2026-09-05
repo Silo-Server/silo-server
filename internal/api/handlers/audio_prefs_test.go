@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -77,5 +78,30 @@ func TestLegacyAudioPreferenceKeepsTrackIdentityAndSyncsCanonicalLanguage(t *tes
 	rec = routeAudioPref(t, handler, http.MethodDelete, "series-1", nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSetAudioPreferenceStampsUpdatedAtOnSQLite guards the v2 seam against
+// the SQLite store: updateAudioPreference sends no UpdatedAt, and a read
+// after the write must carry a parseable timestamp, not the empty string.
+func TestSetAudioPreferenceStampsUpdatedAtOnSQLite(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	handler := NewAudioPrefHandler(testUserStoreProvider{store: store})
+	ctx := newAuthorizedPlaybackContext()
+
+	if err := handler.SetAudioPreference(ctx, 1, userstore.AudioPreference{
+		ProfileID: "profile-1", SeriesID: "series-1", AudioTrackIndex: 2, AudioLanguage: "ja",
+	}); err != nil {
+		t.Fatalf("SetAudioPreference: %v", err)
+	}
+	pref, err := handler.GetAudioPreference(ctx, 1, "profile-1", "series-1")
+	if err != nil {
+		t.Fatalf("GetAudioPreference: %v", err)
+	}
+	if pref.UpdatedAt == "" {
+		t.Fatal("updated_at is empty after a v2-seam write")
+	}
+	if ts, err := time.Parse(time.RFC3339Nano, pref.UpdatedAt); err != nil || ts.IsZero() {
+		t.Fatalf("updated_at %q is not a valid RFC3339 instant: %v", pref.UpdatedAt, err)
 	}
 }
