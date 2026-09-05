@@ -201,6 +201,7 @@ func registerAll(reg *Registry) {
 	// Alphabetical by domain file; registration order is deterministic.
 	registerAccount(reg)
 	registerAdminUsers(reg)
+	registerAuth(reg)
 	registerDeviceLogin(reg)
 	registerProfiles(reg)
 	registerProgress(reg)

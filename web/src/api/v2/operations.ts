@@ -19,4 +19,7 @@ export const v2Operations = {
   "POST /api/v2/auth/device/deny": "denyDeviceLogin",
   "POST /api/v2/auth/device/poll": "pollDeviceLogin",
   "POST /api/v2/auth/device/start": "startDeviceLogin",
+  "POST /api/v2/auth/impersonation/end": "endImpersonation",
+  "POST /api/v2/auth/login": "login",
+  "POST /api/v2/auth/logout": "logout",
 } as const;

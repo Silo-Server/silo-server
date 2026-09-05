@@ -99,6 +99,8 @@ type Dependencies struct {
 	// Devices drives the device-pairing state machine
 	// (*handlers.AuthHandler).
 	Devices DeviceLoginService
+	// Sessions opens and closes login sessions (*handlers.AuthHandler).
+	Sessions SessionService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -383,6 +385,14 @@ type ProfileService interface {
 type LibraryService interface {
 	// ExistingIDs returns the subset of ids that name a library.
 	ExistingIDs(ctx context.Context, ids []int) ([]int, error)
+}
+
+// SessionService is the slice of *handlers.AuthHandler the login-session
+// operations use.
+type SessionService interface {
+	Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error)
+	Logout(ctx context.Context, claims *auth.Claims) error
+	EndImpersonation(ctx context.Context, claims *auth.Claims) error
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing

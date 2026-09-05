@@ -19935,13 +19935,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/impersonation/end",
+        "operation_id": "endImpersonation"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Authenticated. Same 204; v1 400 not_impersonating became 409 conflict (the request is well formed, the session state is not impersonating); a refused return stays 403."
     },
     {
       "listener": "api",
@@ -20008,13 +20008,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/login",
+        "operation_id": "login"
       },
-      "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, login rate-limit bucket; both registrations are one operation. Same token-pair body {access_token, refresh_token, expires_in, user} with user in the getCurrentUser shape (string id, role enum). Blank username/password is 422 at the member; wrong credentials are 401 invalid_token (not authentication_required); a disabled account is 403. Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -20083,13 +20083,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/login",
+        "operation_id": "login"
       },
-      "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, login rate-limit bucket; both registrations are one operation. Same token-pair body {access_token, refresh_token, expires_in, user} with user in the getCurrentUser shape (string id, role enum). Blank username/password is 422 at the member; wrong credentials are 401 invalid_token (not authentication_required); a disabled account is 403. Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -20176,13 +20176,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/logout",
+        "operation_id": "logout"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Authenticated. Same 204 with no body; the session id comes from the gate claims."
     },
     {
       "listener": "api",

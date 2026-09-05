@@ -227,6 +227,7 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
 	deps.Devices = fixtureDevices()
+	deps.Sessions = &fakeSessionService{}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
@@ -392,4 +393,49 @@ func fixtureDevices() fakeDevices {
 		"br-consumed":  {Status: auth.DeviceLoginStatusConsumed, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
 		"br-denied":    {Status: auth.DeviceLoginStatusDenied, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
 	}}
+}
+
+// fakeSessionService stands in for the login-session seam on
+// *handlers.AuthHandler.
+type fakeSessionService struct {
+	// loggedOut and ended record the session ids the calls received.
+	loggedOut []string
+	ended     []string
+	err       error
+}
+
+func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
+	if f.err != nil {
+		return handlers.TokenPairView{}, f.err
+	}
+	if in.Username == "" || in.Password == "" {
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 400, Code: "bad_request", Message: "Username and password are required"}
+	}
+	switch {
+	case in.Username == "laura" && in.Password == "pw":
+		return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+	case in.Username == "off":
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "user_disabled", Message: "User account is disabled"}
+	}
+	return handlers.TokenPairView{}, &handlers.APIError{Status: 401, Code: "invalid_credentials", Message: "Invalid username or password"}
+}
+
+func (f *fakeSessionService) Logout(_ context.Context, claims *auth.Claims) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.loggedOut = append(f.loggedOut, claims.SessionID)
+	return nil
+}
+
+func (f *fakeSessionService) EndImpersonation(_ context.Context, claims *auth.Claims) error {
+	if f.err != nil {
+		return f.err
+	}
+	if claims.ImpersonatorUserID == nil {
+		return &handlers.APIError{Status: 400, Code: "not_impersonating", Message: "No active impersonation session"}
+	}
+	f.ended = append(f.ended, claims.SessionID)
+	return nil
 }

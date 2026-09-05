@@ -187,30 +187,85 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Username == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Username and password are required")
+	// Extract device name from User-Agent header and IP from request.
+	view, err := h.Login(r.Context(), LoginInput{
+		Provider:   req.Provider,
+		Username:   req.Username,
+		Password:   req.Password,
+		DeviceName: r.UserAgent(),
+		IP:         clientip.FromContext(r.Context()),
+	})
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
-	// Extract device name from User-Agent header and IP from request.
-	deviceName := r.UserAgent()
-	ip := clientip.FromContext(r.Context())
+	writeJSON(w, http.StatusOK, loginResponseOf(view))
+}
 
-	pair, user, err := h.service.LoginWithProvider(r.Context(), req.Provider, req.Username, req.Password, deviceName, ip)
+// LoginInput is a password login as the transport received it.
+type LoginInput struct {
+	Provider   string
+	Username   string
+	Password   string
+	DeviceName string
+	IP         string
+}
+
+// loginResponseOf renders the shared credential view in the v1 shape.
+func loginResponseOf(v TokenPairView) loginResponse {
+	return loginResponse(v)
+}
+
+// Login authenticates a username and password and opens a login session. v1
+// POST /auth/login and v2 login both call it; a failure is an *APIError.
+func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, error) {
+	if in.Username == "" || in.Password == "" {
+		return TokenPairView{}, apiError(http.StatusBadRequest, "bad_request", "Username and password are required")
+	}
+	pair, user, err := h.service.LoginWithProvider(ctx, in.Provider, in.Username, in.Password, in.DeviceName, in.IP)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
-			writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid username or password")
-			return
+			return TokenPairView{}, apiError(http.StatusUnauthorized, "invalid_credentials", "Invalid username or password")
 		}
 		if errors.Is(err, auth.ErrUserDisabled) {
-			writeError(w, http.StatusForbidden, "user_disabled", "User account is disabled")
-			return
+			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
-		return
+		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
+	return TokenPairView{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
+	}, nil
+}
 
-	writeJSON(w, http.StatusOK, buildLoginResponse(pair, user, effectiveDownloadAllowed(r.Context(), user, h.accessGroups), nil))
+// Logout revokes the caller's login session. v1 POST /auth/logout and v2
+// logout both call it.
+func (h *AuthHandler) Logout(ctx context.Context, claims *auth.Claims) error {
+	if err := h.service.Logout(ctx, claims.SessionID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return nil
+}
+
+// EndImpersonation returns an impersonating session to the administrator.
+// v1 POST /auth/impersonation/end and v2 endImpersonation both call it.
+func (h *AuthHandler) EndImpersonation(ctx context.Context, claims *auth.Claims) error {
+	if claims.ImpersonatorUserID == nil {
+		return apiError(http.StatusBadRequest, "not_impersonating", "No active impersonation session")
+	}
+	if err := h.service.EndImpersonation(ctx, claims.SessionID, *claims.ImpersonatorUserID); err != nil {
+		if errors.Is(err, auth.ErrNotImpersonating) {
+			return apiError(http.StatusBadRequest, "not_impersonating", "No active impersonation session")
+		}
+		if errors.Is(err, auth.ErrImpersonationNotAllowed) {
+			return apiError(http.StatusForbidden, "impersonation_not_allowed", "Impersonation is not allowed")
+		}
+		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return nil
 }
 
 func (h *AuthHandler) HandleProviders(w http.ResponseWriter, r *http.Request) {
@@ -294,8 +349,8 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.Logout(r.Context(), claims.SessionID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	if err := h.Logout(r.Context(), claims); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
@@ -309,21 +364,8 @@ func (h *AuthHandler) HandleEndImpersonation(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
 		return
 	}
-	if claims.ImpersonatorUserID == nil {
-		writeError(w, http.StatusBadRequest, "not_impersonating", "No active impersonation session")
-		return
-	}
-
-	if err := h.service.EndImpersonation(r.Context(), claims.SessionID, *claims.ImpersonatorUserID); err != nil {
-		if errors.Is(err, auth.ErrNotImpersonating) {
-			writeError(w, http.StatusBadRequest, "not_impersonating", "No active impersonation session")
-			return
-		}
-		if errors.Is(err, auth.ErrImpersonationNotAllowed) {
-			writeError(w, http.StatusForbidden, "impersonation_not_allowed", "Impersonation is not allowed")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	if err := h.EndImpersonation(r.Context(), claims); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 

@@ -1884,6 +1884,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if authHandler != nil {
 		v2deps.Accounts = authHandler
 		v2deps.Devices = authHandler
+		v2deps.Sessions = authHandler
 	}
 	if progressHandler != nil {
 		v2deps.Progress = progressHandler
