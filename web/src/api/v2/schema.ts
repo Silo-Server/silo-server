@@ -147,7 +147,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB). */
+    /** Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB; the whole request, framing included, at most 11 MiB). */
     put: operations["uploadProfileAvatar"];
     post?: never;
     /** Remove a profile's uploaded avatar; a preset avatar is left as is. */

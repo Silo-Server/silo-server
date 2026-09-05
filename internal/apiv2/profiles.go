@@ -271,7 +271,7 @@ func registerProfiles(reg *Registry) {
 	}, reg.verifyProfilePIN)
 
 	upload := humaOp(http.MethodPut, Prefix+"/profiles/{id}/avatar", "uploadProfileAvatar", "profiles",
-		"Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB).")
+		"Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB; the whole request, framing included, at most 11 MiB).")
 	Register(reg, Operation{
 		Operation: upload,
 		// As v1 PUT /profiles/{id}/avatar: any signed-in caller on the
@@ -301,12 +301,16 @@ func registerProfiles(reg *Registry) {
 	}, reg.deleteProfileAvatar)
 }
 
-// maxAvatarBytes is v1's avatar limit (10 MiB); maxAvatarFormBytes leaves
-// room for the multipart framing around it so the file limit, not the
-// request limit, is what a slightly-too-large image hits.
+// maxAvatarBytes is v1's avatar limit (10 MiB). maxAvatarFormBytes is the
+// whole-request cap: the file plus maxAvatarFramingBytes of multipart
+// framing (boundaries and the client-chosen part headers, filename
+// included), so a valid upload at the file limit is judged by the file
+// limit and never by the request cap. The framing allowance is part of
+// the documented contract.
 const (
-	maxAvatarBytes     = 10 << 20
-	maxAvatarFormBytes = maxAvatarBytes + 64<<10
+	maxAvatarBytes        = 10 << 20
+	maxAvatarFramingBytes = 1 << 20
+	maxAvatarFormBytes    = maxAvatarBytes + maxAvatarFramingBytes
 )
 
 // ProfileIDInput is the request of an operation addressing one profile.

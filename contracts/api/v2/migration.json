@@ -36711,7 +36711,7 @@
         "path": "/api/v2/profiles/{id}/avatar",
         "operation_id": "uploadProfileAvatar"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Huma multipart operation (form part avatar, image/jpeg, image/png or image/webp). A JSON body is 415; a part outside the declared types or an undecodable image is 422 at body.avatar (v1: 400); an avatar over 10 MiB is 413 payload_too_large; a missing upload store is 503 dependency_unavailable. Demo-restricted in v2; v1's demo guard does not block it."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Huma multipart operation (form part avatar, image/jpeg, image/png or image/webp). A JSON body is 415; a part outside the declared types or an undecodable image is 422 at body.avatar (v1: 400); an avatar over 10 MiB is 413 payload_too_large, as is a whole request over 11 MiB (the file limit plus a 1 MiB allowance for multipart framing, part headers and filename included); a missing upload store is 503 dependency_unavailable. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",

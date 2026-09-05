@@ -554,6 +554,14 @@ func TestUploadProfileAvatar(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", huge, with(bearer(memberToken), "Content-Type", ct)), TypePayloadTooLarge)
 	large, _ := avatarForm("image/png", strings.Repeat("x", maxAvatarBytes+1))
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", large, with(bearer(memberToken), "Content-Type", ct)), TypePayloadTooLarge)
+	// An avatar exactly at the file limit is accepted even when the client
+	// spends most of the framing allowance on its own part headers (a long
+	// filename): the request cap covers the documented file limit plus
+	// framing, so the file limit is the only limit a valid upload meets.
+	atLimit := fixtureMultipart("avatar", strings.Repeat("n", 200<<10)+".png", "image/png", strings.Repeat("x", maxAvatarBytes))
+	if rec := do(t, h, http.MethodPut, "/api/v2/profiles/p-owner/avatar", atLimit, with(bearer(memberToken), "Content-Type", ct)); rec.Code != 200 {
+		t.Fatalf("avatar at the file limit with 200 KiB of framing: %d %s", rec.Code, rec.Body.String())
+	}
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-missing/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeNotFound)
 	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{view: fixtureProfileView(), noAvatarStore: true})), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeDependencyUnavailable)
 	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: errors.New("boom")})), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeInternalError)

@@ -4833,7 +4833,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB).",
+        "summary": "Replace a profile's avatar with an uploaded image (multipart form, part `avatar`: JPEG, PNG or WebP, at most 10 MiB; the whole request, framing included, at most 11 MiB).",
         "tags": [
           "profiles"
         ],
