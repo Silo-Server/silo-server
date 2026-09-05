@@ -931,23 +931,41 @@ type PluginSettingsWriteInput struct {
 	Body           PluginSettingsWrite
 }
 
+// The seam's names for rejected request members, and the locations the
+// operations declare those members at.
+const (
+	fieldKey    = "key"
+	fieldKeys   = "keys"
+	fieldValues = "values"
+
+	locationPathKey        = "path.key"
+	locationQueryKeys      = "query.keys"
+	locationQueryScope     = "query.scope"
+	locationQueryLibraryID = "query.library_id"
+	locationBodyValue      = "body.value"
+	locationBodyValues     = "body.values"
+	locationBodyKeys       = "body.keys"
+	locationBodyItem       = "body.item"
+	locationBodyContexts   = "body.contexts"
+)
+
 // settingFieldLocations maps the seam's rejected-field names onto the
 // request locations the operations declare them at.
 var settingFieldLocations = map[string]string{
-	"key":            "path.key",
-	"keys":           "query.keys",
-	"scope":          "query.scope",
+	fieldKey:         locationPathKey,
+	fieldKeys:        locationQueryKeys,
+	"scope":          locationQueryScope,
 	"profile_id":     "query.profile_id",
 	"profile_header": locationProfileHeader,
-	"device_id":      "query.device_id",
+	fieldDeviceID:    "query.device_id",
 	"device_header":  "header." + deviceIDHeader,
 	"client_family":  "header." + clientFamilyHeader,
-	"library_id":     "query.library_id",
+	"library_id":     locationQueryLibraryID,
 	"series_id":      "query.series_id",
-	"value":          "body.value",
-	"item":           "body.item",
+	"value":          locationBodyValue,
+	"item":           locationBodyItem,
 	"present":        "body.present",
-	"contexts":       "body.contexts",
+	"contexts":       locationBodyContexts,
 }
 
 // settingValueProblem renders the seam's decision. A rejected request
@@ -959,7 +977,7 @@ func settingValueProblem(err error, overrides map[string]string) *Problem {
 	if !errors.As(err, &apiErr) || apiErr.Field == "" || apiErr.Status >= 500 {
 		return serviceProblem(err)
 	}
-	unknownKey := apiErr.Status == http.StatusNotFound && (apiErr.Field == "key" || apiErr.Field == "keys")
+	unknownKey := apiErr.Status == http.StatusNotFound && (apiErr.Field == fieldKey || apiErr.Field == fieldKeys)
 	if apiErr.Status != http.StatusBadRequest && !unknownKey {
 		return serviceProblem(err)
 	}
@@ -1027,7 +1045,7 @@ func (reg *Registry) listSettingValues(ctx context.Context, in *SettingValuesInp
 	}
 	views, err := reg.deps.SettingValues.ListSettingValues(ctx, userID, in.Keys, in.identity(ctx, ""))
 	if err != nil {
-		return nil, settingValueProblem(err, map[string]string{"key": "query.keys"})
+		return nil, settingValueProblem(err, map[string]string{fieldKey: locationQueryKeys})
 	}
 	items := make([]ExplicitSettingValue, 0, len(views))
 	for _, v := range views {
@@ -1081,7 +1099,7 @@ func (reg *Registry) resolveEffectiveSettings(ctx context.Context, in *Effective
 	}
 	views, err := reg.deps.SettingValues.ResolveEffectiveSettingContexts(ctx, userID, q, contexts)
 	if err != nil {
-		return nil, settingValueProblem(err, map[string]string{"keys": "body.keys"})
+		return nil, settingValueProblem(err, map[string]string{fieldKeys: locationBodyKeys})
 	}
 	items := make([]EffectiveSettingContext, 0, len(views))
 	for _, v := range views {
@@ -1117,7 +1135,7 @@ func (reg *Registry) updatePluginSettings(ctx context.Context, in *PluginSetting
 		return nil, NewProblem(TypeNotFound, "Plugin installation not found")
 	}
 	if err := reg.deps.PluginSettings.SetUserPluginSettings(ctx, claims.UserID, id, NonNilMap(map[string]string(in.Body.Values))); err != nil {
-		return nil, settingValueProblem(err, map[string]string{"values": "body.values"})
+		return nil, settingValueProblem(err, map[string]string{fieldValues: locationBodyValues})
 	}
 	view, err := reg.deps.PluginSettings.GetUserPluginSettings(ctx, claims.UserID, id)
 	if err != nil {

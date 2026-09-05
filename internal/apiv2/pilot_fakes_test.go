@@ -527,7 +527,7 @@ func (f *fakeSettingValuesSeam) SetSettingValue(_ context.Context, _ int, req ha
 		return handlers.SettingValueView{}, settingAPIError(400, "invalid_value", "value", "value must be a non-empty string")
 	}
 	f.revision++
-	id.Value, id.Revision, id.UpdatedAt = json.RawMessage(value), f.revision, fixedTime().Format(time.RFC3339Nano)
+	id.Value, id.Revision, id.UpdatedAt = value, f.revision, fixedTime().Format(time.RFC3339Nano)
 	f.values[settingRowKey(id)] = id
 	return id, nil
 }

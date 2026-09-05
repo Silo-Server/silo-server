@@ -145,7 +145,7 @@ func TestSubtitleAppearanceDeviceOverrideValidation(t *testing.T) {
 	}
 	// A value that is not JSON is the seam's decision, rendered at body.value.
 	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/device/subtitle-appearance", `{"value":"not json"}`, device), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.value" || p.Errors[0].Code != codeInvalid {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationBodyValue || p.Errors[0].Code != codeInvalid {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	// Unknown members are refused; the member is required.
@@ -154,7 +154,7 @@ func TestSubtitleAppearanceDeviceOverrideValidation(t *testing.T) {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/device/subtitle-appearance", `{}`, device), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.value" || p.Errors[0].Code != codeRequired {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationBodyValue || p.Errors[0].Code != codeRequired {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 }
@@ -281,7 +281,7 @@ func TestUpdatePluginSettings(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/abc", `{"values":{}}`, bearer(memberToken)), TypeNotFound)
 	// The member is required and its values are strings; unknown members are refused.
 	p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{}`, bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.values" || p.Errors[0].Code != codeRequired {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationBodyValues || p.Errors[0].Code != codeRequired {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{"region":1}}`, bearer(memberToken)), TypeValidationFailed)
@@ -290,7 +290,7 @@ func TestUpdatePluginSettings(t *testing.T) {
 	plugins := deps.PluginSettings.(*fakePluginSettingsSeam)
 	plugins.err = &handlers.APIError{Status: 400, Code: "bad_request", Message: "region must be one of us, eu", Field: "values"}
 	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/plugins/3", `{"values":{"region":"xx"}}`, bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.values" || p.Errors[0].Code != codeInvalid {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationBodyValues || p.Errors[0].Code != codeInvalid {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	plugins.err = nil
@@ -363,17 +363,17 @@ func TestSettingValueValidation(t *testing.T) {
 		headers                  map[string]string
 		location, code           string
 	}{
-		{"scope required", http.MethodGet, "/api/v2/settings/values/ui.theme", "", settingsOwner(), "query.scope", codeRequired},
-		{"scope enum", http.MethodGet, "/api/v2/settings/values/ui.theme?scope=global", "", settingsOwner(), "query.scope", codeInvalidEnum},
-		{"unknown key is 422, not 404", http.MethodGet, "/api/v2/settings/values/no.such?scope=profile", "", settingsOwner(), "path.key", codeInvalid},
+		{"scope required", http.MethodGet, "/api/v2/settings/values/ui.theme", "", settingsOwner(), locationQueryScope, codeRequired},
+		{"scope enum", http.MethodGet, "/api/v2/settings/values/ui.theme?scope=global", "", settingsOwner(), locationQueryScope, codeInvalidEnum},
+		{"unknown key is 422, not 404", http.MethodGet, "/api/v2/settings/values/no.such?scope=profile", "", settingsOwner(), locationPathKey, codeInvalid},
 		{"device header missing", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_device", `{"value":"x"}`, settingsOwner(), "header." + deviceIDHeader, codeInvalid},
 		{"client family missing", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_client", `{"value":"x"}`, settingsOwner(), "header." + clientFamilyHeader, codeInvalid},
 		{"client family enum", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile_client", `{"value":"x"}`, with(settingsOwner(), "X-Silo-Client-Family", "toaster"), "header.X-Silo-Client-Family", codeInvalidEnum},
-		{"library id", http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile_library&library_id=9", "", settingsOwner(), "query.library_id", codeInvalid},
-		{"value required", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{}`, settingsOwner(), "body.value", codeRequired},
+		{"library id", http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile_library&library_id=9", "", settingsOwner(), locationQueryLibraryID, codeInvalid},
+		{"value required", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{}`, settingsOwner(), locationBodyValue, codeRequired},
 		{"unknown member", http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"x","mutation_id":"1"}`, settingsOwner(), "body.mutation_id", codeUnknownField},
-		{"nav.shortcuts whole-document write refused", http.MethodPut, "/api/v2/settings/values/nav.shortcuts?scope=profile", `{"value":{"items":[]}}`, settingsOwner(), "path.key", codeInvalid},
-		{"nav.shortcuts delete refused", http.MethodDelete, "/api/v2/settings/values/nav.shortcuts?scope=profile", "", settingsOwner(), "path.key", codeInvalid},
+		{"nav.shortcuts whole-document write refused", http.MethodPut, "/api/v2/settings/values/nav.shortcuts?scope=profile", `{"value":{"items":[]}}`, settingsOwner(), locationPathKey, codeInvalid},
+		{"nav.shortcuts delete refused", http.MethodDelete, "/api/v2/settings/values/nav.shortcuts?scope=profile", "", settingsOwner(), locationPathKey, codeInvalid},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -413,11 +413,11 @@ func TestListSettingValues(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile&keys=ui.theme,playback.preferred_quality", "", settingsOwner()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.keys" {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationQueryKeys {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile", "", settingsOwner()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.keys" || p.Errors[0].Code != codeRequired {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationQueryKeys || p.Errors[0].Code != codeRequired {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values?scope=profile&keys=ui.theme", "", bearer(memberToken)), TypeValidationFailed)
@@ -444,7 +444,7 @@ func TestListEffectiveSettings(t *testing.T) {
 		t.Fatalf("all: %d %s", rec.Code, rec.Body.String())
 	}
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective?keys=no.such", "", settingsOwner()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.keys" {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationQueryKeys {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/effective?library_ids=x", "", settingsOwner()), TypeValidationFailed)
@@ -467,13 +467,13 @@ func TestResolveEffectiveSettings(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	cases := []struct{ name, body, location string }{
-		{"keys required", `{"contexts":[{"context_id":"a","library_id":"3"}]}`, "body.keys"},
-		{"keys empty", `{"keys":[],"contexts":[{"context_id":"a","library_id":"3"}]}`, "body.keys"},
-		{"unknown key", `{"keys":["no.such"],"contexts":[{"context_id":"a","library_id":"3"}]}`, "body.keys"},
-		{"contexts empty", `{"keys":["ui.theme"],"contexts":[]}`, "body.contexts"},
+		{"keys required", `{"contexts":[{"context_id":"a","library_id":"3"}]}`, locationBodyKeys},
+		{"keys empty", `{"keys":[],"contexts":[{"context_id":"a","library_id":"3"}]}`, locationBodyKeys},
+		{"unknown key", `{"keys":["no.such"],"contexts":[{"context_id":"a","library_id":"3"}]}`, locationBodyKeys},
+		{"contexts empty", `{"keys":["ui.theme"],"contexts":[]}`, locationBodyContexts},
 		{"context id required", `{"keys":["ui.theme"],"contexts":[{"library_id":"3"}]}`, "body.contexts[0].context_id"},
-		{"context needs content", `{"keys":["ui.theme"],"contexts":[{"context_id":"a"}]}`, "body.contexts"},
-		{"duplicate context", `{"keys":["ui.theme"],"contexts":[{"context_id":"a","library_id":"3"},{"context_id":"a","library_id":"3"}]}`, "body.contexts"},
+		{"context needs content", `{"keys":["ui.theme"],"contexts":[{"context_id":"a"}]}`, locationBodyContexts},
+		{"duplicate context", `{"keys":["ui.theme"],"contexts":[{"context_id":"a","library_id":"3"},{"context_id":"a","library_id":"3"}]}`, locationBodyContexts},
 		{"unknown member", `{"keys":["ui.theme"],"contexts":[{"context_id":"a","library_id":"3","item_id":"x"}]}`, "body.contexts[0].item_id"},
 	}
 	for _, c := range cases {
@@ -511,7 +511,7 @@ func TestUpdateNavigationShortcut(t *testing.T) {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":{"type":"library"},"present":true}`, settingsOwner()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.item" || p.Errors[0].Code != codeInvalid {
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationBodyItem || p.Errors[0].Code != codeInvalid {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/settings/values/nav.shortcuts/item", `{"item":"movies","present":true}`, settingsOwner()), TypeValidationFailed)
