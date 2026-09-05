@@ -152,7 +152,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 					t.Errorf("%s documents %d = %v, want %v", id, status, ok, want)
 				}
 			}
-			if got := declaresHeader(op, profileTokenHeader); got != profileToken[id] {
+			if got := documentsHeaderParam(op, profileTokenHeader); got != profileToken[id] {
 				t.Errorf("%s documents %s = %v, want %v", id, profileTokenHeader, got, profileToken[id])
 			}
 			if op["requestBody"] == nil {
@@ -174,10 +174,10 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	}
 }
 
-// declaresHeader reports whether the decoded operation documents the header
+// documentsHeaderParam reports whether the decoded operation documents the header
 // parameter, and requires it to be optional with a description: the token
 // is proof for a locked profile, never a requirement of its own.
-func declaresHeader(op map[string]any, name string) bool {
+func documentsHeaderParam(op map[string]any, name string) bool {
 	params, _ := op["parameters"].([]any)
 	for _, raw := range params {
 		p, _ := raw.(map[string]any)

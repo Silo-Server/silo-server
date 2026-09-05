@@ -154,7 +154,7 @@ func profileHeaderParam(class Class) *huma.Param {
 func ifMatchParam() *huma.Param {
 	return &huma.Param{
 		Name:        ifMatchField,
-		In:          "header",
+		In:          paramInHeader,
 		Required:    true,
 		Description: "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
 		Schema:      &huma.Schema{Type: "string"},
@@ -169,7 +169,7 @@ func ifMatchParam() *huma.Param {
 func ifNoneMatchGuardedParam() *huma.Param {
 	return &huma.Param{
 		Name:        ifNoneMatchField,
-		In:          "header",
+		In:          paramInHeader,
 		Required:    false,
 		Description: "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
 		Schema:      &huma.Schema{Type: "string"},
@@ -183,7 +183,7 @@ func ifNoneMatchGuardedParam() *huma.Param {
 func ifMatchOptionalParam() *huma.Param {
 	return &huma.Param{
 		Name:        ifMatchField,
-		In:          "header",
+		In:          paramInHeader,
 		Required:    false,
 		Description: "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
 		Schema:      &huma.Schema{Type: "string"},
@@ -193,7 +193,7 @@ func ifMatchOptionalParam() *huma.Param {
 func ifNoneMatchCreateParam() *huma.Param {
 	return &huma.Param{
 		Name:        ifNoneMatchField,
-		In:          "header",
+		In:          paramInHeader,
 		Required:    false,
 		Description: "\"*\" makes the request create-only: a resource already stored at this id is 412 precondition_failed with its current ETag. Absent, the request replaces or creates.",
 		Schema:      &huma.Schema{Type: "string"},
