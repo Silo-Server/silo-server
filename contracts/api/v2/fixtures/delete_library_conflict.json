@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/conflict",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "A library deletion is already queued or running",
+  "instance": "urn:silo:request:00000000000000000000001c"
+}
+

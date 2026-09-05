@@ -144,13 +144,29 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"uploadProfileAvatar":            {http.StatusOK: true, http.StatusRequestEntityTooLarge: true, http.StatusUnsupportedMediaType: true},
 		"verifyProfilePIN":               {http.StatusOK: true, http.StatusNotFound: true},
 		"listHouseholdSessions":          {http.StatusOK: true, http.StatusForbidden: true},
+		"createLibrary":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true},
+		"updateLibrary":                  {http.StatusNotFound: true, http.StatusConflict: true},
+		"deleteLibrary":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusAccepted: true},
+		"setRootOverride":                {http.StatusNotFound: true, http.StatusConflict: true, http.StatusNoContent: true},
+		"listLibraries":                  {http.StatusNotFound: true, http.StatusConflict: false},
 	}
+	// Every operation the viewer-access gate fronts documents the header;
+	// the acting-admin class resolves the declared profile the same way.
 	profileToken := map[string]bool{
 		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
 		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
 		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
 		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
 	}
+	for _, id := range libraryOperationIDs {
+		profileToken[id] = true
+	}
+	for _, id := range libraryViewOperationIDs {
+		profileToken[id] = true
+	}
+	expect["refreshLibraryMetadata"] = map[int]bool{http.StatusNotFound: true, http.StatusConflict: true, http.StatusAccepted: true}
+	expect["uploadLibraryPoster"] = map[int]bool{http.StatusNotFound: true, http.StatusRequestEntityTooLarge: true, http.StatusUnsupportedMediaType: true}
+	expect["getLibraryLayout"] = map[int]bool{http.StatusNotFound: true, http.StatusConflict: false}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
 		for method, raw := range item.(map[string]any) {
@@ -221,13 +237,34 @@ func TestGeneratedDocumentRequestMediaTypes(t *testing.T) {
 				t.Errorf("%s %s documents a body with no media type", method, path)
 			}
 			for mediaType := range content {
-				if !requestMediaTypeOK(mediaType) {
-					t.Errorf("%s %s documents request media type %q that the listener rejects with 415", method, path, mediaType)
+				if structuredMediaTypeOK(mediaType) {
+					continue
 				}
+				// A multipart operation takes multipart only (mediaTypeGuard).
+				if mediaType == mediaTypeMultipart && len(content) == 1 {
+					continue
+				}
+				t.Errorf("%s %s documents request media type %q that the listener rejects with 415", method, path, mediaType)
 			}
 		}
 	}
 	if bodies == 0 {
 		t.Fatal("no operation with a request body; the media-type rule is untested")
 	}
+}
+
+// libraryOperationIDs is every acting-admin library operation the
+// catalog-libraries section registers.
+var libraryOperationIDs = []string{
+	"listLibraries", "createLibrary", "updateLibrary", "deleteLibrary", "checkLibraryMount",
+	"listMetadataMatchQueues", "getLibraryProviderDefaults", "reorderLibraries", "listLibraryRoots",
+	"setRootOverride", "deleteRootOverride", "listSkippedRoots", "listStaleIds", "rematchStaleId", "listUnmatchedItems",
+	"confirmEmptyRootCleanup", "getMetadataMatchQueue", "retryMetadataMatchQueue", "cancelMetadataMatchQueue", "refreshLibraryMetadata",
+	"getLibraryProviders", "setLibraryProviders", "uploadLibraryPoster", "deleteLibraryPoster",
+}
+
+// libraryViewOperationIDs is every profile-scoped library read the
+// catalog-libraries section registers.
+var libraryViewOperationIDs = []string{
+	"getLibraryLayout", "listLibrarySections", "getLibrarySectionItems", "getLibraryCollections", "getLibraryCollectionItems", "listLibraryUserCollections",
 }

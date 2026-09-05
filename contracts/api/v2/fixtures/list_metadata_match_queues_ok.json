@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "library_id": "1",
+      "movie_count": 2,
+      "series_count": 0,
+      "raw_file_count": 0,
+      "total_count": 2,
+      "pending_count": 1,
+      "parked_count": 1
+    },
+    {
+      "library_id": "2",
+      "movie_count": 2,
+      "series_count": 0,
+      "raw_file_count": 0,
+      "total_count": 2,
+      "pending_count": 1,
+      "parked_count": 1
+    }
+  ]
+}
+

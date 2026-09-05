@@ -8,8 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -296,6 +294,10 @@ type staleMediaIDResponse struct {
 	ProviderID  string `json:"provider_id"`
 	FirstSeenAt string `json:"first_seen_at"`
 	LastSeenAt  string `json:"last_seen_at"`
+	// FirstSeen and LastSeen carry the instants the formatted strings above
+	// render, for the v2 view; they are not part of the v1 document.
+	FirstSeen time.Time `json:"-"`
+	LastSeen  time.Time `json:"-"`
 }
 
 type libraryRootResponse struct {
@@ -487,18 +489,11 @@ func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.
 
 // HandleListLibraries handles GET /libraries.
 func (h *LibraryHandler) HandleListLibraries(w http.ResponseWriter, r *http.Request) {
-	folders, err := h.folderRepo.List(r.Context())
+	resp, err := h.ListLibraries(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "listing libraries", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list libraries")
+		writeAPIError(w, err)
 		return
 	}
-
-	resp := make([]libraryResponse, 0, len(folders))
-	for _, f := range folders {
-		resp = append(resp, h.toLibraryResponseWithPoster(r.Context(), f))
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -514,9 +509,8 @@ func (h *LibraryHandler) HandleReorderLibraries(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if err := h.folderRepo.Reorder(r.Context(), req.Entries); err != nil {
-		slog.ErrorContext(r.Context(), "reordering libraries", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reorder libraries")
+	if err := h.ReorderLibraries(r.Context(), req.Entries); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -524,44 +518,11 @@ func (h *LibraryHandler) HandleReorderLibraries(w http.ResponseWriter, r *http.R
 
 // HandleListSkippedRoots handles GET /libraries/skipped-roots.
 func (h *LibraryHandler) HandleListSkippedRoots(w http.ResponseWriter, r *http.Request) {
-	if h.SkippedRootRepo == nil {
-		writeJSON(w, http.StatusOK, []librarySkippedRootResponse{})
-		return
-	}
-
-	folders, err := h.folderRepo.List(r.Context())
+	resp, err := h.ListSkippedRoots(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "listing libraries for skipped roots", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list libraries")
+		writeAPIError(w, err)
 		return
 	}
-
-	folderNames := make(map[int]string, len(folders))
-	for _, folder := range folders {
-		folderNames[folder.ID] = folder.Name
-	}
-
-	roots, err := h.SkippedRootRepo.ListAll(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "listing skipped roots", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list skipped roots")
-		return
-	}
-
-	resp := make([]librarySkippedRootResponse, 0, len(roots))
-	for _, root := range roots {
-		resp = append(resp, librarySkippedRootResponse{
-			LibraryID:      root.MediaFolderID,
-			LibraryName:    folderNames[root.MediaFolderID],
-			RootPath:       root.RootPath,
-			Reason:         root.Reason,
-			SampleFilePath: root.SampleFilePath,
-			FileCount:      root.FileCount,
-			FirstSeenAt:    root.FirstSeenAt,
-			LastSeenAt:     root.LastSeenAt,
-		})
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -572,80 +533,12 @@ func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-
-	if len(req.Paths) == 0 || req.Type == "" || req.Name == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Paths, type, and name are required")
-		return
-	}
-	if req.MetadataLanguage != "" && !validMetadataLanguages[req.MetadataLanguage] {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid metadata_language; must be a valid ISO 639-1 code")
-		return
-	}
-	if req.ChapterThumbnailsEnabled && h.S3Meta == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Chapter thumbnails require configured public asset S3 storage")
-		return
-	}
-
-	folder, err := h.folderRepo.Create(r.Context(), catalog.CreateFolderInput{
-		Paths:                    req.Paths,
-		Type:                     req.Type,
-		Name:                     req.Name,
-		MetadataLanguage:         req.MetadataLanguage,
-		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
-		IntroDetectionEnabled:    req.IntroDetectionEnabled,
-		TrailerKinds:             req.TrailerKinds,
-	})
+	resp, err := h.CreateLibrary(r.Context(), req)
 	if err != nil {
-		if errors.Is(err, catalog.ErrDuplicatePath) {
-			writeError(w, http.StatusConflict, "conflict", "A library with this path already exists")
-			return
-		}
-		slog.ErrorContext(r.Context(), "creating library", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create library")
+		writeAPIError(w, err)
 		return
 	}
-
-	// Seed default sections for the new library.
-	if h.SectionRepo != nil {
-		if seedErr := h.SectionRepo.SeedDefaults(r.Context(), "library", &folder.ID, sections.DefaultLibrarySectionsForType(&folder.ID, folder.Type)); seedErr != nil {
-			slog.WarnContext(r.Context(), "seed default sections for new library", "component", "api", "library_id", folder.ID, "error", seedErr)
-		}
-		if sections.IsAudiobookLibraryType(folder.Type) {
-			if _, seedErr := h.SectionRepo.EnsureHomeContinueListeningSection(r.Context()); seedErr != nil {
-				slog.WarnContext(r.Context(), "ensure home continue listening section", "component", "api", "library_id", folder.ID, "error", seedErr)
-			}
-		}
-		if _, seedErr := h.SectionRepo.CreateGeneratedHomeLibraryRecentSections(r.Context(), folder.ID, folder.Name, folder.Type); seedErr != nil {
-			slog.WarnContext(r.Context(), "seed generated home sections for new library", "component", "api", "library_id", folder.ID, "error", seedErr)
-		}
-	}
-
-	// Seed default provider chain from plugin manifest defaults.
-	if h.ChainRepo != nil {
-		entries := h.seedDefaultChain(r.Context(), req.Type)
-		if len(entries) > 0 {
-			if seedErr := h.ChainRepo.SetChain(r.Context(), folder.ID, entries); seedErr != nil {
-				slog.WarnContext(r.Context(), "seed default chain failed", "component", "api", "folder_id", folder.ID, "error", seedErr)
-			}
-		}
-	}
-
-	// Kick off an initial scan so content appears immediately.
-	if h.ScanQueue != nil {
-		if _, err := h.ScanQueue.EnqueueLibraryScan(r.Context(), folder.ID, "library_created"); err != nil {
-			slog.WarnContext(r.Context(), "queue initial library scan failed", "component", "api", "library_id", folder.ID, "error", err)
-		}
-	} else {
-		initialScanID := ulid.Make().String()
-		h.recordAcceptedScan(initialScanID, &scantrigger.Target{
-			Folder:  folder,
-			Mode:    scantrigger.ModeLibrary,
-			Trigger: "library_created",
-		})
-		h.runFolderScanAsync(initialScanID, folder, "library_created")
-	}
-
-	writeJSON(w, http.StatusCreated, h.toLibraryResponseWithPoster(r.Context(), folder))
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // HandleUpdateLibrary handles PUT /libraries/{id}.
@@ -655,114 +548,17 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
 		return
 	}
-
 	var req updateLibraryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if req.MetadataLanguage != nil && *req.MetadataLanguage != "" && !validMetadataLanguages[*req.MetadataLanguage] {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid metadata_language; must be a valid ISO 639-1 code")
-		return
-	}
-	if req.ChapterThumbnailsEnabled != nil && *req.ChapterThumbnailsEnabled && h.S3Meta == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Chapter thumbnails require configured public asset S3 storage")
-		return
-	}
-
-	// Fetch the folder before updating so we can detect path changes.
-	oldFolder, err := h.folderRepo.GetByID(r.Context(), id)
+	resp, err := h.UpdateLibrary(r.Context(), id, currentAdminUserID(r), req)
 	if err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "fetching library for update", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
+		writeAPIError(w, err)
 		return
 	}
-
-	err = h.folderRepo.Update(r.Context(), id, catalog.UpdateFolderInput{
-		Paths:                    req.Paths,
-		Type:                     req.Type,
-		Name:                     req.Name,
-		Enabled:                  req.Enabled,
-		MetadataLanguage:         req.MetadataLanguage,
-		AutoTranslateMetadata:    req.AutoTranslateMetadata,
-		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
-		IntroDetectionEnabled:    req.IntroDetectionEnabled,
-		TrailerKinds:             req.TrailerKinds,
-	})
-	if err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		if errors.Is(err, catalog.ErrDuplicatePath) {
-			writeError(w, http.StatusConflict, "conflict", "A library with this path already exists")
-			return
-		}
-		slog.ErrorContext(r.Context(), "updating library", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update library")
-		return
-	}
-
-	// Fetch the updated folder to return it.
-	folder, err := h.folderRepo.GetByID(r.Context(), id)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "fetching updated library", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch updated library")
-		return
-	}
-
-	if h.SectionRepo != nil && oldFolder.Name != folder.Name {
-		if syncErr := h.SectionRepo.SyncGeneratedHomeLibraryRecentTitles(r.Context(), id, oldFolder.Name, folder.Name); syncErr != nil {
-			slog.WarnContext(r.Context(), "sync generated home section titles", "component", "api", "library_id", id, "error", syncErr)
-		}
-	}
-
-	// Re-fetch metadata when the library's metadata language changed, so
-	// existing items adopt the new language instead of keeping the one
-	// stamped at first match. Quick mode suffices: the refresh item lister
-	// includes complete-but-language-mismatched items.
-	languageChanged := !strings.EqualFold(strings.TrimSpace(oldFolder.MetadataLanguage), strings.TrimSpace(folder.MetadataLanguage))
-	if languageChanged {
-		h.wakeMetadataMatcher(r.Context(), folder.ID)
-	}
-	if h.JobRepo != nil && languageChanged {
-		job, jobErr := h.JobRepo.CreateLibraryRefresh(r.Context(), currentAdminUserID(r), adminjob.LibraryRefreshRequest{
-			LibraryID:   folder.ID,
-			LibraryName: folder.Name,
-			Mode:        adminjob.LibraryRefreshModeQuick,
-		}, "Queued metadata refresh after library language change")
-		if jobErr != nil {
-			var conflict *adminjob.ActiveJobConflictError
-			if !errors.As(jobErr, &conflict) {
-				slog.WarnContext(r.Context(), "queue language-change metadata refresh failed", "component", "api", "library_id", folder.ID, "error", jobErr)
-			}
-		} else {
-			publishEventJob(r.Context(), h.EventsHub, "job.created", job)
-		}
-	}
-
-	// Rescan when paths have changed (folders added or removed).
-	if req.Paths != nil && !slices.Equal(oldFolder.Paths, *req.Paths) {
-		if h.ScanQueue != nil {
-			if _, err := h.ScanQueue.EnqueueLibraryScan(r.Context(), folder.ID, "library_paths_changed"); err != nil {
-				slog.WarnContext(r.Context(), "queue library path-change scan failed", "component", "api", "library_id", folder.ID, "error", err)
-			}
-		} else {
-			updateScanID := ulid.Make().String()
-			h.recordAcceptedScan(updateScanID, &scantrigger.Target{
-				Folder:  folder,
-				Mode:    scantrigger.ModeLibrary,
-				Trigger: "library_paths_changed",
-			})
-			h.runFolderScanAsync(updateScanID, folder, "library_paths_changed")
-		}
-	}
-
-	writeJSON(w, http.StatusOK, h.toLibraryResponseWithPoster(r.Context(), folder))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleDeleteLibrary handles DELETE /libraries/{id}.
@@ -772,79 +568,17 @@ func (h *LibraryHandler) HandleDeleteLibrary(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
 		return
 	}
-
-	if h.JobRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Library delete jobs are not configured")
-		return
-	}
-
-	folder, err := h.folderRepo.GetByID(r.Context(), id)
+	job, err := h.DeleteLibrary(r.Context(), id, currentAdminUserID(r))
 	if err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "fetching library before delete", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load library")
-		return
-	}
-
-	wasEnabled := folder.Enabled
-	if wasEnabled {
-		disabled := false
-		if err := h.folderRepo.Update(r.Context(), folder.ID, catalog.UpdateFolderInput{Enabled: &disabled}); err != nil {
-			slog.ErrorContext(r.Context(), "disabling library before delete", "component", "api", "library_id", folder.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare library deletion")
-			return
-		}
-		folder.Enabled = false
-	}
-
-	job, err := h.JobRepo.Create(r.Context(), adminjob.CreateJobInput{
-		JobType:         adminjob.JobTypeDeleteLibrary,
-		CreatedByUserID: currentAdminUserID(r),
-		RequestPayload: adminjob.DeleteLibraryRequest{
-			LibraryID:   folder.ID,
-			LibraryName: folder.Name,
-		},
-		Message: "Queued library deletion",
-	})
-	if err != nil {
-		if wasEnabled {
-			enabled := true
-			if revertErr := h.folderRepo.Update(r.Context(), folder.ID, catalog.UpdateFolderInput{Enabled: &enabled}); revertErr != nil {
-				slog.ErrorContext(r.Context(), "re-enabling library after failed delete queue", "component", "api",
-					"library_id", folder.ID,
-					"queue_error", err,
-					"revert_error", revertErr,
-				)
-			}
-		}
 		var conflict *adminjob.ActiveJobConflictError
-		if errors.As(err, &conflict) {
-			jobsHandler := NewAdminJobsHandler(nil, nil)
-			writeAdminJobConflict(w, "A library deletion is already queued or running", conflict.Job, jobsHandler, r)
+		var apiErr *APIError
+		if errors.As(err, &conflict) && errors.As(err, &apiErr) {
+			writeAdminJobConflict(w, apiErr.Message, conflict.Job, NewAdminJobsHandler(nil, nil), r)
 			return
 		}
-		slog.ErrorContext(r.Context(), "queuing library delete job", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue library delete")
+		writeAPIError(w, err)
 		return
 	}
-
-	if h.ingester != nil {
-		cancelled := h.ingester.CancelLibrary(folder.ID)
-		slog.InfoContext(r.Context(), "library delete: cancelled running scans", "component", "api", "library_id", folder.ID, "cancelled", cancelled)
-	}
-	if h.ScanQueue != nil {
-		queuedCancelled, err := h.ScanQueue.CancelAcceptedByLibrary(r.Context(), folder.ID)
-		if err != nil {
-			slog.WarnContext(r.Context(), "library delete: failed to cancel queued scans", "component", "api", "library_id", folder.ID, "error", err)
-		} else if queuedCancelled > 0 {
-			slog.InfoContext(r.Context(), "library delete: cancelled queued scans", "component", "api", "library_id", folder.ID, "cancelled", queuedCancelled)
-		}
-	}
-	publishEventJob(r.Context(), h.EventsHub, "job.created", job)
-
 	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, nil))
 }
 
@@ -856,32 +590,11 @@ func (h *LibraryHandler) HandleCheckLibraryMount(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
 		return
 	}
-
-	folder, err := h.folderRepo.GetByID(r.Context(), id)
+	resp, err := h.CheckLibraryMount(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "fetching library for mount check", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
+		writeAPIError(w, err)
 		return
 	}
-
-	resp := h.checkLibraryMount(r.Context(), folder)
-	if resp.Healthy && folder.ScanWarningCode != nil &&
-		(*folder.ScanWarningCode == "empty_root" || *folder.ScanWarningCode == "dead_root") {
-		if err := h.folderRepo.ClearScanWarning(r.Context(), folder.ID); err != nil {
-			if errors.Is(err, catalog.ErrFolderNotFound) {
-				writeError(w, http.StatusNotFound, "not_found", "Library not found")
-				return
-			}
-			slog.ErrorContext(r.Context(), "clearing empty-root warning after successful mount check", "component", "api", "library_id", folder.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear library warning")
-			return
-		}
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1409,6 +1122,10 @@ type libraryMetadataMatchQueueDetailResponse struct {
 	Movies   []libraryMovieMatchQueueEntryResponse  `json:"movies"`
 	Series   []librarySeriesMatchQueueEntryResponse `json:"series"`
 	RawFiles []libraryRawMatchBacklogEntryResponse  `json:"raw_files"`
+	// The list totals are not on the v1 wire; the v2 listener pages on them.
+	MovieTotal   int `json:"-"`
+	SeriesTotal  int `json:"-"`
+	RawFileTotal int `json:"-"`
 }
 
 type libraryMovieMatchQueueEntryResponse struct {
@@ -1459,35 +1176,11 @@ type libraryRawMatchBacklogEntryResponse struct {
 }
 
 func (h *LibraryHandler) HandleListMetadataMatchQueues(w http.ResponseWriter, r *http.Request) {
-	if h.folderRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Library repository is not configured")
-		return
-	}
-
-	folders, err := h.folderRepo.List(r.Context())
+	resp, err := h.ListMetadataMatchQueues(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "metadata queue: failed to list libraries", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher queues")
+		writeAPIError(w, err)
 		return
 	}
-
-	folderIDs := make([]int, 0, len(folders))
-	for _, folder := range folders {
-		if folder != nil {
-			folderIDs = append(folderIDs, folder.ID)
-		}
-	}
-	statuses, err := h.metadataMatchQueueStatuses(r.Context(), folderIDs)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "metadata queue: failed to load queue statuses", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queues")
-		return
-	}
-	resp := make([]libraryMetadataMatchQueueStatusResponse, 0, len(folderIDs))
-	for _, folderID := range folderIDs {
-		resp = append(resp, statuses[folderID])
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1500,14 +1193,6 @@ func (h *LibraryHandler) HandleGetMetadataMatchQueue(w http.ResponseWriter, r *h
 	id, err := parseIDParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
 		return
 	}
 
@@ -1524,99 +1209,11 @@ func (h *LibraryHandler) HandleGetMetadataMatchQueue(w http.ResponseWriter, r *h
 		}
 	}
 
-	status, err := h.metadataMatchQueueStatus(r.Context(), id)
+	resp, err := h.GetMetadataMatchQueue(r.Context(), id, limit, offset)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "metadata queue: failed to load queue status", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queue")
+		writeAPIError(w, err)
 		return
 	}
-
-	resp := libraryMetadataMatchQueueDetailResponse{
-		libraryMetadataMatchQueueStatusResponse: status,
-		Limit:                                   limit,
-		Offset:                                  offset,
-		Movies:                                  []libraryMovieMatchQueueEntryResponse{},
-		Series:                                  []librarySeriesMatchQueueEntryResponse{},
-		RawFiles:                                []libraryRawMatchBacklogEntryResponse{},
-	}
-	if h.MovieMatchQueueRepo != nil {
-		movies, _, err := h.MovieMatchQueueRepo.ListByFolder(r.Context(), id, limit, offset)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to list movie queue", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher queue")
-			return
-		}
-		for _, entry := range movies {
-			resp.Movies = append(resp.Movies, libraryMovieMatchQueueEntryResponse{
-				MediaFileID:               entry.MediaFileID,
-				MediaFolderID:             entry.MediaFolderID,
-				FilePath:                  entry.FilePath,
-				FirstQueuedAt:             entry.FirstQueuedAt,
-				AvailableAt:               entry.AvailableAt,
-				LastAttemptedAt:           entry.LastAttemptedAt,
-				AttemptCount:              entry.AttemptCount,
-				LastError:                 entry.LastError,
-				State:                     entry.State,
-				FailureKind:               entry.FailureKind,
-				FailureDetail:             entry.FailureDetail,
-				DeterministicAttemptCount: entry.DeterministicAttemptCount,
-				MatcherRevision:           entry.MatcherRevision,
-				ParkedAt:                  entry.ParkedAt,
-				UpdatedAt:                 entry.UpdatedAt,
-			})
-		}
-	}
-	if h.SeriesMatchQueueRepo != nil {
-		series, _, err := h.SeriesMatchQueueRepo.ListByFolder(r.Context(), id, limit, offset)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to list series queue", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher queue")
-			return
-		}
-		for _, entry := range series {
-			resp.Series = append(resp.Series, librarySeriesMatchQueueEntryResponse{
-				MediaFolderID:             entry.MediaFolderID,
-				ObservedRootPath:          entry.ObservedRootPath,
-				FirstQueuedAt:             entry.FirstQueuedAt,
-				AvailableAt:               entry.AvailableAt,
-				LastAttemptedAt:           entry.LastAttemptedAt,
-				AttemptCount:              entry.AttemptCount,
-				LastError:                 entry.LastError,
-				State:                     entry.State,
-				FailureKind:               entry.FailureKind,
-				FailureDetail:             entry.FailureDetail,
-				DeterministicAttemptCount: entry.DeterministicAttemptCount,
-				MatcherRevision:           entry.MatcherRevision,
-				ParkedAt:                  entry.ParkedAt,
-				UpdatedAt:                 entry.UpdatedAt,
-			})
-		}
-	}
-	if h.RawMatchBacklogRepo != nil {
-		rawFiles, _, err := h.RawMatchBacklogRepo.ListUnmatchedMatchBacklogByFolder(r.Context(), id, h.rawMatchBacklogMode(), limit, offset)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to list raw backlog", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher backlog")
-			return
-		}
-		for _, file := range rawFiles {
-			if file == nil {
-				continue
-			}
-			resp.RawFiles = append(resp.RawFiles, libraryRawMatchBacklogEntryResponse{
-				MediaFileID:     file.ID,
-				MediaFolderID:   file.MediaFolderID,
-				FilePath:        file.FilePath,
-				BaseTitle:       file.BaseTitle,
-				BaseYear:        file.BaseYear,
-				BaseType:        file.BaseType,
-				LastAttemptedAt: file.MatchAttemptedAt,
-				CreatedAt:       file.CreatedAt,
-				UpdatedAt:       file.UpdatedAt,
-			})
-		}
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1631,59 +1228,12 @@ func (h *LibraryHandler) HandleRetryMetadataMatchQueue(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
 		return
 	}
-	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
-		return
-	}
-
-	if h.SeriesMatchQueueRepo != nil {
-		if err := h.SeriesMatchQueueRepo.SyncForFolder(r.Context(), id); err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to retry series queue", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
-			return
-		}
-		if _, err := h.SeriesMatchQueueRepo.RetryNowByFolder(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
-			return
-		}
-	}
-	if h.MovieMatchQueueRepo != nil {
-		if err := h.MovieMatchQueueRepo.SyncForFolder(r.Context(), id); err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to retry movie queue", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
-			return
-		}
-		if _, err := h.MovieMatchQueueRepo.RetryNowByFolder(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
-			return
-		}
-	}
-	rawFileRetried := 0
-	if h.RawMatchBacklogRepo != nil {
-		rawFileRetried, err = h.RawMatchBacklogRepo.RetryUnmatchedMatchBacklogByFolder(r.Context(), id, h.rawMatchBacklogMode())
-		if err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to retry raw backlog", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
-			return
-		}
-	}
-
-	status, err := h.metadataMatchQueueStatus(r.Context(), id)
+	resp, err := h.RetryMetadataMatchQueue(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "metadata queue: failed to load retried queue status", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queue")
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, libraryMetadataMatchQueueActionResponse{
-		Status:         "queued",
-		LibraryID:      id,
-		RawFileRetried: rawFileRetried,
-		Queue:          status,
-	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *LibraryHandler) HandleCancelMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
@@ -1697,58 +1247,12 @@ func (h *LibraryHandler) HandleCancelMetadataMatchQueue(w http.ResponseWriter, r
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
 		return
 	}
-	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
-		return
-	}
-
-	seriesCancelled := 0
-	if h.SeriesMatchQueueRepo != nil {
-		seriesCancelled, err = h.SeriesMatchQueueRepo.DeleteByFolder(r.Context(), id)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to cancel series queue", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel metadata matcher")
-			return
-		}
-	}
-	movieCancelled := 0
-	if h.MovieMatchQueueRepo != nil {
-		movieCancelled, err = h.MovieMatchQueueRepo.DeleteByFolder(r.Context(), id)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to cancel movie queue", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel metadata matcher")
-			return
-		}
-	}
-	rawFileCancelled := 0
-	if h.RawMatchBacklogRepo != nil {
-		rawFileCancelled, err = h.RawMatchBacklogRepo.SuppressUnmatchedMatchBacklogByFolder(r.Context(), id, h.rawMatchBacklogMode())
-		if err != nil {
-			slog.ErrorContext(r.Context(), "metadata queue: failed to suppress raw backlog", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel metadata matcher")
-			return
-		}
-	}
-
-	status, err := h.metadataMatchQueueStatus(r.Context(), id)
+	resp, err := h.CancelMetadataMatchQueue(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "metadata queue: failed to load cancelled queue status", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queue")
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, libraryMetadataMatchQueueActionResponse{
-		Status:           "cancelled",
-		LibraryID:        id,
-		MovieCancelled:   movieCancelled,
-		SeriesCancelled:  seriesCancelled,
-		RawFileCancelled: rawFileCancelled,
-		TotalCancelled:   movieCancelled + seriesCancelled + rawFileCancelled,
-		Queue:            status,
-	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *LibraryHandler) metadataMatchBacklogConfigured() bool {
@@ -1857,33 +1361,17 @@ func (h *LibraryHandler) HandleRefreshLibraryMetadata(w http.ResponseWriter, r *
 		}
 	}
 
-	folder, err := h.folderRepo.GetByID(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
-		return
-	}
-
-	job, err := h.JobRepo.CreateLibraryRefresh(r.Context(), currentAdminUserID(r), adminjob.LibraryRefreshRequest{
-		LibraryID:   folder.ID,
-		LibraryName: folder.Name,
-		Mode:        mode,
-	}, fmt.Sprintf("Queued %s library metadata refresh", mode))
+	job, err := h.RefreshLibraryMetadata(r.Context(), id, currentAdminUserID(r), mode)
 	if err != nil {
 		var conflict *adminjob.ActiveJobConflictError
-		if errors.As(err, &conflict) {
-			jobsHandler := NewAdminJobsHandler(nil, nil)
-			writeAdminJobConflict(w, "A metadata refresh is already queued or running for this library", conflict.Job, jobsHandler, r)
+		var apiErr *APIError
+		if errors.As(err, &conflict) && errors.As(err, &apiErr) {
+			writeAdminJobConflict(w, apiErr.Message, conflict.Job, NewAdminJobsHandler(nil, nil), r)
 			return
 		}
-		slog.ErrorContext(r.Context(), "library: queue library refresh failed", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue library metadata refresh")
+		writeAPIError(w, err)
 		return
 	}
-	publishEventJob(r.Context(), h.EventsHub, "job.created", job)
 
 	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, nil))
 }
@@ -1897,12 +1385,8 @@ func (h *LibraryHandler) HandleConfirmEmptyRootCleanup(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := h.folderRepo.AllowEmptyCleanupOnce(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to confirm cleanup")
+	if err := h.ConfirmEmptyRootCleanup(r.Context(), id); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
@@ -1928,8 +1412,7 @@ func (h *LibraryHandler) HandleUploadPoster(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	folder, err := h.folderRepo.GetByID(r.Context(), id)
-	if err != nil {
+	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Library not found")
 			return
@@ -1939,7 +1422,7 @@ func (h *LibraryHandler) HandleUploadPoster(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Parse multipart form (max 10 MB).
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
+	if err := r.ParseMultipartForm(maxLibraryPosterBytes); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid multipart form")
 		return
 	}
@@ -1951,44 +1434,25 @@ func (h *LibraryHandler) HandleUploadPoster(w http.ResponseWriter, r *http.Reque
 	}
 	defer file.Close()
 
-	// Validate content type.
+	// Validate content type before reading the bytes, as v1 always has.
 	ct := header.Header.Get("Content-Type")
-	ext := posterExtension(ct)
-	if ext == "" {
+	if posterExtension(ct) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported image type; use JPEG, PNG, or WebP")
 		return
 	}
 
-	data, err := io.ReadAll(io.LimitReader(file, 10<<20+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxLibraryPosterBytes+1))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read upload")
 		return
 	}
-	if len(data) > 10<<20 {
-		writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Poster must be under 10 MB")
+
+	resp, err := h.UploadLibraryPoster(r.Context(), id, ct, data)
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	// Delete old poster if it exists and has a different key.
-	s3Key := fmt.Sprintf("library-posters/%d%s", id, ext)
-	if folder.PosterPath != "" && folder.PosterPath != s3Key {
-		_ = h.S3Meta.DeleteObject(r.Context(), h.S3Meta.Bucket(), folder.PosterPath)
-	}
-
-	if err := h.S3Meta.PutObject(r.Context(), h.S3Meta.Bucket(), s3Key, data); err != nil {
-		slog.ErrorContext(r.Context(), "uploading library poster", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to upload poster")
-		return
-	}
-
-	if err := h.folderRepo.SetPosterPath(r.Context(), id, s3Key); err != nil {
-		slog.ErrorContext(r.Context(), "saving library poster path", "component", "api", "library_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save poster")
-		return
-	}
-
-	folder.PosterPath = s3Key
-	writeJSON(w, http.StatusOK, h.toLibraryResponseWithPoster(r.Context(), folder))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleDeletePoster handles DELETE /libraries/{id}/poster.
@@ -2004,23 +1468,9 @@ func (h *LibraryHandler) HandleDeletePoster(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	folder, err := h.folderRepo.GetByID(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
+	if err := h.DeleteLibraryPoster(r.Context(), id); err != nil {
+		writeAPIError(w, err)
 		return
-	}
-
-	if folder.PosterPath != "" {
-		_ = h.S3Meta.DeleteObject(r.Context(), h.S3Meta.Bucket(), folder.PosterPath)
-		if err := h.folderRepo.ClearPosterPath(r.Context(), id); err != nil {
-			slog.ErrorContext(r.Context(), "clearing library poster path", "component", "api", "library_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear poster")
-			return
-		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -2078,34 +1528,10 @@ func (h *LibraryHandler) HandleGetLibraryProviders(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Verify the library exists.
-	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "fetching library for provider chain", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
-		return
-	}
-
-	entries, err := h.ChainRepo.GetAllChainEntries(r.Context(), id)
+	levels, err := h.LibraryProviders(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "getting provider chain", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get provider chain")
+		writeAPIError(w, err)
 		return
-	}
-
-	// Group by content level — capability_id is the provider slug.
-	levels := make(map[string][]chainLevelEntry)
-	for _, e := range entries {
-		levels[e.ContentLevel] = append(levels[e.ContentLevel], chainLevelEntry{
-			PluginInstallationID: e.PluginInstallationID,
-			CapabilityID:         e.CapabilityID,
-			ProviderSlug:         e.CapabilityID,
-			Priority:             e.Priority,
-			Enabled:              e.Enabled,
-		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"levels": levels})
@@ -2118,34 +1544,11 @@ func (h *LibraryHandler) HandleGetLibraryProviders(w http.ResponseWriter, r *htt
 // plugin manifests client-side, so the displayed defaults and the chain the
 // server seeds on create can never disagree.
 func (h *LibraryHandler) HandleGetLibraryProviderDefaults(w http.ResponseWriter, r *http.Request) {
-	libraryType := r.URL.Query().Get("library_type")
-	levels := metadataContentLevelsForLibraryType(libraryType)
-	if len(levels) == 0 {
-		// A type the server doesn't seed chains for (unknown, or one like
-		// podcasts with no metadata content levels) simply has no defaults.
-		writeJSON(w, http.StatusOK, map[string]any{"levels": map[string][]chainLevelEntry{}})
+	out, err := h.LibraryProviderDefaults(r.Context(), r.URL.Query().Get("library_type"))
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	if h.ChainRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Provider chain management is not configured")
-		return
-	}
-
-	out := make(map[string][]chainLevelEntry, len(levels))
-	for _, level := range levels {
-		out[level] = []chainLevelEntry{}
-	}
-	for _, e := range h.seedDefaultChain(r.Context(), libraryType) {
-		out[e.ContentLevel] = append(out[e.ContentLevel], chainLevelEntry{
-			PluginInstallationID: e.PluginInstallationID,
-			CapabilityID:         e.CapabilityID,
-			ProviderSlug:         e.CapabilityID,
-			Priority:             e.Priority,
-			Enabled:              e.Enabled,
-		})
-	}
-
 	writeJSON(w, http.StatusOK, map[string]any{"levels": out})
 }
 
@@ -2163,7 +1566,7 @@ func (h *LibraryHandler) HandleSetLibraryProviders(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Verify the library exists.
+	// Verify the library exists before reading the body, as v1 always has.
 	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Library not found")
@@ -2180,29 +1583,10 @@ func (h *LibraryHandler) HandleSetLibraryProviders(w http.ResponseWriter, r *htt
 		return
 	}
 
-	var entries []metadata.ChainEntry
-	for level, inputs := range req.Levels {
-		for _, input := range inputs {
-			entries = append(entries, metadata.ChainEntry{
-				PluginInstallationID: input.PluginInstallationID,
-				CapabilityID:         input.CapabilityID,
-				CapabilityType:       "metadata_provider.v1",
-				ContentLevel:         level,
-				Priority:             input.Priority,
-				Enabled:              input.Enabled,
-			})
-		}
-	}
-
-	if err := h.ChainRepo.SetChain(r.Context(), id, entries); err != nil {
-		slog.ErrorContext(r.Context(), "setting provider chain", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set provider chain")
+	if err := h.SetLibraryProviders(r.Context(), id, req.Levels); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	if h.chainCacheInvalidator != nil {
-		h.chainCacheInvalidator.InvalidateChainCache()
-	}
-	h.wakeMetadataMatcher(r.Context(), id)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2316,108 +1700,11 @@ func metadataContentLevelsForLibraryType(libraryType string) []string {
 
 // HandleListStaleIDs handles GET /libraries/stale-ids.
 func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Request) {
-	if h.StaleIDRepo == nil {
-		writeJSON(w, http.StatusOK, []staleMediaIDResponse{})
-		return
-	}
-
-	staleIDs, err := h.StaleIDRepo.ListAll(r.Context())
+	resp, err := h.ListStaleIDs(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "listing stale media IDs", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list stale IDs")
+		writeAPIError(w, err)
 		return
 	}
-	if len(staleIDs) == 0 {
-		writeJSON(w, http.StatusOK, []staleMediaIDResponse{})
-		return
-	}
-
-	// Collect unique content IDs for batch lookup.
-	contentIDs := make([]string, 0, len(staleIDs))
-	seen := make(map[string]bool, len(staleIDs))
-	for _, s := range staleIDs {
-		if !seen[s.ContentID] {
-			contentIDs = append(contentIDs, s.ContentID)
-			seen[s.ContentID] = true
-		}
-	}
-
-	// Batch-load item metadata and library associations.
-	type itemInfo struct {
-		Title       string
-		Year        int
-		ContentType string
-		Status      string
-		TmdbID      string
-		TvdbID      string
-		ImdbID      string
-		LibraryID   int
-		LibraryName string
-	}
-	items := make(map[string]itemInfo, len(contentIDs))
-
-	rows, err := h.pool.Query(r.Context(), `
-		SELECT mi.content_id, mi.title, mi.year, mi.type, COALESCE(mi.status, ''),
-		       COALESCE(mi.tmdb_id, ''), COALESCE(mi.tvdb_id, ''), COALESCE(mi.imdb_id, ''),
-		       COALESCE(mf_lib.folder_id, 0),
-		       COALESCE(mf_lib.folder_name, '')
-		FROM media_items mi
-		LEFT JOIN LATERAL (
-			SELECT mf2.media_folder_id AS folder_id, f.name AS folder_name
-			FROM media_files mf2
-			JOIN media_folders f ON f.id = mf2.media_folder_id
-			WHERE mf2.content_id = mi.content_id
-			LIMIT 1
-		) mf_lib ON true
-		WHERE mi.content_id = ANY($1)
-	`, contentIDs)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "loading items for stale IDs", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load item data")
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid, title, ctype, status, tmdbID, tvdbID, imdbID, libName string
-		var year, libID int
-		if err := rows.Scan(&cid, &title, &year, &ctype, &status, &tmdbID, &tvdbID, &imdbID, &libID, &libName); err != nil {
-			slog.ErrorContext(r.Context(), "scanning item for stale IDs", "component", "api", "error", err)
-			continue
-		}
-		items[cid] = itemInfo{
-			Title: title, Year: year, ContentType: ctype, Status: status,
-			TmdbID: tmdbID, TvdbID: tvdbID, ImdbID: imdbID,
-			LibraryID: libID, LibraryName: libName,
-		}
-	}
-
-	resp := make([]staleMediaIDResponse, 0, len(staleIDs))
-	for _, s := range staleIDs {
-		info := items[s.ContentID]
-		if !metadata.IsActionableStaleProviderID(&models.MediaItem{
-			ContentID: s.ContentID,
-			Status:    info.Status,
-			TmdbID:    info.TmdbID,
-			TvdbID:    info.TvdbID,
-			ImdbID:    info.ImdbID,
-		}, s) {
-			continue
-		}
-		resp = append(resp, staleMediaIDResponse{
-			ContentID:   s.ContentID,
-			LibraryID:   info.LibraryID,
-			LibraryName: info.LibraryName,
-			Title:       info.Title,
-			Year:        info.Year,
-			ContentType: info.ContentType,
-			Provider:    s.Provider,
-			ProviderID:  s.ProviderID,
-			FirstSeenAt: s.FirstSeenAt.Format("2006-01-02T15:04:05Z"),
-			LastSeenAt:  s.LastSeenAt.Format("2006-01-02T15:04:05Z"),
-		})
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -2425,50 +1712,14 @@ func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Reque
 // Deprecated: prefer the explicit admin match search/apply flow via
 // POST /admin/items/{id}/match/search and POST /admin/items/{id}/match/apply.
 func (h *LibraryHandler) HandleRematchStaleID(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "contentID")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Missing content ID")
+	if err := h.RematchStaleID(r.Context(), chi.URLParam(r, "contentID")); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	// Clear the stale external IDs from the media_items row.
-	// We clear all provider IDs so the re-match starts fresh from title/year.
-	_, err := h.pool.Exec(r.Context(), `
-		UPDATE media_items
-		SET tmdb_id = '', tvdb_id = '', imdb_id = ''
-		WHERE content_id = $1
-	`, contentID)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "clearing stale IDs from media item", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear IDs")
-		return
-	}
-
-	// Remove stale_media_ids records.
-	if h.StaleIDRepo != nil {
-		if err := h.StaleIDRepo.DeleteByContentID(r.Context(), contentID); err != nil {
-			slog.ErrorContext(r.Context(), "deleting stale media ID records", "component", "api", "content_id", contentID, "error", err)
-		}
-	}
-
-	// Re-trigger metadata match.
-	if h.refresher != nil {
-		go func() {
-			if err := h.refresher.RefreshItem(h.appCtx, contentID); err != nil {
-				slog.WarnContext(r.Context(), "metadata: rematch refresh failed", "component", "api", "content_id", contentID, "error", err)
-			}
-		}()
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request) {
-	if h.ScannedGroupRepo == nil || h.folderRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Group snapshots not configured")
-		return
-	}
-
 	q := r.URL.Query()
 	libraryID, err := strconv.Atoi(q.Get("library_id"))
 	if err != nil || libraryID <= 0 {
@@ -2487,191 +1738,35 @@ func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request)
 			offset = parsed
 		}
 	}
-	state := strings.TrimSpace(q.Get("state"))
-
-	folder, err := h.folderRepo.GetByID(r.Context(), libraryID)
+	items, total, err := h.ListLibraryRoots(r.Context(), libraryID, strings.TrimSpace(q.Get("state")), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Library not found")
+		writeAPIError(w, err)
 		return
 	}
-
-	groups, total, err := h.ScannedGroupRepo.ListByFolder(r.Context(), libraryID, state, limit, offset)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "listing scanned groups", "component", "api", "library_id", libraryID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list roots")
-		return
-	}
-
-	overrideByGroup := map[string]models.MediaGroupOverride{}
-	if h.GroupOverrideRepo != nil {
-		overrides, err := h.GroupOverrideRepo.ListByFolder(r.Context(), libraryID)
-		if err != nil {
-			slog.WarnContext(r.Context(), "listing group overrides", "component", "api", "library_id", libraryID, "error", err)
-		} else {
-			for _, override := range overrides {
-				overrideByGroup[groupOverrideLookupKey(override.GroupKeyVersion, override.ContentGroupKey)] = override
-			}
-		}
-	}
-
-	contentIDByGroup := map[string]string{}
-	if h.pool != nil {
-		claimRows, err := h.pool.Query(r.Context(), `
-			SELECT group_key_version, content_group_key, content_id
-			FROM media_item_groups
-			WHERE media_folder_id = $1
-		`, libraryID)
-		if err != nil {
-			slog.WarnContext(r.Context(), "listing group claims", "component", "api", "library_id", libraryID, "error", err)
-		} else {
-			defer claimRows.Close()
-			for claimRows.Next() {
-				var version int
-				var groupKey, contentID string
-				if err := claimRows.Scan(&version, &groupKey, &contentID); err != nil {
-					slog.WarnContext(r.Context(), "scanning group claim", "component", "api", "library_id", libraryID, "error", err)
-					break
-				}
-				contentIDByGroup[groupOverrideLookupKey(version, groupKey)] = contentID
-			}
-		}
-	}
-
-	items := make([]libraryRootResponse, 0, len(groups))
-	for _, group := range groups {
-		rootPath := strings.TrimSpace(group.SampleObservedRootPath)
-		if rootPath == "" {
-			rootPath = filepath.Dir(group.SampleFilePath)
-		}
-		resp := libraryRootResponse{
-			LibraryID:      libraryID,
-			LibraryName:    folder.Name,
-			RootPath:       rootPath,
-			State:          group.State,
-			InferredType:   group.InferredType,
-			TypeConfidence: group.TypeConfidence,
-			Title:          group.BaseTitle,
-			Year:           group.BaseYear,
-			TmdbID:         group.TmdbID,
-			ImdbID:         group.ImdbID,
-			TvdbID:         group.TvdbID,
-			ObservedFiles:  group.ObservedFileCount,
-			SampleFilePath: group.SampleFilePath,
-			Evidence:       append(json.RawMessage(nil), group.EvidenceJSON...),
-			OverrideSource: group.OverrideSource,
-			FirstSeenAt:    group.FirstSeenAt,
-			LastSeenAt:     group.LastSeenAt,
-			ContentID:      contentIDByGroup[groupOverrideLookupKey(group.GroupKeyVersion, group.ContentGroupKey)],
-		}
-		if override, ok := overrideByGroup[groupOverrideLookupKey(group.GroupKeyVersion, group.ContentGroupKey)]; ok {
-			resp.ActiveOverride = &rootOverride{
-				ForcedType:   override.ForcedType,
-				ForcedTitle:  override.ForcedTitle,
-				ForcedYear:   override.ForcedYear,
-				ForcedTmdbID: override.ForcedTmdbID,
-				ForcedImdbID: override.ForcedImdbID,
-				ForcedTvdbID: override.ForcedTvdbID,
-				Note:         override.Note,
-			}
-		}
-		items = append(items, resp)
-	}
-
 	writeJSON(w, http.StatusOK, libraryRootsListResponse{Items: items, Total: total})
 }
 
 func (h *LibraryHandler) HandleUpsertRootOverride(w http.ResponseWriter, r *http.Request) {
-	if h.GroupOverrideRepo == nil || h.ObservedLocationRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Root overrides not configured")
-		return
-	}
-
 	var req rootOverrideUpsertRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	req.RootPath = filepath.Clean(strings.TrimSpace(req.RootPath))
-	if req.LibraryID <= 0 || req.RootPath == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_id and root_path are required")
-		return
-	}
-	location, err := h.ObservedLocationRepo.Get(r.Context(), req.LibraryID, req.RootPath)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "loading observed media location", "component", "api", "library_id", req.LibraryID, "root_path", req.RootPath, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load root")
-		return
-	}
-	if location == nil || location.PrimaryContentGroupKey == "" {
-		if location != nil && location.ContentGroupCount > 1 {
-			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains files from multiple items; resolve it with the item split flow (POST /admin/items/{id}/split)")
-			return
-		}
-		writeError(w, http.StatusNotFound, "not_found", "Root not found")
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	override := models.MediaGroupOverride{
-		MediaFolderID:   req.LibraryID,
-		GroupKeyVersion: location.PrimaryGroupKeyVersion,
-		ContentGroupKey: location.PrimaryContentGroupKey,
-		ForcedType:      strings.TrimSpace(req.ForcedType),
-		ForcedTitle:     strings.TrimSpace(req.ForcedTitle),
-		ForcedYear:      req.ForcedYear,
-		ForcedTmdbID:    strings.TrimSpace(req.ForcedTmdbID),
-		ForcedImdbID:    strings.TrimSpace(req.ForcedImdbID),
-		ForcedTvdbID:    strings.TrimSpace(req.ForcedTvdbID),
-		Note:            strings.TrimSpace(req.Note),
-		CreatedByUserID: nil,
-		UpdatedByUserID: nil,
-	}
-	if userID > 0 {
-		override.CreatedByUserID = &userID
-		override.UpdatedByUserID = &userID
-	}
-	if err := h.GroupOverrideRepo.Upsert(r.Context(), override); err != nil {
-		slog.ErrorContext(r.Context(), "upserting group override", "component", "api", "library_id", req.LibraryID, "root_path", req.RootPath, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save override")
+	if err := h.SetRootOverride(r.Context(), apimw.GetUserID(r.Context()), req); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *LibraryHandler) HandleDeleteRootOverride(w http.ResponseWriter, r *http.Request) {
-	if h.GroupOverrideRepo == nil || h.ObservedLocationRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Root overrides not configured")
-		return
-	}
-
 	var req rootOverrideDeleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	req.RootPath = filepath.Clean(strings.TrimSpace(req.RootPath))
-	if req.LibraryID <= 0 || req.RootPath == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_id and root_path are required")
-		return
-	}
-	location, err := h.ObservedLocationRepo.Get(r.Context(), req.LibraryID, req.RootPath)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "loading observed media location", "component", "api", "library_id", req.LibraryID, "root_path", req.RootPath, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load root")
-		return
-	}
-	if location == nil || location.PrimaryContentGroupKey == "" {
-		if location != nil && location.ContentGroupCount > 1 {
-			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains files from multiple items; manage its identity overrides via the item split flow instead")
-			return
-		}
-		writeError(w, http.StatusNotFound, "not_found", "Root not found")
-		return
-	}
-
-	if err := h.GroupOverrideRepo.Delete(r.Context(), req.LibraryID, location.PrimaryGroupKeyVersion, location.PrimaryContentGroupKey); err != nil {
-		slog.ErrorContext(r.Context(), "deleting group override", "component", "api", "library_id", req.LibraryID, "root_path", req.RootPath, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete override")
+	if err := h.DeleteRootOverride(r.Context(), req); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -2697,11 +1792,6 @@ type unmatchedItemsListResponse struct {
 // Returns items that are in unmatched, pending, or ambiguous status, enriched with
 // library context so the admin maintenance page can link to them.
 func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http.Request) {
-	if h.pool == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-
 	q := r.URL.Query()
 	limit := 100
 	if v := q.Get("limit"); v != "" {
@@ -2715,95 +1805,12 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 			offset = n
 		}
 	}
-
-	// Optional case-insensitive search across title, library name, type, and
-	// status. Applied server-side so it spans the whole table, not just the
-	// current page. The displayed folder still comes from the lateral join below,
-	// but the search predicate checks every membership so multi-library items are
-	// found when any linked library name matches.
-	search := strings.TrimSpace(q.Get("q"))
-	filter := ""
-	filterArgs := []any{}
-	if search != "" {
-		filterArgs = append(filterArgs, "%"+search+"%")
-		filter = ` AND (
-			mi.title ILIKE $1
-			OR mi.type ILIKE $1
-			OR mi.status ILIKE $1
-			OR EXISTS (
-				SELECT 1
-				FROM media_item_libraries search_mil
-				JOIN media_folders search_f ON search_f.id = search_mil.media_folder_id
-				WHERE search_mil.content_id = mi.content_id
-				  AND search_f.name ILIKE $1
-			)
-		)`
-	}
-
-	// Manga chapters carry their series' match state; the chapter rows
-	// themselves stay 'pending' and are resolved through the manga series,
-	// so they must not surface as actionable unmatched items here.
-	mangaChapterGuard := ` AND ` + catalog.MangaChapterExclusionWhere("mi")
-
-	countSQL := `
-		SELECT COUNT(*)
-		FROM media_items mi
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + mangaChapterGuard
-	countSQL += filter
-
-	var total int
-	if err := h.pool.QueryRow(r.Context(), countSQL, filterArgs...).Scan(&total); err != nil {
-		slog.ErrorContext(r.Context(), "counting unmatched items", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to count unmatched items")
-		return
-	}
-
-	listArgs := append(append([]any{}, filterArgs...), limit, offset)
-	listSQL := fmt.Sprintf(`
-		SELECT mi.content_id, mi.title, mi.year, mi.type, mi.status,
-		       COALESCE(lib.folder_id, 0),
-		       COALESCE(lib.folder_name, '')
-		FROM media_items mi
-		LEFT JOIN LATERAL (
-			SELECT mil.media_folder_id AS folder_id, f.name AS folder_name
-			FROM media_item_libraries mil
-			JOIN media_folders f ON f.id = mil.media_folder_id
-			WHERE mil.content_id = mi.content_id
-			LIMIT 1
-		) lib ON true
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s%s
-		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $%d OFFSET $%d
-	`, mangaChapterGuard, filter, len(filterArgs)+1, len(filterArgs)+2)
-
-	rows, err := h.pool.Query(r.Context(), listSQL, listArgs...)
+	items, total, err := h.ListUnmatchedItems(r.Context(), q.Get("q"), limit, offset)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "listing unmatched items", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list unmatched items")
+		writeAPIError(w, err)
 		return
 	}
-	defer rows.Close()
-
-	items := make([]unmatchedItemResponse, 0)
-	for rows.Next() {
-		var item unmatchedItemResponse
-		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &item.ContentType, &item.Status, &item.LibraryID, &item.LibraryName); err != nil {
-			slog.ErrorContext(r.Context(), "scanning unmatched item", "component", "api", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to scan item")
-			return
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		slog.ErrorContext(r.Context(), "iterating unmatched items", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to iterate items")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, unmatchedItemsListResponse{
-		Items: items,
-		Total: total,
-	})
+	writeJSON(w, http.StatusOK, unmatchedItemsListResponse{Items: items, Total: total})
 }
 
 // parseIDParam extracts and parses the "id" URL parameter as an integer.

@@ -1,0 +1,18 @@
+{
+  "status": "healthy",
+  "library_id": "1",
+  "library_name": "Movies",
+  "healthy": true,
+  "checked_at": "2026-01-02T03:04:05.678Z",
+  "summary": "All 1 roots reachable",
+  "roots": [
+    {
+      "path": "/media/movies",
+      "reachable": true,
+      "error_code": null,
+      "error_message": null,
+      "suspect_empty": false
+    }
+  ]
+}
+

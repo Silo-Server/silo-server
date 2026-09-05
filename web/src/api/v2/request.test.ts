@@ -291,6 +291,32 @@ describe("v2 request boundary", () => {
     expect(unverified).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem("profile_token")).toBeNull();
   });
+
+  it("clears the active PIN when a multipart upload is refused for the profile", async () => {
+    setAccessToken("tok-user");
+    setProfileId("p-owner");
+    setProfileToken("pin-1");
+    const unverified = vi.fn();
+    onProfileUnverified(unverified);
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      json(profileVerificationRequired, 403, PROBLEM_HEADERS),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const poster = new Blob(["png"], { type: "image/png" });
+    await expect(
+      v2("PUT /api/v2/libraries/{id}/poster", { path: { id: "7" }, form: { poster } }),
+    ).rejects.toMatchObject({ problemType: "profile_verification_required" });
+
+    const { url, init } = lastRequest(fetchMock);
+    expect(url).toBe("/api/v2/libraries/7/poster");
+    expect(init.method).toBe("PUT");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("poster")).toBeInstanceOf(Blob);
+    expect(init.headers["Content-Type"]).toBeUndefined();
+    expect(unverified).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("profile_token")).toBeNull();
+  });
 });
 
 describe("v2 type separation", () => {
