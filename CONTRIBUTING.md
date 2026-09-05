@@ -97,8 +97,16 @@ make verify-route-inventory
 make verify-migration-ledger
 make verify-scenario-catalogs
 make verify-offline-routes
+make verify-apiv2-openapi
+make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
+make verify-apiv2-fixtures
+go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
 ```
+
+Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
+`make apiv2-fixtures` and commit what they write; the gates above fail on a
+stale artifact or fixture tree.
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch

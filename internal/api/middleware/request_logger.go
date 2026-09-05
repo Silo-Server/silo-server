@@ -21,7 +21,7 @@ import (
 func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			for _, prefix := range []string{"/api/v1/health", "/api/v1/ready", "/api/v1/admin/logs"} {
+			for _, prefix := range []string{"/api/v1/health", "/api/v1/ready", "/api/v1/admin/logs", APIv2Prefix} {
 				if strings.HasPrefix(r.URL.Path, prefix) {
 					next.ServeHTTP(w, r)
 					return

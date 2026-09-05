@@ -547,3 +547,102 @@ func TestObservedServeMuxWalksRoutingTree(t *testing.T) {
 		t.Fatal("method-aware pattern should be refused")
 	}
 }
+
+// consumerFixtureConfig declares a chi listener that delegates /api/v2/* to a
+// second listener whose router is handed once to a declared consumer.
+func consumerFixtureConfig(name string) Config {
+	return Config{
+		Root: filepath.Join("testdata", "fixtures", name),
+		Listeners: []ListenerSpec{
+			{ID: "api", Description: "fixture api listener", Dir: "api", Func: "NewRouter", Constructor: "newRouter"},
+			{
+				ID: "v2", Description: "fixture v2 listener", Dir: "v2", Func: "NewHandler", Constructor: "newChiRouter",
+				DelegatedBy:    "api",
+				RouterConsumer: "github.com/Silo-Server/silo-server/internal/routeinventory/testdata/fixtures/" + name + "/adapter.New",
+			},
+		},
+		AuditDirs: []string{"api", "v2"},
+	}
+}
+
+// TestAnalyzeRecordsListenerDelegationAndConsumer covers the v2 mount shape: a
+// chi listener registering another listener's sealed entry function as a
+// wildcard handler produces delegation rows, and the delegated listener may
+// hand its router to its declared consumer exactly once.
+func TestAnalyzeRecordsListenerDelegationAndConsumer(t *testing.T) {
+	inv, err := Analyze(consumerFixtureConfig("consumer_ok"))
+	if err != nil {
+		t.Fatalf("analyze consumer_ok: %v", err)
+	}
+	delegations := 0
+	for _, route := range inv.Routes {
+		if route.Path != "/api/v2/*" {
+			continue
+		}
+		delegations++
+		if route.DelegatesTo != "v2" || route.HandlerKind != handlerKindDelegation || route.AuthClass != authDelegated {
+			t.Errorf("delegation row misrecorded: %+v", route)
+		}
+		if route.Namespace != NamespaceAPIV2 {
+			t.Errorf("namespace = %q, want %q", route.Namespace, NamespaceAPIV2)
+		}
+	}
+	if delegations != len(handleAllMethods) {
+		t.Errorf("delegation produced %d rows, want %d", delegations, len(handleAllMethods))
+	}
+	for _, l := range inv.Listeners {
+		if l.ID == "v2" && l.RouteCount != 0 {
+			t.Errorf("v2 listener has %d rows; its operations are described by the OpenAPI artifact", l.RouteCount)
+		}
+	}
+}
+
+// TestAnalyzeRefusesSealedListenerHandlerThroughAVariable: the delegating
+// listener must build the sealed handler in the registration itself. Bound to
+// a local first, aliased, or wrapped in another call, the registration would
+// be recorded as an ordinary leaf route and the delegated listener's
+// operations would vanish from the artifact.
+func TestAnalyzeRefusesSealedListenerHandlerThroughAVariable(t *testing.T) {
+	for _, fixture := range []string{"consumer_sealed_var", "consumer_sealed_alias", "consumer_sealed_wrapped"} {
+		t.Run(fixture, func(t *testing.T) {
+			_, err := Analyze(consumerFixtureConfig(fixture))
+			if err == nil || !strings.Contains(err.Error(), "sealed listener handler must be built at the registration site") {
+				t.Fatalf("err = %v, want the sealed-handler refusal", err)
+			}
+		})
+	}
+}
+
+// TestAnalyzeRefusesConsumerMisuse: the hand-off is admitted once, at the
+// constructor's top level, and only to the declared consumer.
+func TestAnalyzeRefusesConsumerMisuse(t *testing.T) {
+	cases := []struct{ fixture, want string }{
+		{"consumer_twice", "is called more than once"},
+		{"consumer_nested", "must receive the v2 listener's own root router"},
+		{"consumer_closure_group", "must receive the v2 listener's own root router"},
+		{"consumer_closure_route", "must receive the v2 listener's own root router"},
+		{"consumer_closure_with", "must receive the v2 listener's own root router"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			cfg := consumerFixtureConfig(tc.fixture)
+			cfg.Listeners = cfg.Listeners[1:]
+			cfg.Listeners[0].DelegatedBy = ""
+			cfg.AuditDirs = []string{"v2"}
+			_, err := Analyze(cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	// Without a declared consumer, the same hand-off is the escape the walk
+	// has always refused.
+	cfg := consumerFixtureConfig("consumer_ok")
+	cfg.Listeners = cfg.Listeners[1:]
+	cfg.Listeners[0].DelegatedBy = ""
+	cfg.Listeners[0].RouterConsumer = ""
+	cfg.AuditDirs = []string{"v2"}
+	if _, err := Analyze(cfg); err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("undeclared consumer err = %v, want an escape refusal", err)
+	}
+}

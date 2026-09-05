@@ -59,6 +59,27 @@ jobs:
             exit 1
           fi
 
+      - name: Check out the release commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Stage the v2 OpenAPI artifact and its digest
+        shell: bash
+        run: |
+          # The release carries the exact committed bytes of the v2 contract,
+          # never a regenerated copy, so downstream copies can be verified
+          # against the digest attached beside it.
+          asset_dir="$(mktemp -d)"
+          cp contracts/api/v2/openapi.json "$asset_dir/openapi.json"
+          (
+            cd "$asset_dir"
+            sha256sum openapi.json > openapi.json.sha256
+            sha256sum -c openapi.json.sha256
+            echo "openapi.json sha256: $(cut -d ' ' -f 1 openapi.json.sha256)"
+          )
+          echo "ASSET_DIR=$asset_dir" >> "$GITHUB_ENV"
+
       - name: Create release with generated notes
         shell: bash
         env:
@@ -78,4 +99,6 @@ jobs:
             args+=(--prerelease)
           fi
 
-          gh release create "$VERSION" "${args[@]}"
+          gh release create "$VERSION" "${args[@]}" \
+            "$ASSET_DIR/openapi.json" \
+            "$ASSET_DIR/openapi.json.sha256"

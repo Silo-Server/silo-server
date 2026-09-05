@@ -7,6 +7,7 @@
 # Regenerate with make offline-routes; make verify-offline-routes fails when
 # this file is stale. Do not edit by hand.
 wiring: AppContext ClientIPResolver Config DB NodeID PublicURL SecretCipher
+CONNECT /api/v2/*
 DELETE /api/v1/admin/access-groups/{id}
 DELETE /api/v1/admin/api-keys/{id}
 DELETE /api/v1/admin/collection-groups/{id}
@@ -32,6 +33,7 @@ DELETE /api/v1/diagnostics/reports/uploads/{upload_id}
 DELETE /api/v1/downloads/subscriptions/{id}
 DELETE /api/v1/downloads/{id}
 DELETE /api/v1/profile/sections/reset
+DELETE /api/v2/*
 GET /api/v1/admin/access-groups
 GET /api/v1/admin/access-groups/{id}
 GET /api/v1/admin/api-keys
@@ -189,15 +191,19 @@ GET /api/v1/theme/catalog
 GET /api/v1/theme/download
 GET /api/v1/watch/{id}
 GET /api/v1/works/{work_id}
+GET /api/v2/*
 HEAD /api/v1/direct-download
 HEAD /api/v1/direct-download-proxy
 HEAD /api/v1/downloads/{id}/file
 HEAD /api/v1/downloads/{id}/file-proxy
+HEAD /api/v2/*
+OPTIONS /api/v2/*
 PATCH /api/v1/admin/items/{id}/metadata
 PATCH /api/v1/admin/jellyfin-compat/settings
 PATCH /api/v1/admin/subtitles/{id}/
 PATCH /api/v1/downloads/subscriptions/{id}
 PATCH /api/v1/downloads/{id}
+PATCH /api/v2/*
 POST /api/v1/admin/access-groups
 POST /api/v1/admin/api-keys
 POST /api/v1/admin/catalog/export
@@ -284,6 +290,7 @@ POST /api/v1/recommendations/taste-seed
 POST /api/v1/requests/
 POST /api/v1/requests/{id}/cancel
 POST /api/v1/theme/catalog/refresh
+POST /api/v2/*
 PUT /api/v1/admin/access-groups/{id}
 PUT /api/v1/admin/api-keys/{id}/tier
 PUT /api/v1/admin/collection-groups/{groupID}/collections/reorder
@@ -311,3 +318,5 @@ PUT /api/v1/admin/subtitle-providers/{provider}/
 PUT /api/v1/admin/users/{id}
 PUT /api/v1/diagnostics/reports/uploads/{upload_id}/chunks/{chunk_index}
 PUT /api/v1/profile/sections/
+PUT /api/v2/*
+TRACE /api/v2/*

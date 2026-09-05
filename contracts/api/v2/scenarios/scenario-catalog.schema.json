@@ -8,7 +8,7 @@
   "required": ["schema_version", "listener", "route_group", "wave", "description", "rows"],
   "properties": {
     "schema_version": { "const": 1 },
-    "listener": { "enum": ["root", "api", "proxy", "transcode_node"] },
+    "listener": { "enum": ["root", "api", "api_v2", "proxy", "transcode_node"] },
     "route_group": { "type": "string", "pattern": "^/" },
     "wave": { "type": "integer", "minimum": 1, "maximum": 8 },
     "description": { "type": "string", "minLength": 1 },
@@ -335,7 +335,7 @@
       "additionalProperties": false,
       "required": ["listener", "method", "path", "registration_index", "scenarios"],
       "properties": {
-        "listener": { "enum": ["root", "api", "proxy", "transcode_node"] },
+        "listener": { "enum": ["root", "api", "api_v2", "proxy", "transcode_node"] },
         "method": { "$ref": "#/$defs/method" },
         "path": { "type": "string", "pattern": "^/" },
         "registration_index": { "type": "integer", "minimum": 0 },

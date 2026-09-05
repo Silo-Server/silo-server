@@ -101,10 +101,11 @@ The same artifact is published publicly under the project-controlled `siloserver
 `https://siloserver.org/api/v2/openapi.json` tracks the current stable v2 release, while
 `https://siloserver.org/api/v2/releases/<server-version>/openapi.json` is an immutable release
 snapshot. Prereleases publish only their versioned snapshot and do not advance the stable alias.
-The release workflow copies the exact committed bytes and verifies their SHA-256 rather than asking
-the website to regenerate them. `https://siloserver.org/docs/api/v2/` may provide a browsable UI,
-but it is presentation over the raw JSON, not another source of truth. The hosting provider may
-change without changing these canonical project URLs.
+The release workflow attaches the exact committed bytes and their SHA-256 to each GitHub release as
+assets; the `siloserver.org` copies are taken from those assets rather than regenerated, and
+publishing them is a post-1.0 follow-up. `https://siloserver.org/docs/api/v2/` may provide a
+browsable UI, but it is presentation over the raw JSON, not another source of truth. The hosting
+provider may change without changing these canonical project URLs.
 
 ### Legacy native route inventory
 
@@ -240,7 +241,8 @@ The first implementation slice establishes and tests rules shared by every later
 - response models that first-party clients decode leniently: clients ignore unknown response
   fields and preserve an unknown-enum fallback;
 - auth, profile, acting-admin, rate-limit, demo-mode, and request-ID middleware behavior identical
-  in strength to the existing router.
+  in strength to the existing router (v2 additionally returns the canonical ID in `X-Request-ID`;
+  see Foundation).
 
 The exact shared schemas and status mapping land in the foundation pull request before domain
 operations begin. Huma defaults are not accepted implicitly: generated validation errors, schema
@@ -265,10 +267,88 @@ The foundation configures the framework rather than inheriting convenience defau
 - disable the built-in OpenAPI, documentation, and schema routes and remove the default schema-link
   response transformer; Silo serves the exact committed artifact and omits production `$schema`
   additions as specified above; and
-- choose and document an explicit structured-body read timeout before the foundation PR merges.
-  The audited Huma default is five seconds and can supersede the server's current 30-second read
-  timeout, so it is not adopted accidentally. The chosen deadline, timeout boundary, and Silo
-  `408` Problem Details response receive integration tests.
+- set the structured-body read deadline to 30 seconds, the server's own `ReadTimeout` baseline,
+  rather than inheriting Huma's audited five-second default, which would silently supersede it.
+  The deadline, its boundary, and Silo's `408` Problem Details response have integration tests.
+
+#### Foundation
+
+The foundation is `internal/apiv2`. These facts about it are not derivable from the rules above:
+
+- **Operation classes.** Every v2 operation declares one class at registration — `public`,
+  `authenticated`, `profile_scoped`, `acting_admin`, or `permission_gated` (the last with the
+  policy permission it needs) — and the listener composes the existing `internal/api/middleware`
+  gates onto it per class, in the order the v1 authenticated group runs them: auth, then demo
+  mode for operations marked demo-restricted, then the rate limiter, then viewer access for
+  every class that resolves a profile (`profile_scoped`, `acting_admin`, `permission_gated`),
+  then the profile, acting-admin, or permission gate. A gate's denial is re-rendered as the
+  matching Problem Details document by switching on the v1 body's machine-readable `error` and
+  `reason`; the decision itself is the v1 gate's, and a locked profile keeps its own
+  `profile_verification_required` type so clients still know to ask for the PIN. A gate the
+  wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
+  removes them from the route table. Handlers read claims, profile, and viewer scope from the
+  request context and never from headers.
+- **The delegation row.** The API listener hands the `/api/v2/` subtree to the sealed
+  `apiv2` handler with one wildcard registration, built in the registration itself. The route
+  inventory records that as a delegation row per method (`delegates_to: api_v2`, namespace
+  `api_v2`) and lists `api_v2` as a listener with zero rows: its router is handed exactly once
+  to the Huma adapter (`RouterConsumer` in the generator config), and only as the constructor's
+  own root router at the constructor's top level — never a router derived by `Group()`,
+  `Route()` or `With()`, and never inside a closure, a helper function, or a condition. The
+  operations behind it are described by `contracts/api/v2/openapi.json`. `TestRuntimeReconcile`
+  in `internal/apiv2` asserts the routes the assembled router serves are exactly the set the
+  registry declares. The wildcard covers `/api/v2/` and everything under it; the namespace root
+  `/api/v2`, with no trailing slash, is outside the v2 surface and is answered by the legacy
+  listener like any other unrouted path.
+- **The artifact.** `cmd/apiv2-openapi` renders `contracts/api/v2/openapi.json` from the
+  registries alone (`apiv2.GenerateOpenAPI`; no database, network, credentials or
+  environment), the binary embeds the committed bytes, `GET /api/v2/openapi.json`
+  (`getOpenAPIDocument`, an ordinary public operation) serves them unchanged, and
+  `/api/v2/system/info` reports their SHA-256. `make verify-apiv2-openapi` byte-compares a
+  fresh generation; `make verify-apiv2-contract` runs the spec lint and the pinned oasdiff
+  policy (`internal/contractspec`): pre-lock, a breaking change against the merge base needs
+  an exact entry — operation id, rule id, fingerprint — in
+  `contracts/api/v2/breaking-approvals.json`; once `contracts/api/v2/LOCKED` exists no entry
+  applies. `TestCommittedArtifactMatchesRouter` reconciles the assembled router with the
+  committed artifact plus the typed manual registry of raw handshakes (`apiv2.RawHandshake`,
+  empty today), in both directions. The root `/health`, `/ready` and unauthenticated
+  `/metrics` probes are operator-facing and deliberately absent from the artifact and from
+  generated native clients; deployments restrict their exposure through proxy or network
+  policy.
+- **The fixtures.** `contracts/api/v2/fixtures/` is generated through the assembled v2 router
+  by `TestContractFixtures` in `internal/apiv2` (`make apiv2-fixtures`), never edited: each
+  body is what the server answered a synthetic request with a fixed request id and fake
+  credentials, and `index.json` (schema `contracts/api/v2/fixtures.schema.json`) records the
+  operation id, scenario, request, expected status, asserted headers, media type and the
+  component-schema pointer the body satisfies. `make verify-apiv2-fixtures` fails on a stale
+  tree and then validates every body against the committed artifact
+  (`contractspec.ValidateFixtures`); the local-path leak scan covers the tree. `make
+  apiv2-fixtures-sync` vendors the tree into the sibling client checkouts with a `SOURCE`
+  file naming the server commit, as the playback-v3 fixtures are.
+- **Observability.** The v2 listener records each request once (`internal/apiv2/observe.go`)
+  with bounded labels — `api_major`, `operation_id` (never a raw path; `none` for the router
+  fallbacks), `method`, `status_class`, `error_code` (the problem type identifier),
+  `auth_class` (`public`, `anonymous`, `session`, `api_key`, `plugin`) and a clamped client
+  name — on `streamapp_apiv2_requests_total` and `streamapp_apiv2_request_duration_seconds`,
+  and the same attributes plus the request id on the `apiv2 request` log line. The v1
+  request logger and metrics skip `/api/v2/` so nothing is counted twice.
+  `streamapp_apiv2_validation_failures_total` counts `validation_failed` problems per
+  operation; `streamapp_apiv1_tombstone_requests_total` is registered now and incremented by
+  `apiv2.RecordV1Tombstone` once the tombstone exists. No URL, query string, body or
+  credential header is logged.
+- **The body read timeout.** `apiv2.BodyReadTimeout` is the server's 30 s `ReadTimeout`
+  baseline, not Huma's 5 s default. Ratified on #135, 2026-09-02; the constant is the one
+  place to change it.
+- **Request IDs.** v1 routes set no request-ID response header; v2 sets `X-Request-ID` from the
+  same context value `apimw.RequestID` already stored, so the request log, activity log, and the
+  Problem Details `instance` name the same request.
+- **Not yet encoded.** These ratified wire rules from the plan have no foundation code or tests
+  yet. Each lands with the first v2 operation that needs it, before the first Phase 3 domain PR,
+  tracked on #882: opt-in optimistic concurrency (strong ETag, `If-Match`, the `428`/`412`
+  separation, and RFC parser conformance tests); per-operation mutation retry / idempotency
+  classification; the durable `202` job acceptance and its monitor/cancel shape; the
+  atomic-versus-per-item bulk contract; and the RFC 9745 / RFC 8594 deprecation, link, and
+  sunset headers.
 
 ### Problem Details
 
@@ -304,11 +384,11 @@ and adds regression tests for those call sites; existing key-based filtering is 
 proof that every current message is safe.
 
 The initial shared type catalog includes malformed request, validation failure, authentication
-required, invalid token, session expired, permission denied, resource not found, method not
-allowed, resource conflict, idempotency conflict, payload too large, unsupported media type, rate
-limit exceeded, capability disabled, dependency unavailable, client upgrade required, and
-internal error. Domain-specific types are added only when a client needs distinct corrective
-behavior.
+required, invalid token, session expired, permission denied, profile verification required,
+resource not found, method not allowed, resource conflict, idempotency conflict, payload too
+large, unsupported media type, rate limit exceeded, capability disabled, dependency unavailable,
+client upgrade required, and internal error. Domain-specific types are added only when a client
+needs distinct corrective behavior.
 
 The foundation adapter replaces Huma's default problem output where necessary: every response has
 a Silo type and instance; validation details add stable codes and omit Huma's rejected `value`;

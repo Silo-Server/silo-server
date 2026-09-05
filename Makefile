@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -220,6 +220,93 @@ SCENARIO_CATALOG_DIR := contracts/api/v2/scenarios
 verify-scenario-catalogs:
 	@go test -count=1 -run '^TestCatalogsPassGate$$' ./internal/scenariocatalog/ \
 		|| { echo "::error::$(SCENARIO_CATALOG_DIR) violates scenario-catalog.schema.json or leaves a tier-1 row uncovered"; exit 1; }
+
+APIV2_OPENAPI := contracts/api/v2/openapi.json
+
+# Regenerate the native API v2 OpenAPI artifact from the Go registries. The
+# generator opens no database or network and reads no environment, so the
+# output is byte-identical on every machine.
+apiv2-openapi:
+	go run ./cmd/apiv2-openapi -out $(APIV2_OPENAPI)
+
+# Fail when the committed artifact differs from a fresh generation. The
+# generator writes to a temporary directory and the two files are
+# byte-compared, so a stale artifact, a reordered key or a stray timestamp all
+# land here.
+verify-apiv2-openapi:
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		go run ./cmd/apiv2-openapi -out "$$tmp/openapi.json" && \
+		cmp -s "$$tmp/openapi.json" $(APIV2_OPENAPI) \
+		|| { echo "::error::$(APIV2_OPENAPI) is stale; run make apiv2-openapi"; exit 1; }
+	@echo "$(APIV2_OPENAPI) is current"
+
+# Semantic diff and spec lint over the committed artifact. BASE_REF names the
+# merge base the diff compares against (CI passes the PR's base). The diff
+# tool is the oasdiff Go module pinned in go.mod/go.sum; no binary is
+# downloaded. A breaking change fails unless contracts/api/v2/
+# breaking-approvals.json approves that exact operation and fingerprint;
+# once contracts/api/v2/LOCKED exists no approval applies. The spec lint is
+# the internal/contractspec tests, which also run the seeded breaking fixture
+# through the tool so an upgrade that stops detecting it fails here.
+BASE_REF ?= origin/main
+verify-apiv2-contract:
+	@go test -count=1 ./internal/contractspec/ \
+		|| { echo "::error::$(APIV2_OPENAPI) fails the spec lint or the diff tool no longer detects the seeded breaking fixture"; exit 1; }
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		base=$$(git merge-base $(BASE_REF) HEAD) && \
+		{ git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" 2>/dev/null || : ; } && \
+		go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
+		|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }
+
+# Regenerate the native API v2 contract fixtures through the real v2 router.
+# The bodies are what the server answers, byte for byte, for synthetic
+# requests with fixed request ids; nothing is hand-edited. verify-apiv2-fixtures
+# fails when the committed tree is stale, then validates every body against
+# the OpenAPI schema its index entry names (internal/contractspec).
+APIV2_FIXTURE_DIR := contracts/api/v2/fixtures
+apiv2-fixtures:
+	go test -count=1 -run '^TestContractFixtures$$' ./internal/apiv2/ -update-apiv2-fixtures
+
+verify-apiv2-fixtures:
+	@go test -count=1 -run '^TestContractFixtures$$' ./internal/apiv2/ \
+		|| { echo "::error::$(APIV2_FIXTURE_DIR) disagrees with the v2 router; run make apiv2-fixtures"; exit 1; }
+	@go test -count=1 -run '^TestCommittedFixturesValidate$$' ./internal/contractspec/ \
+		|| { echo "::error::$(APIV2_FIXTURE_DIR) fails OpenAPI schema validation"; exit 1; }
+	@echo "$(APIV2_FIXTURE_DIR) is current and valid"
+
+# Copy the v2 fixtures into the sibling client checkouts, the way the
+# playback-v3 fixtures are vendored there: the tree plus a SOURCE file naming
+# the server commit they came from. A missing checkout is skipped.
+# verify-apiv2-fixtures-siblings reports which sibling copies are stale
+# without writing anything.
+APIV2_FIXTURES_APPLE := $(SILO_APPLE_DIR)/iosApp/Tests/Fixtures/APIv2
+APIV2_FIXTURES_ANDROID := $(SILO_ANDROID_DIR)/shared/src/commonTest/resources/api/v2/fixtures
+apiv2-fixtures-sync:
+	@set -e; for dest in "$(APIV2_FIXTURES_APPLE)" "$(APIV2_FIXTURES_ANDROID)"; do \
+		root=$${dest%%/iosApp/*}; root=$${root%%/shared/*}; \
+		if [ ! -d "$$root" ]; then echo "skipping $$dest: $$root not checked out"; continue; fi; \
+		mkdir -p "$$dest"; \
+		find "$$dest" -maxdepth 1 -name '*.json' -delete; \
+		cp $(APIV2_FIXTURE_DIR)/*.json "$$dest/"; \
+		cp contracts/api/v2/fixtures.schema.json "$$dest/"; \
+		printf 'Source: silo-server %s (plus %s)\nServer ref: %s\nServer commit: %s\nVendored: %s\n\nGenerated by make apiv2-fixtures; refresh with make apiv2-fixtures-sync from the server commit above.\n' \
+			"$(APIV2_FIXTURE_DIR)" "contracts/api/v2/fixtures.schema.json" "$$(git rev-parse --abbrev-ref HEAD)" "$$(git rev-parse HEAD)" "$$(date -u +%Y-%m-%d)" > "$$dest/SOURCE"; \
+		echo "wrote v2 fixtures to $$dest"; \
+	done
+
+verify-apiv2-fixtures-siblings:
+	@status=0; for dest in "$(APIV2_FIXTURES_APPLE)" "$(APIV2_FIXTURES_ANDROID)"; do \
+		root=$${dest%%/iosApp/*}; root=$${root%%/shared/*}; \
+		if [ ! -d "$$root" ]; then echo "skipping $$dest: $$root not checked out"; continue; fi; \
+		if [ ! -d "$$dest" ]; then echo "$$dest: not vendored yet; run make apiv2-fixtures-sync"; status=1; continue; fi; \
+		for f in $(APIV2_FIXTURE_DIR)/*.json contracts/api/v2/fixtures.schema.json; do \
+			cmp -s "$$f" "$$dest/$$(basename "$$f")" || { echo "$$dest/$$(basename "$$f") is stale"; status=1; }; \
+		done; \
+		for f in "$$dest"/*.json; do \
+			b=$$(basename "$$f"); [ -e "$(APIV2_FIXTURE_DIR)/$$b" ] || [ "$$b" = fixtures.schema.json ] || { echo "$$f has no server counterpart"; status=1; }; \
+		done; \
+	done; \
+	[ "$$status" -eq 0 ] && echo "sibling v2 fixture copies are current" || exit 1
 
 OFFLINE_ROUTES := contracts/api/v2/offline-routes.txt
 

@@ -39,6 +39,7 @@ const (
 const (
 	ListenerRoot          = "root"
 	ListenerAPI           = "api"
+	ListenerAPIV2         = "api_v2"
 	ListenerProxy         = "proxy"
 	ListenerTranscodeNode = "transcode_node"
 )
@@ -98,6 +99,26 @@ type ListenerSpec struct {
 	// the API router registers a delegation, not a leaf route, and the row says
 	// so instead of pretending the whole namespace is one handler.
 	Delegates map[string]string
+	// DelegatedBy names the package directory of the chi listener that hands
+	// a subtree to this listener by registering its entry function's result
+	// as a handler (`r.Handle("/api/v2/*", apiv2.NewHandler(...))`). The
+	// registration is recorded as a delegation row on the registering
+	// listener; this listener's own operations are described elsewhere
+	// (the committed OpenAPI artifact) rather than enumerated as rows. The
+	// entry function must be called in the registration itself: a handler
+	// bound to a local first is refused, because nothing else proves the
+	// registered value is that listener.
+	DelegatedBy string
+	// RouterConsumer names the one function ("import/path.Func") allowed to
+	// receive this listener's router from inside its constructor: the Huma
+	// adapter constructor that registers the listener's operations. It is
+	// permitted exactly once, and only with the constructor's own root
+	// router at the constructor's top level — never a router derived by
+	// Group(), Route() or With(), never inside a closure, a helper function
+	// or a condition, because the prefix and middleware such a router
+	// carries are invisible to the OpenAPI artifact that describes the
+	// operations registered through it.
+	RouterConsumer string
 }
 
 // Entrypoint renders the listener's entry function for the artifact.
@@ -156,6 +177,13 @@ type Analyzer struct {
 	// therefore anchored at "/"; a second one is only reachable through an
 	// attachment the walk cannot see, so its rows would claim wrong paths.
 	rootConstructed bool
+	// routerConsumed guards the current listener walk against a second
+	// hand-off to its RouterConsumer.
+	routerConsumed bool
+	// rootScope is the scope of the router the current listener's constructor
+	// built. Every Group/Route/With scope is a clone, so identity with this
+	// one is what "the constructor's own root router" means.
+	rootScope *routerScope
 
 	classifier *classifier
 }
@@ -366,9 +394,16 @@ type walkEnv struct {
 	muxes map[*types.Var]bool
 	// delegates maps an entry parameter to the listener ID it carries.
 	delegates map[*types.Var]string
-	conds     []string
-	depth     int
-	entry     bool
+	// sealed maps a local bound to a delegated listener's sealed entry-function
+	// result to that listener's ID, so registering the variable instead of the
+	// call is refused rather than recorded as a leaf handler.
+	sealed map[*types.Var]string
+	conds  []string
+	depth  int
+	entry  bool
+	// inRouterLit is true inside a Group(), Route() or With(...).Group()
+	// closure: the router in scope there is derived, not the constructor's own.
+	inRouterLit bool
 }
 
 func (e *walkEnv) info() *types.Info { return e.pkg.info() }
@@ -382,11 +417,15 @@ func (e *walkEnv) child() *walkEnv {
 	for obj := range e.muxes {
 		muxes[obj] = true
 	}
+	sealed := make(map[*types.Var]string, len(e.sealed))
+	for obj, id := range e.sealed {
+		sealed[obj] = id
+	}
 	return &walkEnv{
 		pkg: e.pkg, listener: e.listener,
-		routers: routers, muxes: muxes, delegates: e.delegates,
+		routers: routers, muxes: muxes, delegates: e.delegates, sealed: sealed,
 		conds: append([]string{}, e.conds...),
-		depth: e.depth, entry: e.entry,
+		depth: e.depth, entry: e.entry, inRouterLit: e.inRouterLit,
 	}
 }
 
@@ -413,6 +452,8 @@ func (a *Analyzer) walkListener(spec ListenerSpec) error {
 	}
 	a.enteredFuncs[decl] = true
 	a.rootConstructed = false
+	a.routerConsumed = false
+	a.rootScope = nil
 
 	env := &walkEnv{
 		pkg:       pkg,
@@ -420,6 +461,7 @@ func (a *Analyzer) walkListener(spec ListenerSpec) error {
 		routers:   map[*types.Var]*routerScope{},
 		muxes:     map[*types.Var]bool{},
 		delegates: map[*types.Var]string{},
+		sealed:    map[*types.Var]string{},
 		entry:     true,
 	}
 	if spec.kind() == ListenerKindServeMux {
@@ -687,6 +729,14 @@ func (a *Analyzer) walkStmt(stmt ast.Stmt, env *walkEnv) error {
 		return a.walkStmt(typed.Else, alt)
 
 	case *ast.AssignStmt:
+		if len(typed.Lhs) == 1 && len(typed.Rhs) == 1 {
+			if call, ok := unwrapParen(typed.Rhs[0]).(*ast.CallExpr); ok && a.isRouterConsumer(call, env) {
+				if err := a.consumeRouter(call, env); err != nil {
+					return err
+				}
+				return a.leakCheck(typed.Lhs[0], env)
+			}
+		}
 		return a.walkBinding(typed, a.bindingsOfAssign(typed, env), env, ListenerKindChi)
 
 	case *ast.DeclStmt:
@@ -806,6 +856,9 @@ func (a *Analyzer) bindingsOfDecl(stmt *ast.DeclStmt, env *walkEnv) ([]valueBind
 // the walk cannot tie to exactly one name is refused rather than approximated:
 // a router nobody can name is a router nobody can prove the attachment of.
 func (a *Analyzer) walkBinding(stmt ast.Stmt, bindings []valueBinding, env *walkEnv, kind string) error {
+	for _, binding := range bindings {
+		a.noteSealedListener(binding, env)
+	}
 	interesting := false
 	for _, binding := range bindings {
 		if a.set.routerKind(binding.declared) != ctorNone || a.valueRouterKind(binding.value, env) != ctorNone {
@@ -889,7 +942,8 @@ func (a *Analyzer) bindChiValue(stmt ast.Stmt, binding valueBinding, ctor ctorKi
 				env.listener.ID)
 		}
 		a.rootConstructed = true
-		env.routers[binding.obj] = &routerScope{}
+		a.rootScope = &routerScope{}
+		env.routers[binding.obj] = a.rootScope
 		return nil
 	default:
 		return a.errorf(stmt, "an http.ServeMux is constructed inside the %s chi listener entry point; "+
@@ -966,11 +1020,64 @@ func (a *Analyzer) handleCall(call *ast.CallExpr, env *walkEnv) (bool, error) {
 			return true, a.handleRouterMethod(call, sel, scope, env)
 		}
 	}
+	// A router handed to the listener's declared consumer: recorded, not followed.
+	if a.isRouterConsumer(call, env) {
+		return true, a.consumeRouter(call, env)
+	}
 	// A router handed to another function: follow it, or fail.
 	if a.callPassesRouter(call, env) {
 		return true, a.followHelper(call, env)
 	}
 	return false, nil
+}
+
+// isRouterConsumer reports whether call is the listener's RouterConsumer.
+func (a *Analyzer) isRouterConsumer(call *ast.CallExpr, env *walkEnv) bool {
+	if env.listener.RouterConsumer == "" {
+		return false
+	}
+	fn := calleeFunc(call, env.info())
+	if fn == nil || fn.Pkg() == nil || fn.Signature().Recv() != nil {
+		return false
+	}
+	return fn.Pkg().Path()+"."+fn.Name() == env.listener.RouterConsumer
+}
+
+// consumeRouter admits the one hand-off of the listener's router to its
+// RouterConsumer: once, at the constructor's top level, with every other
+// argument leak-checked as usual.
+func (a *Analyzer) consumeRouter(call *ast.CallExpr, env *walkEnv) error {
+	var received *routerScope
+	for _, arg := range call.Args {
+		if obj := env.varOf(arg); obj != nil && env.routers[obj] != nil {
+			if received == nil {
+				received = env.routers[obj]
+			}
+			continue
+		}
+		if err := a.leakCheck(arg, env); err != nil {
+			return err
+		}
+	}
+	if received == nil {
+		return a.errorf(call, "%s does not receive the %s listener's router", env.listener.RouterConsumer, env.listener.ID)
+	}
+	// The consumer registers operations the inventory does not enumerate, so
+	// it may only receive the constructor's own root router: on a router
+	// derived by Group(), Route() or With(), or inside a helper or a
+	// condition, the prefix and middleware those operations would inherit are
+	// invisible to the artifact that describes them.
+	if !env.entry || env.depth != 0 || len(env.conds) > 0 || env.inRouterLit || received != a.rootScope {
+		return a.errorf(call, "%s must receive the %s listener's own root router at the top level of its "+
+			"constructor: not a router derived by Group(), Route() or With(), not inside a closure, a helper "+
+			"function or a condition", env.listener.RouterConsumer, env.listener.ID)
+	}
+	if a.routerConsumed {
+		return a.errorf(call, "%s is called more than once in the %s listener constructor; "+
+			"the router may be handed to its consumer exactly once", env.listener.RouterConsumer, env.listener.ID)
+	}
+	a.routerConsumed = true
+	return nil
 }
 
 func (a *Analyzer) callPassesRouter(call *ast.CallExpr, env *walkEnv) bool {
@@ -1151,6 +1258,7 @@ func (a *Analyzer) walkRouterLit(lit *ast.FuncLit, scope *routerScope, env *walk
 	}
 	a.enteredLits[lit] = true
 	child := env.child()
+	child.inRouterLit = true
 	if obj, ok := env.info().Defs[params[0].ident].(*types.Var); ok {
 		child.routers[obj] = scope
 	}
@@ -1213,6 +1321,15 @@ func (a *Analyzer) emit(call *ast.CallExpr, env *walkEnv, scope *routerScope, me
 		group = "/"
 	}
 	sourceFile := a.set.sourceFile(call)
+	delegate := a.delegatedListener(handler, env)
+	if delegate == "" {
+		if id := a.sealedListenerValue(handler, env); id != "" {
+			return a.errorf(handler, "sealed listener handler must be built at the registration site: "+
+				"%s holds the %s listener's handler, so this registration would be recorded as a leaf route "+
+				"instead of a delegation. Call its entry function in the registration itself",
+				a.set.exprText(handler), id)
+		}
+	}
 
 	for _, method := range methods {
 		info := a.classifier.describe(handler, method, fullPath, env)
@@ -1236,6 +1353,7 @@ func (a *Analyzer) emit(call *ast.CallExpr, env *walkEnv, scope *routerScope, me
 			UpgradesWebSocket: info.websocket,
 			MethodOrigin:      origin,
 			SourceFile:        sourceFile,
+			DelegatesTo:       delegate,
 		}
 		if route.chain == nil {
 			route.chain = []string{}
@@ -1244,15 +1362,99 @@ func (a *Analyzer) emit(call *ast.CallExpr, env *walkEnv, scope *routerScope, me
 			route.Conditions = []string{}
 		}
 		route.AuthClass, route.AuthTraits = classifyAuth(route.chain)
+		if delegate != "" {
+			// The delegated listener's own surface carries its auth; the row
+			// records the hand-off, not a claim about the operations behind it.
+			route.Namespace = NamespaceAPIV2
+			route.Handler = "listener:" + delegate
+			route.HandlerKind = handlerKindDelegation
+			route.HandlerResolved = true
+			route.RequestKind = unknownClassification
+			route.ResponseMediaKind = unknownClassification
+			route.AuthClass = authDelegated
+			route.AuthTraits = []string{authDelegated}
+		}
 		a.routes = append(a.routes, route)
 	}
 	return nil
+}
+
+// noteSealedListener records a local bound to a delegated listener's sealed
+// entry-function result. The value is an http.Handler like any other, so only
+// the walk knows what it holds; emit refuses a registration that uses it.
+func (a *Analyzer) noteSealedListener(binding valueBinding, env *walkEnv) {
+	if !binding.attributed || binding.obj == nil || binding.value == nil || env.sealed == nil {
+		return
+	}
+	if id := a.sealedListenerValue(binding.value, env); id != "" {
+		env.sealed[binding.obj] = id
+	}
+}
+
+// sealedListenerValue reports the delegated listener an expression holds
+// without being the entry call at a registration site: a variable the walk
+// saw bound to a sealed value, an alias of such a variable, or a call that
+// receives a sealed value as an argument (a wrapper or middleware around the
+// sealed handler). The mark propagates through those shapes so a registration
+// using any of them is refused rather than recorded as a leaf route.
+func (a *Analyzer) sealedListenerValue(expr ast.Expr, env *walkEnv) string {
+	switch e := unwrapParen(expr).(type) {
+	case *ast.Ident:
+		if obj := env.varOf(e); obj != nil {
+			return env.sealed[obj]
+		}
+	case *ast.CallExpr:
+		if id := a.delegatedListenerOfCall(e, env); id != "" {
+			return id
+		}
+		for _, arg := range e.Args {
+			if id := a.sealedListenerValue(arg, env); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// delegatedListener reports the listener a handler expression delegates to:
+// the expression is a direct call to the entry function of a listener whose
+// DelegatedBy names the current listener's package. Anything else is a leaf
+// handler. Only a direct call counts: the sealed handler must be built at the
+// registration site, so no other value of that type can stand in for it.
+func (a *Analyzer) delegatedListener(handler ast.Expr, env *walkEnv) string {
+	call, ok := unwrapParen(handler).(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	return a.delegatedListenerOfCall(call, env)
+}
+
+// delegatedListenerOfCall is delegatedListener for a call expression that has
+// already been unwrapped.
+func (a *Analyzer) delegatedListenerOfCall(call *ast.CallExpr, env *walkEnv) string {
+	fn := calleeFunc(call, env.info())
+	if fn == nil || fn.Pkg() == nil {
+		return ""
+	}
+	for _, spec := range a.cfg.Listeners {
+		if spec.DelegatedBy != env.listener.Dir || spec.Recv != "" {
+			continue
+		}
+		pkg := a.set.packages[spec.Dir]
+		if pkg == nil || fn.Pkg() != pkg.Pkg.Types || fn.Name() != spec.Func {
+			continue
+		}
+		return spec.ID
+	}
+	return ""
 }
 
 func namespaceFor(path string) string {
 	switch {
 	case path == "/api/v1" || strings.HasPrefix(path, "/api/v1/"):
 		return NamespaceAPIV1
+	case path == "/api/v2" || strings.HasPrefix(path, "/api/v2/"):
+		return NamespaceAPIV2
 	case path == metricsPath:
 		return NamespaceOperational
 	default:
