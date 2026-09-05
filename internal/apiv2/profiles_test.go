@@ -452,7 +452,7 @@ func TestListHouseholdSessions(t *testing.T) {
 		want ProblemType
 	}{
 		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
-		{&handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Playback sessions are not configured"}, TypeInternalError},
+		{&handlers.APIError{Status: http.StatusInternalServerError, Code: TypeInternalError.ID, Message: "Playback sessions are not configured"}, TypeInternalError},
 	} {
 		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
 		requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", bearer(memberToken)), tc.want)

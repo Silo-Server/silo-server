@@ -316,8 +316,10 @@ func (s *PostgresUserStore) ClearProgress(ctx context.Context, profileID, mediaI
 	return nil
 }
 
-// MarkWatchedBatch marks every target watched and inserts its history row in
-// one transaction, so a series mark either lands whole or not at all. The
+// MarkWatchedBatch atomically marks incomplete targets watched and inserts
+// their history rows. Conflict updates recheck completed state after any
+// concurrent writer, and only changed targets emit history and provider entries.
+// A series mark either lands whole or not at all. The
 // prior per-episode loop committed each episode separately, which left a large
 // series half-marked whenever the client disconnected mid-request.
 //
@@ -413,7 +415,7 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if _, err := tx.Exec(ctx, `
+	markedRows, err := tx.Query(ctx, `
 		WITH target(media_item_id, duration_seconds) AS (
 			SELECT * FROM unnest($3::text[], $4::double precision[])
 		),
@@ -436,6 +438,7 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 			(user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		SELECT $1, $2, media_item_id, 0, duration_seconds, TRUE, updated_at
 		FROM visible
+ ORDER BY media_item_id
 		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
 			position_seconds = 0,
 			-- Keep a known duration when the caller has none: jellycompat's
@@ -447,14 +450,34 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 			END,
 			completed = TRUE,
 			updated_at = EXCLUDED.updated_at,
-			event_at = EXCLUDED.updated_at`,
+			event_at = EXCLUDED.updated_at
+ WHERE NOT user_watch_progress.completed OR EXISTS (
+  SELECT 1 FROM user_history_hidden_items hhi
+  WHERE hhi.user_id = user_watch_progress.user_id AND hhi.profile_id = user_watch_progress.profile_id
+  AND hhi.media_item_id = user_watch_progress.media_item_id AND user_watch_progress.updated_at <= hhi.hidden_before
+ )
+ RETURNING media_item_id`,
 		s.userID, profileID, mediaItemIDs, durations, now,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, fmt.Errorf("marking watched batch: %w", err)
+	}
+	marked := make([]string, 0, len(mediaItemIDs))
+	for markedRows.Next() {
+		var id string
+		if err := markedRows.Scan(&id); err != nil {
+			markedRows.Close()
+			return nil, fmt.Errorf("reading marked target: %w", err)
+		}
+		marked = append(marked, id)
+	}
+	markedRows.Close()
+	if err := markedRows.Err(); err != nil {
+		return nil, fmt.Errorf("reading marked targets: %w", err)
 	}
 
 	written := make([]userstore.WatchHistoryEntry, 0, len(historyIDs))
-	if len(historyIDs) > 0 {
+	if len(historyIDs) > 0 && len(marked) > 0 {
 		rows, err := tx.Query(ctx, `
 			WITH entry(id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity, ord) AS (
 				SELECT * FROM unnest(
@@ -477,10 +500,11 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 			  ON hhi.user_id = $1
 			 AND hhi.profile_id = $2
 			 AND hhi.media_item_id = e.media_item_id
+			WHERE e.media_item_id = ANY($10::text[])
 			ORDER BY e.ord
 			RETURNING id, media_item_id, watched_at`,
 			s.userID, profileID, historyIDs, historyItemIDs, historyWatchedAt,
-			historyDurations, historyCompleted, historySources, historyIdentities,
+			historyDurations, historyCompleted, historySources, historyIdentities, marked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("adding visible history batch: %w", err)
@@ -500,6 +524,9 @@ func (s *PostgresUserStore) MarkWatchedBatch(
 			return nil, fmt.Errorf("iterating inserted history: %w", err)
 		}
 		for i, id := range historyIDs {
+			if _, ok := resolved[id]; !ok {
+				continue
+			}
 			entry := entries[historySourceIndex[i]]
 			entry.ID = id
 			entry.MediaItemID = historyItemIDs[i]

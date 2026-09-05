@@ -45,8 +45,9 @@ type MarkWatchedTarget struct {
 // episode independently, so losing the request mid-loop strands the series
 // half-watched.
 //
-// Semantics must match the fallback: per-target duration lands on the progress
-// row, each entry gets exactly one history row, and both respect the
+// Implementations preserve per-target duration on the progress
+// row; already-completed visible targets produce no history or returned entry.
+// The completed-state check and writes are atomic. Both respect the
 // hidden-history watermark the single-row MarkWatched/AddVisibleHistory paths
 // apply. The returned entries carry the resolved (possibly watermark-adjusted)
 // WatchedAt, in the order given.

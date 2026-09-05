@@ -1251,6 +1251,17 @@ func testMarkWatchedBatch(t *testing.T, newStore func(t *testing.T) userstore.Us
 		t.Fatalf("history counts = %v, want exactly one row per target", counts)
 	}
 
+	// A retry reaches the store directly: it must not produce a second play
+	// or return another entry for outbound provider synchronization.
+	replay, err := userstore.MarkWatchedBatch(ctx, store, "p1", targets, entries)
+	if err != nil || len(replay) != 0 {
+		t.Fatalf("completed retry: %+v %v", replay, err)
+	}
+	history, err = store.ListHistory(ctx, "p1", 50, 0)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("history after retry: %+v %v", history, err)
+	}
+
 	// A zero duration must not erase a duration the store already knows.
 	if _, err := userstore.MarkWatchedBatch(ctx, store, "p1",
 		[]userstore.MarkWatchedTarget{{MediaItemID: "ep-1"}},

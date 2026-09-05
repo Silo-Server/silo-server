@@ -101,7 +101,8 @@ func registerProgress(reg *Registry) {
 	})
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPost, Prefix+"/sync/progress", "syncProgress", "progress",
-			"Apply a batch of progress writes for the acting profile and answer one result per item; a replayed write with the same updated_at is a no-op."),
+			"Apply a batch of progress writes for the acting profile and answer one result per item; supply updated_at on each item to preserve event ordering."),
+		RetrySafety:   RetrySafetyNonRetryable,
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
 	}, reg.syncProgress)

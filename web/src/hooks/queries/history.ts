@@ -1,5 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BrowseItem } from "@/api/types";
+import { useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { catalogItemFromV2 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
 import { toast } from "sonner";
@@ -9,10 +8,19 @@ import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import type { HistoryRemovalTarget } from "@/lib/historyRemoval";
 
 export function useHistory() {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: historyKeys.list(),
-    queryFn: (): Promise<BrowseItem[]> =>
-      v2("GET /api/v2/history").then((page) => page.items.map(catalogItemFromV2)),
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam, signal }) => {
+      const page = await v2("GET /api/v2/history", {
+        query: pageParam ? { cursor: pageParam } : undefined,
+        signal,
+      });
+      return { ...page, items: page.items.map(catalogItemFromV2) };
+    },
+    // Empty raw windows can still precede unseen cards. Load another page
+    // only when requested, and use its cursor rather than its item count.
+    getNextPageParam: (lastPage) => lastPage.page?.next_cursor || undefined,
   });
 }
 

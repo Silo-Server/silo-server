@@ -60,10 +60,19 @@ func (f *fakeHistory) HistoryPage(_ context.Context, _ int, profileID string, af
 	return rows, nil
 }
 
-func (f *fakeHistory) HistoryCards(_ context.Context, _ handlers.SectionViewer, entries []userstore.WatchHistoryEntry) ([]handlers.HistoryCardView, error) {
+func (f *fakeHistory) HistoryPageCards(_ context.Context, _ handlers.SectionViewer, entries []userstore.WatchHistoryEntry) ([]handlers.HistoryCardView, error) {
+	latest := make(map[string]userstore.WatchHistoryEntry)
+	for _, e := range f.entries {
+		if card, ok := f.cards[e.MediaItemID]; ok {
+			old := latest[card.ContentID]
+			if e.WatchedAt > old.WatchedAt || (e.WatchedAt == old.WatchedAt && e.ID > old.ID) {
+				latest[card.ContentID] = e
+			}
+		}
+	}
 	var out []handlers.HistoryCardView
 	for _, e := range entries {
-		if card, ok := f.cards[e.MediaItemID]; ok {
+		if card, ok := f.cards[e.MediaItemID]; ok && latest[card.ContentID].ID == e.ID {
 			out = append(out, handlers.HistoryCardView{Item: card, Entry: e})
 		}
 	}
@@ -179,6 +188,10 @@ func TestListHistoryKeysetSurvivesChurn(t *testing.T) {
 		{ID: "h3", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-03T00:00:00Z", Completed: true},
 		{ID: "h2", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-02T00:00:00Z", Completed: true},
 	}
+	for i := range history.entries {
+		history.entries[i].MediaItemID = "movie:" + history.entries[i].ID
+		history.cards[history.entries[i].MediaItemID] = handlers.CollectionItemView{ContentID: history.entries[i].MediaItemID, Type: "movie", Title: "Movie", Genres: []string{}, Status: "matched"}
+	}
 	h := newTestHandler(t, historyDeps(history))
 	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
 
@@ -239,6 +252,36 @@ func TestListHistoryKeysetSurvivesChurn(t *testing.T) {
 	}
 	if key := history.pages[2]; key == nil || key.ID != "h3" {
 		t.Fatalf("page 3 key = %+v, want h3", key)
+	}
+}
+
+func TestListHistorySkipsRepeatedCardsAcrossEmptyWindows(t *testing.T) {
+	history := newFakeHistory()
+	history.cards["episode:heat-s01e01"] = history.cards["episode:heat-s01e02"]
+	history.cards["movie:last"] = handlers.CollectionItemView{ContentID: "movie:last", Type: "movie", Title: "Last", Genres: []string{}, Status: "matched"}
+	history.entries = []userstore.WatchHistoryEntry{
+		{ID: "h6", ProfileID: "p-owner", MediaItemID: "episode:heat-s01e02", WatchedAt: "2026-01-06T00:00:00Z"},
+		{ID: "h5", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-05T00:00:00Z"},
+		{ID: "h4", ProfileID: "p-owner", MediaItemID: "episode:heat-s01e01", WatchedAt: "2026-01-04T00:00:00Z"},
+		{ID: "h3", ProfileID: "p-owner", MediaItemID: "movie:heat-1995", WatchedAt: "2026-01-03T00:00:00Z"},
+		{ID: "h2", ProfileID: "p-owner", MediaItemID: "movie:last", WatchedAt: "2026-01-02T00:00:00Z"},
+	}
+	h := newTestHandler(t, historyDeps(history))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	first := decodeHistory(t, do(t, h, http.MethodGet, "/api/v2/history?limit=2", "", owner).Body.String())
+	if len(first.Items) != 2 || !first.Page.HasMore {
+		t.Fatalf("first page = %+v", first)
+	}
+	middle := decodeHistory(t, do(t, h, http.MethodGet, "/api/v2/history?limit=2&cursor="+first.Page.NextCursor, "", owner).Body.String())
+	if len(middle.Items) != 0 || !middle.Page.HasMore || middle.Page.NextCursor == first.Page.NextCursor {
+		t.Fatalf("empty intermediate page = %+v", middle)
+	}
+	last := decodeHistory(t, do(t, h, http.MethodGet, "/api/v2/history?limit=2&cursor="+middle.Page.NextCursor, "", owner).Body.String())
+	if len(last.Items) != 1 || last.Items[0].ContentID != "movie:last" || last.Page.HasMore {
+		t.Fatalf("last page = %+v", last)
+	}
+	if len(history.pages) != 3 || history.pages[2].ID != "h3" {
+		t.Fatalf("cursor did not advance over duplicate window: %+v", history.pages)
 	}
 }
 

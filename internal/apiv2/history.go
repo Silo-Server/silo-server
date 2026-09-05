@@ -83,9 +83,9 @@ func registerHistory(reg *Registry) {
 	})
 
 	remove := humaOp(http.MethodPost, Prefix+"/history/remove", "removeHistoryEntries", "history",
-		"Hide the targets' watches from the acting profile's history; hiding an already hidden item is a no-op.")
+		"Hide the targets' watches from the acting profile's history; the server chooses the cutoff when this request runs.")
 	remove.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true}, reg.removeHistoryEntries)
+	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.removeHistoryEntries)
 }
 
 // listHistory pages the same rows v1 GET /history does, by keyset rather
@@ -115,8 +115,9 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 		}
 		after = &userstore.HistoryKey{WatchedAt: pos.WatchedAt, ID: pos.ID}
 	}
-	// has_more is decided on the raw store rows, before cards are rendered,
-	// so a hidden or catalog-missing card never makes a page look final.
+	// Bound work to one raw window. The renderer keeps only global latest
+	// display witnesses; a page may therefore be short or empty. Advance on
+	// the last scanned row, and let next_cursor (not item count) signal more.
 	entries, err := reg.deps.History.HistoryPage(ctx, userID, profileID, after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
@@ -130,7 +131,7 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
 	}
-	cards, err := reg.deps.History.HistoryCards(ctx, sectionViewer(ctx, in.ImageSize), entries)
+	cards, err := reg.deps.History.HistoryPageCards(ctx, sectionViewer(ctx, in.ImageSize), entries)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -196,6 +197,6 @@ func fieldProblem(err error) *Problem {
 // operations use.
 type HistoryService interface {
 	HistoryPage(ctx context.Context, userID int, profileID string, after *userstore.HistoryKey, limit int) ([]userstore.WatchHistoryEntry, error)
-	HistoryCards(ctx context.Context, viewer handlers.SectionViewer, entries []userstore.WatchHistoryEntry) ([]handlers.HistoryCardView, error)
+	HistoryPageCards(ctx context.Context, viewer handlers.SectionViewer, entries []userstore.WatchHistoryEntry) ([]handlers.HistoryCardView, error)
 	RemoveHistory(ctx context.Context, userID int, profileID string, filter catalogpkg.AccessFilter, targets []handlers.HistoryRemovalTarget) error
 }

@@ -57,7 +57,11 @@ describe("history hooks on the v2 contract", () => {
   });
 
   it("lists history as catalog cards from the listHistory fixture", async () => {
-    const fetchMock = stubFetch(() => jsonResponse(listHistoryOk));
+    const fetchMock = stubFetch((url) =>
+      jsonResponse(
+        url.searchParams.has("cursor") ? { items: [], page: { has_more: false } } : listHistoryOk,
+      ),
+    );
 
     const { result } = renderHook(() => useHistory(), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -66,10 +70,45 @@ describe("history hooks on the v2 contract", () => {
     expect(String(url)).toBe("/api/v2/history");
     expect((init?.headers as Record<string, string>)["X-Profile-Id"]).toBe("p-owner");
 
-    const cards = result.current.data ?? [];
+    const cards = result.current.data?.pages.flatMap((page) => page.items) ?? [];
     expect(cards.map((c) => c.content_id)).toEqual(listHistoryOk.items.map((i) => i.content_id));
     expect(cards[0]?.type).toBe("series");
     expect(cards[0]?.title).toBe("Heat: The Series");
+  });
+
+  it("follows the cursor through an empty nonterminal page", async () => {
+    const cursors: (string | null)[] = [];
+    stubFetch((url) => {
+      const cursor = url.searchParams.get("cursor");
+      cursors.push(cursor);
+      if (!cursor)
+        return jsonResponse({
+          ...listHistoryOk,
+          items: [listHistoryOk.items[0]],
+          page: { has_more: true, next_cursor: "older" },
+        });
+      if (cursor === "older")
+        return jsonResponse({ items: [], page: { has_more: true, next_cursor: "oldest" } });
+      return jsonResponse({
+        items: [{ ...listHistoryOk.items[0], content_id: "movie:last" }],
+        page: { has_more: false },
+      });
+    });
+    const { result } = renderHook(() => useHistory(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(cursors).toEqual([null]);
+    expect(result.current.data?.pages).toHaveLength(1);
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+    await waitFor(() => expect(result.current.data?.pages[1]?.items).toEqual([]));
+    expect(result.current.hasNextPage).toBe(true);
+    await act(() => result.current.fetchNextPage());
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
+    expect(cursors).toEqual([null, "older", "oldest"]);
+    expect(
+      result.current.data?.pages.flatMap((page) => page.items.map((item) => item.content_id)),
+    ).toEqual([listHistoryOk.items[0]?.content_id, "movie:last"]);
   });
 
   it("posts removal targets to removeHistoryEntries and treats 204 as success", async () => {

@@ -72,38 +72,43 @@ func (r *ScannedGroupRepository) Get(
 	return group, nil
 }
 
+// ListByFolder pages one folder's scanned groups, newest first. An empty
+// state lists every state; a non-empty search keeps only groups whose
+// observed root path, base title or sample file path contains it,
+// case-insensitively. The total counts every group the same filters admit.
 func (r *ScannedGroupRepository) ListByFolder(
 	ctx context.Context,
 	folderID int,
 	state string,
+	search string,
 	limit,
 	offset int,
 ) ([]models.ScannedMediaGroup, int, error) {
 	filterState := strings.TrimSpace(state)
+	filterSearch := strings.TrimSpace(search)
 
-	countQuery := `SELECT COUNT(*) FROM scanned_media_groups WHERE media_folder_id = $1`
-	countArgs := []any{folderID}
+	where := `WHERE media_folder_id = $1`
+	args := []any{folderID}
 	if filterState != "" {
-		countQuery += ` AND state = $2`
-		countArgs = append(countArgs, filterState)
+		args = append(args, filterState)
+		where += fmt.Sprintf(` AND state = $%d`, len(args))
+	}
+	if filterSearch != "" {
+		args = append(args, "%"+escapeLikePattern(filterSearch)+"%")
+		where += fmt.Sprintf(` AND (sample_observed_root_path ILIKE $%[1]d ESCAPE '\' OR base_title ILIKE $%[1]d ESCAPE '\' OR sample_file_path ILIKE $%[1]d ESCAPE '\')`, len(args))
 	}
 
 	var total int
-	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM scanned_media_groups `+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("counting scanned media groups: %w", err)
 	}
 
 	listQuery := `
 		SELECT ` + scannedGroupColumns + `
 		FROM scanned_media_groups
-		WHERE media_folder_id = $1`
-	listArgs := []any{folderID}
-	argPos := 2
-	if filterState != "" {
-		listQuery += fmt.Sprintf(` AND state = $%d`, argPos)
-		listArgs = append(listArgs, filterState)
-		argPos++
-	}
+		` + where
+	listArgs := append([]any(nil), args...)
+	argPos := len(listArgs) + 1
 	listQuery += fmt.Sprintf(` ORDER BY last_seen_at DESC, sample_observed_root_path ASC, content_group_key ASC LIMIT $%d OFFSET $%d`, argPos, argPos+1)
 	listArgs = append(listArgs, limit, offset)
 
@@ -125,6 +130,15 @@ func (r *ScannedGroupRepository) ListByFolder(
 		return nil, 0, fmt.Errorf("iterating scanned media groups: %w", err)
 	}
 	return groups, total, nil
+}
+
+// escapeLikePattern escapes %, _ and \ so a user-supplied substring is safe
+// inside a LIKE/ILIKE pattern with ESCAPE '\'.
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 func (r *ScannedGroupRepository) UpsertMany(ctx context.Context, groups []models.ScannedMediaGroup) error {

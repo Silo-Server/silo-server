@@ -353,8 +353,8 @@ export const adminKeys = {
   deviceDetail: (userId: number, deviceId: string) =>
     ["admin", "devices", userId, deviceId] as const,
   libraries: () => ["admin", "libraries"] as const,
-  libraryRoots: (libraryId?: number, state?: string) =>
-    ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all"] as const,
+  libraryRoots: (libraryId?: number, state?: string, search?: string) =>
+    ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all", search ?? ""] as const,
   libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,
   libraryMatchQueueDetail: (libraryId: number) =>
     ["admin", "libraries", "metadataMatchQueue", libraryId] as const,
@@ -464,9 +464,9 @@ export const adminKeys = {
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
-  unmatchedItems: (page?: number, search?: string) =>
-    page != null
-      ? (["admin", "libraries", "unmatchedItems", page, search ?? ""] as const)
+  unmatchedItems: (search?: string) =>
+    search !== undefined
+      ? (["admin", "libraries", "unmatchedItems", search] as const)
       : (["admin", "libraries", "unmatchedItems"] as const),
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,

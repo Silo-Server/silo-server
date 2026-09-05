@@ -259,14 +259,14 @@ func registerWatch(reg *Registry) {
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",
 		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op.")
 	mark.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: mark, Class: ClassProfileScoped, ServiceBacked: true}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
+	Register(reg, Operation{Operation: mark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, true)
 	})
 
 	unmark := humaOp(http.MethodDelete, Prefix+"/watched/{id}", "unmarkWatched", "watch",
-		"Mark an item unwatched for the acting profile; a season or series clears every episode. Clearing an unwatched item is a no-op.")
+		"Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs.")
 	unmark.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: unmark, Class: ClassProfileScoped, ServiceBacked: true}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
+	Register(reg, Operation{Operation: unmark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, false)
 	})
 }

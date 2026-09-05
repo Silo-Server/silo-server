@@ -325,6 +325,8 @@ func (s *Service) recordMarkWatched(
 	if watchedAt.IsZero() {
 		watchedAt = time.Now().UTC()
 	}
+	// This preflight avoids identity lookups for sequential retries; the
+	// store repeats the completed-state decision atomically with the write.
 	// A mark is idempotent per leaf: a target the profile has already
 	// completed gets no new history row and no new outbound play, so a
 	// retried request (or a series mark over partly watched episodes)
@@ -370,6 +372,10 @@ func (s *Service) recordMarkWatched(
 	result := ManualMarkResult{Entries: written}
 	if err != nil {
 		return result, err
+	}
+	completedIDs = completedIDs[:0]
+	for _, entry := range written {
+		completedIDs = append(completedIDs, entry.MediaItemID)
 	}
 	s.notifyWatchedCompleted(ctx, userID, profileID, completedIDs)
 	return result, nil

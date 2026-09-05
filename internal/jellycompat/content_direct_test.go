@@ -1143,3 +1143,7 @@ func TestSeasonUserDataFromCountsMatchesEpisodeRollup(t *testing.T) {
 		t.Fatalf("zero counts must produce the empty rollup, got %+v", empty)
 	}
 }
+
+func (s *progressCountingStore) LatestHistoryIDs(context.Context, string, map[string][]string) (map[string]string, error) {
+	return nil, nil
+}

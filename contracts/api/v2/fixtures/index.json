@@ -239,7 +239,8 @@
       "expected_status": 202,
       "response_headers": {
         "Cache-Control": "no-store",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/job-1"
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminJob",
@@ -811,6 +812,42 @@
       "body_file": "get_watch_state_unauthenticated.json"
     },
     {
+      "name": "guarded_delete_ok",
+      "operation_id": null,
+      "scenario": "A guarded DELETE whose If-Match names the current ETag: 204 with no body and no validator, since the representation is gone.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/probe/guarded/a",
+        "headers": {
+          "If-Match": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "head_not_found",
+      "operation_id": null,
+      "scenario": "HEAD on a path under /api/v2/ with no operation registered at it: the 404 problem's headers with no body.",
+      "request": {
+        "method": "HEAD",
+        "path": "/api/v2/library/items/fixture-missing"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "list_admin_users_offset_rejected",
       "operation_id": "listAdminUsers",
       "scenario": "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
@@ -1301,10 +1338,10 @@
     {
       "name": "list_stale_ids_ok",
       "operation_id": "listStaleIds",
-      "scenario": "Provider identifiers that no longer resolve, with the items carrying them.",
+      "scenario": "The first page of provider identifiers that no longer resolve, with the items carrying them.",
       "request": {
         "method": "GET",
-        "path": "/api/v2/libraries/stale-ids",
+        "path": "/api/v2/libraries/stale-ids?limit=2",
         "headers": {
           "Authorization": "Bearer tok-admin"
         }
@@ -1417,6 +1454,26 @@
       "body_file": "not_found.json"
     },
     {
+      "name": "not_modified",
+      "operation_id": null,
+      "scenario": "A conditional read whose If-None-Match matches the current ETag: 304 with the validator, no body.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/probe/guarded/a",
+        "headers": {
+          "If-None-Match": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
+        }
+      },
+      "expected_status": 304,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "ETag": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "payload_too_large",
       "operation_id": null,
       "scenario": "A JSON body over the operation's declared limit (256 bytes on this probe), refused before decoding.",
@@ -1433,6 +1490,68 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "payload_too_large.json"
+    },
+    {
+      "name": "precondition_failed",
+      "operation_id": null,
+      "scenario": "A guarded mutation whose If-Match names a stale version: nothing changes and ETag carries the current validator to retry with.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/probe/guarded/a",
+        "headers": {
+          "If-Match": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt6\""
+        },
+        "body": "{\"name\":\"fixture\"}"
+      },
+      "expected_status": 412,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json",
+        "ETag": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "precondition_failed.json"
+    },
+    {
+      "name": "precondition_failed_create_only",
+      "operation_id": null,
+      "scenario": "A create-only PUT (If-None-Match: *) at an id that already holds a resource: nothing changes and ETag carries the existing validator.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/probe/created/a",
+        "headers": {
+          "If-None-Match": "*"
+        },
+        "body": "{\"name\":\"fixture\"}"
+      },
+      "expected_status": 412,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json",
+        "ETag": "\"ed4e929829d1c6dc3b0ef948.3b5u953tvmbt7\""
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "precondition_failed_create_only.json"
+    },
+    {
+      "name": "precondition_required",
+      "operation_id": null,
+      "scenario": "A guarded mutation without If-Match: the server refuses before touching the resource and names the field to send.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/probe/guarded/a",
+        "body": "{\"name\":\"fixture\"}"
+      },
+      "expected_status": 428,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "precondition_required.json"
     },
     {
       "name": "profile_verification_required",
@@ -1493,7 +1612,8 @@
       "expected_status": 202,
       "response_headers": {
         "Cache-Control": "no-store",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/job-2"
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminJob",

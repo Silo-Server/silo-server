@@ -541,6 +541,39 @@ func (h *PersonalDataHandler) HistoryCards(ctx context.Context, viewer SectionVi
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
 	}
+	return h.historyDisplayCards(ctx, viewer, display)
+}
+
+// HistoryPageCards keeps only the newest visible watch of each display card.
+// Witnesses are selected across the whole group, not just the bounded raw
+// page, so older repeats on later pages cannot emit that card again.
+func (h *PersonalDataHandler) HistoryPageCards(ctx context.Context, viewer SectionViewer, entries []userstore.WatchHistoryEntry) ([]HistoryCardView, error) {
+	display, err := catalog.ResolveHistoryDisplayEntries(ctx, entries, h.episodeRepo)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := catalog.HistoryDisplayGroups(ctx, display, h.episodeRepo)
+	if err != nil {
+		return nil, err
+	}
+	store, err := h.storeProvider.ForUser(ctx, viewer.Access.UserID)
+	if err != nil {
+		return nil, err
+	}
+	witnesses, err := store.LatestHistoryIDs(ctx, viewer.Access.ProfileID, groups)
+	if err != nil {
+		return nil, err
+	}
+	latest := display[:0]
+	for _, d := range display {
+		if witnesses[d.DisplayID] == d.Entry.ID {
+			latest = append(latest, d)
+		}
+	}
+	return h.historyDisplayCards(ctx, viewer, latest)
+}
+
+func (h *PersonalDataHandler) historyDisplayCards(ctx context.Context, viewer SectionViewer, display []catalog.HistoryDisplayEntry) ([]HistoryCardView, error) {
 	ids := make([]string, 0, len(display))
 	for _, d := range display {
 		ids = append(ids, d.DisplayID)

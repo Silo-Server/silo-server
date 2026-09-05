@@ -59,7 +59,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Hide the targets' watches from the acting profile's history; hiding an already hidden item is a no-op. */
+    /** Hide the targets' watches from the acting profile's history; the server chooses the cutoff when this request runs. */
     post: operations["removeHistoryEntries"];
     delete?: never;
     options?: never;
@@ -334,7 +334,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every root the scanner skipped, across libraries. */
+    /** Page roots the scanner skipped, across libraries. */
     get: operations["listSkippedRoots"];
     put?: never;
     post?: never;
@@ -351,7 +351,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List provider identifiers that no longer resolve, with the items carrying them. */
+    /** List provider identifiers that no longer resolve, with the items carrying them, a page at a time. */
     get: operations["listStaleIds"];
     put?: never;
     post?: never;
@@ -681,7 +681,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Apply a batch of progress writes for the acting profile and answer one result per item; a replayed write with the same updated_at is a no-op. */
+    /** Apply a batch of progress writes for the acting profile and answer one result per item; supply updated_at on each item to preserve event ordering. */
     post: operations["syncProgress"];
     delete?: never;
     options?: never;
@@ -751,7 +751,7 @@ export interface paths {
     put?: never;
     /** Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op. */
     post: operations["markWatched"];
-    /** Mark an item unwatched for the acting profile; a season or series clears every episode. Clearing an unwatched item is a no-op. */
+    /** Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs. */
     delete: operations["unmarkWatched"];
     options?: never;
     head?: never;
@@ -4494,6 +4494,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
@@ -5809,6 +5810,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6293,6 +6295,8 @@ export interface operations {
         library_id: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Case-insensitive substring over root path, title and sample file path */
+        q?: string;
         /** @description Only roots in this inference state */
         state?: string;
       };
@@ -6663,7 +6667,14 @@ export interface operations {
   };
   listSkippedRoots: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over root path, library name or reason */
+        q?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;
@@ -6769,7 +6780,14 @@ export interface operations {
   };
   listStaleIds: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over title, provider, provider ID or library name */
+        q?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;

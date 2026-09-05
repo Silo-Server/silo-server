@@ -717,3 +717,7 @@ type stubGroupProvider struct {
 func (p stubGroupProvider) GetPolicyForUser(context.Context, int) (*GroupPolicy, error) {
 	return p.group, p.err
 }
+
+func (s stubStore) LatestHistoryIDs(context.Context, string, map[string][]string) (map[string]string, error) {
+	return nil, nil
+}

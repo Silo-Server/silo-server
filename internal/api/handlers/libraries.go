@@ -518,7 +518,7 @@ func (h *LibraryHandler) HandleReorderLibraries(w http.ResponseWriter, r *http.R
 
 // HandleListSkippedRoots handles GET /libraries/skipped-roots.
 func (h *LibraryHandler) HandleListSkippedRoots(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListSkippedRoots(r.Context())
+	resp, err := h.ListSkippedRoots(r.Context(), "", 0, 0)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1700,7 +1700,7 @@ func metadataContentLevelsForLibraryType(libraryType string) []string {
 
 // HandleListStaleIDs handles GET /libraries/stale-ids.
 func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListStaleIDs(r.Context())
+	resp, err := h.ListStaleIDs(r.Context(), "", 0, 0)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1738,7 +1738,7 @@ func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request)
 			offset = parsed
 		}
 	}
-	items, total, err := h.ListLibraryRoots(r.Context(), libraryID, strings.TrimSpace(q.Get("state")), limit, offset)
+	items, total, err := h.ListLibraryRoots(r.Context(), libraryID, strings.TrimSpace(q.Get("state")), "", limit, offset)
 	if err != nil {
 		writeAPIError(w, err)
 		return

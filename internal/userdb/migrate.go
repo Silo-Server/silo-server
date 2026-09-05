@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 20
+const schemaVersion = 21
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -193,6 +193,15 @@ func runMigrations(db *sql.DB) error {
 		}
 		if _, err := tx.Exec("PRAGMA user_version = 20"); err != nil {
 			return fmt.Errorf("setting sqlite user_version 20: %w", err)
+		}
+	}
+
+	if version < 21 {
+		if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_watch_history_item_witness ON watch_history (profile_id, media_item_id, watched_at DESC, id DESC)`); err != nil {
+			return fmt.Errorf("migration v21 failed: %w", err)
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 21"); err != nil {
+			return err
 		}
 	}
 

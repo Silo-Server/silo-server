@@ -99,6 +99,9 @@ type UserStore interface {
 	// row, and equal timestamps are ordered by the unique row id, which the
 	// offset form cannot promise.
 	ListHistoryPage(ctx context.Context, profileID string, after *HistoryKey, limit int) ([]WatchHistoryEntry, error)
+	// LatestHistoryIDs returns the newest visible watch ID for each bounded
+	// display group, using the same timestamp/id ordering as ListHistoryPage.
+	LatestHistoryIDs(ctx context.Context, profileID string, groups map[string][]string) (map[string]string, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error

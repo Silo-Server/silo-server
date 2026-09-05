@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
@@ -22,11 +23,11 @@ func (d *recordingWatchDispatcher) HandleLocalWatchEvent(_ context.Context, even
 // provider event when the profile already completed the target. An unmark
 // clears that state, so the next mark records again.
 func TestMarkLeafTargetsWatchedIsIdempotentUntilUnmarked(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newProfileTestStore(t)
 	dispatcher := &recordingWatchDispatcher{}
 	handler := &ItemsHandler{
-		watchState:           watchstate.NewService(testUserStoreProvider{store: store}),
+		watchState:           watchstate.NewService(testUserStoreProvider{store: store}).WithStableIdentityResolver(watchstate.NewStableIdentityResolver(manualMarkIdentityFixture{}, nil, manualMarkIdentityFixture{})),
 		localWatchDispatcher: dispatcher,
 	}
 	targets := []watchedLeafTarget{{ContentID: "movie-1", DurationSeconds: 7200}}
@@ -68,4 +69,18 @@ func TestMarkLeafTargetsWatchedIsIdempotentUntilUnmarked(t *testing.T) {
 	if dispatcher.events[2].Plays[0].HistoryID == dispatcher.events[0].Plays[0].HistoryID {
 		t.Fatal("the second play reused the first history id")
 	}
+}
+
+// Provider events require an exportable identity, as production resolves from
+// the catalog. A local-only ID correctly records history without exporting it.
+type manualMarkIdentityFixture struct{}
+
+func (manualMarkIdentityFixture) GetByID(_ context.Context, id string) (*models.MediaItem, error) {
+	return &models.MediaItem{ContentID: id, Type: "movie"}, nil
+}
+func (manualMarkIdentityFixture) GetByContentID(_ context.Context, id string) ([]*models.MediaItemProviderID, error) {
+	return []*models.MediaItemProviderID{{ContentID: id, ItemType: "movie", Provider: "tmdb", ProviderID: "123"}}, nil
+}
+func (manualMarkIdentityFixture) FindContentIDByProviderIDs(context.Context, map[string]string, string, string) (string, error) {
+	return "movie-1", nil
 }

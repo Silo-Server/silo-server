@@ -101,3 +101,31 @@ func ResolveHistoryDisplayEntries(ctx context.Context, entries []userstore.Watch
 	}
 	return display, nil
 }
+
+// HistoryDisplayGroups expands candidate display IDs to their constituent
+// history IDs in one catalog query. Movies retain their own ID; a series also
+// includes every episode, so a watch outside the raw page can be its witness.
+func HistoryDisplayGroups(ctx context.Context, display []HistoryDisplayEntry, episodes *EpisodeRepository) (map[string][]string, error) {
+	groups := make(map[string][]string, len(display))
+	ids := make([]string, 0, len(display))
+	for _, d := range display {
+		groups[d.DisplayID] = []string{d.DisplayID}
+		ids = append(ids, d.DisplayID)
+	}
+	if episodes == nil || len(ids) == 0 {
+		return groups, nil
+	}
+	rows, err := episodes.pool.Query(ctx, `SELECT series_id, content_id FROM episodes WHERE series_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seriesID, episodeID string
+		if err := rows.Scan(&seriesID, &episodeID); err != nil {
+			return nil, err
+		}
+		groups[seriesID] = append(groups[seriesID], episodeID)
+	}
+	return groups, rows.Err()
+}
