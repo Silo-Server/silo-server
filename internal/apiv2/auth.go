@@ -2,9 +2,11 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
@@ -26,6 +28,28 @@ type LoginOutput struct {
 	Body TokenPair
 }
 
+// CompleteOAuthLoginInput redeems the one-time code the OAuth callback
+// redirected the browser with.
+type CompleteOAuthLoginInput struct {
+	Body struct {
+		Code string `json:"code" minLength:"1" maxLength:"128" doc:"Completion code from the callback redirect; single use" example:"3f2b47eb7b36dd2d"`
+	}
+}
+
+// OAuthCompletion is the credential the code redeemed, plus where the
+// browser meant to go.
+type OAuthCompletion struct {
+	AccessToken  string `json:"access_token" doc:"Bearer access token" example:"eyJhbGciOi..."`
+	RefreshToken string `json:"refresh_token" doc:"Refresh token for POST /auth/refresh" example:"eyJhbGciOi..."`
+	ExpiresIn    int    `json:"expires_in" doc:"Access token lifetime in seconds" example:"3600"`
+	Next         string `json:"next" doc:"Site-relative path the login started from; / when none was given" example:"/"`
+}
+
+// CompleteOAuthLoginOutput is the completeOAuthLogin response.
+type CompleteOAuthLoginOutput struct {
+	Body OAuthCompletion
+}
+
 func registerAuth(reg *Registry) {
 	end := humaOp(http.MethodPost, Prefix+"/auth/impersonation/end", "endImpersonation", "auth",
 		"Return an impersonating session to the administrator who started it.")
@@ -42,6 +66,11 @@ func registerAuth(reg *Registry) {
 		Operation: login,
 		Class:     ClassPublic, ServiceBacked: true, RateLimitBucket: "login",
 	}, reg.login)
+	complete := humaOp(http.MethodPost, Prefix+"/auth/oauth/complete", "completeOAuthLogin", "auth",
+		"Redeem the one-time code an OAuth callback issued for the token pair.")
+	// An unknown, used or expired code is 401 invalid_token.
+	complete.Errors = []int{http.StatusUnauthorized}
+	Register(reg, Operation{Operation: complete, Class: ClassPublic, ServiceBacked: true}, reg.completeOAuthLogin)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPost, Prefix+"/auth/logout", "logout", "auth",
 			"Revoke the caller's login session."),
@@ -95,6 +124,29 @@ func (reg *Registry) endImpersonation(ctx context.Context, _ *struct{}) (*struct
 		return nil, impersonationProblem(err)
 	}
 	return nil, nil
+}
+
+// completeOAuthLogin answers from the same completion store v1 POST
+// /auth/oauth/complete redeems; the token pair carries no account view
+// because the callback stored none (the client follows with getCurrentUser).
+func (reg *Registry) completeOAuthLogin(ctx context.Context, in *CompleteOAuthLoginInput) (*CompleteOAuthLoginOutput, error) {
+	if reg.deps.OAuth == nil {
+		return nil, unavailable("oauth login")
+	}
+	c, err := reg.deps.OAuth.Complete(ctx, in.Body.Code)
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrOAuthCompletionUnavailable):
+			return nil, unavailable("oauth login")
+		case errors.Is(err, auth.ErrOAuthCompletionInvalid):
+			return nil, NewProblem(TypeInvalidToken, "The completion code is invalid, used, or expired.")
+		case errors.Is(err, auth.ErrOAuthCodeRequired):
+			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+				WithErrors(ProblemError{Location: locationBody + ".code", Code: codeRequired, Detail: "A completion code is required."})
+		}
+		return nil, serviceProblem(err)
+	}
+	return &CompleteOAuthLoginOutput{Body: OAuthCompletion{AccessToken: c.AccessToken, RefreshToken: c.RefreshToken, ExpiresIn: c.ExpiresIn, Next: c.NextURL}}, nil
 }
 
 // loginProblem renders a login failure: v1's 401 invalid_credentials is the

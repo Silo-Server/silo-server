@@ -20322,13 +20322,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/oauth/complete",
+        "operation_id": "completeOAuthLogin"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authHandler != nil; oauthHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Public. Same {access_token, refresh_token, expires_in, next} body; v1 plain-text errors became problems: empty code 422 at body.code, unknown/used/expired code 401 invalid_token, no completion store 503 dependency_unavailable. Registered unconditionally (v1 only registers when PublicURL and the DB are configured). Cache-Control: no-store."
     },
     {
       "listener": "api",

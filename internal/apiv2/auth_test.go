@@ -82,3 +82,24 @@ func TestEndImpersonation(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/impersonation/end", "", bearer(memberToken)), TypeConflict)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/impersonation/end", "", nil), TypeAuthenticationRequired)
 }
+
+func TestCompleteOAuthLogin(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	rec := do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil)
+	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != `{"access_token":"acc","refresh_token":"ref","expires_in":3600,"next":"/me"}`+"\n" {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"nope"}`, nil), TypeInvalidToken)
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":""}`, nil), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.code" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// Whitespace-only passes the schema and is the seam's own refusal.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"  "}`, nil), TypeValidationFailed)
+	deps := pilotDeps(nil, nil)
+	deps.OAuth = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil), TypeDependencyUnavailable)
+}

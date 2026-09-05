@@ -336,6 +336,24 @@
         ],
         "type": "object"
       },
+      "CompleteOAuthLoginInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Completion code from the callback redirect; single use",
+            "examples": [
+              "3f2b47eb7b36dd2d"
+            ],
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
       "DecideDeviceLoginInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -865,6 +883,47 @@
         "required": [
           "username",
           "password"
+        ],
+        "type": "object"
+      },
+      "OAuthCompletion": {
+        "additionalProperties": false,
+        "properties": {
+          "access_token": {
+            "description": "Bearer access token",
+            "examples": [
+              "eyJhbGciOi..."
+            ],
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Access token lifetime in seconds",
+            "examples": [
+              3600
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "next": {
+            "description": "Site-relative path the login started from; / when none was given",
+            "examples": [
+              "/"
+            ],
+            "type": "string"
+          },
+          "refresh_token": {
+            "description": "Refresh token for POST /auth/refresh",
+            "examples": [
+              "eyJhbGciOi..."
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in",
+          "next"
         ],
         "type": "object"
       },
@@ -3180,6 +3239,129 @@
           "auth"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/oauth/complete": {
+      "post": {
+        "operationId": "completeOAuthLogin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteOAuthLoginInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthCompletion"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Redeem the one-time code an OAuth callback issued for the token pair.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
         "x-silo-service-backed": true
       }
     },

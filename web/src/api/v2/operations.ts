@@ -22,4 +22,5 @@ export const v2Operations = {
   "POST /api/v2/auth/impersonation/end": "endImpersonation",
   "POST /api/v2/auth/login": "login",
   "POST /api/v2/auth/logout": "logout",
+  "POST /api/v2/auth/oauth/complete": "completeOAuthLogin",
 } as const;

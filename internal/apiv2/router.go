@@ -101,6 +101,8 @@ type Dependencies struct {
 	Devices DeviceLoginService
 	// Sessions opens and closes login sessions (*handlers.AuthHandler).
 	Sessions SessionService
+	// OAuth redeems browser OAuth completions (*auth.OAuthHandler).
+	OAuth OAuthService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -385,6 +387,11 @@ type ProfileService interface {
 type LibraryService interface {
 	// ExistingIDs returns the subset of ids that name a library.
 	ExistingIDs(ctx context.Context, ids []int) ([]int, error)
+}
+
+// OAuthService is the slice of *auth.OAuthHandler completeOAuthLogin uses.
+type OAuthService interface {
+	Complete(ctx context.Context, code string) (auth.OAuthCompletion, error)
 }
 
 // SessionService is the slice of *handlers.AuthHandler the login-session

@@ -280,13 +280,12 @@ func (h *OAuthHandler) HandleComplete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	code := strings.TrimSpace(req.Code)
-	if code == "" {
-		http.Error(w, "code required", http.StatusBadRequest)
-		return
-	}
-	completion, err := h.deps.CompletionStore.GetAndDeleteCompletion(r.Context(), code)
+	completion, err := h.Complete(r.Context(), req.Code)
 	if err != nil {
+		if errors.Is(err, ErrOAuthCodeRequired) {
+			http.Error(w, "code required", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "invalid or expired completion code", http.StatusUnauthorized)
 		return
 	}
@@ -297,6 +296,31 @@ func (h *OAuthHandler) HandleComplete(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn:    completion.ExpiresIn,
 		NextURL:      completion.NextURL,
 	})
+}
+
+// Errors Complete reports; each transport renders them in its own shape.
+var (
+	ErrOAuthCompletionUnavailable = errors.New("oauth completion unavailable")
+	ErrOAuthCodeRequired          = errors.New("oauth completion code required")
+	ErrOAuthCompletionInvalid     = errors.New("oauth completion code invalid or expired")
+)
+
+// Complete redeems a one-time completion code for the token pair the
+// callback stored; the code is consumed on success. v1 POST
+// /auth/oauth/complete and v2 completeOAuthLogin both call it.
+func (h *OAuthHandler) Complete(ctx context.Context, code string) (OAuthCompletion, error) {
+	if h.deps.CompletionStore == nil {
+		return OAuthCompletion{}, ErrOAuthCompletionUnavailable
+	}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return OAuthCompletion{}, ErrOAuthCodeRequired
+	}
+	completion, err := h.deps.CompletionStore.GetAndDeleteCompletion(ctx, code)
+	if err != nil {
+		return OAuthCompletion{}, ErrOAuthCompletionInvalid
+	}
+	return completion, nil
 }
 
 func clientIP(r *http.Request) string {

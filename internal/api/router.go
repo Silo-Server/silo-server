@@ -1877,6 +1877,38 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// contracts/api/v2/openapi.json, not by an inventory row. All v2
 	// operations register at build regardless of the wiring here: a gate the
 	// wiring lacks makes its operations fail closed, never disappear.
+	// The OAuth handler is optional: it only stands up when PublicURL is
+	// configured (a stable redirect_uri origin for IdPs) and the DB is
+	// available (oauth_session storage). It is built before the v2 listener
+	// so completeOAuthLogin shares it with the v1 routes.
+	var oauthHandler *auth.OAuthHandler
+	if authHandler != nil {
+		if deps.PublicURL != "" && deps.DB != nil && authService != nil && jwtService != nil {
+			stateSecret := auth.DeriveOAuthStateSecret([]byte(deps.Config.Auth.JWTSecret))
+			oauthStore := auth.NewPGOAuthStore(deps.DB, stateSecret)
+			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, error) {
+				pp := authService.FindOAuthInstallation(installationID)
+				if pp == nil {
+					return nil, "", errors.New("plugin not found")
+				}
+				c, err := pp.OAuthClient(ctx)
+				if err != nil {
+					return nil, "", err
+				}
+				return c, pp.CapabilityID(), nil
+			}
+			oauthHandler = auth.NewOAuthHandler(auth.OAuthHandlerDeps{
+				Store:           oauthStore,
+				CompletionStore: oauthStore,
+				StateSecret:     stateSecret,
+				ResolveClient:   resolveClient,
+				LoginCompleter:  authService,
+				HostBaseURL:     deps.PublicURL,
+				StateTTL:        10 * time.Minute,
+			})
+		}
+	}
+
 	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
 	// The pilot operations call the v1 handlers' extracted business logic;
 	// a typed nil must not become a non-nil interface, so each is set only
@@ -1885,6 +1917,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.Accounts = authHandler
 		v2deps.Devices = authHandler
 		v2deps.Sessions = authHandler
+	}
+	if oauthHandler != nil {
+		v2deps.OAuth = oauthHandler
 	}
 	if progressHandler != nil {
 		v2deps.Progress = progressHandler
@@ -1969,34 +2004,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		// Auth routes: public (no auth required).
 		if authHandler != nil {
-			// OAuth handler is optional: it only stands up when PublicURL is
-			// configured (we need a stable redirect_uri origin for IdPs) and
-			// the DB is available (oauth_session storage).
-			var oauthHandler *auth.OAuthHandler
-			if deps.PublicURL != "" && deps.DB != nil && authService != nil && jwtService != nil {
-				stateSecret := auth.DeriveOAuthStateSecret([]byte(deps.Config.Auth.JWTSecret))
-				oauthStore := auth.NewPGOAuthStore(deps.DB, stateSecret)
-				resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, error) {
-					pp := authService.FindOAuthInstallation(installationID)
-					if pp == nil {
-						return nil, "", errors.New("plugin not found")
-					}
-					c, err := pp.OAuthClient(ctx)
-					if err != nil {
-						return nil, "", err
-					}
-					return c, pp.CapabilityID(), nil
-				}
-				oauthHandler = auth.NewOAuthHandler(auth.OAuthHandlerDeps{
-					Store:           oauthStore,
-					CompletionStore: oauthStore,
-					StateSecret:     stateSecret,
-					ResolveClient:   resolveClient,
-					LoginCompleter:  authService,
-					HostBaseURL:     deps.PublicURL,
-					StateTTL:        10 * time.Minute,
-				})
-			}
 			authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
 
 			if invitationService != nil {

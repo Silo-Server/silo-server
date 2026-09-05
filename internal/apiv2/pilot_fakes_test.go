@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -228,6 +229,7 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
 	deps.Devices = fixtureDevices()
 	deps.Sessions = &fakeSessionService{}
+	deps.OAuth = fakeOAuth{codes: map[string]auth.OAuthCompletion{"c0de": {AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600, NextURL: "/me"}}}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
@@ -438,4 +440,21 @@ func (f *fakeSessionService) EndImpersonation(_ context.Context, claims *auth.Cl
 	}
 	f.ended = append(f.ended, claims.SessionID)
 	return nil
+}
+
+// fakeOAuth stands in for *auth.OAuthHandler.Complete: one redeemable code.
+type fakeOAuth struct {
+	codes map[string]auth.OAuthCompletion
+}
+
+func (f fakeOAuth) Complete(_ context.Context, code string) (auth.OAuthCompletion, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return auth.OAuthCompletion{}, auth.ErrOAuthCodeRequired
+	}
+	c, ok := f.codes[code]
+	if !ok {
+		return auth.OAuthCompletion{}, auth.ErrOAuthCompletionInvalid
+	}
+	return c, nil
 }
