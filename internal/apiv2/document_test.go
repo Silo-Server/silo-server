@@ -137,16 +137,31 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
 		// Public lookups by code answer 404 without a path parameter; a
 		// decision on a finished request is 409, on an expired one 410.
-		"getDeviceLogin":           {http.StatusNotFound: true, http.StatusServiceUnavailable: true},
-		"pollDeviceLogin":          {http.StatusNotFound: true},
-		"approveDeviceLogin":       {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
-		"approveDeviceHandoff":     {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
-		"denyDeviceLogin":          {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
-		"getDeviceLoginCapability": {http.StatusServiceUnavailable: false},
+		"getDeviceLogin":                 {http.StatusNotFound: true, http.StatusServiceUnavailable: true},
+		"pollDeviceLogin":                {http.StatusNotFound: true},
+		"approveDeviceLogin":             {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
+		"approveDeviceHandoff":           {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
+		"denyDeviceLogin":                {http.StatusNotFound: true, http.StatusConflict: true, http.StatusGone: true},
+		"getDeviceLoginCapability":       {http.StatusServiceUnavailable: false},
+		"listProfiles":                   {http.StatusNotFound: true, http.StatusConflict: false},
+		"createProfile":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true, http.StatusOK: false},
+		"replaceProfileSectionOverrides": {http.StatusNoContent: true, http.StatusForbidden: true},
+		"resetProfileSectionOverrides":   {http.StatusNoContent: true},
+		"deleteProfile":                  {http.StatusNoContent: true, http.StatusConflict: true, http.StatusNotFound: true},
+		"deleteProfileAvatar":            {http.StatusNoContent: true, http.StatusNotFound: true},
+		"uploadProfileAvatar":            {http.StatusOK: true, http.StatusRequestEntityTooLarge: true, http.StatusUnsupportedMediaType: true},
+		"verifyProfilePIN":               {http.StatusOK: true, http.StatusNotFound: true},
+		"listHouseholdSessions":          {http.StatusOK: true, http.StatusForbidden: true},
 	}
-	profileToken := map[string]bool{"listProgress": true, "listAdminUsers": true, "updateProfile": true, "approveDeviceHandoff": true,
+	profileToken := map[string]bool{
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "approveDeviceHandoff": true,
 		"getOnboardingFlow": true, "getOnboardingState": true, "recordOnboardingProgress": true, "getPolicyCapability": true, "listUserLibraries": true, "launchPlugin": true,
-		"getAccountPasswordCapability": true, "changePassword": true}
+		"getAccountPasswordCapability": true, "changePassword": true,
+		"listProfiles": true, "createProfile": true,
+		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
+		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
+		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
+	}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
 		for method, raw := range item.(map[string]any) {
@@ -217,7 +232,7 @@ func TestGeneratedDocumentRequestMediaTypes(t *testing.T) {
 				t.Errorf("%s %s documents a body with no media type", method, path)
 			}
 			for mediaType := range content {
-				if !structuredMediaTypeOK(mediaType) {
+				if !requestMediaTypeOK(mediaType) {
 					t.Errorf("%s %s documents request media type %q that the listener rejects with 415", method, path, mediaType)
 				}
 			}

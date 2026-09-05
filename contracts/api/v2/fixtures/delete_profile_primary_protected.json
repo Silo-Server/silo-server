@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/conflict",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "The primary profile cannot be deleted. Delete the user account instead.",
+  "instance": "urn:silo:request:000000000000000000000058"
+}
+

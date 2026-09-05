@@ -206,6 +206,7 @@ func registerAll(reg *Registry) {
 	registerDeviceLogin(reg)
 	registerOnboarding(reg)
 	registerPolicy(reg)
+	registerProfileSections(reg)
 	registerProfiles(reg)
 	registerProgress(reg)
 	registerSystem(reg)

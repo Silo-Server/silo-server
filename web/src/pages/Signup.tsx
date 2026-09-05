@@ -2,9 +2,8 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { Profile } from "@/api/types";
 import { v2 } from "@/api/v2/request";
+import { listProfiles } from "@/hooks/queries/profiles";
 import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -77,8 +76,7 @@ export default function Signup() {
         return;
       }
       try {
-        const profilesRequest: Promise<{ profiles: Profile[] }> = api("/profiles");
-        const profileList = await profilesRequest;
+        const profileList = await listProfiles();
         const soleProfile = getBootstrapProfile(profileList.profiles ?? []);
         if (soleProfile) {
           selectProfile(soleProfile);

@@ -213,7 +213,13 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 func TestReconcileSpecSeeded(t *testing.T) {
 	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
 	observed := []string{
-		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json", "PATCH " + Prefix + "/profiles/{id}", "GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
+		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json",
+		"GET " + Prefix + "/profile/sections", "PUT " + Prefix + "/profile/sections", "DELETE " + Prefix + "/profile/sections",
+		"GET " + Prefix + "/profile/sections/flags", "GET " + Prefix + "/profile/sections/settings",
+		"GET " + Prefix + "/profiles", "POST " + Prefix + "/profiles", "PATCH " + Prefix + "/profiles/{id}", "DELETE " + Prefix + "/profiles/{id}",
+		"GET " + Prefix + "/profiles/household/sessions", "POST " + Prefix + "/profiles/{id}/verify-pin",
+		"PUT " + Prefix + "/profiles/{id}/avatar", "DELETE " + Prefix + "/profiles/{id}/avatar",
+		"GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
 		"GET " + Prefix + "/auth/device", "GET " + Prefix + "/auth/device/capability", "POST " + Prefix + "/auth/device/approve", "POST " + Prefix + "/auth/device/approve-handoff",
 		"POST " + Prefix + "/auth/device/deny", "POST " + Prefix + "/auth/device/poll", "POST " + Prefix + "/auth/device/start",
 		"POST " + Prefix + "/auth/impersonation/end", "POST " + Prefix + "/auth/login", "POST " + Prefix + "/auth/logout", "POST " + Prefix + "/auth/oauth/complete",

@@ -53,6 +53,10 @@ const (
 	metaProfileOptional = "silo.profile_optional"
 	metaMaxBodyBytes    = "silo.max_body_bytes"
 	metaRateLimitBucket = "silo.rate_limit_bucket"
+	// metaFormSchema names the multipart form type of an operation whose
+	// RawBody is a huma.MultipartFormFiles[T]; the document hook registers
+	// the form under that name so the request schema is not anonymous.
+	metaFormSchema = "silo.form_schema"
 )
 
 // knownPermissions is the policy permission set an operation may name. It is
@@ -164,6 +168,9 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 		limit = MaxJSONBodyBytes
 	}
 	op.Metadata[metaMaxBodyBytes] = limit
+	if name := multipartFormName(reflect.TypeOf(in)); name != "" {
+		op.Metadata[metaFormSchema] = name
+	}
 	// Huma reads through a LimitReader and reports "too large" when the count
 	// reaches the limit, so a body of exactly N bytes needs N+1. Every limit
 	// goes through this translation, the default and an override alike.
@@ -178,6 +185,23 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class})
 	reg.mu.Unlock()
 	huma.Register(reg.api, op.Operation, handler)
+}
+
+// multipartFormName returns the form type name of an input whose RawBody is
+// a huma.MultipartFormFiles[T], else "".
+func multipartFormName(t reflect.Type) string {
+	if t == nil || t.Kind() != reflect.Struct {
+		return ""
+	}
+	f, ok := t.FieldByName("RawBody")
+	if !ok || !strings.HasPrefix(f.Type.Name(), "MultipartFormFiles[") {
+		return ""
+	}
+	data, ok := f.Type.FieldByName("data")
+	if !ok {
+		return ""
+	}
+	return data.Type.Elem().Name()
 }
 
 func checkOperation(op Operation) error {

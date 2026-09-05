@@ -48,10 +48,13 @@ export default tseslint.config(
       "src/hooks/queries/policy.ts",
       "src/hooks/queries/account.ts",
       "src/hooks/queries/admin/users.ts",
+      "src/lib/profile-management.ts",
       "src/pages/ActivateDevice.tsx",
       "src/pages/Login.tsx",
       "src/pages/OAuthComplete.tsx",
+      "src/pages/ProfileCustomizeHome.tsx",
       "src/pages/Signup.tsx",
+      "src/pages/setup-wizard/steps/ProfileStep.tsx",
     ],
     rules: {
       "no-restricted-syntax": [

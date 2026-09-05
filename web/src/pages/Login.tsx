@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import QRCode from "react-qr-code";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
-import { api } from "@/api/client";
-import type { Profile } from "@/api/types";
 import { sessionFromTokenPair } from "@/api/v2/account";
 import { v2, type V2Result } from "@/api/v2/request";
+import { listProfiles } from "@/hooks/queries/profiles";
 import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -122,8 +121,7 @@ export default function Login() {
     }
 
     try {
-      const profilesRequest: Promise<{ profiles: Profile[] }> = api("/profiles");
-      const profileList = await profilesRequest;
+      const profileList = await listProfiles();
       const soleProfile = getBootstrapProfile(profileList.profiles ?? []);
       if (soleProfile) {
         selectProfile(soleProfile);

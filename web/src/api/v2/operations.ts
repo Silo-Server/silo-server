@@ -6,6 +6,9 @@
 /** Operation ids keyed by `METHOD /path`, as the committed v2 OpenAPI document lists them. */
 export const v2Operations = {
   "DELETE /api/v2/auth/sessions/{id}": "deleteSession",
+  "DELETE /api/v2/profile/sections": "resetProfileSectionOverrides",
+  "DELETE /api/v2/profiles/{id}": "deleteProfile",
+  "DELETE /api/v2/profiles/{id}/avatar": "deleteProfileAvatar",
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/account/password/capability": "getAccountPasswordCapability",
   "GET /api/v2/admin/users": "listAdminUsers",
@@ -19,6 +22,11 @@ export const v2Operations = {
   "GET /api/v2/onboarding/state": "getOnboardingState",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
   "GET /api/v2/policy/capability": "getPolicyCapability",
+  "GET /api/v2/profile/sections": "listProfileSectionOverrides",
+  "GET /api/v2/profile/sections/flags": "getProfileSectionFlags",
+  "GET /api/v2/profile/sections/settings": "getProfileSectionSettings",
+  "GET /api/v2/profiles": "listProfiles",
+  "GET /api/v2/profiles/household/sessions": "listHouseholdSessions",
   "GET /api/v2/progress": "listProgress",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
@@ -40,4 +48,8 @@ export const v2Operations = {
   "POST /api/v2/auth/setup": "setupServer",
   "POST /api/v2/auth/signup": "signup",
   "POST /api/v2/onboarding/progress": "recordOnboardingProgress",
+  "POST /api/v2/profiles": "createProfile",
+  "POST /api/v2/profiles/{id}/verify-pin": "verifyProfilePIN",
+  "PUT /api/v2/profile/sections": "replaceProfileSectionOverrides",
+  "PUT /api/v2/profiles/{id}/avatar": "uploadProfileAvatar",
 } as const;
