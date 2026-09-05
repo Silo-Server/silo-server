@@ -1,0 +1,15 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:000000000000000000000011",
+  "errors": [
+    {
+      "location": "body.is_child",
+      "code": "invalid_type",
+      "detail": "null is not a value for this member; omit it to leave it unchanged"
+    }
+  ]
+}
+

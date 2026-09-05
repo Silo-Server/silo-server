@@ -194,7 +194,9 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 // test-only entry the placeholder registry carries.
 func TestReconcileSpecSeeded(t *testing.T) {
 	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
-	observed := []string{"GET " + Prefix + "/openapi.json", "GET " + Prefix + "/system/info"}
+	observed := []string{
+		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json", "PATCH " + Prefix + "/profiles/{id}", "GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
+	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
 	if err != nil || len(unaccounted) != 0 || len(unserved) != 0 {
@@ -216,7 +218,13 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		t.Fatalf("unserved manual entry not reported: %v", unserved)
 	}
 	// A documented operation the router does not serve (stale artifact).
-	_, unserved, _ = reconcileSpec(observed[:1], contracts.OpenAPI, nil)
+	var withoutInfo []string
+	for _, route := range observed {
+		if route != "GET "+Prefix+"/system/info" {
+			withoutInfo = append(withoutInfo, route)
+		}
+	}
+	_, unserved, _ = reconcileSpec(withoutInfo, contracts.OpenAPI, nil)
 	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+Prefix+"/system/info") {
 		t.Fatalf("stale artifact not reported: %v", unserved)
 	}
@@ -510,8 +518,8 @@ func TestOpenAPIDocumentIsTheEmbeddedArtifact(t *testing.T) {
 }
 
 // TestGenerateOpenAPIIsDeterministic: two generations in one process and the
-// document's own hygiene rules (no servers, no examples, nothing
-// build-specific).
+// document's own hygiene rules (no servers, nothing build-specific; schema
+// examples are fictional fixture-shaped values and are allowed).
 func TestGenerateOpenAPIIsDeterministic(t *testing.T) {
 	a, err := GenerateOpenAPI()
 	if err != nil {
@@ -533,7 +541,7 @@ func TestGenerateOpenAPIIsDeterministic(t *testing.T) {
 			t.Errorf("document carries %q", forbidden)
 		}
 	}
-	for _, needle := range []string{"\"example\"", "\"examples\"", "/Users/", "/home/", "localhost"} {
+	for _, needle := range []string{"/Users/", "/home/", "localhost"} {
 		if bytes.Contains(a, []byte(needle)) {
 			t.Errorf("document contains %s", needle)
 		}

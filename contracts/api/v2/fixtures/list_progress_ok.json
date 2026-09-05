@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "media_item_id": "movie-8f2c1a",
+      "position_seconds": 1325.5,
+      "duration_seconds": 5400,
+      "completed": false,
+      "updated_at": "2026-01-02T03:04:05.000Z"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7InUiOiIyMDI2LTAxLTAyVDAzOjA0OjA1WiIsIm0iOiJtb3ZpZS04ZjJjMWEifX0.7fNOMpzpMssIVUy2sr5knHSZhSdx8HPH7x4WWFoLLDQ",
+    "has_more": true
+  }
+}
+

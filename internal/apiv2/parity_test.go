@@ -53,6 +53,11 @@ func (fakeResolver) Resolve(_ context.Context, in access.ResolveInput) (access.S
 	case "p-owner", "p-primary":
 		return access.Scope{UserID: in.UserID, ProfileID: in.ProfileID, ProfileVerified: true}, nil
 	case "p-locked", "p-primary-locked":
+		// An API-key credential is exempt from the PIN at the gate, and the
+		// scope records that the verification was skipped rather than proved.
+		if in.SkipPINVerification {
+			return access.Scope{UserID: in.UserID, ProfileID: in.ProfileID, ProfileVerified: true, PINVerificationSkipped: true}, nil
+		}
 		if in.ProfileToken == "" {
 			return access.Scope{}, access.ErrProfileUnverified
 		}
@@ -75,24 +80,43 @@ func (f fakeSettings) GetAll(context.Context) (map[string]string, error) {
 }
 
 const (
-	memberToken  = "tok-member"
-	adminToken   = "tok-admin"
-	expiredToken = "tok-expired"
+	memberToken = "tok-member"
+	adminToken  = "tok-admin"
+	// otherAdminToken is a second admin account, for cursors that must not
+	// cross accounts.
+	otherAdminToken = "tok-admin-other"
+	expiredToken    = "tok-expired"
+	// apiKeyToken is an unscoped API key owned by the member account: no
+	// login session, exempt from profile PIN verification at the gate.
+	apiKeyToken = "sa_member"
 )
+
+type fakeAPIKeys struct{ keys map[string]*models.APIKey }
+
+func (f fakeAPIKeys) GetByKey(_ context.Context, key string) (*models.APIKey, error) {
+	if k, ok := f.keys[key]; ok {
+		return k, nil
+	}
+	return nil, errors.New("no key")
+}
+func (f fakeAPIKeys) UpdateLastUsed(context.Context, int64) error { return nil }
 
 func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 	claims := map[string]*auth.Claims{
-		memberToken:  {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
-		adminToken:   {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
-		expiredToken: {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
+		memberToken:     {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
+		adminToken:      {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
+		otherAdminToken: {UserID: 3, Role: "admin", SessionID: "s3", TokenType: auth.TokenTypeAccess},
+		expiredToken:    {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
 	}
-	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true}}, nil, nil)
+	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}}}
+	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true, "s3": true}}, keys, fakeUsers{users})
 }
 
 func parityDeps(demo bool) Dependencies {
 	users := map[int]*models.User{
 		1: {ID: 1, Role: "user", Enabled: true, Permissions: []string{}},
 		2: {ID: 2, Role: "admin", Enabled: true},
+		3: {ID: 3, Role: "admin", Enabled: true},
 	}
 	primary := func(_ context.Context, userID int, profileID string) (bool, bool, error) {
 		switch profileID {
@@ -147,6 +171,11 @@ func TestMiddlewareParity(t *testing.T) {
 		{"profile: locked", ClassProfileScoped, with(bearer(memberToken), "X-Profile-Id", "p-locked"), TypeProfileVerificationRequired, false},
 		{"profile: unlocked with token", ClassProfileScoped, with(with(bearer(memberToken), "X-Profile-Id", "p-locked"), "X-Profile-Token", "t"), ProblemType{}, true},
 		{"profile: ok", ClassProfileScoped, with(bearer(memberToken), "X-Profile-Id", "p-owner"), ProblemType{}, true},
+		// An API key is exempt from the profile PIN at the gate, in v1 and v2
+		// alike; the household verifier, not the gate, refuses it (see
+		// TestUpdateProfileDecisions).
+		{"profile: locked with api key", ClassProfileScoped, with(bearer(apiKeyToken), "X-Profile-Id", "p-locked"), ProblemType{}, true},
+		{"authenticated: api key", ClassAuthenticated, bearer(apiKeyToken), ProblemType{}, true},
 		{"acting admin: member", ClassActingAdmin, bearer(memberToken), TypePermissionDenied, false},
 		{"acting admin: non-primary profile", ClassActingAdmin, with(bearer(adminToken), "X-Profile-Id", "p-owner"), TypePermissionDenied, false},
 		{"acting admin: primary", ClassActingAdmin, with(bearer(adminToken), "X-Profile-Id", "p-primary"), ProblemType{}, true},
@@ -274,7 +303,7 @@ func TestGateOrderMatchesV1(t *testing.T) {
 		requireProblem(t, rec, TypePermissionDenied)
 	}
 	// The chain itself, so a reordering that the demo probe cannot see still fails.
-	chain, missing := gateChain(deps, ClassProfileScoped, "", true)
+	chain, missing := gateChain(deps, ClassProfileScoped, "", true, false)
 	if missing != "" || len(chain) != 5 {
 		t.Fatalf("profile-scoped chain = %d gates, missing %q; want auth, demo, rate limit, viewer access, profile", len(chain), missing)
 	}

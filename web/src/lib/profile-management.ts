@@ -1,4 +1,5 @@
 import type { CreateProfileRequest, Profile } from "@/api/types";
+import type { ProfileUpdate } from "@/hooks/queries/profiles";
 import { avatarPresetRef, parseProfileAvatarPresetRef } from "@/lib/profile-avatars";
 import {
   formatPlaybackQualityPreset,
@@ -77,6 +78,35 @@ export function buildProfileRequestFromDraft(draft: ProfileDraft): CreateProfile
 
   if (draft.clearPin) {
     body.pin = "";
+  } else if (draft.pin.trim() !== "") {
+    body.pin = draft.pin.trim();
+  }
+
+  return body;
+}
+
+/**
+ * The v2 PATCH body for an edited profile. Every field the editor owns is sent
+ * so the profile matches the draft; a cleared value goes on the wire as null
+ * (the contract's clearing form), and the PIN is omitted unless it changes.
+ */
+export function buildProfileUpdateFromDraft(draft: ProfileDraft): ProfileUpdate {
+  const maxPlaybackQuality = playbackQualityValueFromPreset(draft.maxPlaybackQuality);
+  const body: ProfileUpdate = {
+    name: draft.name.trim(),
+    avatar: draft.avatarPreset ? avatarPresetRef(draft.avatarPreset) : null,
+    is_child: draft.isChild,
+    max_content_rating: draft.maxContentRating === "" ? null : draft.maxContentRating,
+    max_playback_quality:
+      maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p" ? maxPlaybackQuality : null,
+    library_restrictions_enabled: draft.libraryRestrictionsEnabled,
+    allowed_library_ids: draft.libraryRestrictionsEnabled
+      ? sortUniqueLibraryIDs(draft.allowedLibraryIDs).map(String)
+      : [],
+  };
+
+  if (draft.clearPin) {
+    body.pin = null;
   } else if (draft.pin.trim() !== "") {
     body.pin = draft.pin.trim();
   }

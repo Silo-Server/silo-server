@@ -256,7 +256,7 @@ export async function bootstrapAccessToken(fetchImpl: typeof fetch = fetch): Pro
   }
 }
 
-async function refreshAccessToken(
+export async function refreshAccessToken(
   refreshToken: string,
   fetchImpl: typeof fetch,
 ): Promise<RefreshResponse | null> {
@@ -371,53 +371,6 @@ function apiClientErrorFrom(status: number, parsed: ParsedApiError): ApiClientEr
   return err;
 }
 
-export interface RestoredUserSession<TUser> {
-  user: TUser;
-  accessToken: string;
-  refreshToken: string;
-}
-
-export async function restoreUserSession<TUser>({
-  accessToken,
-  refreshToken,
-  fetchImpl = fetch,
-}: {
-  accessToken: string;
-  refreshToken: string;
-  fetchImpl?: typeof fetch;
-}): Promise<RestoredUserSession<TUser>> {
-  let restoredAccessToken = accessToken;
-  let restoredRefreshToken = refreshToken;
-
-  const requestUser = (token: string) =>
-    fetchImpl("/api/v1/auth/me", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-  let res = await requestUser(restoredAccessToken);
-
-  if (res.status === 401) {
-    const refreshed = await refreshAccessToken(restoredRefreshToken, fetchImpl);
-    if (refreshed) {
-      restoredAccessToken = refreshed.access_token;
-      restoredRefreshToken = refreshed.refresh_token;
-      res = await requestUser(restoredAccessToken);
-    }
-  }
-
-  if (!res.ok) {
-    throw apiClientErrorFrom(res.status, await parseApiError(res));
-  }
-
-  return {
-    user: (await res.json()) as TUser,
-    accessToken: restoredAccessToken,
-    refreshToken: restoredRefreshToken,
-  };
-}
-
 async function readApiResponse<T>(res: Response): Promise<T> {
   // Handle empty successful responses.
   if (res.status === 204 || res.status === 205) {
@@ -475,6 +428,43 @@ async function apiResponseInternal(
   options: RequestInit,
   snapshot?: ProfileRequestContextSnapshot,
 ): Promise<Response> {
+  const { res, requestProfileId, requestProfileToken } = await fetchWithSession(
+    `/api/v1${path}`,
+    options,
+    snapshot,
+  );
+
+  if (!res.ok) {
+    const parsed = await parseApiError(res);
+    if (res.status === 403 && parsed.apiErr.error === "profile_unverified") {
+      reportProfileUnverified(requestProfileId, requestProfileToken, snapshot);
+    }
+    throw apiClientErrorFrom(res.status, parsed);
+  }
+  return res;
+}
+
+/** The response of one session-bound fetch plus the profile identity it carried. */
+export interface SessionFetchResult {
+  res: Response;
+  requestProfileId: string | null;
+  requestProfileToken: string | null;
+}
+
+/**
+ * Sends one request with the current account, profile, and device headers and
+ * retries once after a token refresh on 401. The URL is complete (`/api/v1/…`
+ * or `/api/v2/…`); the caller owns the status and body handling, which is
+ * where the v1 `{error, message}` and v2 Problem Details surfaces differ.
+ *
+ * Shared by `api`/`apiResponse` and the v2 request boundary; not for direct
+ * use at call sites.
+ */
+export async function fetchWithSession(
+  url: string,
+  options: RequestInit,
+  snapshot?: ProfileRequestContextSnapshot,
+): Promise<SessionFetchResult> {
   if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
     throw new StaleApiRequestContextError();
   }
@@ -486,7 +476,7 @@ async function apiResponseInternal(
   const requestProfileId = headers["X-Profile-Id"] ?? null;
   const requestProfileToken = headers["X-Profile-Token"] ?? null;
 
-  let res = await fetch(`/api/v1${path}`, { ...options, headers });
+  let res = await fetch(url, { ...options, headers });
 
   if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
     throw new StaleApiRequestContextError();
@@ -527,28 +517,33 @@ async function apiResponseInternal(
       } else {
         delete refreshedHeaders.Authorization;
       }
-      res = await fetch(`/api/v1${path}`, { ...options, headers: refreshedHeaders });
+      res = await fetch(url, { ...options, headers: refreshedHeaders });
       if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
         throw new StaleApiRequestContextError();
       }
     }
   }
 
-  if (!res.ok) {
-    const parsed = await parseApiError(res);
-    if (
-      res.status === 403 &&
-      parsed.apiErr.error === "profile_unverified" &&
-      (snapshot
-        ? isCapturedProfileAuthorityActive(snapshot)
-        : getProfileId() === requestProfileId && getProfileToken() === requestProfileToken)
-    ) {
-      setProfileToken(null);
-      profileUnverifiedListener?.();
-    }
-    throw apiClientErrorFrom(res.status, parsed);
+  return { res, requestProfileId, requestProfileToken };
+}
+
+/**
+ * Drops the active PIN token and notifies the profile-unverified listener when
+ * the server rejected the profile authority that is still the active one. A
+ * rejection for a profile the user has since switched away from is ignored.
+ */
+export function reportProfileUnverified(
+  requestProfileId: string | null,
+  requestProfileToken: string | null,
+  snapshot?: ProfileRequestContextSnapshot,
+): void {
+  const stillActive = snapshot
+    ? isCapturedProfileAuthorityActive(snapshot)
+    : getProfileId() === requestProfileId && getProfileToken() === requestProfileToken;
+  if (stillActive) {
+    setProfileToken(null);
+    profileUnverifiedListener?.();
   }
-  return res;
 }
 
 function buildApiHeaders(options: RequestInit = {}): Record<string, string> {

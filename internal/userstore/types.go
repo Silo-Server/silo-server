@@ -72,6 +72,18 @@ type UpdateProfileInput struct {
 	MaxPlaybackQuality         *string
 }
 
+// ProgressKey is the keyset position ListProgressPage resumes after: the
+// (UpdatedAt, MediaItemID) of the last row a caller already holds, copied
+// verbatim from a WatchProgress that ListProgressPage returned. The pair is
+// unique per profile (media_item_id is in the primary key), so together with
+// the fixed ORDER BY updated_at DESC, media_item_id DESC it orders every row
+// totally. UpdatedAt keeps whatever sub-second precision the store keeps, so
+// a round trip through the string compares equal to the stored value.
+type ProgressKey struct {
+	UpdatedAt   string
+	MediaItemID string
+}
+
 // WatchProgress represents watch progress for a media item.
 type WatchProgress struct {
 	ProfileID       string

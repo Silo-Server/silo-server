@@ -52,6 +52,8 @@ type AdminMetadataRefresher interface {
 // UserRepository defines the operations the AdminHandler needs on users.
 type UserRepository interface {
 	List(ctx context.Context) ([]*models.User, error)
+	// ListPage returns up to limit users with id above afterID, in id order.
+	ListPage(ctx context.Context, afterID, limit int) ([]*models.User, error)
 	Create(ctx context.Context, input models.CreateUserInput) (*models.User, error)
 	Update(ctx context.Context, id int, input models.UpdateUserInput) error
 	Delete(ctx context.Context, id int) error
@@ -301,13 +303,13 @@ func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
 	return optional
 }
 
-// adminUserResponse represents a user in admin JSON responses.
+// AdminUserView represents a user in admin JSON responses.
 //
 // The policy fields carry the account's stored overrides: null means the
 // field is inherited from the access group. EffectivePolicy is the resolved
 // value the server enforces (override when set, otherwise the group's value,
 // otherwise the permissive no-group default).
-type adminUserResponse struct {
+type AdminUserView struct {
 	ID                       int                 `json:"id"`
 	Username                 string              `json:"username"`
 	Email                    string              `json:"email"`
@@ -325,14 +327,14 @@ type adminUserResponse struct {
 	DownloadTranscodeAllowed *bool               `json:"download_transcode_allowed"`
 	RequestsAllowed          *bool               `json:"requests_allowed"`
 	AccessGroupID            *int64              `json:"access_group_id"`
-	EffectivePolicy          effectivePolicyResp `json:"effective_policy"`
+	EffectivePolicy          EffectivePolicyView `json:"effective_policy"`
 	CreatedAt                time.Time           `json:"created_at"`
 	UpdatedAt                time.Time           `json:"updated_at"`
 	LastActiveAt             *time.Time          `json:"last_active_at,omitempty"`
 }
 
-// effectivePolicyResp is the resolved policy block on admin user responses.
-type effectivePolicyResp struct {
+// EffectivePolicyView is the resolved policy block on admin user responses.
+type EffectivePolicyView struct {
 	LibraryIDs               []int    `json:"library_ids"`
 	MaxPlaybackQuality       string   `json:"max_playback_quality"`
 	MaxStreams               int      `json:"max_streams"`
@@ -390,9 +392,9 @@ func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
 
 // toAdminUserResponse converts a User model to an admin API response. group
 // is the user's access-group policy (nil when ungrouped or unknown).
-func toAdminUserResponse(u *models.User, group *access.GroupPolicy) adminUserResponse {
+func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserView {
 	effective := access.ApplyGroupPolicy(u, group)
-	resp := adminUserResponse{
+	resp := AdminUserView{
 		ID:                       u.ID,
 		Username:                 u.Username,
 		Email:                    u.Email,
@@ -410,7 +412,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) adminUserRes
 		DownloadTranscodeAllowed: clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:          clonePtr(u.RequestsAllowed),
 		AccessGroupID:            clonePtr(u.AccessGroupID),
-		EffectivePolicy: effectivePolicyResp{
+		EffectivePolicy: EffectivePolicyView{
 			LibraryIDs:               effective.LibraryIDs,
 			MaxPlaybackQuality:       effective.MaxPlaybackQuality,
 			MaxStreams:               effective.MaxStreams,
@@ -671,7 +673,7 @@ func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) 
 	return lastActive, nil
 }
 
-func applyLastActiveAt(resp *adminUserResponse, lastActive map[int]time.Time) {
+func applyLastActiveAt(resp *AdminUserView, lastActive map[int]time.Time) {
 	if resp == nil {
 		return
 	}
@@ -684,32 +686,65 @@ func applyLastActiveAt(resp *adminUserResponse, lastActive map[int]time.Time) {
 
 // HandleListUsers handles GET /admin/users.
 func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.userRepo.List(r.Context())
+	resp, err := h.ListAdminUsers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list users")
+		writeAPIError(w, err)
 		return
 	}
 
-	policies, err := h.groupPolicies(r.Context())
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListAdminUsers builds the administrator's view of every account. v1 GET
+// /admin/users calls it; a failure is an *APIError.
+func (h *AdminHandler) ListAdminUsers(ctx context.Context) ([]AdminUserView, error) {
+	users, err := h.userRepo.List(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
-		return
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list users")
 	}
-	resp := make([]adminUserResponse, 0, len(users))
+	return h.adminUserViews(ctx, users)
+}
+
+// ListAdminUsersPage is the keyset page v2 listAdminUsers uses: up to limit
+// accounts with id above afterID, in id order, enriched the same way as
+// ListAdminUsers, plus whether more accounts follow.
+func (h *AdminHandler) ListAdminUsersPage(ctx context.Context, afterID, limit int) ([]AdminUserView, bool, error) {
+	users, err := h.userRepo.ListPage(ctx, afterID, limit+1)
+	if err != nil {
+		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to list users")
+	}
+	hasMore := len(users) > limit
+	if hasMore {
+		users = users[:limit]
+	}
+	views, err := h.adminUserViews(ctx, users)
+	if err != nil {
+		return nil, false, err
+	}
+	return views, hasMore, nil
+}
+
+// adminUserViews resolves the effective policy and last activity for a batch
+// of accounts, in the batch's order.
+func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User) ([]AdminUserView, error) {
+	policies, err := h.groupPolicies(ctx)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
+	}
+	resp := make([]AdminUserView, 0, len(users))
 	userIDs := make([]int, 0, len(users))
 	for _, u := range users {
 		userIDs = append(userIDs, u.ID)
 		resp = append(resp, toAdminUserResponse(u, lookupGroupPolicy(policies, u)))
 	}
-	lastActive, err := h.loadUserLastActiveAt(r.Context(), userIDs)
+	lastActive, err := h.loadUserLastActiveAt(ctx, userIDs)
 	if err != nil {
-		slog.WarnContext(r.Context(), "failed to load admin user last activity", "component", "api", "error", err)
+		slog.WarnContext(ctx, "failed to load admin user last activity", "component", "api", "error", err)
 	}
 	for i := range resp {
 		applyLastActiveAt(&resp[i], lastActive)
 	}
-
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // HandleGetUser handles GET /admin/users/{id}.

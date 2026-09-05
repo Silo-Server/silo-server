@@ -18,6 +18,7 @@ import (
 const (
 	extClass          = "x-silo-class"
 	extDemoRestricted = "x-silo-demo-restricted"
+	extServiceBacked  = "x-silo-service-backed"
 	extExtensionBag   = "x-silo-extension-bag"
 	securityScheme    = "bearerAuth"
 )
@@ -90,6 +91,7 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 		return
 	}
 	demo, _ := op.Extensions[extDemoRestricted].(bool)
+	serviceBacked, _ := op.Extensions[extServiceBacked].(bool)
 	success := false
 	for status := range op.Responses {
 		if code, err := strconv.Atoi(status); err == nil && code >= 200 && code < 300 {
@@ -99,7 +101,7 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 	if !success {
 		fail("%s: no success status is documented", where)
 	}
-	implied := apiv2.ImpliedStatuses(class, demo, op.RequestBody != nil, strings.Contains(path, "{"))
+	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"))
 	for _, status := range implied {
 		if _, ok := op.Responses[strconv.Itoa(status)]; !ok {
 			fail("%s: status %d is implied by class %s but not documented", where, status, class)
@@ -231,11 +233,36 @@ type mediaType struct {
 
 type schema struct {
 	Ref                  string             `json:"$ref"`
-	Type                 string             `json:"type"`
+	Type                 schemaType         `json:"type"`
 	Properties           map[string]*schema `json:"properties"`
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
 	Extensions           map[string]any     `json:"-"`
+}
+
+// schemaType is the JSON Schema `type` member: a single name, or in OpenAPI
+// 3.1 a list such as ["string", "null"] for a nullable member. The lint
+// reasons about the non-null name.
+type schemaType string
+
+func (t *schemaType) UnmarshalJSON(b []byte) error {
+	var single string
+	if err := json.Unmarshal(b, &single); err == nil {
+		*t = schemaType(single)
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(b, &list); err != nil {
+		return err
+	}
+	for _, name := range list {
+		if name != "null" {
+			*t = schemaType(name)
+			return nil
+		}
+	}
+	*t = ""
+	return nil
 }
 
 func (s *schema) UnmarshalJSON(b []byte) error {

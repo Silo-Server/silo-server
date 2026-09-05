@@ -95,6 +95,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 			return Scope{}, err
 		}
 		scope.ProfileVerified = verified
+		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
 	}
 
 	// Apply the profile's disabled library IDs setting.

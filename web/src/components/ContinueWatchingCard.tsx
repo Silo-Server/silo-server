@@ -3,7 +3,7 @@ import { BookOpen, Play } from "lucide-react";
 import { useCallback, useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
-import type { ProgressEntry } from "@/api/types";
+import type { ProgressListEntry } from "@/hooks/queries/progress";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
@@ -20,7 +20,7 @@ import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 type ContinueWatchingCardProps = (
   | {
       detail: ItemDetail;
-      progress: ProgressEntry;
+      progress: ProgressListEntry;
       sectionItem?: never;
     }
   | {

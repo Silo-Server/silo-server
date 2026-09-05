@@ -2392,3 +2392,88 @@ func testSectionOverridesUserAddedFields(t *testing.T, newStore func(t *testing.
 		t.Errorf("UserTitle = %q, want %q", o.UserTitle, "Hidden Gems")
 	}
 }
+
+// RunProgressPage runs the keyset progress paging conformance test. It is
+// exposed separately so each backend pins the (updated_at DESC, media_item_id
+// DESC) order, the strict resume after a key, and the equal-timestamp
+// tiebreak without the full suite.
+func RunProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("KeysetPage", func(t *testing.T) {
+		testProgressPage(t, newStore)
+	})
+}
+
+func testProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	// m-b and m-d share a timestamp; m-done is completed with position 0 and
+	// must not appear in the in_progress listing.
+	writes := []struct {
+		id        string
+		position  float64
+		completed bool
+		at        time.Time
+	}{
+		{"m-a", 10, false, base.Add(3 * time.Minute)},
+		{"m-b", 10, false, base.Add(2 * time.Minute)},
+		{"m-d", 10, false, base.Add(2 * time.Minute)},
+		{"m-c", 10, false, base.Add(time.Minute)},
+		{"m-done", 0, true, base.Add(4 * time.Minute)},
+		{"m-e", 10, false, base},
+	}
+	for _, w := range writes {
+		if err := store.SetProgressAt(ctx, "p1", w.id, w.position, 1000, w.completed, w.at); err != nil {
+			t.Fatalf("write %s: %v", w.id, err)
+		}
+	}
+
+	var got []string
+	var after *userstore.ProgressKey
+	for pages := 0; ; pages++ {
+		if pages > 10 {
+			t.Fatal("paging did not terminate")
+		}
+		rows, err := store.ListProgressPage(ctx, "p1", "in_progress", after, 2)
+		if err != nil {
+			t.Fatalf("ListProgressPage: %v", err)
+		}
+		for _, r := range rows {
+			got = append(got, r.MediaItemID)
+		}
+		if len(rows) < 2 {
+			break
+		}
+		last := rows[len(rows)-1]
+		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
+	}
+	want := []string{"m-a", "m-d", "m-b", "m-c", "m-e"}
+	if len(got) != len(want) {
+		t.Fatalf("paged ids = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("paged ids = %v, want %v", got, want)
+		}
+	}
+
+	// The full listing includes the completed row, newest first.
+	all, err := store.ListProgressPage(ctx, "p1", "", nil, 10)
+	if err != nil {
+		t.Fatalf("ListProgressPage(all): %v", err)
+	}
+	if len(all) != 6 || all[0].MediaItemID != "m-done" {
+		t.Fatalf("all = %d rows, first %q", len(all), all[0].MediaItemID)
+	}
+	// A key resumes strictly after itself even when it is the newest row.
+	rest, err := store.ListProgressPage(ctx, "p1", "", &userstore.ProgressKey{UpdatedAt: all[0].UpdatedAt, MediaItemID: all[0].MediaItemID}, 10)
+	if err != nil {
+		t.Fatalf("ListProgressPage(after newest): %v", err)
+	}
+	if len(rest) != 5 || rest[0].MediaItemID != want[0] {
+		t.Fatalf("rest = %d rows, first %q", len(rest), rest[0].MediaItemID)
+	}
+}

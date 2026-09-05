@@ -91,15 +91,61 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodPost, path: "/api/v2/probe/authenticated", body: validBody,
 			headers: map[string]string{"Authorization": "Bearer " + memberToken},
 			status:  http.StatusTooManyRequests, assertHeaders: []string{"Content-Type", "Cache-Control", "Retry-After"}, schema: problem},
+		// Pilot operations (Phase 3). New cases append here: the request id is
+		// the case index, so inserting earlier would rewrite committed bodies.
+		{name: "get_setup_status_ok", operationID: "getSetupStatus",
+			scenario: "First-run discovery before login: whether the server still needs its initial admin account.",
+			method:   http.MethodGet, path: "/api/v2/system/setup",
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SetupStatus"},
+		{name: "get_current_user_ok", operationID: "getCurrentUser",
+			scenario: "The signed-in account with no profile selected; impersonation is absent outside an admin impersonation session.",
+			method:   http.MethodGet, path: "/api/v2/account/me", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Account"},
+		{name: "list_progress_ok", operationID: opListProgress,
+			scenario: "The first page of a profile's watch progress, newest first, with an opaque cursor for the next page.",
+			method:   http.MethodGet, path: "/api/v2/progress?limit=1", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProgressCollection"},
+		{name: "list_progress_profile_header_required", operationID: opListProgress,
+			scenario: "A profile-scoped operation called without X-Profile-Id: a validation failure naming the header.",
+			method:   http.MethodGet, path: "/api/v2/progress", headers: bearer(memberToken),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_progress_offset_rejected", operationID: opListProgress,
+			scenario: "The v1 offset parameter is not part of v2 pagination; cursor-paginated operations refuse it as unknown.",
+			method:   http.MethodGet, path: "/api/v2/progress?offset=50", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "update_profile_ok", operationID: "updateProfile",
+			scenario: "A partial PATCH: omitted members stay unchanged, null clears a clearable member, the whole profile is returned.",
+			method:   http.MethodPatch, path: "/api/v2/profiles/p-owner", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			body:   `{"name":"Laura","subtitle_mode":"always","max_content_rating":null,"allowed_library_ids":["3"]}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Profile"},
+		{name: "update_profile_null_not_clearable", operationID: "updateProfile",
+			scenario: "Explicit null on a member that does not admit clearing is a validation failure; omit it to leave it unchanged.",
+			method:   http.MethodPatch, path: "/api/v2/profiles/p-owner", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			body:   `{"is_child":null}`,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_admin_users_ok", operationID: opListAdminUsers,
+			scenario: "The first page of accounts for an acting admin, in id order with an opaque cursor for the next page: nullable limits, instants, and the nested effective policy.",
+			method:   http.MethodGet, path: "/api/v2/admin/users?limit=1", headers: bearer(adminToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminUserCollection"},
+		{name: "list_admin_users_permission_denied", operationID: opListAdminUsers,
+			scenario: "An acting-admin operation called by a member account.",
+			method:   http.MethodGet, path: "/api/v2/admin/users", headers: bearer(memberToken),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_admin_users_offset_rejected", operationID: opListAdminUsers,
+			scenario: "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
+			method:   http.MethodGet, path: "/api/v2/admin/users?offset=50", headers: bearer(adminToken),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 	}
 }
 
-// fixtureDeps is the parity wiring plus a limiter that refuses the
-// rate_limited case's path with a fixed Retry-After in the v1 shape, so the
-// 429 fixture is deterministic and still produced by the gate translation
-// the production limiter goes through.
+// fixtureDeps is the pilot wiring (parity gates plus the pilot fakes) with a
+// fixed cursor key, so the pagination cursor in list_progress_ok is stable,
+// plus a limiter that refuses the rate_limited case's path with a fixed
+// Retry-After in the v1 shape, so the 429 fixture is deterministic and still
+// produced by the gate translation the production limiter goes through.
 func fixtureDeps() Dependencies {
-	deps := parityDeps(false)
+	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
+	deps.CursorSecret = []byte("fixture-cursor-key")
 	deps.RateLimit = func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/api/v2/probe/authenticated" {

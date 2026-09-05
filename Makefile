@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -240,6 +240,25 @@ verify-apiv2-openapi:
 		|| { echo "::error::$(APIV2_OPENAPI) is stale; run make apiv2-openapi"; exit 1; }
 	@echo "$(APIV2_OPENAPI) is current"
 
+# Regenerate the web contract types from the committed OpenAPI artifact.
+# openapi-typescript is pinned exactly in web/package.json, and the output is
+# run through the repository prettier config, so the artifact is byte-stable.
+APIV2_WEB_TYPES_DIR := web/src/api/v2
+apiv2-web-types:
+	cd web && pnpm run --silent generate:apiv2
+
+# Fail when the committed web types disagree with a fresh generation from the
+# committed OpenAPI artifact: a spec change that does not regenerate would
+# leave the web client typed against a contract the server no longer serves.
+verify-apiv2-web-types:
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		( cd web && node scripts/generate-apiv2.mjs --out-dir "$$tmp" ) && \
+		for f in schema.ts operations.ts; do \
+			cmp -s "$$tmp/$$f" $(APIV2_WEB_TYPES_DIR)/$$f \
+			|| { echo "::error::$(APIV2_WEB_TYPES_DIR)/$$f is stale; run make apiv2-web-types"; exit 1; }; \
+		done
+	@echo "$(APIV2_WEB_TYPES_DIR) is current"
+
 # Semantic diff and spec lint over the committed artifact. BASE_REF names the
 # merge base the diff compares against (CI passes the PR's base). The diff
 # tool is the oasdiff Go module pinned in go.mod/go.sum; no binary is
@@ -299,12 +318,20 @@ verify-apiv2-fixtures-siblings:
 		root=$${dest%%/iosApp/*}; root=$${root%%/shared/*}; \
 		if [ ! -d "$$root" ]; then echo "skipping $$dest: $$root not checked out"; continue; fi; \
 		if [ ! -d "$$dest" ]; then echo "$$dest: not vendored yet; run make apiv2-fixtures-sync"; status=1; continue; fi; \
-		for f in $(APIV2_FIXTURE_DIR)/*.json contracts/api/v2/fixtures.schema.json; do \
-			cmp -s "$$f" "$$dest/$$(basename "$$f")" || { echo "$$dest/$$(basename "$$f") is stale"; status=1; }; \
-		done; \
+		cmp -s contracts/api/v2/fixtures.schema.json "$$dest/fixtures.schema.json" || { echo "$$dest/fixtures.schema.json is stale"; status=1; }; \
+		names=""; \
 		for f in "$$dest"/*.json; do \
-			b=$$(basename "$$f"); [ -e "$(APIV2_FIXTURE_DIR)/$$b" ] || [ "$$b" = fixtures.schema.json ] || { echo "$$f has no server counterpart"; status=1; }; \
+			b=$$(basename "$$f"); \
+			case "$$b" in fixtures.schema.json|index.json) continue;; esac; \
+			names="$$names $${b%.json}"; \
+			if [ -e "$(APIV2_FIXTURE_DIR)/$$b" ]; then cmp -s "$(APIV2_FIXTURE_DIR)/$$b" "$$f" || { echo "$$f is stale"; status=1; }; \
+			else echo "$$f has no server counterpart"; status=1; fi; \
 		done; \
+		if command -v jq >/dev/null 2>&1; then \
+			want=$$(jq -S --arg names "$$names" '.fixtures |= map(select(.name as $$n | ($$names | split(" ")) | index($$n)))' $(APIV2_FIXTURE_DIR)/index.json); \
+			have=$$(jq -S . "$$dest/index.json" 2>/dev/null); \
+			[ "$$want" = "$$have" ] || { echo "$$dest/index.json is stale (entries differ from the server index for the vendored fixtures)"; status=1; }; \
+		else echo "jq not installed; skipped the $$dest/index.json entry check"; fi; \
 	done; \
 	[ "$$status" -eq 0 ] && echo "sibling v2 fixture copies are current" || exit 1
 

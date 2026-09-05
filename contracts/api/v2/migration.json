@@ -17499,13 +17499,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/admin/users",
+        "operation_id": "listAdminUsers"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (acting_admin, demo-guarded). Bare array became {items:[...]} with limit+cursor pagination keyed by account id (page.next_cursor, page.has_more; offset refused); ids are string IDs; instants are UTC ms; role carries an enum."
     },
     {
       "listener": "api",
@@ -19815,13 +19815,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/account/me",
+        "operation_id": "getCurrentUser"
       },
-      "notes": "Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (authenticated). id is a string ID; role carries an enum; permissions stays []string; impersonation is omitted when absent."
     },
     {
       "listener": "api",
@@ -20362,13 +20362,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/system/setup",
+        "operation_id": "getSetupStatus"
       },
-      "notes": "Conditionally registered: authHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (public). Same {needs_setup} shape; registered unconditionally."
     },
     {
       "listener": "api",
@@ -35885,13 +35885,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PATCH",
+        "path": "/api/v2/profiles/{id}",
+        "operation_id": "updateProfile"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Only max_playback_quality is a strict enum (no 4K/UHD aliases); quality_preference and subtitle_mode stay free-form (maxLength 32) until ratified (#135) because v1 never validated them and clients send 1080p/4k/2160p/720p and default/forced_only; every string member always emitted; read model does not constrain legacy stored enum values."
     },
     {
       "listener": "api",
@@ -36162,13 +36162,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/progress",
+        "operation_id": "listProgress"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; progressHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Pilot (profile_scoped). Offset pagination replaced by limit+opaque keyset cursor (updated_at, media_item_id of the last emitted entry; has_more decided after the access/library filters); offset/since rejected (422). The v1 ?since= delta pull is a separate operation in a later section."
     },
     {
       "listener": "api",

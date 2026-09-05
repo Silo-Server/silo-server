@@ -155,5 +155,10 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		// with the Go-computed fact keeps that invariant even if a policy bug
 		// emitted true for an unverified profile.
 		ProfileVerified: profileVerified && decision.ProfileVerified,
+		// Same fact the legacy resolver records: the profile counts as
+		// verified only because the caller (an API key) skipped the PIN
+		// check. Mutations that v1 gates on a real verification read this.
+		PINVerificationSkipped: profileVerified && decision.ProfileVerified &&
+			profile != nil && profile.PINHash != "" && input.SkipPINVerification,
 	}, nil
 }

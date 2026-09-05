@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +67,9 @@ func (Instant) Schema(_ huma.Registry) *huma.Schema {
 // full syntax check is the date-time format.
 const nonZeroInstantPattern = `^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-`
 
+// jsonNull is the JSON null literal.
+var jsonNull = []byte("null")
+
 // NullableInstant is the explicit-null form: a JSON null is a documented
 // "known to have no value", distinct from omission.
 type NullableInstant struct {
@@ -75,7 +79,7 @@ type NullableInstant struct {
 
 // UnmarshalJSON accepts null or an instant.
 func (n *NullableInstant) UnmarshalJSON(b []byte) error {
-	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+	if bytes.Equal(bytes.TrimSpace(b), jsonNull) {
 		*n = NullableInstant{}
 		return nil
 	}
@@ -90,7 +94,7 @@ func (n *NullableInstant) UnmarshalJSON(b []byte) error {
 // MarshalJSON renders null or the instant.
 func (n NullableInstant) MarshalJSON() ([]byte, error) {
 	if !n.Valid {
-		return []byte("null"), nil
+		return jsonNull, nil
 	}
 	return n.Time.MarshalJSON()
 }
@@ -109,10 +113,35 @@ func IDFromInt(v int64) ID { return ID(fmt.Sprint(v)) }
 
 // Schema describes ID as an opaque string.
 func (ID) Schema(_ huma.Registry) *huma.Schema {
-	return &huma.Schema{Type: huma.TypeString, MinLength: ptr(1), Description: "Opaque identifier"}
+	return &huma.Schema{Type: huma.TypeString, MinLength: ptr(1), Description: "Opaque identifier", Examples: []any{"1"}}
+}
+
+// Permission is one assignable permission name. It is a plain string on the
+// wire; the named type only lets array items carry a schema example.
+type Permission string
+
+// examplePermission is the fictional permission the schema examples and the
+// pilot fixtures use.
+const examplePermission Permission = "marker_edit"
+
+// Schema describes Permission as a plain string.
+func (Permission) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{Type: huma.TypeString, Description: "Assignable permission name", Examples: []any{string(examplePermission)}}
+}
+
+// permissionsOf renders permission names; the result is never null.
+func permissionsOf(names []string) []Permission {
+	out := make([]Permission, 0, len(names))
+	for _, n := range names {
+		out = append(out, Permission(n))
+	}
+	return out
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// intOfID recovers an internal integer key from an opaque ID.
+func intOfID(id ID) (int, error) { return strconv.Atoi(string(id)) }
 
 // Patch is the presence-aware PATCH transport for one field: omitted
 // (unchanged), explicit null (clear, only where the schema is nullable), or
@@ -129,7 +158,7 @@ type Patch[T any] struct {
 // UnmarshalJSON is only called when the field is present.
 func (p *Patch[T]) UnmarshalJSON(b []byte) error {
 	p.Present = true
-	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+	if bytes.Equal(bytes.TrimSpace(b), jsonNull) {
 		p.Null = true
 		var zero T
 		p.Value = zero
@@ -143,7 +172,7 @@ func (p *Patch[T]) UnmarshalJSON(b []byte) error {
 // null, which callers avoid by using omitzero.
 func (p Patch[T]) MarshalJSON() ([]byte, error) {
 	if !p.Present || p.Null {
-		return []byte("null"), nil
+		return jsonNull, nil
 	}
 	return json.Marshal(p.Value)
 }
@@ -156,7 +185,7 @@ func (Patch[T]) Schema(r huma.Registry) *huma.Schema {
 	var v T
 	s := r.Schema(reflect.TypeOf(v), true, "")
 	if s.Ref != "" {
-		return &huma.Schema{OneOf: []*huma.Schema{s, {Type: "null"}}}
+		return &huma.Schema{OneOf: []*huma.Schema{s, {Type: string(jsonNull)}}}
 	}
 	out := *s
 	out.Nullable = true
@@ -165,8 +194,8 @@ func (Patch[T]) Schema(r huma.Registry) *huma.Schema {
 
 // PageInfo is the cursor state a paginated collection returns.
 type PageInfo struct {
-	NextCursor string `json:"next_cursor,omitempty" doc:"Opaque cursor for the next page; absent on the last page"`
-	HasMore    bool   `json:"has_more" doc:"Whether a next page exists"`
+	NextCursor string `json:"next_cursor,omitempty" doc:"Opaque cursor for the next page; absent on the last page" example:"eyJvZmZzZXQiOjUwfQ"`
+	HasMore    bool   `json:"has_more" doc:"Whether a next page exists" example:"true"`
 }
 
 // Collection is the shared collection envelope. Items is never null: use
@@ -217,7 +246,7 @@ const (
 // LimitParam is the shared `limit` query parameter. Embed it in an input
 // struct; Huma enforces the bound with 422.
 type LimitParam struct {
-	Limit int `query:"limit" minimum:"1" maximum:"200" default:"50" doc:"Page size; default 50, maximum 200"`
+	Limit int `query:"limit" minimum:"1" maximum:"200" default:"50" doc:"Page size; default 50, maximum 200" example:"50"`
 }
 
 // SortField is one parsed sort term.
@@ -253,4 +282,17 @@ func ParseSort(raw string, allowed []string) ([]SortField, *Problem) {
 		out = append(out, SortField{Field: field, Desc: desc})
 	}
 	return out, nil
+}
+
+// idsOfInts renders integer keys as IDs, keeping nil (inherit) distinct from
+// empty (none).
+func idsOfInts(ints []int) []ID {
+	if ints == nil {
+		return nil
+	}
+	out := make([]ID, 0, len(ints))
+	for _, v := range ints {
+		out = append(out, IDFromInt(int64(v)))
+	}
+	return out
 }

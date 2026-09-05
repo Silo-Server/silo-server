@@ -272,7 +272,7 @@ func TestCreateProfileSyncsCanonicalLanguages(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("POST = %d: %s", rr.Code, rr.Body.String())
 	}
-	var created profileResponse
+	var created ProfileView
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decoding create response: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestCreateProfileInheritsSurvivingLegacyAccountSettings(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST = %d: %s", rec.Code, rec.Body.String())
 	}
-	var created profileResponse
+	var created ProfileView
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decoding create response: %v", err)
 	}
@@ -455,7 +455,7 @@ func listProfilesVia(t *testing.T, handler *ProfileHandler) profileListResponse 
 	return resp
 }
 
-func profileFromList(t *testing.T, resp profileListResponse, profileID string) profileResponse {
+func profileFromList(t *testing.T, resp profileListResponse, profileID string) ProfileView {
 	t.Helper()
 	for _, p := range resp.Profiles {
 		if p.ID == profileID {
@@ -463,7 +463,7 @@ func profileFromList(t *testing.T, resp profileListResponse, profileID string) p
 		}
 	}
 	t.Fatalf("profile %s missing from the list response", profileID)
-	return profileResponse{}
+	return ProfileView{}
 }
 
 // TestListProfilesServesCanonicalWrite is the cross-client coherence gap this
@@ -569,7 +569,7 @@ func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
 	}
 
 	// The update response and the next list must agree; both serve resolution.
-	var updated profileResponse
+	var updated ProfileView
 	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decoding update response: %v", err)
 	}

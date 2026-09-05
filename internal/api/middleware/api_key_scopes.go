@@ -30,6 +30,9 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodPut, regexp.MustCompile(`^/api/v1/admin/users/[0-9]+$`)},
 		{http.MethodDelete, regexp.MustCompile(`^/api/v1/admin/users/[0-9]+$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v1/admin/users/[0-9]+/profiles$`)},
+		// The v2 listAdminUsers operation; pagination lives in the query
+		// string, which the path match does not see.
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},
 	},
 	auth.ScopeAdminAccessGroupsRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v1/admin/access-groups$`)},

@@ -6,7 +6,6 @@ import {
   bootstrapAccessToken,
   getAccessToken,
   onProfileUnverified,
-  restoreUserSession,
   setAccessToken,
   setProfileId,
   setProfileToken,
@@ -18,11 +17,12 @@ import type {
   LoginResponse,
   Profile,
   SetupRequest,
-  SetupStatusResponse,
   SignupRequest,
   User,
   VerifyPinResponse,
 } from "@/api/types";
+import { v2, V2ProblemError } from "@/api/v2/request";
+import { restoreUserSession, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import {
   clearStoredImpersonationAdminSession,
@@ -65,6 +65,12 @@ export function getBootstrapProfile(profiles: Profile[]): Profile | null {
 }
 
 function isRecoverableImpersonationAuthError(error: unknown): boolean {
+  // The current-user fetch runs over v2 and fails with a Problem; ending an
+  // impersonation still runs over v1 and fails with an ApiClientError.
+  if (error instanceof V2ProblemError) {
+    return error.status === 401;
+  }
+
   if (!(error instanceof ApiClientError)) {
     return false;
   }
@@ -260,7 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const restoreAdminUser = useCallback(
     async (storedSession: { accessToken: string; refreshToken: string }) => {
-      const restoredSession = await restoreUserSession<User>(storedSession);
+      const restoredSession = await restoreUserSession(storedSession);
       clearProfile();
       queryClient.clear();
       setAccessToken(restoredSession.accessToken);
@@ -325,7 +331,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyProfilePin = useCallback(
     async (profileId: string, pin: string): Promise<VerifyPinResponse> => {
-      return api<VerifyPinResponse>(`/profiles/${profileId}/verify-pin`, {
+      return api(`/profiles/${profileId}/verify-pin`, {
         method: "POST",
         body: JSON.stringify({ pin }),
       });
@@ -358,9 +364,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function initialize() {
       try {
+        const providersRequest: Promise<AuthProviderOption[]> = api("/auth/providers");
         const [status, availableProviders] = await Promise.all([
-          api<SetupStatusResponse>("/auth/setup"),
-          api<AuthProviderOption[]>("/auth/providers"),
+          v2("GET /api/v2/system/setup"),
+          providersRequest,
         ]);
         if (cancelled) {
           return;
@@ -383,7 +390,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           refreshToken: storage.get(storage.KEYS.REFRESH_TOKEN),
           hasStoredImpersonationAdminSession: Boolean(loadStoredImpersonationAdminSession()),
           bootstrapAccessToken: () => bootstrapAccessToken(),
-          fetchCurrentUser: () => api<User>("/auth/me"),
+          fetchCurrentUser: () => v2("GET /api/v2/account/me").then(userFromAccount),
           applyCurrentUser: (currentUser) => {
             if (cancelled) {
               return;
@@ -447,7 +454,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     soleProfileBootstrapRef.current = bootstrapKey;
 
     let cancelled = false;
-    api<{ profiles: Profile[] }>("/profiles")
+    const profilesRequest: Promise<{ profiles: Profile[] }> = api("/profiles");
+    profilesRequest
       .then((data) => {
         if (cancelled) {
           return;
@@ -466,7 +474,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string, provider?: string) => {
-      const data = await api<LoginResponse>("/auth/login", {
+      const data: LoginResponse = await api("/auth/login", {
         method: "POST",
         body: JSON.stringify({ username, password, provider }),
       });
@@ -483,7 +491,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         create_default_profile: true,
       };
-      const data = await api<LoginResponse>("/auth/setup", {
+      const data: LoginResponse = await api("/auth/setup", {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -501,7 +509,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         invite_code: inviteCode,
         create_default_profile: true,
       };
-      const data = await api<LoginResponse>("/auth/signup", {
+      const data: LoginResponse = await api("/auth/signup", {
         method: "POST",
         body: JSON.stringify(body),
       });

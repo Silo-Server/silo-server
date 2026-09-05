@@ -460,8 +460,9 @@ and a server-added unique tiebreaker when needed. Unknown filter or sort fields 
 Potentially large or mutable collections use `limit` plus an opaque `cursor`, returning the
 accepted `page.next_cursor` and `page.has_more` fields. The default limit is 50 and the global
 maximum is 200; an operation may set a lower maximum. Cursors are URL-safe, tamper-resistant, and
-bound to the operation, security scope, filters, effective sort, and unique tiebreaker. Clients do
-not decode or construct them. Malformed, tampered, or context-mismatched cursors receive `400`
+bound to the operation, security scope, filters, effective sort, and unique tiebreaker, and to the
+viewer's effective access policy where the collection is access-filtered. Clients do not decode or
+construct them. Malformed, tampered, or context-mismatched cursors receive `400`
 with the invalid-cursor problem type. Cursors contain no credentials or sensitive metadata in
 reversibly encoded unsigned form.
 
@@ -885,6 +886,50 @@ server commit, `SOURCE` pins, linked PR checklist, and green client builds are t
 Before 1.0, the project publishes the v2 OpenAPI document, the v1-to-v2 operation mapping, a
 migration guide, and the bridge/retirement dates. The alpha v1 contract does not receive a
 post-1.0 deprecation window, but its removal must not be a surprise.
+
+### Pilot slice
+
+Phase 3 ports five operations before any domain section, one per foundation class, so the
+foundation is proven on real v1 behavior rather than on probes. Each pilot calls the same
+service layer as its v1 handler; v1 stays byte-identical and fully served.
+
+| Operation | v2 | v1 | Proves |
+| --- | --- | --- | --- |
+| `getSetupStatus` | `GET /api/v2/system/setup` | `GET /api/v1/auth/setup` | `public` discovery |
+| `getCurrentUser` | `GET /api/v2/account/me` | `GET /api/v1/auth/me` | `authenticated`, no profile |
+| `listProgress` | `GET /api/v2/progress` | `GET /api/v1/progress/` | `profile_scoped` read with query parameters and cursor pagination |
+| `updateProfile` | `PATCH /api/v2/profiles/{id}` | `PUT /api/v1/profiles/{id}` | `profile_scoped` JSON mutation with a path parameter |
+| `listAdminUsers` | `GET /api/v2/admin/users` | `GET /api/v1/admin/users` | `acting_admin`, demo-guarded; nullable, instant, and enum fields; keyset cursor pagination by account id |
+
+Two findings from the pilot are now settled for every later section:
+
+- **PATCH semantics.** A v1 full-replacement `PUT` becomes a `PATCH` whose members are all
+  optional: an omitted member is unchanged, and explicit `null` clears a member only where the
+  schema admits clearing (for `updateProfile`: avatar, PIN, content-rating ceiling, languages,
+  playback ceiling). `null` on any other member is a `422` `validation_failed` naming the member.
+  Because Huma treats `null` on an optional member as absent, the distinction is enforced from the
+  raw body. The pilot mutation is naturally idempotent and is not `If-Match` protected;
+  optimistic concurrency stays opt-in per operation.
+- **Cursor pagination replaces offset.** `listProgress` takes `limit` (default 50, maximum 200)
+  and an opaque `cursor` bound to the operation, account, profile, effective access policy,
+  filters, and sort; `offset`
+  and the v1 `since` parameter are refused with the unknown-query-parameter `422`. The cursor
+  is a keyset (`updated_at`, `media_item_id`) of the last entry emitted, so a row whose
+  `updated_at` moves during playback is neither repeated nor lets an older row slip past, and
+  `has_more` is decided after the viewer-access and library filters run. The v1
+  `?since=` delta pull is a separate operation for a later section, not a mode of `listProgress`.
+  `listAdminUsers` paginates the same way: accounts are not bounded on a multi-user
+  deployment, so it takes `limit` and a `cursor` bound to the operation and the acting
+  account, keyed by account id ascending (unique, monotonic), and refuses `offset`.
+
+The pilot ledger rows record the remaining v1 divergences: `max_playback_quality` is a strict
+request enum (no `4K`/`UHD` aliases) because the server owns its constants, while
+`quality_preference` and `subtitle_mode` stay free-form (length-bounded) until their vocabulary is
+ratified (#135) since v1 never validated them and the clients already send values outside any
+inferred set; the profile read model documents canonical values without constraining legacy
+stored ones, every string member of a profile is always emitted, ids are string `ID`s, and instants
+are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
+`<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
 ## v1 lifecycle and release sequence
 

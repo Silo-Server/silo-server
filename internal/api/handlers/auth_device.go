@@ -52,16 +52,16 @@ type devicePollRequest struct {
 }
 
 type devicePollResponse struct {
-	Status           string        `json:"status"`
-	PollAfter        int           `json:"poll_after"`
-	AccessToken      string        `json:"access_token,omitempty"`
-	RefreshToken     string        `json:"refresh_token,omitempty"`
-	ExpiresIn        int           `json:"expires_in,omitempty"`
-	User             *userResponse `json:"user,omitempty"`
-	ProfileID        string        `json:"profile_id,omitempty"`
-	ProfileToken     string        `json:"profile_token,omitempty"`
-	Temporary        bool          `json:"temporary,omitempty"`
-	SessionExpiresAt string        `json:"session_expires_at,omitempty"`
+	Status           string    `json:"status"`
+	PollAfter        int       `json:"poll_after"`
+	AccessToken      string    `json:"access_token,omitempty"`
+	RefreshToken     string    `json:"refresh_token,omitempty"`
+	ExpiresIn        int       `json:"expires_in,omitempty"`
+	User             *UserView `json:"user,omitempty"`
+	ProfileID        string    `json:"profile_id,omitempty"`
+	ProfileToken     string    `json:"profile_token,omitempty"`
+	Temporary        bool      `json:"temporary,omitempty"`
+	SessionExpiresAt string    `json:"session_expires_at,omitempty"`
 }
 
 type deviceDecisionRequest struct {

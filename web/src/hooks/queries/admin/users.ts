@@ -9,6 +9,7 @@ import type {
   LoginResponse,
   UpdateUserRequest,
 } from "@/api/types";
+import { v2, type V2Result } from "@/api/v2/request";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { adminKeys } from "../keys";
 import { useAdminUserProfiles } from "./history";
@@ -159,10 +160,12 @@ function adminSettingValuePath(userId: number, key: string, identity: AdminSetti
 function useAdminUserSettingValues(userId: number) {
   return useQuery({
     queryKey: adminKeys.userSettings(userId),
-    queryFn: () =>
-      api<AdminSettingValuesResponse>(`/admin/users/${userId}/settings/values`).then(
-        (response) => response?.values ?? [],
-      ),
+    queryFn: async () => {
+      const response: AdminSettingValuesResponse | null = await api(
+        `/admin/users/${userId}/settings/values`,
+      );
+      return response?.values ?? [];
+    },
     staleTime: ADMIN_STALE_TIME,
   });
 }
@@ -177,10 +180,77 @@ function invalidateAdminDeviceCaches(
   queryClient.invalidateQueries({ queryKey: adminKeys.devices() });
 }
 
+type AdminUserV2 = V2Result<"GET /api/v2/admin/users">["items"][number];
+
+/**
+ * Projects a v2 admin user onto the `AdminUser` shape the admin pages share
+ * with the detail, create, update, and delete operations, which still answer
+ * on v1 with numeric ids. The v2 ids are the same ids as strings; an absent
+ * last activity is null on v2 and omitted on v1.
+ */
+export function adminUserFromV2(user: AdminUserV2): AdminUser {
+  return {
+    id: Number(user.id),
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    permissions: user.permissions,
+    enabled: user.enabled,
+    library_ids: user.library_ids === null ? null : user.library_ids.map(Number),
+    access_group_id: user.access_group_id === null ? null : Number(user.access_group_id),
+    max_playback_quality: user.max_playback_quality,
+    max_streams: user.max_streams,
+    max_transcodes: user.max_transcodes,
+    transcode_allowed: user.transcode_allowed,
+    audio_transcode_allowed: user.audio_transcode_allowed,
+    max_profiles: user.max_profiles,
+    download_allowed: user.download_allowed,
+    download_transcode_allowed: user.download_transcode_allowed,
+    requests_allowed: user.requests_allowed,
+    effective_policy: {
+      library_ids: user.effective_policy.library_ids.map(Number),
+      max_playback_quality: user.effective_policy.max_playback_quality,
+      max_streams: user.effective_policy.max_streams,
+      max_transcodes: user.effective_policy.max_transcodes,
+      transcode_allowed: user.effective_policy.transcode_allowed,
+      audio_transcode_allowed: user.effective_policy.audio_transcode_allowed,
+      download_allowed: user.effective_policy.download_allowed,
+      download_transcode_allowed: user.effective_policy.download_transcode_allowed,
+      requests_allowed: user.effective_policy.requests_allowed,
+      permissions: user.effective_policy.permissions,
+    },
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+    ...(user.last_active_at === null ? {} : { last_active_at: user.last_active_at }),
+  };
+}
+
+/** Page size for the admin account walk: the v2 maximum. */
+const ADMIN_USERS_PAGE_LIMIT = 200;
+
+/**
+ * Fetches every account by walking the cursor-paginated v2 listing. The admin
+ * screens render, filter, and pick from the full list, so the walk runs to
+ * completion; a page the server marks as the last one ends it.
+ */
+export async function fetchAllAdminUsers(signal?: AbortSignal): Promise<AdminUser[]> {
+  const users: AdminUser[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await v2("GET /api/v2/admin/users", {
+      query: { limit: ADMIN_USERS_PAGE_LIMIT, ...(cursor === undefined ? {} : { cursor }) },
+      signal,
+    });
+    users.push(...page.items.map(adminUserFromV2));
+    if (!page.page?.has_more || !page.page.next_cursor) return users;
+    cursor = page.page.next_cursor;
+  }
+}
+
 export function useAdminUsers() {
   return useQuery({
     queryKey: adminKeys.users(),
-    queryFn: () => api<AdminUser[]>("/admin/users").then((d) => d ?? []),
+    queryFn: ({ signal }) => fetchAllAdminUsers(signal),
     staleTime: ADMIN_STALE_TIME,
   });
 }
@@ -188,7 +258,7 @@ export function useAdminUsers() {
 export function useAdminUser(id: number) {
   return useQuery({
     queryKey: adminKeys.userDetail(id),
-    queryFn: () => api<AdminUser>(`/admin/users/${id}`),
+    queryFn: (): Promise<AdminUser> => api(`/admin/users/${id}`),
     staleTime: ADMIN_STALE_TIME,
   });
 }
@@ -509,7 +579,10 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
 export function useAdminDevices() {
   return useQuery({
     queryKey: adminKeys.devices(),
-    queryFn: () => api<AdminDevicesResponse>("/admin/devices").then((d) => d.devices ?? []),
+    queryFn: async () => {
+      const response: AdminDevicesResponse = await api("/admin/devices");
+      return response.devices ?? [];
+    },
     staleTime: ADMIN_STALE_TIME,
   });
 }
@@ -517,8 +590,8 @@ export function useAdminDevices() {
 export function useAdminDeviceDetail(userId: number, deviceId: string, enabled = true) {
   return useQuery({
     queryKey: adminKeys.deviceDetail(userId, deviceId),
-    queryFn: () =>
-      api<AdminDeviceDetail>(`/admin/devices/${userId}/${encodeURIComponent(deviceId)}`),
+    queryFn: (): Promise<AdminDeviceDetail> =>
+      api(`/admin/devices/${userId}/${encodeURIComponent(deviceId)}`),
     enabled: enabled && userId > 0 && deviceId.length > 0,
     staleTime: ADMIN_STALE_TIME,
   });
@@ -526,8 +599,8 @@ export function useAdminDeviceDetail(userId: number, deviceId: string, enabled =
 
 export function useImpersonateUser() {
   return useMutation({
-    mutationFn: (id: number) =>
-      api<LoginResponse>(`/admin/users/${id}/impersonate`, {
+    mutationFn: (id: number): Promise<LoginResponse> =>
+      api(`/admin/users/${id}/impersonate`, {
         method: "POST",
       }),
   });

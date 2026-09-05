@@ -1,11 +1,15 @@
 package apiv2
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -13,8 +17,12 @@ import (
 // and tiebreaker. A cursor presented against a different scope is invalid.
 type CursorScope struct {
 	OperationID string
-	// Security is the caller's scope identity (account/profile/policy
-	// revision); a cursor never outlives a change in what the caller may see.
+	// Security is the caller's scope identity: account and profile, and for
+	// every collection the viewer access policy filters, viewerScopeDigest
+	// as well. A cursor never outlives a change in what the caller may see:
+	// when the policy changes mid-pagination, rows that became visible and
+	// sort before the key would otherwise be skipped silently, so the client
+	// restarts from the first page instead.
 	Security string
 	Filter   string
 	Sort     string
@@ -24,6 +32,50 @@ type CursorScope struct {
 
 func (s CursorScope) key() string {
 	return strings.Join([]string{s.OperationID, s.Security, s.Filter, s.Sort, s.Tiebreaker}, "\x00")
+}
+
+// viewerScopeDigest is a stable digest of the visibility-affecting fields of
+// the request's effective access policy (policy revision, whether library
+// access is restricted at all, allowed and disabled library IDs,
+// content-rating ceiling). It goes into CursorScope.Security for
+// access-filtered collections. "none" stands for a request that resolved no
+// viewer scope.
+//
+// A nil id list and an empty one are different policies (an unrestricted
+// profile versus one restricted to nothing), so they serialize differently:
+// not every store bumps PolicyRevision when only that distinction changes,
+// and a cursor minted under the narrower policy must not survive the wider
+// one.
+func viewerScopeDigest(ctx context.Context) string {
+	scope, ok := scopeFrom(ctx)
+	if !ok {
+		return labelNone
+	}
+	ids := func(in []int) string {
+		if in == nil {
+			return "-"
+		}
+		sorted := slices.Clone(in)
+		slices.Sort(sorted)
+		parts := make([]string, len(sorted))
+		for i, id := range sorted {
+			parts[i] = strconv.Itoa(id)
+		}
+		return strings.Join(parts, ",")
+	}
+	restricted := "0"
+	if scope.LibrariesRestricted {
+		restricted = "1"
+	}
+	canonical := strings.Join([]string{
+		strconv.FormatInt(scope.PolicyRevision, 10),
+		restricted,
+		ids(scope.AllowedLibraryIDs),
+		ids(scope.DisabledLibraryIDs),
+		scope.MaxContentRating,
+	}, "\x00")
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:8])
 }
 
 // Cursors mints and verifies opaque, tamper-resistant cursors. The position

@@ -1877,7 +1877,28 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// contracts/api/v2/openapi.json, not by an inventory row. All v2
 	// operations register at build regardless of the wiring here: a gate the
 	// wiring lacks makes its operations fail closed, never disappear.
-	r.Handle("/api/v2/*", apiv2.NewHandler(v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)))
+	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
+	// The pilot operations call the v1 handlers' extracted business logic;
+	// a typed nil must not become a non-nil interface, so each is set only
+	// when the v1 handler exists.
+	if authHandler != nil {
+		v2deps.Accounts = authHandler
+	}
+	if progressHandler != nil {
+		v2deps.Progress = progressHandler
+	}
+	if profileHandler != nil {
+		v2deps.Profiles = profileHandler
+	}
+	if deps.FolderRepo != nil {
+		v2deps.Libraries = deps.FolderRepo
+	} else if deps.DB != nil {
+		v2deps.Libraries = catalog.NewFolderRepository(deps.DB)
+	}
+	if adminHandler != nil {
+		v2deps.AdminUsers = adminHandler
+	}
+	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)

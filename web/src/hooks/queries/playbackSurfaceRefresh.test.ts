@@ -7,7 +7,7 @@ describe("invalidatePlaybackSurfaceQueries", () => {
   it("marks playback-derived queries as invalidated", async () => {
     const queryClient = new QueryClient();
 
-    queryClient.setQueryData(progressKeys.list("in_progress"), { progress: [] });
+    queryClient.setQueryData(progressKeys.list("in_progress"), { items: [] });
     queryClient.setQueryData(historyKeys.list(), { items: [] });
     queryClient.setQueryData(sectionKeys.homeItems("continue"), { section: { id: "continue" } });
     queryClient.setQueryData(sectionKeys.library(42), { sections: [] });

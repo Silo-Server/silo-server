@@ -104,6 +104,10 @@ func (s *SQLiteUserStore) ListProgress(_ context.Context, profileID, status stri
 	return ListProgress(s.db, profileID, status, limit, offset)
 }
 
+func (s *SQLiteUserStore) ListProgressPage(_ context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
+	return ListProgressPage(s.db, profileID, status, after, limit)
+}
+
 // ListProgressFiltered cannot push the type/library predicate down: the
 // per-user SQLite store has no catalog tables (media_items/episodes/
 // media_item_libraries live in the shared Postgres schema). It therefore

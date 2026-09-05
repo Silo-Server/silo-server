@@ -73,7 +73,7 @@ type createProfileRequest struct {
 	MaxPlaybackQuality         string `json:"max_playback_quality"`
 }
 
-type updateProfileRequest struct {
+type ProfileUpdateRequest struct {
 	Name                       *string `json:"name,omitempty"`
 	Avatar                     *string `json:"avatar,omitempty"`
 	PIN                        *string `json:"pin,omitempty"`
@@ -98,7 +98,7 @@ type verifyPINRequest struct {
 	PIN string `json:"pin"`
 }
 
-type profileResponse struct {
+type ProfileView struct {
 	ID                         string `json:"id"`
 	Name                       string `json:"name"`
 	Avatar                     string `json:"avatar,omitempty"`
@@ -126,8 +126,8 @@ type profileResponse struct {
 }
 
 type profileListResponse struct {
-	Profiles            []profileResponse `json:"profiles"`
-	AvatarUploadEnabled bool              `json:"avatar_upload_enabled"`
+	Profiles            []ProfileView `json:"profiles"`
+	AvatarUploadEnabled bool          `json:"avatar_upload_enabled"`
 }
 
 type verifyPINResponse struct {
@@ -195,7 +195,7 @@ func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) 
 // only touches fields the user is allowed to change on their own profiles.
 // Admin-only fields (access policy: library restrictions, content rating,
 // playback-quality cap, child-profile flag) must be rejected for non-admins.
-func isAllowedSelfServiceProfileUpdate(req updateProfileRequest) bool {
+func isAllowedSelfServiceProfileUpdate(req ProfileUpdateRequest) bool {
 	return req.IsChild == nil &&
 		req.MaxContentRating == nil &&
 		req.LibraryRestrictionsEnabled == nil &&
@@ -431,17 +431,60 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var req updateProfileRequest
+	var req ProfileUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	resp, err := h.UpdateProfile(r.Context(), ProfileUpdateCommand{
+		UserID:          userID,
+		ProfileID:       profileID,
+		ActiveProfileID: activeProfileIDOf(r),
+		Request:         req,
+		VerifyProfile: func(id string) error {
+			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+		},
+	})
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "profile_management" {
+			writeProfileManagementPermissionError(w, apiErr.cause)
+			return
+		}
+		writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ProfileUpdateCommand is a profile update with its request already parsed
+// and its caller already reduced to an identity.
+type ProfileUpdateCommand struct {
+	UserID    int
+	ProfileID string
+	// ActiveProfileID is the profile the caller acts as ("" when none).
+	ActiveProfileID string
+	Request         ProfileUpdateRequest
+	// VerifyProfile confirms a PIN-locked primary profile is verified for
+	// this request; it returns access.ErrProfileUnverified when it is not.
+	VerifyProfile func(profileID string) error
+}
+
+// UpdateProfile applies a profile update: authorization (household manager
+// or self-service), validation, the name-conflict check, the atomic column
+// and canonical-settings write, and the re-read. v1 PUT /profiles/{id} and v2
+// updateProfile both call it; a failure is an *APIError carrying the v1
+// status, code and message.
+func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCommand) (ProfileView, error) {
+	var none ProfileView
+	req := cmd.Request
+	userID, profileID := cmd.UserID, cmd.ProfileID
 	var avatarRef *string
 	if req.Avatar != nil {
 		normalized, err := normalizePresetAvatarReference(*req.Avatar)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
+			return none, fieldError("avatar", err.Error())
 		}
 		avatarRef = &normalized
 	}
@@ -450,52 +493,32 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 	if req.MaxPlaybackQuality != nil {
 		normalized, ok := access.ParsePlaybackQualityPreset(*req.MaxPlaybackQuality)
 		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
-			return
+			return none, fieldError("max_playback_quality", "Invalid max_playback_quality")
 		}
 		maxPlaybackQuality = &normalized
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	currentProfile, err := store.GetProfile(r.Context(), profileID)
+	currentProfile, err := store.GetProfile(ctx, profileID)
 	if err != nil || currentProfile == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return
+		return none, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 
-	canManage, err := h.canManageHouseholdProfiles(r, store)
+	canManage, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
 	if err != nil {
-		writeProfileManagementPermissionError(w, err)
-		return
+		return none, profileManagementError(err)
 	}
 	if !canManage {
 		// Non-managers may only update their own active profile and only a
 		// narrow set of playback preferences.
-		activeProfileID := apimw.GetProfileID(r.Context())
-		if activeProfileID == "" {
-			activeProfileID = r.Header.Get("X-Profile-Id")
-		}
-		if activeProfileID == "" || activeProfileID != profileID {
-			writeError(
-				w,
-				http.StatusForbidden,
-				"forbidden",
-				"You can only update the active profile's playback preferences",
-			)
-			return
+		if cmd.ActiveProfileID == "" || cmd.ActiveProfileID != profileID {
+			return none, apiError(http.StatusForbidden, "forbidden", "You can only update the active profile's playback preferences")
 		}
 		if !isAllowedSelfServiceProfileUpdate(req) {
-			writeError(
-				w,
-				http.StatusForbidden,
-				"forbidden",
-				"Profile access settings require the primary profile or admin access",
-			)
-			return
+			return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 		}
 	}
 
@@ -504,23 +527,15 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		// it and the store persists it, so " Laura " never lands verbatim.
 		trimmedName := strings.TrimSpace(*req.Name)
 		if trimmedName == "" {
-			writeError(w, http.StatusBadRequest, "bad_request", "Profile name is required")
-			return
+			return none, fieldError("name", "Profile name is required")
 		}
 		req.Name = &trimmedName
-		existingProfiles, err := store.ListProfiles(r.Context())
+		existingProfiles, err := store.ListProfiles(ctx)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-			return
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
 		}
 		if profileNameConflicts(existingProfiles, *req.Name, profileID) {
-			writeError(
-				w,
-				http.StatusConflict,
-				"name_conflict",
-				"A profile with this name already exists",
-			)
-			return
+			return none, apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
 		}
 	}
 
@@ -528,8 +543,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 	// request is still a no-op.
 	settingsSync, err := planUpdateProfileSettingsSync(req)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
 	input := userstore.UpdateProfileInput{
@@ -557,27 +571,37 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 	// failure cannot leave a 500 response whose legacy values look saved while
 	// canonical readers continue serving the previous preference.
 	if err := h.applyProfileUpdateSettingsSync(
-		r.Context(), store, userID, profileID, input, settingsSync,
+		ctx, store, userID, profileID, input, settingsSync,
 	); err != nil {
-		slog.ErrorContext(r.Context(), "profile update failed to sync canonical settings",
+		slog.ErrorContext(ctx, "profile update failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
-		if cleanupErr := deleteUploadedAvatarObjects(r.Context(), h.AvatarStore, userID, profileID); cleanupErr != nil {
-			slog.WarnContext(r.Context(), "profile avatar cleanup failed after update", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
+		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
+			slog.WarnContext(ctx, "profile avatar cleanup failed after update", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
 		}
 	}
 
 	// Re-read the profile to return the updated state.
-	profile, err := store.GetProfile(r.Context(), profileID)
+	profile, err := store.GetProfile(ctx, profileID)
 	if err != nil || profile == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
 	}
 
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *profile))
+	return h.toProfileResponse(ctx, store, *profile), nil
+}
+
+// profileManagementError wraps a household-permission failure so the v1
+// handler can keep its exact wording (writeProfileManagementPermissionError)
+// and the v2 listener still sees the status.
+func profileManagementError(err error) *APIError {
+	out := &APIError{Status: http.StatusInternalServerError, Code: "profile_management", Message: "Failed to check profile permissions", cause: err}
+	if errors.Is(err, access.ErrProfileUnverified) {
+		out.Status = http.StatusForbidden
+		out.Message = "Profile management requires verifying the primary profile PIN"
+	}
+	return out
 }
 
 // HandleDeleteProfile handles DELETE /profiles/{id}.
@@ -725,7 +749,7 @@ func (h *ProfileHandler) HandleVerifyPIN(w http.ResponseWriter, r *http.Request)
 // instead so the whole list costs one store read.
 func (h *ProfileHandler) toProfileResponse(
 	ctx context.Context, store userstore.UserStore, p userstore.Profile,
-) profileResponse {
+) ProfileView {
 	prefs := resolveProfilePreferences(ctx, store, []string{p.ID})
 	return h.profileResponseWith(ctx, p, prefs[p.ID])
 }
@@ -734,14 +758,14 @@ func (h *ProfileHandler) toProfileResponse(
 // preference block in one store read rather than one per profile.
 func (h *ProfileHandler) toProfileResponses(
 	ctx context.Context, store userstore.UserStore, profiles []userstore.Profile,
-) []profileResponse {
+) []ProfileView {
 	ids := make([]string, 0, len(profiles))
 	for _, p := range profiles {
 		ids = append(ids, p.ID)
 	}
 	prefs := resolveProfilePreferences(ctx, store, ids)
 
-	out := make([]profileResponse, 0, len(profiles))
+	out := make([]ProfileView, 0, len(profiles))
 	for _, p := range profiles {
 		out = append(out, h.profileResponseWith(ctx, p, prefs[p.ID]))
 	}
@@ -756,9 +780,9 @@ func (h *ProfileHandler) toProfileResponses(
 // read (see profiles_settings_sync.go). Everything else is still column-backed.
 func (h *ProfileHandler) profileResponseWith(
 	ctx context.Context, p userstore.Profile, prefs profilePreferences,
-) profileResponse {
+) ProfileView {
 	avatarSource, avatarURL := resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, p.Avatar)
-	return profileResponse{
+	return ProfileView{
 		ID:                         p.ID,
 		Name:                       p.Name,
 		Avatar:                     p.Avatar,

@@ -93,20 +93,20 @@ func TypeForStatus(status int) ProblemType {
 // ProblemError is one entry of a validation problem's `errors` array. It
 // never carries the rejected value.
 type ProblemError struct {
-	Location string `json:"location" doc:"Where the error occurred: body.*, query.*, path.* or header.*"`
-	Code     string `json:"code" doc:"Stable machine-readable code for the failure"`
-	Detail   string `json:"detail" doc:"Safe human-readable explanation; never the rejected value"`
+	Location string `json:"location" doc:"Where the error occurred: body.*, query.*, path.* or header.*" example:"body.name"`
+	Code     string `json:"code" doc:"Stable machine-readable code for the failure" example:"required"`
+	Detail   string `json:"detail" doc:"Safe human-readable explanation; never the rejected value" example:"expected required property name to be present"`
 }
 
 // Problem is the RFC 9457 Problem Details envelope every v2 error uses.
 // Every member the contract requires is required here; `errors` is present
 // only on validation problems.
 type Problem struct {
-	Type     string         `json:"type" format:"uri" doc:"Stable problem type URI; the final segment is the problem identifier"`
-	Title    string         `json:"title" doc:"Short summary fixed for the problem type"`
-	Status   int            `json:"status" doc:"HTTP status code, equal to the response status"`
-	Detail   string         `json:"detail" doc:"Safe occurrence-specific explanation; not for control flow"`
-	Instance string         `json:"instance" format:"uri" doc:"urn:silo:request:<request-id>, matching the X-Request-ID response header"`
+	Type     string         `json:"type" format:"uri" doc:"Stable problem type URI; the final segment is the problem identifier" example:"https://siloserver.org/docs/api/v2/problems/validation_failed"`
+	Title    string         `json:"title" doc:"Short summary fixed for the problem type" example:"Validation failed"`
+	Status   int            `json:"status" doc:"HTTP status code, equal to the response status" example:"422"`
+	Detail   string         `json:"detail" doc:"Safe occurrence-specific explanation; not for control flow" example:"The request did not pass validation; see errors."`
+	Instance string         `json:"instance" format:"uri" doc:"urn:silo:request:<request-id>, matching the X-Request-ID response header" example:"urn:silo:request:000000000000000000000003"`
 	Errors   []ProblemError `json:"errors,omitempty" doc:"Field-level validation details"`
 
 	headers http.Header

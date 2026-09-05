@@ -31,6 +31,9 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"users update", users, http.MethodPut, "/api/v1/admin/users/42", true},
 		{"users delete", users, http.MethodDelete, "/api/v1/admin/users/42", true},
 		{"users profiles", users, http.MethodGet, "/api/v1/admin/users/42/profiles", true},
+		{"users v2 list", users, http.MethodGet, "/api/v2/admin/users", true},
+		{"users scope denies v2 collection create", users, http.MethodPost, "/api/v2/admin/users", false},
+		{"users scope denies v2 profile update", users, http.MethodPatch, "/api/v2/profiles/1", false},
 
 		{"users scope denies impersonate", users, http.MethodPost, "/api/v1/admin/users/42/impersonate", false},
 		{"users scope denies settings values", users, http.MethodGet, "/api/v1/admin/users/42/settings/values", false},
@@ -53,6 +56,7 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"groups scope denies update", groups, http.MethodPut, "/api/v1/admin/access-groups/3", false},
 		{"groups scope denies delete", groups, http.MethodDelete, "/api/v1/admin/access-groups/3", false},
 		{"groups scope denies users", groups, http.MethodGet, "/api/v1/admin/users", false},
+		{"groups scope denies v2 users", groups, http.MethodGet, "/api/v2/admin/users", false},
 
 		{"combined scopes union", both, http.MethodGet, "/api/v1/admin/access-groups", true},
 		{"combined scopes still deny elsewhere", both, http.MethodPut, "/api/v1/admin/settings", false},

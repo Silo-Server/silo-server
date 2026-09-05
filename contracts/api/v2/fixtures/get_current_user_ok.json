@@ -1,0 +1,11 @@
+{
+  "id": "1",
+  "username": "laura",
+  "email": "laura@example.test",
+  "role": "user",
+  "permissions": [
+    "marker_edit"
+  ],
+  "download_allowed": true
+}
+

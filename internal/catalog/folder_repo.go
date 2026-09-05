@@ -403,6 +403,32 @@ func (r *FolderRepository) GetEnabled(ctx context.Context) ([]*models.MediaFolde
 	return folders, nil
 }
 
+// ExistingIDs returns the subset of ids that name a media folder, enabled or
+// not, in ascending order. It answers referential questions (may this id be
+// stored in a library allowlist?) without loading the rows.
+func (r *FolderRepository) ExistingIDs(ctx context.Context, ids []int) ([]int, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT id FROM media_folders WHERE id = ANY($1) ORDER BY id ASC`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("checking folder IDs: %w", err)
+	}
+	defer rows.Close()
+	var out []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning folder ID: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("checking folder IDs: %w", err)
+	}
+	return out, nil
+}
+
 // ListByIDs returns enabled media folders matching the given IDs, ordered by ID ascending.
 func (r *FolderRepository) ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error) {
 	query := `SELECT ` + folderColumns + ` FROM media_folders WHERE id = ANY($1) AND enabled = true ORDER BY sort_order ASC, id ASC`

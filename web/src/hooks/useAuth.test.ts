@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiClientError } from "../api/client";
 import type { Profile, User } from "../api/types";
+import { V2ProblemError } from "../api/v2/request";
 import {
   endImpersonationWithRecovery,
   getBootstrapProfile,
@@ -155,6 +156,70 @@ describe("initializeAuthSession", () => {
     expect(clearTokens).toHaveBeenCalledTimes(1);
     expect(restoreProfile).not.toHaveBeenCalled();
     expect(clearActiveAuthState).not.toHaveBeenCalled();
+  });
+
+  it("recovers the preserved admin session when the v2 current-user fetch answers 401", async () => {
+    const bootstrapAccessToken = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const fetchCurrentUser = vi.fn<() => Promise<User>>().mockRejectedValue(
+      new V2ProblemError("getCurrentUser", {
+        type: "https://siloserver.org/docs/api/v2/problems/authentication_required",
+        title: "Authentication required",
+        status: 401,
+        detail: "expired",
+        instance: "/api/v2/account/me",
+      }),
+    );
+    const applyCurrentUser = vi.fn();
+    const restoreProfile = vi.fn();
+    const recoverPreservedAdminSession = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const clearTokens = vi.fn();
+    const clearActiveAuthState = vi.fn();
+
+    await initializeAuthSession({
+      refreshToken: "impersonated-refresh",
+      hasStoredImpersonationAdminSession: true,
+      bootstrapAccessToken,
+      fetchCurrentUser,
+      applyCurrentUser,
+      restoreProfile,
+      recoverPreservedAdminSession,
+      clearTokens,
+      clearActiveAuthState,
+    });
+
+    expect(recoverPreservedAdminSession).toHaveBeenCalledTimes(1);
+    expect(restoreProfile).toHaveBeenCalledTimes(1);
+    expect(clearTokens).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a v2 validation problem as recoverable impersonation auth", async () => {
+    const bootstrapAccessToken = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const fetchCurrentUser = vi.fn<() => Promise<User>>().mockRejectedValue(
+      new V2ProblemError("getCurrentUser", {
+        type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+        title: "Validation failed",
+        status: 422,
+        detail: "bad",
+        instance: "/api/v2/account/me",
+      }),
+    );
+    const recoverPreservedAdminSession = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const clearTokens = vi.fn();
+
+    await initializeAuthSession({
+      refreshToken: "impersonated-refresh",
+      hasStoredImpersonationAdminSession: true,
+      bootstrapAccessToken,
+      fetchCurrentUser,
+      applyCurrentUser: vi.fn(),
+      restoreProfile: vi.fn(),
+      recoverPreservedAdminSession,
+      clearTokens,
+      clearActiveAuthState: vi.fn(),
+    });
+
+    expect(recoverPreservedAdminSession).not.toHaveBeenCalled();
+    expect(clearTokens).toHaveBeenCalledTimes(1);
   });
 });
 
