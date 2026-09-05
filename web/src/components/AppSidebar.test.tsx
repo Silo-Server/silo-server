@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PluginSettingsSummary } from "@/api/types";
+import type { PluginSettingsInstallation } from "@/hooks/queries/pluginSettings";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 
 import AppSidebar from "./AppSidebar";
@@ -81,7 +81,7 @@ vi.mock("@/hooks/useUICustomization", () => ({
   }),
 }));
 
-let mockPluginInstallations: PluginSettingsSummary[] = [];
+let mockPluginInstallations: PluginSettingsInstallation[] = [];
 
 vi.mock("@/hooks/queries/pluginSettings", () => ({
   usePluginSettingsList: () => ({
@@ -94,7 +94,7 @@ function pluginInstallation(
   pluginId: string,
   label: string,
   category?: string,
-): PluginSettingsSummary {
+): PluginSettingsInstallation {
   return {
     id,
     plugin_id: pluginId,

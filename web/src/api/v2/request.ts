@@ -13,7 +13,13 @@
  * device headers) is the same machinery the v1 client uses, shared through
  * `fetchWithSession`. This module never touches `/api/v1`.
  */
-import { fetchWithSession, reportProfileUnverified } from "../client";
+import {
+  fetchWithSession,
+  isProfileRequestContextCurrent,
+  reportProfileUnverified,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "../client";
 import { v2Operations } from "./operations";
 import type { components, paths } from "./schema";
 
@@ -99,10 +105,18 @@ export type V2PathParams<K extends V2OperationKey> = PathParamsOf<OperationOf<K>
 // the whole options object is optional when nothing is required.
 // ---------------------------------------------------------------------------
 
-type QueryValue = string | number | boolean | null | undefined;
+type QueryScalar = string | number | boolean | null | undefined;
+type QueryValue = QueryScalar | readonly QueryScalar[];
 
 interface CommonOptions {
   signal?: AbortSignal;
+  /**
+   * Account, profile, and PIN authority captured when a queued intent was
+   * created. The request is sent with exactly those headers rather than the
+   * current session's, and is refused (`StaleApiRequestContextError`) once
+   * the account or server has changed underneath it.
+   */
+  profileContext?: ProfileRequestContextSnapshot;
 }
 
 export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
@@ -139,15 +153,26 @@ export class V2ProblemError extends Error {
   readonly status: number;
   /** The problem identifier, e.g. `authentication_required` or `validation_failed`. */
   readonly problemType: string;
+  /** The `Retry-After` delay in seconds when the server sent one (rate limits, busy backends). */
+  readonly retryAfterSeconds: number | null;
 
-  constructor(operationId: string, problem: Problem) {
+  constructor(operationId: string, problem: Problem, retryAfterSeconds: number | null = null) {
     super(problem.detail || problem.title);
     this.name = "V2ProblemError";
     this.operationId = operationId;
     this.problem = problem;
     this.status = problem.status;
     this.problemType = problemId(problem);
+    this.retryAfterSeconds = retryAfterSeconds;
   }
+}
+
+/** Parses a delta-seconds `Retry-After` header; an HTTP-date form is not a contract shape. */
+function retryAfterSecondsOf(res: Response): number | null {
+  const raw = res.headers.get("Retry-After");
+  if (!raw) return null;
+  const seconds = Number(raw.trim());
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
 }
 
 /**
@@ -210,6 +235,15 @@ function buildUrl(
   const search = new URLSearchParams();
   for (const [name, value] of Object.entries(query)) {
     if (value === undefined || value === null) continue;
+    // Array parameters are declared `explode` in the contract: one repeated
+    // parameter per member, never a comma-joined list.
+    if (Array.isArray(value)) {
+      for (const member of value as readonly QueryScalar[]) {
+        if (member === undefined || member === null) continue;
+        search.append(name, String(member));
+      }
+      continue;
+    }
     search.set(name, String(value));
   }
   const encoded = search.toString();
@@ -253,11 +287,21 @@ export async function v2<K extends V2OperationKey>(
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body);
   }
+  const snapshot = options.profileContext;
+  if (snapshot) {
+    headers["Authorization"] = `Bearer ${snapshot.accessToken}`;
+    headers["X-Profile-Id"] = snapshot.profileId;
+    headers["X-Profile-Token"] = snapshot.profileToken ?? "";
+  }
 
   const { res, requestProfileId, requestProfileToken } = await fetchWithSession(
     buildUrl(route, options.path, options.query),
     init,
+    snapshot,
   );
+  if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
+    throw new StaleApiRequestContextError();
+  }
 
   try {
     return await decodeV2Response(key, res);
@@ -267,7 +311,7 @@ export async function v2<K extends V2OperationKey>(
       err.status === 403 &&
       err.problemType === "profile_verification_required"
     ) {
-      reportProfileUnverified(requestProfileId, requestProfileToken);
+      reportProfileUnverified(requestProfileId, requestProfileToken, snapshot);
     }
     throw err;
   }
@@ -297,5 +341,5 @@ export async function decodeV2Response<K extends V2OperationKey>(
       "the error response is not a problem document",
     );
   }
-  throw new V2ProblemError(operationId, body);
+  throw new V2ProblemError(operationId, body, retryAfterSecondsOf(res));
 }

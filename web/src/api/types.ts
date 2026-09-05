@@ -3793,34 +3793,6 @@ export interface PluginTaskBindingUpdateResponse {
   restart_required: boolean;
 }
 
-export interface PluginSettingsSummary {
-  id: number;
-  plugin_id: string;
-  version: string;
-  user_config_schema: PluginConfigSchema[];
-  routes: PluginRoute[];
-  assets: PluginAsset[];
-  /**
-   * Optional slash-delimited grouping path from the plugin manifest
-   * (e.g. "Tools/Utilities") that groups the plugin's entries in the
-   * Apps sidebar section. Absent when the manifest declares no category.
-   */
-  category?: string;
-}
-
-export interface PluginSettingsListResponse {
-  installations: PluginSettingsSummary[];
-}
-
-export interface PluginSettingsDetailResponse {
-  installation: PluginSettingsSummary;
-  values: Record<string, string>;
-}
-
-export interface UpdatePluginSettingsRequest {
-  values: Record<string, string>;
-}
-
 // Stream Nodes
 
 /** One render device in a node's stored capability report. */

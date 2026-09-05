@@ -3,10 +3,13 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 
-import { ApiClientError } from "@/api/client";
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
-import { buildSubtitleChoiceRequests } from "@/player/utils/subtitleChoicePersistence";
+import {
+  buildSubtitleChoiceRequests,
+  type SubtitleChoiceSettingWrite,
+} from "@/player/utils/subtitleChoicePersistence";
 import type { PlayerSubtitleInfo } from "@/player/types";
 import { useDeleteSubtitlePreference } from "./subtitles";
 
@@ -14,6 +17,11 @@ const apiMock = vi.hoisted(() => vi.fn());
 vi.mock("@/api/client", async () => {
   const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
   return { ...actual, api: apiMock };
+});
+const v2Mock = vi.hoisted(() => vi.fn());
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: v2Mock };
 });
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -44,19 +52,20 @@ const TRACKS: PlayerSubtitleInfo[] = [
 /** The profile_series rows an in-player pick leaves behind. */
 function rowsFromInPlayerPick(seriesId: string): StoredSettingRow[] {
   return buildSubtitleChoiceRequests({ seriesId, index: 0, tracks: TRACKS })
-    .filter((request) => request.path.startsWith("/settings/values/"))
+    .filter((request): request is SubtitleChoiceSettingWrite => request.kind === "setting")
     .map((request) => ({
-      key: decodeURIComponent(request.path.slice("/settings/values/".length).split("?")[0]!),
+      key: request.key,
       scope: "profile_series" as const,
       profileId: "profile-1",
       seriesId,
-      value: (request.body as { value: unknown }).value,
+      value: request.value,
     }));
 }
 
 describe("useDeleteSubtitlePreference", () => {
   beforeEach(() => {
     apiMock.mockReset();
+    v2Mock.mockReset();
   });
 
   it("clears the canonical profile_series rows alongside the legacy row", async () => {
@@ -65,20 +74,19 @@ describe("useDeleteSubtitlePreference", () => {
     // in-player pick left behind kept resolving the abandoned language for
     // every episode of the series, permanently and unreachably.
     const store = rowsFromInPlayerPick("series-1");
-    apiMock.mockImplementation((path: string, options?: RequestInit) => {
-      if (options?.method !== "DELETE") return Promise.resolve(undefined);
-      if (path.startsWith("/subtitle-prefs/")) return Promise.resolve(undefined);
-      const key = decodeURIComponent(path.slice("/settings/values/".length).split("?")[0]!);
-      expect(path).toContain("scope=profile_series&series_id=series-1");
-      const index = store.findIndex((row) => row.key === key);
-      if (index < 0) {
-        return Promise.reject(
-          new ApiClientError(404, "not_found", "No value is set at this scope"),
-        );
-      }
-      store.splice(index, 1);
-      return Promise.resolve(undefined);
-    });
+    apiMock.mockResolvedValue(undefined);
+    v2Mock.mockImplementation(
+      (operation: string, options: { path: { key: string }; query: unknown }) => {
+        expect(operation).toBe("DELETE /api/v2/settings/values/{key}");
+        expect(options.query).toEqual({ scope: "profile_series", series_id: "series-1" });
+        const index = store.findIndex((row) => row.key === options.path.key);
+        if (index < 0) {
+          return Promise.reject(v2Problem(404, "not_found", "No value is set at this scope"));
+        }
+        store.splice(index, 1);
+        return Promise.resolve(undefined);
+      },
+    );
 
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });
@@ -99,10 +107,8 @@ describe("useDeleteSubtitlePreference", () => {
   });
 
   it("treats an already-absent canonical row as success", async () => {
-    apiMock.mockImplementation((path: string) => {
-      if (path.startsWith("/subtitle-prefs/")) return Promise.resolve(undefined);
-      return Promise.reject(new ApiClientError(404, "not_found", "No value is set at this scope"));
-    });
+    apiMock.mockResolvedValue(undefined);
+    v2Mock.mockRejectedValue(v2Problem(404, "not_found", "No value is set at this scope"));
 
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });
@@ -111,10 +117,8 @@ describe("useDeleteSubtitlePreference", () => {
   });
 
   it("surfaces a real failure rather than reporting a reset that did not happen", async () => {
-    apiMock.mockImplementation((path: string) => {
-      if (path.startsWith("/subtitle-prefs/")) return Promise.resolve(undefined);
-      return Promise.reject(new ApiClientError(500, "internal_error", "boom"));
-    });
+    apiMock.mockResolvedValue(undefined);
+    v2Mock.mockRejectedValue(v2Problem(500, "internal_error", "boom"));
 
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });

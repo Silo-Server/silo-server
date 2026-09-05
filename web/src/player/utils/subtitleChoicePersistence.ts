@@ -1,17 +1,30 @@
 import {
   SERIES_SUBTITLE_SETTING_KEYS,
-  seriesSubtitleSettingPath,
+  seriesSubtitleSettingIdentity,
   seriesSubtitleSettingValues,
+  type SeriesSubtitleSettingKey,
 } from "@/lib/seriesSubtitleSettings";
 import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature } from "../types";
 import { derivePersistedSubtitleMode } from "./subtitleMode";
 
-/** One PUT the player issues to persist a subtitle choice. */
-export interface SubtitleChoiceRequest {
+/** One canonical settings write: a value at profile_series for one key. */
+export interface SubtitleChoiceSettingWrite {
+  kind: "setting";
+  key: SeriesSubtitleSettingKey;
+  identity: ReturnType<typeof seriesSubtitleSettingIdentity>;
+  value: unknown;
+}
+
+/** One PUT on the legacy per-series subtitle-preference route. */
+export interface SubtitleChoiceLegacyWrite {
+  kind: "legacy";
   path: string;
   body: unknown;
 }
+
+/** One write the player issues to persist a subtitle choice. */
+export type SubtitleChoiceRequest = SubtitleChoiceSettingWrite | SubtitleChoiceLegacyWrite;
 
 /**
  * The requests an in-player subtitle pick turns into.
@@ -97,11 +110,14 @@ export function buildSubtitleChoiceRequests({
   const chosen = seriesSubtitleSettingValues({ language: track?.language ?? null, mode });
 
   const requests: SubtitleChoiceRequest[] = SERIES_SUBTITLE_SETTING_KEYS.map((key) => ({
-    path: seriesSubtitleSettingPath(key, seriesId),
-    body: { value: chosen[key] },
+    kind: "setting",
+    key,
+    identity: seriesSubtitleSettingIdentity(seriesId),
+    value: chosen[key],
   }));
 
   requests.push({
+    kind: "legacy",
     path: `/subtitle-prefs/${seriesId}`,
     body: {
       subtitle_language: track?.language ?? "",

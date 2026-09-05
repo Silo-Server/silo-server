@@ -44,7 +44,16 @@ export default tseslint.config(
       "src/hooks/queries/progress.ts",
       "src/hooks/queries/profiles.ts",
       "src/hooks/queries/admin/users.ts",
+      "src/hooks/queries/autoPlayNext.ts",
+      "src/hooks/queries/libraryPageState.ts",
+      "src/hooks/queries/pluginSettings.ts",
+      "src/hooks/queries/profileDefaults.ts",
+      "src/hooks/queries/settingValues.ts",
+      "src/hooks/queries/subtitleAppearance.ts",
+      "src/hooks/useOverlayPrefs.ts",
+      "src/lib/seriesSubtitleSettings.ts",
       "src/pages/OAuthComplete.tsx",
+      "src/player/utils/subtitleChoicePersistence.ts",
     ],
     rules: {
       "no-restricted-syntax": [

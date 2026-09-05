@@ -10,6 +10,7 @@ import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
 import { buildSubtitleChoiceRequests } from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
+import { v2 } from "@/api/v2/request";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -214,10 +215,18 @@ export function WatchPage({
         showForcedSubtitles,
       });
       for (const request of requests) {
-        void playerFetch(config, request.path, {
-          method: "PUT",
-          body: JSON.stringify(request.body),
-        }).catch(() => {
+        const write =
+          request.kind === "setting"
+            ? v2("PUT /api/v2/settings/values/{key}", {
+                path: { key: request.key },
+                query: request.identity,
+                body: { value: request.value },
+              })
+            : playerFetch(config, request.path, {
+                method: "PUT",
+                body: JSON.stringify(request.body),
+              });
+        void write.catch(() => {
           // Best effort.
         });
       }

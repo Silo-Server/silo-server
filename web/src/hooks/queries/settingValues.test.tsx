@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClientError } from "@/api/client";
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
   settingsCapabilitiesSupportAtomicShortcuts,
@@ -14,15 +14,10 @@ import {
   useSetSettingValue,
 } from "./settingValues";
 
-const apiMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-const apiWithProfileRequestContextMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock("@/api/client", async () => {
-  const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
-  return {
-    ...actual,
-    api: apiMock,
-    apiWithProfileRequestContext: apiWithProfileRequestContextMock,
-  };
+const v2Mock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: v2Mock };
 });
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -35,8 +30,7 @@ function wrapper({ children }: { children: ReactNode }) {
 describe("self-service setting identities", () => {
   afterEach(() => {
     cleanup();
-    apiMock.mockClear();
-    apiWithProfileRequestContextMock.mockClear();
+    v2Mock.mockClear();
   });
 
   it("cannot address another client family through a query parameter", async () => {
@@ -60,11 +54,23 @@ describe("self-service setting identities", () => {
       });
     });
 
-    expect(apiMock.mock.calls.map(([path]) => path)).toEqual([
-      `/settings/values/${SETTING_KEYS.UI_CARD_PRESENTATION}?scope=profile_client`,
-      `/settings/values/${SETTING_KEYS.UI_CARD_PRESENTATION}?scope=profile_client`,
+    expect(v2Mock.mock.calls.map(([key]) => key)).toEqual([
+      "PUT /api/v2/settings/values/{key}",
+      "DELETE /api/v2/settings/values/{key}",
     ]);
-    expect(apiMock.mock.calls.map(([, options]) => options?.method)).toEqual(["PUT", "DELETE"]);
+    for (const [, options] of v2Mock.mock.calls) {
+      expect(options.path).toEqual({ key: SETTING_KEYS.UI_CARD_PRESENTATION });
+      // The identity carries only what the caller may address; the client
+      // family comes from the request header, never from the query.
+      expect(options.query).toEqual({
+        scope: "profile_client",
+        library_id: undefined,
+        series_id: undefined,
+        device_id: undefined,
+        profile_id: undefined,
+      });
+      expect(options.query).not.toHaveProperty("client_family");
+    }
   });
 
   it("sends an atomic shortcut with its captured profile and PIN token", async () => {
@@ -87,21 +93,13 @@ describe("self-service setting identities", () => {
       });
     });
 
-    expect(apiWithProfileRequestContextMock).toHaveBeenCalledWith(
-      "/settings/values/nav.shortcuts/item",
-      profileAuth,
-      {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Silo-Mutation-Id": "mutation-1",
-        },
-        body: JSON.stringify({
-          item: { type: "library", library_id: 42, label: "Movies" },
-          present: true,
-        }),
+    expect(v2Mock).toHaveBeenCalledWith("PUT /api/v2/settings/values/nav.shortcuts/item", {
+      body: {
+        item: { type: "library", library_id: 42, label: "Movies" },
+        present: true,
       },
-    );
+      profileContext: profileAuth,
+    });
   });
 
   it("keeps an ordinary write pending until effective values reconcile", async () => {
@@ -145,7 +143,7 @@ describe("self-service setting identities", () => {
 
   it.each([
     ["a successful reset", undefined],
-    ["an already-cleared 404 reset", new ApiClientError(404, "not_found", "Already cleared")],
+    ["an already-cleared 404 reset", v2Problem(404, "not_found", "Already cleared")],
   ])("keeps %s pending until effective values reconcile", async (_label, apiError) => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -160,7 +158,7 @@ describe("self-service setting identities", () => {
     const localWrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
-    if (apiError) apiMock.mockRejectedValueOnce(apiError);
+    if (apiError) v2Mock.mockRejectedValueOnce(apiError);
     const clearHook = renderHook(() => useClearSettingValue(), { wrapper: localWrapper });
 
     let settled = false;

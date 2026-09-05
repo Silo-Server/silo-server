@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
 import type { PlayerSubtitleInfo } from "../types";
-import { buildSubtitleChoiceRequests } from "./subtitleChoicePersistence";
+import {
+  buildSubtitleChoiceRequests,
+  type SubtitleChoiceLegacyWrite,
+  type SubtitleChoiceSettingWrite,
+} from "./subtitleChoicePersistence";
 
 const TRACKS: PlayerSubtitleInfo[] = [
   {
@@ -18,13 +22,20 @@ const TRACKS: PlayerSubtitleInfo[] = [
   },
 ];
 
-function canonicalWrites(requests: ReturnType<typeof buildSubtitleChoiceRequests>) {
-  return requests.filter((request) => request.path.startsWith("/settings/values/"));
+function canonicalWrites(
+  requests: ReturnType<typeof buildSubtitleChoiceRequests>,
+): SubtitleChoiceSettingWrite[] {
+  return requests.filter(
+    (request): request is SubtitleChoiceSettingWrite => request.kind === "setting",
+  );
 }
 
-/** The key one canonical write addresses, parsed back out of its path. */
-function keyOf(path: string): string {
-  return decodeURIComponent(path.slice("/settings/values/".length).split("?")[0]!);
+function legacyWrite(
+  requests: ReturnType<typeof buildSubtitleChoiceRequests>,
+): SubtitleChoiceLegacyWrite | undefined {
+  return requests.find(
+    (request): request is SubtitleChoiceLegacyWrite => request.kind === "legacy",
+  );
 }
 
 describe("buildSubtitleChoiceRequests", () => {
@@ -37,15 +48,15 @@ describe("buildSubtitleChoiceRequests", () => {
     });
 
     const canonical = canonicalWrites(requests);
-    expect(canonical.map((request) => keyOf(request.path))).toEqual([
+    expect(canonical.map((request) => request.key)).toEqual([
       SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
       SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
     ]);
     for (const request of canonical) {
-      expect(request.path).toContain("scope=profile_series&series_id=series-1");
+      expect(request.identity).toEqual({ scope: "profile_series", series_id: "series-1" });
     }
-    expect(canonical[0]?.body).toEqual({ value: "ja" });
-    expect(canonical[1]?.body).toEqual({ value: "always" });
+    expect(canonical[0]?.value).toBe("ja");
+    expect(canonical[1]?.value).toBe("always");
   });
 
   it("never writes show_forced_subtitles as a canonical row", () => {
@@ -61,7 +72,7 @@ describe("buildSubtitleChoiceRequests", () => {
         tracks: TRACKS,
         showForcedSubtitles,
       });
-      expect(canonicalWrites(requests).map((request) => keyOf(request.path))).not.toContain(
+      expect(canonicalWrites(requests).map((request) => request.key)).not.toContain(
         SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
       );
     }
@@ -76,7 +87,7 @@ describe("buildSubtitleChoiceRequests", () => {
       index: 0,
       tracks: TRACKS,
       showForcedSubtitles: false,
-    }).filter((request) => request.path.startsWith("/subtitle-prefs/"));
+    }).filter((request) => request.kind === "legacy");
 
     expect(legacy?.body).toMatchObject({
       subtitle_language: "ja",
@@ -91,8 +102,8 @@ describe("buildSubtitleChoiceRequests", () => {
       buildSubtitleChoiceRequests({ seriesId: "series-1", index: null, tracks: TRACKS }),
     );
 
-    expect(canonical[0]?.body).toEqual({ value: null });
-    expect(canonical[1]?.body).toEqual({ value: "off" });
+    expect(canonical[0]?.value).toBeNull();
+    expect(canonical[1]?.value).toBe("off");
   });
 
   it("persists nothing for an index that names no real track", () => {
@@ -123,10 +134,8 @@ describe("buildSubtitleChoiceRequests", () => {
       },
     });
 
-    expect(canonicalWrites(requests)[0]?.body).toEqual({ value: "es" });
-    expect(
-      requests.find((request) => request.path.startsWith("/subtitle-prefs/"))?.body,
-    ).toMatchObject({
+    expect(canonicalWrites(requests)[0]?.value).toBe("es");
+    expect(legacyWrite(requests)?.body).toMatchObject({
       subtitle_language: "es",
       subtitle_track_index: 4,
       track_signature: {
@@ -151,11 +160,11 @@ describe("buildSubtitleChoiceRequests", () => {
       }),
     );
     const stored: StoredSettingRow[] = requests.map((request) => ({
-      key: keyOf(request.path),
+      key: request.key,
       scope: "profile_series",
       profileId: "profile-1",
       seriesId: "series-1",
-      value: (request.body as { value: unknown }).value,
+      value: request.value,
     }));
     stored.push({
       key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
