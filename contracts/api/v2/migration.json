@@ -1591,8 +1591,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; adminHandler != nil; apiKeyRepo != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint",
-      "retry_safety_note": "Same client-selected id as the account-scoped create; the secret is shown once, in the creating response only."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "The secret is shown once, in the creating response only, so a retry after that response is lost cannot recover it and the client must delete and recreate, a different operation. The v2 port must keep a replayable creation result per key id until first read, or accept this as one-shot."
     },
     {
       "listener": "api",
@@ -18667,8 +18667,8 @@
         "operation_id": null
       },
       "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: apiKeyRepo != nil && authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint",
-      "retry_safety_note": "The v2 create takes a client-selected key id so a retry resolves to the existing row. The secret is shown once, in the creating response only; a client that lost it deletes and recreates rather than duplicating."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "The secret is shown once, in the creating response only, so a retry after that response is lost cannot recover it and the client must delete and recreate, a different operation. The v2 port must keep a replayable creation result per key id until first read, or accept this as one-shot."
     },
     {
       "listener": "api",
@@ -27514,7 +27514,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: the row converges (ON CONFLICT DO NOTHING / delete-if-present) but the handler dispatches the watch-provider list event and recommendation refresh unconditionally, so a retry repeats the external call. The v2 port must dispatch only when the store reports a change, behind a durable claim."
     },
     {
       "listener": "api",
@@ -27670,7 +27671,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: the row converges (ON CONFLICT DO NOTHING / delete-if-present) but the handler dispatches the watch-provider list event and recommendation refresh unconditionally, so a retry repeats the external call. The v2 port must dispatch only when the store reports a change, behind a durable claim."
     },
     {
       "listener": "api",
@@ -45583,7 +45585,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: the row converges (ON CONFLICT DO NOTHING / delete-if-present) but the handler dispatches the watch-provider list event and recommendation refresh unconditionally, so a retry repeats the external call. The v2 port must dispatch only when the store reports a change, behind a durable claim."
     },
     {
       "listener": "api",
@@ -45739,7 +45742,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "durable_dispatch",
+      "retry_safety_note": "DEFECT: the row converges (ON CONFLICT DO NOTHING / delete-if-present) but the handler dispatches the watch-provider list event and recommendation refresh unconditionally, so a retry repeats the external call. The v2 port must dispatch only when the store reports a change, behind a durable claim."
     },
     {
       "listener": "api",

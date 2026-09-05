@@ -1124,19 +1124,26 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, RetrySafety: "natural_idempotent", V2: V2Target{OperationID: opID("updateThing")}},
 		{copied: copied{Method: http.MethodPost, Path: "/api/v1/things"}, RetrySafety: "unique_constraint", V2: V2Target{OperationID: opID("createThing")}},
 	}
+	update := apiv2registry.Declared{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "natural_idempotent"}
+	create := apiv2registry.Declared{Method: http.MethodPost, OperationID: "createThing", RetrySafety: "unique_constraint"}
+	with := func(extra ...apiv2registry.Declared) []apiv2registry.Declared {
+		return append([]apiv2registry.Declared{update, create}, extra...)
+	}
 	cases := []struct {
 		name     string
 		declared []apiv2registry.Declared
 		exempt   map[string]string
 		want     string
 	}{
-		{"agree", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "natural_idempotent"}}, nil, ""},
-		{"read declares", []apiv2registry.Declared{{Method: http.MethodGet, OperationID: "getThing", RetrySafety: "natural_idempotent"}}, nil, "read operation getThing declares retry safety"},
-		{"unknown value", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "bogus"}}, nil, "not one of the ledger's values"},
-		{"no legacy row", []apiv2registry.Declared{{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}}, nil, "maps to no legacy row"},
-		{"no legacy row, exempt with reason", []apiv2registry.Declared{{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}}, map[string]string{"deleteThing": "v2-only resource"}, ""},
-		{"no legacy row, exempt without reason", []apiv2registry.Declared{{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}}, map[string]string{"deleteThing": ""}, "maps to no legacy row"},
-		{"disagrees", []apiv2registry.Declared{{Method: http.MethodPost, OperationID: "createThing", RetrySafety: "domain_identity"}}, nil, `ledger retry_safety "unique_constraint", registry declares "domain_identity"`},
+		{"agree", with(), nil, ""},
+		{"read declares", with(apiv2registry.Declared{Method: http.MethodGet, OperationID: "getThing", RetrySafety: "natural_idempotent"}), nil, "read operation getThing declares retry safety"},
+		{"unknown value", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "bogus"}, create}, nil, "not one of the ledger's values"},
+		{"no legacy row", with(apiv2registry.Declared{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}), nil, "maps to no legacy row"},
+		{"no legacy row, exempt with reason", with(apiv2registry.Declared{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}), map[string]string{"deleteThing": "v2-only resource"}, ""},
+		{"no legacy row, exempt without reason", with(apiv2registry.Declared{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}), map[string]string{"deleteThing": ""}, "maps to no legacy row"},
+		{"disagrees", []apiv2registry.Declared{update, {Method: http.MethodPost, OperationID: "createThing", RetrySafety: "domain_identity"}}, nil, `ledger retry_safety "unique_constraint", registry declares "domain_identity"`},
+		{"row names an undeclared operation", []apiv2registry.Declared{update}, nil, "which the registry does not declare"},
+		{"row names a read", []apiv2registry.Declared{update, {Method: http.MethodGet, OperationID: "createThing"}}, nil, "carries no retry classification"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1173,7 +1180,26 @@ func retrySafetyMismatches(entries []Entry, declared []apiv2registry.Declared, e
 			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
 		}
 	}
+	// The reverse direction: a classified row that names a v2 operation
+	// must resolve to a declared mutating operation, or the ledger would
+	// certify a port and its classification that no registration enforces.
+	declaredByID := map[string]apiv2registry.Declared{}
+	for _, op := range declared {
+		declaredByID[op.OperationID] = op
+	}
 	var problems []string
+	for _, e := range entries {
+		if e.RetrySafety == "" || e.V2.OperationID == nil {
+			continue
+		}
+		op, ok := declaredByID[*e.V2.OperationID]
+		switch {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("%s: retry_safety %s names v2 operation %s, which the registry does not declare", e.key(), e.RetrySafety, *e.V2.OperationID))
+		case !isMutatingMethod(op.Method):
+			problems = append(problems, fmt.Sprintf("%s: retry_safety %s names v2 operation %s, which is a %s and carries no retry classification", e.key(), e.RetrySafety, op.OperationID, op.Method))
+		}
+	}
 	for _, op := range declared {
 		if !isMutatingMethod(op.Method) {
 			if op.RetrySafety != "" {
