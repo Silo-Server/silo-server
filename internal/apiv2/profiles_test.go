@@ -2,7 +2,9 @@ package apiv2
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -555,6 +557,34 @@ func TestUploadProfileAvatar(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/profiles/p-missing/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeNotFound)
 	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{view: fixtureProfileView(), noAvatarStore: true})), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeDependencyUnavailable)
 	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: errors.New("boom")})), http.MethodPut, "/api/v2/profiles/p-owner/avatar", body, with(bearer(memberToken), "Content-Type", ct)), TypeInternalError)
+}
+
+// TestUploadProfileAvatarChunkedTooLarge sends an oversized form without a
+// Content-Length (chunked transfer), so the multipart guard cannot refuse it
+// up front and the body cap trips inside the form parser instead. The result
+// is still the documented 413, not a malformed-form 400.
+func TestUploadProfileAvatarChunkedTooLarge(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView(), avatarStore: true}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	huge, ct := avatarForm("image/png", strings.Repeat("x", maxAvatarFormBytes))
+	// io.MultiReader hides the length from httptest.NewRequest, which only
+	// sets ContentLength for the in-memory reader types.
+	r := httptest.NewRequest(http.MethodPut, "/api/v2/profiles/p-owner/avatar", io.MultiReader(strings.NewReader(huge)))
+	r.TransferEncoding = []string{"chunked"}
+	r.Header.Set("Content-Type", ct)
+	r.Header.Set("Authorization", "Bearer "+memberToken)
+	if r.ContentLength != -1 {
+		t.Fatalf("ContentLength = %d, want -1 (unknown length)", r.ContentLength)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	p := requireProblem(t, rec, TypePayloadTooLarge)
+	if len(p.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", p.Errors)
+	}
+	if profiles.lastUpload != nil {
+		t.Fatalf("upload = %+v, want none", profiles.lastUpload)
+	}
 }
 
 func TestUploadProfileAvatarDenied(t *testing.T) {

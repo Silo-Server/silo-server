@@ -182,6 +182,14 @@ func requestIDFrom(ctx context.Context) string {
 // (status, message and huma.ErrorDetail list) onto the Silo envelope with a
 // catalog type, stable codes and no echoed values.
 func fromHumaError(requestID string, status int, msg string, errs []error, bodyLimit int64) *Problem {
+	if formSizeFailure(status, errs) {
+		// The body cap tripped inside the form parser (a chunked or
+		// understated-length upload): the same 413 the multipart guard
+		// writes when Content-Length declares the excess up front.
+		p := NewProblem(TypePayloadTooLarge, humaDetail(TypePayloadTooLarge, msg, bodyLimit))
+		p.Instance = requestInstance(requestID)
+		return p
+	}
 	if formParseFailure(status, errs) {
 		// The form decoder refused the body (no boundary, truncated
 		// framing): a malformed request, as an unparseable JSON document is,
@@ -228,11 +236,29 @@ func fromHumaError(requestID string, status int, msg string, errs []error, bodyL
 // refusing the form as a whole (Huma reports it as one 422 detail at "body"
 // prefixed "cannot read multipart form").
 func formParseFailure(status int, errs []error) bool {
+	return formParseDetail(status, errs) != nil
+}
+
+// formSizeFailure reports whether the form parser failed because the body cap
+// installed by the multipart guard (http.MaxBytesReader) tripped mid-read.
+// Huma keeps only the reader's text, not the *http.MaxBytesError, so the
+// stdlib's own message is matched.
+func formSizeFailure(status int, errs []error) bool {
+	d := formParseDetail(status, errs)
+	return d != nil && strings.Contains(d.Message, new(http.MaxBytesError).Error())
+}
+
+// formParseDetail returns the single "cannot read multipart form" detail of a
+// form parse failure, or nil when the failure is anything else.
+func formParseDetail(status int, errs []error) *huma.ErrorDetail {
 	if status != http.StatusUnprocessableEntity || len(errs) != 1 {
-		return false
+		return nil
 	}
 	var detail *huma.ErrorDetail
-	return errors.As(errs[0], &detail) && detail.Location == locationBody && strings.HasPrefix(detail.Message, "cannot read multipart form")
+	if !errors.As(errs[0], &detail) || detail.Location != locationBody || !strings.HasPrefix(detail.Message, "cannot read multipart form") {
+		return nil
+	}
+	return detail
 }
 
 // bodyParseFailure reports whether a detail is the decoder refusing the body
