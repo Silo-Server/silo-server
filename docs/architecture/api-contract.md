@@ -492,7 +492,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   registration: `At` (required), `Link` (required; an absolute https URL under
   `apiv2.DocsOrigin`, which shares the `ProblemTypeOrigin` host), and an optional `Sunset` that
   must not precede `At`. `Register` panics on a zero `At`, an empty or non-https `Link`, a
-  `Sunset` before `At`, or the embedded Huma `Deprecated` flag set without a declaration. The
+  `Link` outside `apiv2.DocsOrigin`, a `Sunset` before `At`, or the embedded Huma `Deprecated`
+  flag set without a declaration. The
   document carries `deprecated: true` plus `x-silo-deprecation {at, link, sunset?}` in
   RFC 3339 UTC, and the spec lint requires the flag and the extension together. The listener
   sets `Deprecation: @<unix-seconds>`, `Link: <link>; rel="deprecation"` (appended to any

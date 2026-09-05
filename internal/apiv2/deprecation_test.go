@@ -2,10 +2,13 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
 var (
@@ -185,5 +188,52 @@ func TestDeprecatedOperationAppendsToExistingLink(t *testing.T) {
 	got := rec.Header().Values(LinkHeader)
 	if len(got) != 1 || !strings.HasPrefix(got[0], prior+", <"+probeDeprecatedLink+">") {
 		t.Fatalf("Link = %q, want the prior value first and the deprecation link appended", got)
+	}
+}
+
+// TestDeprecatedOperationsAreDocumented generates the document from a
+// registry that carries the deprecated probes and checks what a client
+// generator reads: deprecated: true plus x-silo-deprecation with RFC 3339 UTC
+// at/link and a sunset only where declared, and neither on a plain operation.
+func TestDeprecatedOperationsAreDocumented(t *testing.T) {
+	api := huma.NewAPI(humaConfig(), noopAdapter{})
+	reg := &Registry{api: api}
+	registerProbes(reg)
+	raw, err := api.OpenAPI().MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	op := func(method, path string) map[string]any {
+		o := doc.Paths[Prefix+path][method]
+		if o == nil {
+			t.Fatalf("%s %s is not documented", method, path)
+		}
+		return o
+	}
+	withSunset := op("get", "/probe/deprecated")
+	if withSunset["deprecated"] != true {
+		t.Fatalf("deprecated probe lacks deprecated: true: %v", withSunset["deprecated"])
+	}
+	ext, _ := withSunset[extDeprecation].(map[string]any)
+	if ext["at"] != probeDeprecatedAt.UTC().Format(time.RFC3339) || ext["link"] != probeDeprecatedLink || ext["sunset"] != probeDeprecatedSunset.UTC().Format(time.RFC3339) {
+		t.Fatalf("x-silo-deprecation = %v", ext)
+	}
+	noSunset := op("post", "/probe/deprecated-nosunset")
+	ext, _ = noSunset[extDeprecation].(map[string]any)
+	if noSunset["deprecated"] != true || ext["at"] == nil || ext["link"] == nil {
+		t.Fatalf("no-sunset probe: deprecated=%v ext=%v", noSunset["deprecated"], ext)
+	}
+	if _, has := ext["sunset"]; has {
+		t.Fatalf("no-sunset probe documents a sunset: %v", ext)
+	}
+	plain := op("get", "/probe/zero")
+	if plain["deprecated"] == true || plain[extDeprecation] != nil {
+		t.Fatalf("plain probe carries deprecation metadata: deprecated=%v ext=%v", plain["deprecated"], plain[extDeprecation])
 	}
 }
