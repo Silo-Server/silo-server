@@ -71,6 +71,9 @@ type LibraryCollectionTabUngroupedView = libraryTabUngrouped
 // LibraryLayout answers the library's section layout for the profile on
 // the context.
 func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int) (SectionLayoutView, error) {
+	if !viewerCanAccessLibrary(ctx, libraryID) {
+		return SectionLayoutView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	}
 	resolved, _, _, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
 		return SectionLayoutView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -92,6 +95,9 @@ func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int) (Sect
 
 // LibrarySections answers every section of the library with its items.
 func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, viewer SectionViewer) (SectionsView, error) {
+	if !viewerCanAccessLibrary(ctx, libraryID) {
+		return SectionsView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	}
 	resolved, accessFilter, profileID, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
 		return SectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -105,6 +111,9 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 
 // LibrarySectionItems answers one section of the library with its items.
 func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer) (SectionView, error) {
+	if !viewerCanAccessLibrary(ctx, libraryID) {
+		return SectionView{}, apiError(http.StatusNotFound, "not_found", "Library not found")
+	}
 	resolved, accessFilter, profileID, err := h.loadResolvedLibrarySections(ctx, libraryID)
 	if err != nil {
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
