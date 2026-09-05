@@ -1,4 +1,13 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   getAccessToken,
   getAuthContextVersion,
@@ -9,10 +18,9 @@ import {
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import { storage } from "@/utils/storage";
-import AudiobookPlayer, {
-  type AudiobookPlayerControls,
-  type AudiobookPlayerStatus,
-} from "./AudiobookPlayer";
+import type { AudiobookPlayerControls, AudiobookPlayerStatus } from "./AudiobookPlayer";
+
+const AudiobookPlayer = lazy(() => import("./AudiobookPlayer"));
 
 export interface AudiobookPlaybackStartInput {
   contentId: string;
@@ -102,20 +110,22 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       {children}
       {activeRequest && (
         <PlayerConfigProvider config={playerConfig}>
-          <AudiobookPlayer
-            key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
-            contentId={activeRequest.contentId}
-            title={activeRequest.title}
-            author={activeRequest.author}
-            narrator={activeRequest.narrator}
-            posterUrl={activeRequest.posterUrl}
-            files={activeRequest.files}
-            initialPositionSeconds={activeRequest.initialPositionSeconds}
-            autoPlay={activeRequest.autoPlay}
-            onClose={stopPlayback}
-            onPlaybackStateChange={setActive}
-            onControlsChange={setControls}
-          />
+          <Suspense fallback={null}>
+            <AudiobookPlayer
+              key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
+              contentId={activeRequest.contentId}
+              title={activeRequest.title}
+              author={activeRequest.author}
+              narrator={activeRequest.narrator}
+              posterUrl={activeRequest.posterUrl}
+              files={activeRequest.files}
+              initialPositionSeconds={activeRequest.initialPositionSeconds}
+              autoPlay={activeRequest.autoPlay}
+              onClose={stopPlayback}
+              onPlaybackStateChange={setActive}
+              onControlsChange={setControls}
+            />
+          </Suspense>
         </PlayerConfigProvider>
       )}
     </AudiobookPlaybackControllerContext.Provider>
