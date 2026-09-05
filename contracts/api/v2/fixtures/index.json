@@ -77,12 +77,32 @@
       "body_file": "get_system_info_ok.json"
     },
     {
-      "name": "list_admin_users_ok",
+      "name": "list_admin_users_offset_rejected",
       "operation_id": "listAdminUsers",
-      "scenario": "The bounded account list for an acting admin: nullable limits, instants, and the nested effective policy.",
+      "scenario": "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
       "request": {
         "method": "GET",
-        "path": "/api/v2/admin/users",
+        "path": "/api/v2/admin/users?offset=50",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_admin_users_offset_rejected.json"
+    },
+    {
+      "name": "list_admin_users_ok",
+      "operation_id": "listAdminUsers",
+      "scenario": "The first page of accounts for an acting admin, in id order with an opaque cursor for the next page: nullable limits, instants, and the nested effective policy.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users?limit=1",
         "headers": {
           "Authorization": "Bearer tok-admin"
         }

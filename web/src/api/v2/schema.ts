@@ -23,7 +23,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every login account with its policy overrides and effective policy. */
+    /** List login accounts with their policy overrides and effective policy, in account id order. */
     get: operations["listAdminUsers"];
     put?: never;
     post?: never;
@@ -740,7 +740,12 @@ export interface operations {
   };
   listAdminUsers: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;

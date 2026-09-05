@@ -899,7 +899,7 @@ service layer as its v1 handler; v1 stays byte-identical and fully served.
 | `getCurrentUser` | `GET /api/v2/account/me` | `GET /api/v1/auth/me` | `authenticated`, no profile |
 | `listProgress` | `GET /api/v2/progress` | `GET /api/v1/progress/` | `profile_scoped` read with query parameters and cursor pagination |
 | `updateProfile` | `PATCH /api/v2/profiles/{id}` | `PUT /api/v1/profiles/{id}` | `profile_scoped` JSON mutation with a path parameter |
-| `listAdminUsers` | `GET /api/v2/admin/users` | `GET /api/v1/admin/users` | `acting_admin`, demo-guarded; nullable, instant, and enum fields |
+| `listAdminUsers` | `GET /api/v2/admin/users` | `GET /api/v1/admin/users` | `acting_admin`, demo-guarded; nullable, instant, and enum fields; keyset cursor pagination by account id |
 
 Two findings from the pilot are now settled for every later section:
 
@@ -918,7 +918,9 @@ Two findings from the pilot are now settled for every later section:
   `updated_at` moves during playback is neither repeated nor lets an older row slip past, and
   `has_more` is decided after the viewer-access and library filters run. The v1
   `?since=` delta pull is a separate operation for a later section, not a mode of `listProgress`.
-  Bounded collections such as `listAdminUsers` return `{items}` with no page object.
+  `listAdminUsers` paginates the same way: accounts are not bounded on a multi-user
+  deployment, so it takes `limit` and a `cursor` bound to the operation and the acting
+  account, keyed by account id ascending (unique, monotonic), and refuses `offset`.
 
 The pilot ledger rows record the remaining v1 divergences: request enums are strict (no `4K`/`UHD`
 aliases) while the profile read model documents canonical values without constraining legacy

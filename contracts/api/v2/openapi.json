@@ -1261,6 +1261,36 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJpIjo1MH0"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1370,7 +1400,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List every login account with its policy overrides and effective policy.",
+        "summary": "List login accounts with their policy overrides and effective policy, in account id order.",
         "tags": [
           "admin"
         ],

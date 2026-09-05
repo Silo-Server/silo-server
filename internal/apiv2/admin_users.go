@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 )
@@ -50,8 +51,13 @@ type AdminUser struct {
 	LastActiveAt             NullableInstant `json:"last_active_at" doc:"Most recent recorded activity; null when the account has none" example:"2026-01-02T03:04:05.678Z"`
 }
 
-// AdminUserCollectionOutput is the listAdminUsers response: a bounded
-// collection, so no page object.
+// AdminUserListInput is the listAdminUsers query.
+type AdminUserListInput struct {
+	LimitParam
+	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJpIjo1MH0"`
+}
+
+// AdminUserCollectionOutput is the listAdminUsers response.
 type AdminUserCollectionOutput struct {
 	Body AdminUserCollection
 }
@@ -61,31 +67,72 @@ type AdminUserCollection struct {
 	Collection[AdminUser]
 }
 
+// adminUserPosition is the cursor payload: the id of the last account the
+// previous page emitted. Ids are unique and only ever grow, so the next page
+// resumes strictly after it with no repeats or gaps.
+type adminUserPosition struct {
+	ID int `json:"i"`
+}
+
+// opListAdminUsers is the operation id; the cursor scope is bound to it.
+const opListAdminUsers = "listAdminUsers"
+
 func registerAdminUsers(reg *Registry) {
+	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodGet, Prefix+"/admin/users", "listAdminUsers", "admin",
-			"List every login account with its policy overrides and effective policy."),
+		Operation: humaOp(http.MethodGet, Prefix+"/admin/users", opListAdminUsers, "admin",
+			"List login accounts with their policy overrides and effective policy, in account id order."),
 		Class:          ClassActingAdmin,
 		DemoRestricted: true,
 		ServiceBacked:  true,
-	}, reg.listAdminUsers)
+	}, func(ctx context.Context, in *AdminUserListInput) (*AdminUserCollectionOutput, error) {
+		return reg.listAdminUsers(ctx, cursors, in)
+	})
 }
 
 // listAdminUsers answers from the same account listing v1 GET /admin/users
-// uses.
-func (reg *Registry) listAdminUsers(ctx context.Context, _ *struct{}) (*AdminUserCollectionOutput, error) {
+// uses, one keyset page at a time.
+func (reg *Registry) listAdminUsers(ctx context.Context, cursors *Cursors, in *AdminUserListInput) (*AdminUserCollectionOutput, error) {
 	if reg.deps.AdminUsers == nil {
 		return nil, unavailable("administration")
 	}
-	views, err := reg.deps.AdminUsers.ListAdminUsers(ctx)
+	claims := claimsFrom(ctx)
+	if claims == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	scope := CursorScope{
+		OperationID: opListAdminUsers,
+		// Every admin sees every account, so the cursor is bound to the
+		// acting account only, not to a viewer policy.
+		Security:   strconv.Itoa(claims.UserID),
+		Filter:     "",
+		Sort:       "id",
+		Tiebreaker: "id",
+	}
+	afterID := 0
+	if in.Cursor != "" {
+		var pos adminUserPosition
+		if p := cursors.Decode(scope, in.Cursor, &pos); p != nil {
+			return nil, p
+		}
+		afterID = pos.ID
+	}
+	views, hasMore, err := reg.deps.AdminUsers.ListAdminUsersPage(ctx, afterID, in.Limit)
 	if err != nil {
 		return nil, serviceProblem(err)
+	}
+	next := ""
+	if hasMore && len(views) > 0 {
+		next, err = cursors.Encode(scope, adminUserPosition{ID: views[len(views)-1].ID})
+		if err != nil {
+			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+		}
 	}
 	items := make([]AdminUser, 0, len(views))
 	for i := range views {
 		items = append(items, adminUserFromView(views[i]))
 	}
-	return &AdminUserCollectionOutput{Body: AdminUserCollection{Collection: NewCollection(items)}}, nil
+	return &AdminUserCollectionOutput{Body: AdminUserCollection{Collection: Paginated(items, next)}}, nil
 }
 
 func adminUserFromView(v handlers.AdminUserView) AdminUser {

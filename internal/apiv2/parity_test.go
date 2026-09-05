@@ -75,24 +75,29 @@ func (f fakeSettings) GetAll(context.Context) (map[string]string, error) {
 }
 
 const (
-	memberToken  = "tok-member"
-	adminToken   = "tok-admin"
-	expiredToken = "tok-expired"
+	memberToken = "tok-member"
+	adminToken  = "tok-admin"
+	// otherAdminToken is a second admin account, for cursors that must not
+	// cross accounts.
+	otherAdminToken = "tok-admin-other"
+	expiredToken    = "tok-expired"
 )
 
 func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 	claims := map[string]*auth.Claims{
-		memberToken:  {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
-		adminToken:   {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
-		expiredToken: {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
+		memberToken:     {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess},
+		adminToken:      {UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess},
+		otherAdminToken: {UserID: 3, Role: "admin", SessionID: "s3", TokenType: auth.TokenTypeAccess},
+		expiredToken:    {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
 	}
-	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true}}, nil, nil)
+	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true, "s3": true}}, nil, nil)
 }
 
 func parityDeps(demo bool) Dependencies {
 	users := map[int]*models.User{
 		1: {ID: 1, Role: "user", Enabled: true, Permissions: []string{}},
 		2: {ID: 2, Role: "admin", Enabled: true},
+		3: {ID: 3, Role: "admin", Enabled: true},
 	}
 	primary := func(_ context.Context, userID int, profileID string) (bool, bool, error) {
 		switch profileID {

@@ -368,7 +368,7 @@ type ProfileService interface {
 
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.
 type AdminUserService interface {
-	ListAdminUsers(ctx context.Context) ([]handlers.AdminUserView, error)
+	ListAdminUsersPage(ctx context.Context, afterID, limit int) ([]handlers.AdminUserView, bool, error)
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

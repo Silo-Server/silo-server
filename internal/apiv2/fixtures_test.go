@@ -123,14 +123,18 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodPatch, path: "/api/v2/profiles/p-owner", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			body:   `{"is_child":null}`,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
-		{name: "list_admin_users_ok", operationID: "listAdminUsers",
-			scenario: "The bounded account list for an acting admin: nullable limits, instants, and the nested effective policy.",
-			method:   http.MethodGet, path: "/api/v2/admin/users", headers: bearer(adminToken),
+		{name: "list_admin_users_ok", operationID: opListAdminUsers,
+			scenario: "The first page of accounts for an acting admin, in id order with an opaque cursor for the next page: nullable limits, instants, and the nested effective policy.",
+			method:   http.MethodGet, path: "/api/v2/admin/users?limit=1", headers: bearer(adminToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminUserCollection"},
-		{name: "list_admin_users_permission_denied", operationID: "listAdminUsers",
+		{name: "list_admin_users_permission_denied", operationID: opListAdminUsers,
 			scenario: "An acting-admin operation called by a member account.",
 			method:   http.MethodGet, path: "/api/v2/admin/users", headers: bearer(memberToken),
 			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_admin_users_offset_rejected", operationID: opListAdminUsers,
+			scenario: "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
+			method:   http.MethodGet, path: "/api/v2/admin/users?offset=50", headers: bearer(adminToken),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 	}
 }
 

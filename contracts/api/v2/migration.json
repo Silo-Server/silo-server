@@ -17505,7 +17505,7 @@
         "path": "/api/v2/admin/users",
         "operation_id": "listAdminUsers"
       },
-      "notes": "Pilot (acting_admin, demo-guarded). Bare array became {items:[...]}; ids are string IDs; instants are UTC ms; role carries an enum."
+      "notes": "Pilot (acting_admin, demo-guarded). Bare array became {items:[...]} with limit+cursor pagination keyed by account id (page.next_cursor, page.has_more; offset refused); ids are string IDs; instants are UTC ms; role carries an enum."
     },
     {
       "listener": "api",

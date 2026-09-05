@@ -144,8 +144,24 @@ type fakeAdminUsers struct {
 	err   error
 }
 
-func (f fakeAdminUsers) ListAdminUsers(context.Context) ([]handlers.AdminUserView, error) {
-	return f.users, f.err
+// ListAdminUsersPage mirrors the handler seam: users are kept in id order,
+// the page starts strictly after afterID, and has_more is decided by the
+// limit+1 probe.
+func (f fakeAdminUsers) ListAdminUsersPage(_ context.Context, afterID, limit int) ([]handlers.AdminUserView, bool, error) {
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	page := make([]handlers.AdminUserView, 0, limit)
+	for _, u := range f.users {
+		if u.ID <= afterID {
+			continue
+		}
+		if len(page) == limit {
+			return page, true, nil
+		}
+		page = append(page, u)
+	}
+	return page, false, nil
 }
 
 var errStore = errors.New("store unavailable")
