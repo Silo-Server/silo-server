@@ -963,6 +963,21 @@ the long-running-work foundation rule; `uploadLibraryPoster` is the first multip
 wrapper, `getLibraryCollectionItems` drops v1's `total`/`has_more` on a bounded list, and
 `getLibraryCollections` has one shape whether or not collection groups are configured.
 
+**Section catalog-home (Phase 4).** Eight profile-scoped operations under the `home` tag:
+`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeLayout`, `listHomeSections`,
+`getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. Home is the same
+shape as a library page with scope=home, so the layout, section, and card reads reuse
+`SectionLayout`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
+`date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
+rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
+instant; the dismissal `surface` is a path enum, `progress_updated_at` an instant, and both
+dismissal operations answer `204`; `getHomeSectionItems` answers the section itself rather than
+a `{section}` wrapper; `listSectionRecipes` groups recipes in an ordered `categories` array of
+`{category, recipes}` instead of a map, never emits `hidden`, and declares each preset's
+`default_params` as the `section-config` extension bag; `listSectionRecipeCandidates` always
+emits `subtitle` and answers an unknown recipe type as a `not_found` problem.
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;
