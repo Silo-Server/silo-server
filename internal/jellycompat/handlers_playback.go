@@ -2075,6 +2075,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			requestedSubtitleIndex = intPtr(int(*req.SubtitleStreamIndex))
 		}
 		source.SelectedSubtitleStreamIndex = resolveSelectedSubtitleStreamIndex(source.Version, len(downloaded), downloadedKnown, requestedSubtitleIndex, source.DefaultSubtitleStreamIndex)
+		if selected := effectiveCompatSubtitleStreamIndex(source); !downloadedKnown && len(profile.SubtitleProfiles) > 0 && selected != nil && *selected >= nextDownloadedSubtitleIndex(source.Version) {
+			// Explicit delivery constraints require the selected subtitle's format.
+			// A failed lookup cannot establish either compatibility or incompatibility.
+			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Subtitle metadata is temporarily unavailable")
+			return
+		}
 		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
 		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
 		applyCompatDownloadedSubtitleDelivery(&source, profile, downloaded)

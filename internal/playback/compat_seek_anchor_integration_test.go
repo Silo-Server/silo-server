@@ -82,6 +82,19 @@ func TestCompatCopySeekSourceTimelineRealFFmpeg(t *testing.T) {
 				if !strings.Contains(string(aligned), "#EXT-X-MEDIA-SEQUENCE:0\n") {
 					t.Fatalf("source-aligned sequence does not include the omitted prefix: %s", aligned)
 				}
+				// Resolve a surviving fragment without an observed prefix, as after
+				// playlist eviction or reconstruction on another server instance.
+				timeline, err := parseManifestTimeline(manifest)
+				if err != nil || len(timeline.entries) < 2 {
+					t.Fatalf("fixture timeline: %v", err)
+				}
+				session := &TranscodeSession{opts: opts, outputDir: output}
+				evicted := timeline
+				evicted.entries = timeline.entries[1:]
+				origin, err := session.copyManifestOrigin(opts, 0, evicted)
+				if err != nil || math.Abs(origin-(anchor+timeline.entries[0].duration)) > 0.002 {
+					t.Fatalf("evicted fragment origin=%g want=%g: %v", origin, anchor+timeline.entries[0].duration, err)
+				}
 				var prefix float64
 				gap := false
 				for line := range strings.SplitSeq(string(aligned), "\n") {
@@ -134,5 +147,64 @@ func TestCompatCopySeekSourceTimelineRealFFmpeg(t *testing.T) {
 				t.Logf("requested=%g anchor=%g firstPTS=%g prefix=%g segment=%d nearest-target=%g", requested, anchor, first, prefix, segment, closest)
 			})
 		}
+	}
+}
+
+func TestCompatCopyEvictionOriginWithAACPriming(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real FFmpeg integration test")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	if _, err := exec.LookPath(ffprobePathFromFFmpeg(ffmpeg)); err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	run := func(args ...string) {
+		t.Helper()
+		if output, err := exec.CommandContext(ctx, ffmpeg, args...).CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg: %v: %s", err, output)
+		}
+	}
+	if encoders, err := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-encoders").CombinedOutput(); err != nil || !strings.Contains(string(encoders), "libx264") {
+		t.Skip("libx264 is unavailable")
+	}
+	source := filepath.Join(t.TempDir(), "priming.mkv")
+	run("-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10", "-c:v", "libx264", "-preset", "ultrafast", "-g", "48", "-bf", "2", "-c:a", "pcm_s16le", source)
+	anchor, segment, err := ResolveCopySeekAnchor(ctx, ffmpeg, source, 0.5, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if anchor != 0 {
+		t.Fatalf("fixture anchor=%g, want zero", anchor)
+	}
+	dir := t.TempDir()
+	opts := TranscodeOpts{InputPath: source, OutputDir: dir, FFmpegPath: ffmpeg, TargetCodecVideo: "copy", TargetCodecAudio: "aac", SourceVideoCodec: "h264", SeekSeconds: 0.5, StreamOriginSeconds: anchor, CopySeekAnchorResolved: true, StartSegmentNumber: segment, SegmentDuration: 2}
+	run(buildFFmpegArgs(opts)...)
+	manifest, err := os.ReadFile(filepath.Join(dir, "stream.m3u8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	timeline, err := parseManifestTimeline(manifest)
+	if err != nil || len(timeline.entries) < 2 {
+		t.Fatalf("timeline=%+v err=%v", timeline, err)
+	}
+	surviving := timeline
+	surviving.entries = timeline.entries[1:]
+	session := &TranscodeSession{opts: opts, outputDir: dir}
+	origin, err := session.copyManifestOrigin(opts, 0, surviving)
+	want := anchor + timeline.entries[0].duration
+	if err != nil || math.Abs(origin-want) > 0.002 {
+		t.Fatalf("eviction origin=%g want=%g err=%v", origin, want, err)
+	}
+	if err := os.Remove(filepath.Join(dir, fmt.Sprintf("seg_%05d.m4s", segment))); err != nil {
+		t.Fatal(err)
+	}
+	uncalibrated := &TranscodeSession{opts: opts, outputDir: dir}
+	if _, err := uncalibrated.copyManifestOrigin(opts, 0, surviving); err == nil {
+		t.Fatal("accepted unknown mux shift after initial fragment pruning")
 	}
 }

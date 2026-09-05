@@ -100,6 +100,15 @@ Unmodified clients still cannot seek beyond a growing copied-video playlist
 without renegotiating; this extension does not claim a complete copy-HLS VOD
 index.
 
+Long-running copied-video sessions retain one observed playlist window and carry
+its source origin forward using actual fragment durations. If an fMP4 session
+loses that observation, bounded probes recover its origin when the generation's
+first fragment remains available to calibrate any muxer timestamp shift.
+MPEG-TS requires an observed window because its timestamps wrap. When the
+required timing evidence is unavailable, start a new playback session rather
+than guessing the source origin. Restarted generations never reuse an older
+generation's timeline.
+
 Deploying the server change requires reinstalling the managed Jellyfin Web
 component to enable its seek handling. The installer applies the source patch
 before building and records `silo-seek-reanchor-v1` in the component provenance.

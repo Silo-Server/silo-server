@@ -193,6 +193,8 @@ type TranscodeSession struct {
 	pruneBeforeStart     bool
 	copyDurationMu       sync.Mutex
 	copyDurationIndex    copyManifestDurationIndex
+	copyTimelineMu       sync.Mutex
+	copyTimeline         observedCopyTimeline
 	segmentGeneration    uint64
 	segmentIncarnation   string
 	throttler            *TranscodeThrottler
@@ -2010,20 +2012,41 @@ const SourceTimelineQueryParam = "source_timeline"
 // first produced segment retains its source-time position. Synthetic manifests
 // already cover the full source timeline and need no adjustment.
 func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	s.mu.Lock()
+	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
+	s.mu.Unlock()
+	if restarting {
+		return nil, ErrManifestNotReady
+	}
 	manifest, err := s.BuildPlaybackManifest(segPrefix, rawQuery)
 	if err != nil {
 		return nil, err
 	}
-	opts := s.Opts()
 	usesRealManifest := strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration)
-	if opts.SeekSeconds <= 0 || !usesRealManifest {
+	if !usesRealManifest {
 		return manifest, nil
 	}
 
 	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
 	if rawQuery != "" {
 		gapURI += "?" + rawQuery
+	}
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
+		timeline, err := parseManifestTimeline(manifest)
+		if err != nil {
+			return nil, err
+		}
+		origin, err := s.copyManifestOrigin(opts, generation, timeline)
+		if err != nil {
+			return nil, err
+		}
+		opts.StreamOriginSeconds = origin
+		opts.StartSegmentNumber = timeline.entries[0].number
+		opts.SeekSeconds = max(opts.SeekSeconds, origin)
+	}
+	if opts.SeekSeconds <= 0 {
+		return manifest, nil
 	}
 	return AlignRealManifestToSourceTimeline(manifest, opts, gapURI)
 }
@@ -3352,10 +3375,15 @@ func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline
 	s.mu.Lock()
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
 	baseSeekSeconds := s.opts.SeekSeconds
+	opts := s.opts
+	generation, restarting := s.segmentGeneration, s.restarting != nil
 	if strings.EqualFold(s.opts.TargetCodecVideo, "copy") && s.opts.CopySeekAnchorResolved {
 		baseSeekSeconds = s.opts.StreamOriginSeconds
 	}
 	s.mu.Unlock()
+	if restarting {
+		return 0, manifestTimeline{}, ErrManifestNotReady
+	}
 
 	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -3372,6 +3400,12 @@ func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline
 
 	if len(timeline.entries) == 0 {
 		return 0, manifestTimeline{}, ErrManifestNotReady
+	}
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
+		baseSeekSeconds, err = s.copyManifestOrigin(opts, generation, timeline)
+		if err != nil {
+			return 0, manifestTimeline{}, err
+		}
 	}
 	return baseSeekSeconds, timeline, nil
 }

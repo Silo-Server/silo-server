@@ -732,3 +732,40 @@ func TestSelectedSubtitleEmbedCapabilitySurvivesPersistence(t *testing.T) {
 		}
 	}
 }
+
+func TestPlaybackInfoDownloadedLookupFailureIsRetryable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{"downloaded external", `{"SubtitleStreamIndex":5,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 503},
+		{"downloaded embed", `{"SubtitleStreamIndex":5,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"Embed"}]}}`, 503},
+		{"legacy downloaded", `{"SubtitleStreamIndex":5}`, 200},
+		{"sidecar", `{"SubtitleStreamIndex":3,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 200},
+		{"embedded", `{"SubtitleStreamIndex":2,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 200},
+		{"subtitles disabled", `{"SubtitleStreamIndex":-1,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, item := newSubtitleSelectionHandler(t)
+			h.SubtitleRepo = erroringSubtitleRepository{}
+			router := chi.NewRouter()
+			router.Post("/Items/{id}/PlaybackInfo", h.HandlePlaybackInfo)
+			req := httptest.NewRequest(http.MethodPost, "/Items/"+item+"/PlaybackInfo", strings.NewReader(tc.body))
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1"}))
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			if rr.Code != tc.status {
+				t.Fatalf("status %d want %d: %s", rr.Code, tc.status, rr.Body.String())
+			}
+			if tc.status == http.StatusServiceUnavailable {
+				if !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
+					t.Fatalf("unexpected error: %s", rr.Body.String())
+				}
+				if _, _, ok := h.playbackStore.FindByRoute("token-1", item); ok {
+					t.Fatal("stored negotiation without required subtitle metadata")
+				}
+			}
+		})
+	}
+}
