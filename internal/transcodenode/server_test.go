@@ -3795,3 +3795,102 @@ func TestHandleStartPreservesVideoSampleEntry(t *testing.T) {
 		t.Fatalf("VideoSampleEntry = %q", got)
 	}
 }
+
+func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	ffmpegScript := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do\n" +
+		"  if [ \"$arg\" = \"pipe:1\" ]; then\n" +
+		"    while :; do printf node-remux-bytes; sleep 0.01; done\n" +
+		"  fi\n" +
+		"done\n" +
+		"exit 0\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-force-reload", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-force-reload-real",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	recipes := &stubRecipeStore{card: &card, ok: true}
+	server.SetRecipeStore(recipes)
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	writer := newAbortableBlockingResponseWriter()
+	t.Cleanup(func() { _ = writer.SetWriteDeadline(time.Now()) })
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	t.Cleanup(cancelRequest)
+	request = request.WithContext(context.WithValue(requestCtx, chi.RouteCtxKey, routeContext))
+	handlerDone := make(chan struct{})
+	go func() {
+		server.handleRemux(writer, request)
+		close(handlerDone)
+	}()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancelWait()
+	select {
+	case <-writer.writeStarted:
+	case <-waitCtx.Done():
+		t.Fatal("progressive remux did not reach the blocked client write")
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs before shutdown = %d, want 1", got)
+	}
+
+	if err := server.Shutdown(waitCtx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handlerDone:
+	case <-waitCtx.Done():
+		t.Fatal("shutdown returned without draining the progressive remux handler")
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after shutdown = %d, want 0", got)
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[claims.TranscodeTransportID]
+	server.mu.RUnlock()
+	if active {
+		t.Fatal("shutdown left the drained remux registered")
+	}
+
+	if !recipes.ok || len(recipes.deletes) != 0 {
+		t.Fatal("shutdown revoked reconstruction authority")
+	}
+	hits := recipes.hits
+
+	// Shutdown retains durable authority, but neither HEAD nor GET may admit
+	// work into this process after its drain has completed.
+	for _, method := range []string{http.MethodHead, http.MethodGet} {
+		late := request.Clone(request.Context())
+		late.Method = method
+		rr := httptest.NewRecorder()
+		server.handleRemux(rr, late)
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("late %s status=%d body=%s", method, rr.Code, rr.Body.String())
+		}
+	}
+	if recipes.hits != hits {
+		t.Fatal("late request reached durable authority lookup")
+	}
+
+}

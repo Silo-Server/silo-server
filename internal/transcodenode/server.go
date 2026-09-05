@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1935,8 +1936,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	clear(s.sessions)
 	clear(s.lastAccess)
+	progressive := maps.Clone(s.progressiveRemuxes)
 	s.mu.Unlock()
 
+	for _, request := range progressive {
+		request.cancel()
+	}
 	var errs []error
 	for _, victim := range victims {
 		if err := ctx.Err(); err != nil {
@@ -1947,6 +1952,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 		if s.tracker != nil {
 			s.tracker.Remove(ctx, victim.id)
+		}
+	}
+	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
+	defer cancelWait()
+	for id, request := range progressive {
+		if err := waitForProgressiveRemuxShutdown(waitCtx, id, request); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
@@ -2027,6 +2039,11 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	// returns; a request that waited through a reload must retry with a fresh
 	// route instead of starting FFmpeg from the stale cfg pointer above.
 	s.reloadMu.RLock()
+	if s.shuttingDown {
+		s.reloadMu.RUnlock()
+		http.Error(w, "node is shutting down", http.StatusServiceUnavailable)
+		return
+	}
 	if s.watcher.Config() != cfg {
 		s.reloadMu.RUnlock()
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)

@@ -17,7 +17,8 @@ Recipe cards and signed reconstruction claims preserve the resolved threshold.
 Remote reconstruction and FFmpeg restarts re-arm the same policy. Local native
 and Jellyfin compatibility playback share the settings resolver. Playback
 expiration closes owned transports; process shutdown drains local FFmpeg
-sessions and refuses publication of new sessions after the drain begins.
+sessions, cancels and waits for active progressive remux requests, and refuses
+new HLS or progressive-remux admission after the drain begins.
 
 Copy-video playlists retain actual FFmpeg fragment durations. A complete
 playlist inferred from source keyframes is not safe: restarting the HLS muxer
