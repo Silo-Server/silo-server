@@ -20,8 +20,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -110,6 +111,12 @@ type Dependencies struct {
 	PersonalLists PersonalListService
 	// Ratings reads and edits a profile's ratings (*handlers.RatingsHandler).
 	Ratings RatingService
+	// ProfileSections reads and writes a profile's home-row overrides
+	// (*handlers.SectionHandler).
+	ProfileSections ProfileSectionService
+	// SectionFlags reads the profile-facing sections settings
+	// (*handlers.SectionSettingsHandler).
+	SectionFlags SectionFlagService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -210,23 +217,43 @@ func humaConfig() huma.Config {
 // documents a RawBody member as application/octet-stream even when the
 // operation also declares a structured Body (updateProfile reads the raw
 // document only for its omitted-versus-null rule), and the listener accepts
-// application/json alone. It runs after Huma has built the request body and
+// application/json and, on an operation declaring a multipart form,
+// multipart/form-data alone. A multipart body is always required: the form
+// is the whole request, and an absent one is the 415 the guard documents. It runs after Huma has built the request body and
 // before the operation reaches the document, so the schema Huma derived for
 // validation is untouched.
-func documentAcceptedRequestMediaTypes(_ *huma.OpenAPI, op *huma.Operation) {
+func documentAcceptedRequestMediaTypes(oapi *huma.OpenAPI, op *huma.Operation) {
 	if op.RequestBody == nil {
 		return
 	}
-	// A multipart operation (an upload with no structured Body) is the one
-	// case the guard accepts a non-JSON body; its declaration stays.
-	if len(op.RequestBody.Content) == 1 && op.RequestBody.Content[mediaTypeMultipart] != nil {
-		return
-	}
 	for mediaType := range op.RequestBody.Content {
-		if !structuredMediaTypeOK(mediaType) {
+		if !requestMediaTypeOK(mediaType) {
 			delete(op.RequestBody.Content, mediaType)
 		}
 	}
+	if media := op.RequestBody.Content[mediaTypeMultipart]; media != nil {
+		op.RequestBody.Required = true
+		nameMultipartForm(oapi, op, media)
+	}
+}
+
+// nameMultipartForm moves the form schema Huma derived for a multipart
+// operation into components under the form type's name and leaves a
+// reference in its place, as every other request schema is named. The
+// framework's own "file required" check reads the inline schema, so the
+// operation checks the part itself.
+func nameMultipartForm(oapi *huma.OpenAPI, op *huma.Operation, media *huma.MediaType) {
+	name, _ := op.Metadata[metaFormSchema].(string)
+	if name == "" || media.Schema == nil || media.Schema.Ref != "" {
+		return
+	}
+	schemas := oapi.Components.Schemas.Map()
+	if prev, taken := schemas[name]; taken && prev != media.Schema {
+		panic(fmt.Sprintf("apiv2: %s: form schema name %q is already registered", op.OperationID, name))
+	}
+	media.Schema.AdditionalProperties = false
+	schemas[name] = media.Schema
+	media.Schema = &huma.Schema{Ref: "#/components/schemas/" + name}
 }
 
 // requestID exposes the canonical request ID. Under the API listener,
@@ -388,9 +415,32 @@ type ProgressService interface {
 	ListProgressPage(ctx context.Context, userID int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error)
 }
 
-// ProfileService is the slice of *handlers.ProfileHandler updateProfile uses.
+// ProfileService is the slice of *handlers.ProfileHandler the profile
+// operations use.
 type ProfileService interface {
+	ListProfiles(ctx context.Context, userID int) (handlers.ProfileListView, error)
+	CreateProfile(ctx context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error)
 	UpdateProfile(ctx context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error)
+	DeleteProfile(ctx context.Context, cmd handlers.ProfileDeleteCommand) error
+	ListHouseholdSessions(ctx context.Context, q handlers.HouseholdSessionsQuery) ([]handlers.PlaybackSessionView, error)
+	VerifyPIN(ctx context.Context, cmd handlers.ProfileVerifyPINCommand) (handlers.ProfileVerification, error)
+	UploadAvatar(ctx context.Context, up handlers.ProfileAvatarUpload) (handlers.ProfileView, error)
+	DeleteAvatar(ctx context.Context, userID int, profileID string) (handlers.ProfileView, error)
+}
+
+// ProfileSectionService is the slice of *handlers.SectionHandler the
+// profile section-override operations use.
+type ProfileSectionService interface {
+	ListProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) ([]userstore.SectionOverride, error)
+	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
+	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
+	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
+}
+
+// SectionFlagService is the slice of *handlers.SectionSettingsHandler
+// getProfileSectionFlags uses.
+type SectionFlagService interface {
+	AllowProfileCustomSections(ctx context.Context) bool
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile
@@ -417,7 +467,7 @@ type LibraryAdminService interface {
 	ConfirmEmptyRootCleanup(ctx context.Context, id int) error
 	ListMetadataMatchQueues(ctx context.Context) ([]handlers.MetadataMatchQueueStatusView, error)
 	LibraryProviderDefaults(ctx context.Context, libraryType string) (map[string][]handlers.ChainLevelEntryView, error)
-	ReorderLibraries(ctx context.Context, entries []catalogpkg.FolderReorderEntry) error
+	ReorderLibraries(ctx context.Context, entries []mediacatalog.FolderReorderEntry) error
 	ListLibraryRoots(ctx context.Context, libraryID int, state string, limit, offset int) ([]handlers.LibraryRootView, int, error)
 	SetRootOverride(ctx context.Context, userID int, req handlers.RootOverrideUpsertRequest) error
 	DeleteRootOverride(ctx context.Context, req handlers.RootOverrideDeleteRequest) error
@@ -448,7 +498,7 @@ type LibrarySectionService interface {
 type LibraryCollectionService interface {
 	LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (handlers.LibraryCollectionTabView, error)
 	LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error)
-	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter) ([]handlers.CollectionItemView, error)
+	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access mediacatalog.AccessFilter, page handlers.CollectionItemPage) ([]handlers.CollectionItemView, bool, error)
 }
 
 // PersonalListService is the slice of *handlers.PersonalDataHandler the
@@ -478,13 +528,13 @@ type PersonalListService interface {
 // RatingService is the slice of *handlers.RatingsHandler the ratings
 // operations use.
 type RatingService interface {
-	ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalogpkg.UserRating, error)
+	ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]mediacatalog.UserRating, error)
 	// GetRating answers the profile's rating of the item; found is false
 	// when the profile has not rated it.
-	GetRating(ctx context.Context, userID int, profileID, itemID string) (rating catalogpkg.UserRating, found bool, err error)
+	GetRating(ctx context.Context, userID int, profileID, itemID string) (rating mediacatalog.UserRating, found bool, err error)
 	// SetRating records a validated rating of an item the access filter
 	// admits; an item outside it is a 404 error.
-	SetRating(ctx context.Context, userID int, profileID, itemID string, access catalogpkg.AccessFilter, rating int) error
+	SetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter, rating int) error
 	DeleteRating(ctx context.Context, userID int, profileID, itemID string) error
 }
 

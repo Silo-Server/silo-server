@@ -89,7 +89,7 @@ func personalListViewer(ctx context.Context, imageSize string) (handlers.Persona
 	if err != nil {
 		size = imagesize.Unset
 	}
-	return handlers.PersonalListViewer{UserID: userID, ProfileID: profileID, Access: handlers.ViewerAccessFilter(ctx, ""), ImageSize: size}, nil
+	return handlers.PersonalListViewer{UserID: userID, ProfileID: profileID, Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}, nil
 }
 
 // personalListScope binds a personal list's cursor to the profile and the

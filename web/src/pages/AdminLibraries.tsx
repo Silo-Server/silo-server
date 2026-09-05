@@ -17,6 +17,7 @@ import {
   useReorderLibraries,
   useSkippedLibraryRoots,
   useLibraryRoots,
+  flattenLibraryRoots,
   useUpsertLibraryRootOverride,
   useDeleteLibraryRootOverride,
   useStaleMediaIDs,
@@ -1412,7 +1413,17 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const [search, setSearch] = useState("");
   const [editingRoot, setEditingRoot] = useState<LibraryRoot | null>(null);
   const effectiveSelectedLibraryId = selectedLibraryId ?? libraries[0]?.id;
-  const { data: roots = [] } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous");
+  // The listing is paged on demand: the first page loads when the section
+  // opens and "Load more" fetches the rest, so a large library does not make
+  // the server walk every root on mount.
+  const {
+    data: rootPages,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous", { enabled: open });
+  const roots = useMemo(() => flattenLibraryRoots(rootPages), [rootPages]);
+  const totalRoots = rootPages?.pages[0]?.total ?? 0;
 
   const filteredRoots = useMemo(() => {
     if (!search) return roots;
@@ -1435,7 +1446,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
     <CollapsibleDiagnosticsSection
       title="Ambiguous Roots"
       description="Scanner roots that stay visible but do not enter unattended metadata matching."
-      count={roots.length}
+      count={totalRoots}
       icon={<FolderOpen className="h-4 w-4 text-amber-500" />}
       open={open}
       onOpenChange={setOpen}
@@ -1550,6 +1561,24 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
         </Table>
       </div>
       <PaginationBar {...pag} />
+      {hasNextPage ? (
+        <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground tabular-nums">
+            Showing {roots.length} of {totalRoots} ambiguous roots
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={isFetchingNextPage}
+            onClick={() => {
+              void fetchNextPage();
+            }}
+          >
+            {isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      ) : null}
 
       {editingRoot ? (
         <RootOverrideDialog

@@ -111,7 +111,7 @@ func (reg *Registry) setRating(ctx context.Context, in *RatingSetInput) (*struct
 	if p != nil {
 		return nil, p
 	}
-	if err := reg.deps.Ratings.SetRating(ctx, userID, profileID, string(in.ItemID), handlers.ViewerAccessFilter(ctx, ""), in.Body.Rating); err != nil {
+	if err := reg.deps.Ratings.SetRating(ctx, userID, profileID, string(in.ItemID), handlers.AccessFilterFromContext(ctx, ""), in.Body.Rating); err != nil {
 		return nil, serviceProblem(err)
 	}
 	return nil, nil

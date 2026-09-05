@@ -803,12 +803,15 @@ func (h *SectionHandler) loadResolvedLibrarySections(ctx context.Context, librar
 // --- Profile override endpoints ---
 
 type saveOverridesRequest struct {
-	Scope     string                   `json:"scope"`
-	LibraryID string                   `json:"library_id"`
-	Overrides []profileOverrideRequest `json:"overrides"`
+	Scope     string                 `json:"scope"`
+	LibraryID string                 `json:"library_id"`
+	Overrides []SectionOverrideWrite `json:"overrides"`
 }
 
-type profileOverrideRequest struct {
+// SectionOverrideWrite is one override as a client sends it: the v1 PUT
+// /profile/sections member shape, which v2 replaceProfileSectionOverrides
+// lowers its own body onto.
+type SectionOverrideWrite struct {
 	ID              string          `json:"id"`
 	SectionID       string          `json:"section_id"`
 	Position        *int            `json:"position"`
@@ -836,27 +839,43 @@ func (h *SectionHandler) HandleGetProfileOverrides(w http.ResponseWriter, r *htt
 	}
 	libraryID := r.URL.Query().Get("library_id")
 
+	overrides, err := h.ListProfileOverrides(r.Context(), SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: scope, LibraryID: libraryID})
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]userstore.SectionOverride{"overrides": overrides})
+}
+
+// SectionOverridesQuery names one profile's override set: the profile, the
+// page scope (home or library) and, for a library page, the library.
+type SectionOverridesQuery struct {
+	UserID    int
+	ProfileID string
+	Scope     string
+	LibraryID string
+}
+
+// ListProfileOverrides lists the profile's saved overrides for one page; the
+// result is never nil. v1 GET /profile/sections and v2
+// listProfileSectionOverrides both call it; a failure is an *APIError
+// carrying the v1 status, code and message.
+func (h *SectionHandler) ListProfileOverrides(ctx context.Context, q SectionOverridesQuery) ([]userstore.SectionOverride, error) {
 	if h.StoreProvider == nil {
-		writeJSON(w, http.StatusOK, map[string][]userstore.SectionOverride{"overrides": {}})
-		return
+		return []userstore.SectionOverride{}, nil
 	}
-
-	store, err := h.StoreProvider.ForUser(r.Context(), userID)
+	store, err := h.StoreProvider.ForUser(ctx, q.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-
-	overrides, err := store.ListSectionOverrides(r.Context(), profileID, scope, libraryID)
+	overrides, err := store.ListSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load overrides")
-		return
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load overrides")
 	}
-
 	if overrides == nil {
 		overrides = []userstore.SectionOverride{}
 	}
-	writeJSON(w, http.StatusOK, map[string][]userstore.SectionOverride{"overrides": overrides})
+	return overrides, nil
 }
 
 // HandleSaveProfileOverrides handles PUT /profile/sections
@@ -874,18 +893,30 @@ func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *ht
 		req.Scope = "home"
 	}
 
+	if err := h.SaveProfileOverrides(r.Context(), SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: req.Scope, LibraryID: req.LibraryID}, req.Overrides); err != nil {
+		writeAPIError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SaveProfileOverrides replaces the profile's override set for one page:
+// the recipe gate on user-added sections (registered recipe, admin-only
+// recipes need the admin role or the allow-custom setting, config validated
+// by the recipe), then the store write. v1 PUT /profile/sections and v2
+// replaceProfileSectionOverrides both call it; a failure is an *APIError
+// carrying the v1 status, code and message.
+func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite) error {
 	// Gate: validate user-added overrides before touching the store.
 	allowCustom := false
 	if h.Settings != nil {
-		v, _ := h.Settings.Get(r.Context(), SectionsAllowProfileCustomSettingKey)
+		v, _ := h.Settings.Get(ctx, SectionsAllowProfileCustomSettingKey)
 		allowCustom = v == "true"
 	}
-	isAdmin := false
-	if claims := apimw.GetClaims(r.Context()); claims != nil {
-		isAdmin = claims.Role == "admin"
-	}
+	isAdmin := apimw.IsAdmin(ctx)
 
-	for _, o := range req.Overrides {
+	for _, o := range writes {
 		// The resolver treats any override with empty SectionID as user-added,
 		// regardless of the IsUserAdded flag. Match that here so a client cannot
 		// bypass the recipe gate by omitting is_user_added and sending the legacy
@@ -903,12 +934,10 @@ func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *ht
 		}
 		rec, ok := recipes.Get(recipeType)
 		if !ok {
-			writeError(w, http.StatusBadRequest, "unknown_recipe", "section_type not registered: "+recipeType)
-			return
+			return apiError(http.StatusBadRequest, "unknown_recipe", "section_type not registered: "+recipeType)
 		}
 		if rec.Definition().AdminOnly && !isAdmin && !allowCustom {
-			writeError(w, http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
-			return
+			return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
 		}
 		// Validate whichever config the resolver will actually use.
 		cfg := o.UserConfig
@@ -916,33 +945,30 @@ func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *ht
 			cfg = o.Config
 		}
 		if err := rec.Validate(cfg); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_config", err.Error())
-			return
+			return apiError(http.StatusBadRequest, "invalid_config", err.Error())
 		}
 	}
 
 	if h.StoreProvider == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "User store not available")
-		return
+		return apiError(http.StatusInternalServerError, "internal_error", "User store not available")
 	}
 
-	store, err := h.StoreProvider.ForUser(r.Context(), userID)
+	store, err := h.StoreProvider.ForUser(ctx, q.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
-	overrides := make([]userstore.SectionOverride, len(req.Overrides))
-	for i, o := range req.Overrides {
+	overrides := make([]userstore.SectionOverride, len(writes))
+	for i, o := range writes {
 		var configStr string
 		if len(o.Config) > 0 {
 			configStr = string(o.Config)
 		}
 		overrides[i] = userstore.SectionOverride{
 			ID:              o.ID,
-			ProfileID:       profileID,
-			Scope:           req.Scope,
-			LibraryID:       req.LibraryID,
+			ProfileID:       q.ProfileID,
+			Scope:           q.Scope,
+			LibraryID:       q.LibraryID,
 			SectionID:       o.SectionID,
 			Position:        o.Position,
 			Hidden:          o.Hidden,
@@ -959,12 +985,10 @@ func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *ht
 		}
 	}
 
-	if err := store.SaveSectionOverrides(r.Context(), profileID, req.Scope, req.LibraryID, overrides); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save overrides")
-		return
+	if err := store.SaveSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID, overrides); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to save overrides")
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // HandleResetProfileOverrides handles DELETE /profile/sections/reset?scope=home
@@ -978,23 +1002,29 @@ func (h *SectionHandler) HandleResetProfileOverrides(w http.ResponseWriter, r *h
 	}
 	libraryID := r.URL.Query().Get("library_id")
 
-	if h.StoreProvider == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "User store not available")
-		return
-	}
-
-	store, err := h.StoreProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	if err := store.ResetSectionOverrides(r.Context(), profileID, scope, libraryID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reset overrides")
+	if err := h.ResetProfileOverrides(r.Context(), SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: scope, LibraryID: libraryID}); err != nil {
+		writeAPIError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ResetProfileOverrides deletes the profile's override set for one page.
+// v1 DELETE /profile/sections/reset and v2 resetProfileSectionOverrides both
+// call it; a failure is an *APIError carrying the v1 status, code and message.
+func (h *SectionHandler) ResetProfileOverrides(ctx context.Context, q SectionOverridesQuery) error {
+	if h.StoreProvider == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "User store not available")
+	}
+	store, err := h.StoreProvider.ForUser(ctx, q.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := store.ResetSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to reset overrides")
+	}
+	return nil
 }
 
 // HandleSectionSettings handles GET /profile/sections/settings?scope=home&library_id=123
@@ -1017,27 +1047,11 @@ func (h *SectionHandler) HandleSectionSettings(w http.ResponseWriter, r *http.Re
 		libIDPtr = &v
 	}
 
-	adminSections, err := h.repo.ListByScope(r.Context(), scope, libIDPtr)
+	resolved, err := h.ResolveProfileSectionSettings(r.Context(), userID, profileID, scope, libIDPtr, requestAccessFilter(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load sections")
+		writeAPIError(w, err)
 		return
 	}
-
-	var overrides []sections.ProfileSectionOverride
-	if h.StoreProvider != nil && profileID != "" {
-		store, storeErr := h.StoreProvider.ForUser(r.Context(), userID)
-		if storeErr == nil {
-			libStr := ""
-			if libIDPtr != nil {
-				libStr = strconv.Itoa(*libIDPtr)
-			}
-			userOverrides, _ := store.ListSectionOverrides(r.Context(), profileID, scope, libStr)
-			overrides = toSectionOverrides(userOverrides)
-		}
-	}
-
-	resolved := sections.ResolveForSettings(adminSections, overrides)
-	resolved = filterResolvedSectionsByAccess(resolved, requestAccessFilter(r))
 
 	type settingsEntry struct {
 		ID          string          `json:"id"`
@@ -1069,6 +1083,34 @@ func (h *SectionHandler) HandleSectionSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusOK, map[string][]settingsEntry{"sections": entries})
+}
+
+// ResolveProfileSectionSettings merges the admin sections of one page with
+// the profile's overrides and drops the sections the viewer's access filter
+// hides: the settings view a profile customizes from. v1 GET
+// /profile/sections/settings and v2 getProfileSectionSettings both call it;
+// a failure is an *APIError carrying the v1 status, code and message.
+func (h *SectionHandler) ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter catalog.AccessFilter) ([]sections.ResolvedSection, error) {
+	adminSections, err := h.repo.ListByScope(ctx, scope, libraryID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
+	}
+
+	var overrides []sections.ProfileSectionOverride
+	if h.StoreProvider != nil && profileID != "" {
+		store, storeErr := h.StoreProvider.ForUser(ctx, userID)
+		if storeErr == nil {
+			libStr := ""
+			if libraryID != nil {
+				libStr = strconv.Itoa(*libraryID)
+			}
+			userOverrides, _ := store.ListSectionOverrides(ctx, profileID, scope, libStr)
+			overrides = toSectionOverrides(userOverrides)
+		}
+	}
+
+	resolved := sections.ResolveForSettings(adminSections, overrides)
+	return filterResolvedSectionsByAccess(resolved, filter), nil
 }
 
 func filterResolvedSectionsByAccess(resolved []sections.ResolvedSection, filter catalog.AccessFilter) []sections.ResolvedSection {

@@ -128,22 +128,36 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	doc := generatedDocument(t)
 	bodies := 0
 	expect := map[string]map[int]bool{
-		"getSetupStatus":     {http.StatusServiceUnavailable: true},
-		"getSystemInfo":      {http.StatusServiceUnavailable: false},
-		"getOpenAPIDocument": {http.StatusServiceUnavailable: false},
-		"getCurrentUser":     {http.StatusNotFound: false},
-		"listProgress":       {http.StatusNotFound: true},
-		"listAdminUsers":     {http.StatusNotFound: true},
-		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
-		"createLibrary":      {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true},
-		"updateLibrary":      {http.StatusNotFound: true, http.StatusConflict: true},
-		"deleteLibrary":      {http.StatusNotFound: true, http.StatusConflict: true, http.StatusAccepted: true},
-		"setRootOverride":    {http.StatusNotFound: true, http.StatusConflict: true, http.StatusNoContent: true},
-		"listLibraries":      {http.StatusNotFound: true, http.StatusConflict: false},
+		"getSetupStatus":                 {http.StatusServiceUnavailable: true},
+		"getSystemInfo":                  {http.StatusServiceUnavailable: false},
+		"getOpenAPIDocument":             {http.StatusServiceUnavailable: false},
+		"getCurrentUser":                 {http.StatusNotFound: false},
+		"listProgress":                   {http.StatusNotFound: true},
+		"listAdminUsers":                 {http.StatusNotFound: true},
+		"updateProfile":                  {http.StatusNotFound: true, http.StatusConflict: true},
+		"listProfiles":                   {http.StatusNotFound: true, http.StatusConflict: false},
+		"createProfile":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true, http.StatusOK: false},
+		"replaceProfileSectionOverrides": {http.StatusNoContent: true, http.StatusForbidden: true},
+		"resetProfileSectionOverrides":   {http.StatusNoContent: true},
+		"deleteProfile":                  {http.StatusNoContent: true, http.StatusConflict: true, http.StatusNotFound: true},
+		"deleteProfileAvatar":            {http.StatusNoContent: true, http.StatusNotFound: true},
+		"uploadProfileAvatar":            {http.StatusOK: true, http.StatusRequestEntityTooLarge: true, http.StatusUnsupportedMediaType: true},
+		"verifyProfilePIN":               {http.StatusOK: true, http.StatusNotFound: true},
+		"listHouseholdSessions":          {http.StatusOK: true, http.StatusForbidden: true},
+		"createLibrary":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true},
+		"updateLibrary":                  {http.StatusNotFound: true, http.StatusConflict: true},
+		"deleteLibrary":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusAccepted: true},
+		"setRootOverride":                {http.StatusNotFound: true, http.StatusConflict: true, http.StatusNoContent: true},
+		"listLibraries":                  {http.StatusNotFound: true, http.StatusConflict: false},
 	}
 	// Every operation the viewer-access gate fronts documents the header;
 	// the acting-admin class resolves the declared profile the same way.
-	profileToken := map[string]bool{"listProgress": true, "listAdminUsers": true, "updateProfile": true}
+	profileToken := map[string]bool{
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
+		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
+		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
+		"deleteProfile": true, "deleteProfileAvatar": true, "uploadProfileAvatar": true, "verifyProfilePIN": true, "listHouseholdSessions": true,
+	}
 	for _, id := range libraryOperationIDs {
 		profileToken[id] = true
 	}

@@ -204,6 +204,7 @@ func registerAll(reg *Registry) {
 	registerFavorites(reg)
 	registerLibraries(reg)
 	registerLibraryViews(reg)
+	registerProfileSections(reg)
 	registerProfiles(reg)
 	registerProgress(reg)
 	registerRatings(reg)

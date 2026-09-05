@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type {
   BrowseItem,
   LibraryCollection,
@@ -59,18 +59,59 @@ export function getLibraryCollectionList(
   return resp?.collections ?? [];
 }
 
+/** Page size of a collection's items: the endpoint's default. */
+export const LIBRARY_COLLECTION_ITEMS_PAGE_LIMIT = 50;
+
+export interface LibraryCollectionItemsPage {
+  items: BrowseItem[];
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
+}
+
+export async function fetchLibraryCollectionItemsPage(
+  libraryId: number,
+  collectionId: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<LibraryCollectionItemsPage> {
+  const page = await v2("GET /api/v2/library/{id}/collections/{collection_id}/items", {
+    path: { id: String(libraryId), collection_id: collectionId },
+    query: {
+      limit: LIBRARY_COLLECTION_ITEMS_PAGE_LIMIT,
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return {
+    items: page.items.map(catalogItemFromV2),
+    nextCursor: page.page?.has_more && page.page.next_cursor ? page.page.next_cursor : undefined,
+  };
+}
+
+/**
+ * Pages a collection's items by cursor. A page can come back with no items
+ * while `has_more` is still set (access filtering emptied that window), so a
+ * caller that needs the first visible item keeps fetching while
+ * `hasNextPage` holds.
+ */
 export function useLibraryCollectionItems(libraryId: number, collectionId: string | null) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: libraryCollectionKeys.items(libraryId, collectionId ?? ""),
-    queryFn: ({ signal }): Promise<BrowseItem[]> =>
-      v2("GET /api/v2/library/{id}/collections/{collection_id}/items", {
-        path: { id: String(libraryId), collection_id: collectionId ?? "" },
-        signal,
-      }).then((data) => data.items.map(catalogItemFromV2)),
+    queryFn: ({ pageParam, signal }) =>
+      fetchLibraryCollectionItemsPage(libraryId, collectionId ?? "", pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled:
       Number.isFinite(libraryId) &&
       libraryId > 0 &&
       collectionId !== null &&
       collectionId.length > 0,
   });
+}
+
+/** Flattens the loaded pages of useLibraryCollectionItems into one list. */
+export function flattenLibraryCollectionItems(
+  data: { pages: LibraryCollectionItemsPage[] } | undefined,
+): BrowseItem[] {
+  return data?.pages.flatMap((page) => page.items) ?? [];
 }
