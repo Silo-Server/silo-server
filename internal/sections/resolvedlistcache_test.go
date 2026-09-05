@@ -97,14 +97,15 @@ func TestResolvedListCacheScopeIsolation(t *testing.T) {
 	}
 }
 
-func TestResolvedListCacheInvalidationAdvancesGeneration(t *testing.T) {
+func TestResolvedListCacheInvalidationDropsExpiredGeneration(t *testing.T) {
 	resetResolvedListCacheForTest()
 	defer resetResolvedListCacheForTest()
 
 	resolved := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
 	oldKey := resolvedListCacheKey(resolved, nil, []int{7}, catalog.AccessFilter{})
 	now := time.Unix(1_700_000_000, 0)
-	if _, _, err := getOrRefresh(context.Background(), oldKey, now, staticLoader(mediaItems("stale"), nil)); err != nil {
+	resolvedListNow = func() time.Time { return now.Add(resolvedListTTL) }
+	if _, _, err := getOrRefresh(t.Context(), oldKey, now, staticLoader(mediaItems("stale"), nil)); err != nil {
 		t.Fatalf("prime old generation: %v", err)
 	}
 
@@ -130,11 +131,8 @@ func TestResolvedListCacheInvalidationAdvancesGeneration(t *testing.T) {
 	}
 }
 
-// TestResolvedListCacheInvalidationReleasesSupersededEntries verifies a
-// generation bump actually frees the entries it obsoletes — a long rescan bumps
-// the generation every 30s, well inside the 15-minute TTL, so leaving them for
-// the expiry sweep would keep many generations of every (library × scope) entry
-// resident at once. Generation-independent entries must survive.
+// A scan keeps one usable entry per scope, without accumulating generations
+// or extending the hard expiry. Other section types are unaffected.
 func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 	resetResolvedListCacheForTest()
 	defer resetResolvedListCacheForTest()
@@ -181,7 +179,6 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 
 	// The new generation caches normally and is itself released by the next bump.
 	newKey := resolvedListCacheKey(recent, nil, []int{1}, catalog.AccessFilter{})
-	prime(newKey)
 	clock = clock.Add(resolvedListInvalidationInterval)
 	InvalidateResolvedListCache()
 	if _, ok := resolvedListGet(newKey); ok {
@@ -193,8 +190,17 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 	resolvedListCacheMu.RLock()
 	size := len(resolvedListCache)
 	resolvedListCacheMu.RUnlock()
+	if size != 4 {
+		t.Fatalf("cache holds %d entries after two bumps, want one per scope plus genre", size)
+	}
+	// Scans must not renew the last successful load's hard expiry.
+	clock = clock.Add(resolvedListTTL)
+	InvalidateResolvedListCache()
+	resolvedListCacheMu.RLock()
+	size = len(resolvedListCache)
+	resolvedListCacheMu.RUnlock()
 	if size != 1 {
-		t.Fatalf("cache holds %d entries after two bumps, want 1 (the generation-independent rail)", size)
+		t.Fatalf("expired recently-added rows survived repeated scans: %d entries", size)
 	}
 }
 
@@ -288,6 +294,7 @@ func TestResolvedListCacheInvalidationIsolatesInflightRefresh(t *testing.T) {
 
 	resolved := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
 	base := time.Unix(1_700_000_000, 0)
+	resolvedListNow = func() time.Time { return base.Add(6 * time.Minute) }
 	oldKey := resolvedListCacheKey(resolved, nil, []int{7}, catalog.AccessFilter{})
 	if _, _, err := getOrRefresh(context.Background(), oldKey, base, staticLoader(mediaItems("old"), nil)); err != nil {
 		t.Fatalf("prime old generation: %v", err)
@@ -314,12 +321,15 @@ func TestResolvedListCacheInvalidationIsolatesInflightRefresh(t *testing.T) {
 	}
 	close(releaseRefresh)
 	<-refreshDone
-
 	if !waitFor(2*time.Second, func() bool {
-		entry, ok := resolvedListGet(oldKey)
-		return ok && len(entry.items) == 1 && entry.items[0].ContentID == "late-stale"
+		resolvedListRefreshMu.Lock()
+		defer resolvedListRefreshMu.Unlock()
+		return len(resolvedListRefreshing) == 0
 	}) {
-		t.Fatal("old generation refresh did not finish")
+		t.Fatal("refreshes did not finish")
+	}
+	if _, ok := resolvedListGet(oldKey); ok {
+		t.Fatal("late refresh retained an obsolete generation")
 	}
 	active, _, err := getOrRefresh(context.Background(), newKey, base.Add(6*time.Minute), func(context.Context) ([]*models.MediaItem, int, error) {
 		t.Fatal("late old-generation refresh repopulated the active key")

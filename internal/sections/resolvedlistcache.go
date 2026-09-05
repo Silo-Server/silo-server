@@ -106,11 +106,11 @@ var (
 	}
 )
 
-// InvalidateResolvedListCache advances the cache namespace and releases the
-// entries the bump supersedes. In-flight refreshes remain under the old
-// generation and therefore cannot repopulate reads after a catalog scan
-// completes. Scan-complete bursts are coalesced so large batches advance the
-// namespace at most once per 30 seconds.
+// InvalidateResolvedListCache marks Recently Added rows for refresh after a
+// scan. Unexpired membership remains usable while one background rebuild picks
+// up the changes; profile-specific overlays are still resolved on every request.
+// The generation fences off older builds without making a warm page cold.
+// Scan-complete bursts advance the generation at most once per 30 seconds.
 func InvalidateResolvedListCache() {
 	resolvedListInvalidationMu.Lock()
 	defer resolvedListInvalidationMu.Unlock()
@@ -131,7 +131,7 @@ func InvalidateResolvedListCache() {
 				resolvedListInvalidationPending = false
 				resolvedListInvalidationCancel = nil
 				resolvedListLastInvalidation = deadline
-				dropSupersededResolvedListEntries(resolvedListGeneration.Add(1))
+				advanceResolvedListGeneration(resolvedListNow())
 			})
 		}
 		return
@@ -143,47 +143,32 @@ func InvalidateResolvedListCache() {
 	}
 	resolvedListInvalidationPending = false
 	resolvedListLastInvalidation = now
-	dropSupersededResolvedListEntries(resolvedListGeneration.Add(1))
+	advanceResolvedListGeneration(now)
 }
 
-// dropSupersededResolvedListEntries releases the cache entries a generation bump
-// leaves behind. Advancing the generation only changes FUTURE keys, so without
-// this every obsolete (library × access-scope) recently-added entry would stay
-// resident until its 15-minute expiry and be swept only opportunistically by
-// pruneExpiredResolvedListEntriesLocked. A long multi-library rescan bumps the
-// generation every 30s, which would otherwise keep up to 30 generations of every
-// entry — each holding an ItemLimit-sized item slice — alive at once.
-//
-// Entries with an in-flight background refresh are left in place so a refresh
-// that started under the old generation can still finish writing to its own old
-// key (it can never repopulate the active key, whose generation differs). Those
-// keys are superseded too, so the next bump releases them.
-//
-// Concurrency: the caller holds resolvedListInvalidationMu. This takes
-// resolvedListRefreshMu and resolvedListCacheMu one after the other and never
-// nests them, and no cache path ever acquires resolvedListInvalidationMu, so the
-// immediate and trailing-edge invalidation paths cannot deadlock.
-func dropSupersededResolvedListEntries(generation uint64) {
-	current := resolvedListGenerationKeyPrefix(generation)
-
-	resolvedListRefreshMu.Lock()
-	refreshing := make(map[string]struct{}, len(resolvedListRefreshing))
-	for key := range resolvedListRefreshing {
-		refreshing[key] = struct{}{}
-	}
-	resolvedListRefreshMu.Unlock()
-
+// advanceResolvedListGeneration carries only the previous generation's usable
+// entries into the new namespace and makes them due for refresh. Keep their
+// original hard expiry: repeated scans or failed refreshes must not extend it.
+// The cache lock makes the generation change atomic with both migration and
+// writes, so a late old-generation build cannot overwrite or outlive this state.
+// The caller holds resolvedListInvalidationMu.
+func advanceResolvedListGeneration(now time.Time) {
 	resolvedListCacheMu.Lock()
-	for key := range resolvedListCache {
-		if !strings.HasPrefix(key, resolvedListGenerationPrefix) || strings.HasPrefix(key, current) {
+	defer resolvedListCacheMu.Unlock()
+	previous := resolvedListGenerationKeyPrefix(resolvedListGeneration.Load())
+	current := resolvedListGenerationKeyPrefix(resolvedListGeneration.Add(1))
+	next := make(map[string]resolvedListEntry, len(resolvedListCache))
+	for key, entry := range resolvedListCache {
+		if !strings.HasPrefix(key, resolvedListGenerationPrefix) {
+			next[key] = entry
 			continue
 		}
-		if _, inflight := refreshing[key]; inflight {
-			continue
+		if suffix, ok := strings.CutPrefix(key, previous); ok && now.Before(entry.expiresAt) {
+			entry.refreshAfter = now
+			next[current+suffix] = entry
 		}
-		delete(resolvedListCache, key)
 	}
-	resolvedListCacheMu.Unlock()
+	resolvedListCache = next
 }
 
 // getOrRefresh returns the shared item list for key, implementing serve /
@@ -304,6 +289,11 @@ func resolvedListGet(key string) (resolvedListEntry, bool) {
 
 func resolvedListSet(key string, items []*models.MediaItem, total int, now time.Time) {
 	resolvedListCacheMu.Lock()
+	defer resolvedListCacheMu.Unlock()
+	if strings.HasPrefix(key, resolvedListGenerationPrefix) &&
+		!strings.HasPrefix(key, resolvedListGenerationKeyPrefix(resolvedListGeneration.Load())) {
+		return
+	}
 	pruneExpiredResolvedListEntriesLocked(now)
 	resolvedListCache[key] = resolvedListEntry{
 		items:        cloneMediaItems(items),
@@ -312,7 +302,6 @@ func resolvedListSet(key string, items []*models.MediaItem, total int, now time.
 		refreshAfter: now.Add(resolvedListRefreshAfter),
 		expiresAt:    now.Add(resolvedListTTL),
 	}
-	resolvedListCacheMu.Unlock()
 }
 
 // pruneExpiredResolvedListEntriesLocked sweeps expired entries at most once per
