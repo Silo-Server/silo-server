@@ -20,6 +20,7 @@ const stackTransition = { type: "spring" as const, stiffness: 400, damping: 30 }
 interface CardStackProps {
   cards: SwipeCardType[];
   hasMore: boolean;
+  pagingLimited?: boolean;
   isFetching: boolean;
   onNeedMore: () => void;
   onClose: () => void;
@@ -37,6 +38,7 @@ export function playTargetForSwipeCard(card: SwipeCardType) {
 export default function CardStack({
   cards,
   hasMore,
+  pagingLimited = false,
   isFetching,
   onNeedMore,
   onClose,
@@ -115,7 +117,9 @@ export default function CardStack({
       <div className="flex flex-col items-center justify-center gap-4 py-12 text-center">
         <Tv className="text-muted-foreground h-12 w-12" />
         <p className="text-muted-foreground text-sm">
-          {"You've seen everything! Come back later for fresh picks."}
+          {pagingLimited
+            ? "You reached the end of this swipe session. Start over or choose different genres for more picks."
+            : "You've seen everything! Come back later for fresh picks."}
         </p>
         <button
           type="button"

@@ -78,5 +78,10 @@ export function swipeCardFromV2(card: WatchTonightCardV2) {
 }
 
 export function swipeCardsPageFromV2(page: WatchTonightCardPageV2) {
-  return { cards: page.items.map(swipeCardFromV2), has_more: page.has_more, is_cold: page.is_cold };
+  return {
+    cards: page.items.map(swipeCardFromV2),
+    has_more: page.has_more,
+    paging_limited: page.paging_limited,
+    is_cold: page.is_cold,
+  };
 }

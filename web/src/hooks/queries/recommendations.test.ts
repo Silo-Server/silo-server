@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -164,6 +164,40 @@ describe("recommendation reads on the v2 contract", () => {
     expect(requestedUrl(fetchMock, 1).searchParams.getAll("exclude_ids")).toEqual(
       listWatchTonightCardsOk.items.map((c) => c.content_id),
     );
+  });
+  it("stops a limited swipe session before exclusion requests exceed the schema", async () => {
+    const fetchMock = stubFetch((url) => {
+      const prior = url.searchParams.getAll("exclude_ids");
+      expect(prior.length).toBeLessThanOrEqual(200);
+      const count = Math.min(12, 200 - prior.length);
+      return jsonResponse({
+        ...listWatchTonightCardsOk,
+        items: Array.from({ length: count }, (_, i) => ({
+          ...listWatchTonightCardsOk.items[0],
+          content_id: `movie:${prior.length + i}`,
+        })),
+        has_more: true,
+        paging_limited: prior.length + count === 200,
+      });
+    });
+    const { result } = renderHook(() => useSwipeCards(true, "discover", []), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.pages[0]?.cards).toHaveLength(12);
+    expect(result.current.hasNextPage).toBe(true);
+    for (let page = 1; page < 17; page++) {
+      await act(async () => {
+        const fetched = await result.current.fetchNextPage();
+        expect(fetched.error).toBeNull();
+      });
+      await waitFor(() => expect(result.current.data?.pages).toHaveLength(page + 1));
+    }
+    expect(result.current.data?.pages.flatMap((page) => page.cards)).toHaveLength(200);
+    expect(result.current.data?.pages.at(-1)?.has_more).toBe(true);
+    expect(result.current.hasNextPage).toBe(false);
+    await result.current.fetchNextPage();
+    expect(fetchMock).toHaveBeenCalledTimes(17);
   });
 });
 

@@ -283,9 +283,14 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 			o := humaOp(http.MethodPost, Prefix+"/x", "postX", "x", "")
 			o.MaxBodyBytes = 10
 			return o
-		}(), Class: ClassPublic},
-		"negative body limit": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic, MaxBodyBytes: -1},
-		"perm class":          {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPermissionGated},
+		}(), Class: ClassPublic, RetrySafety: RetrySafetyNaturalIdempotent},
+		"negative body limit": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic, MaxBodyBytes: -1, RetrySafety: RetrySafetyNaturalIdempotent},
+		// Retry safety is a required declaration on every mutation and
+		// meaningless on a read.
+		"mutation without retry safety": {Operation: humaOp(http.MethodPost, Prefix+"/x", "postX", "x", ""), Class: ClassPublic},
+		"unknown retry safety":          {Operation: humaOp(http.MethodDelete, Prefix+"/x", "deleteX", "x", ""), Class: ClassPublic, RetrySafety: RetrySafety("retry_later")},
+		"read with retry safety":        {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPublic, RetrySafety: RetrySafetyNaturalIdempotent},
+		"perm class":                    {Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPermissionGated},
 	}
 	for name, op := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -302,9 +307,10 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 	t.Run("item-scoped permission with an id parameter", func(t *testing.T) {
 		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
 			Register(reg, Operation{
-				Operation:  humaOp(http.MethodPatch, Prefix+"/items/{id}", "patchItem", "x", ""),
-				Class:      ClassPermissionGated,
-				Permission: policy.PermissionMetadataCuration,
+				Operation:   humaOp(http.MethodPatch, Prefix+"/items/{id}", "patchItem", "x", ""),
+				Class:       ClassPermissionGated,
+				Permission:  policy.PermissionMetadataCuration,
+				RetrySafety: RetrySafetyNaturalIdempotent,
 			}, func(context.Context, *struct {
 				ID string `path:"id"`
 			}) (*probeOutput, error) {

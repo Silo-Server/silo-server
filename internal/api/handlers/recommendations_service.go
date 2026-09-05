@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -402,9 +403,11 @@ func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int,
 
 // SubmitTasteSeed favorites every picked item for the profile and, when
 // any was added, queues a taste-profile refresh. It answers how many picks
-// were recorded; an item that fails to record is skipped, not fatal.
-// Favouriting is idempotent, so a retried submission converges on the same
-// favorite set and reports 0 added.
+// were newly recorded; an item that fails to record is skipped, not fatal.
+// Favouriting is set membership, so a duplicate pick, an item the profile
+// already favorited, or a retried submission adds nothing: the store's
+// insert is a no-op that the count leaves out, and a submission that added
+// nothing queues no refresh.
 func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string) (int, error) {
 	if h.storeProvider == nil {
 		return 0, apiError(http.StatusServiceUnavailable, "unavailable", "User store unavailable")
@@ -415,15 +418,19 @@ func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int
 		return 0, recommendationsUnavailable("Failed to load user store")
 	}
 	added := 0
+	addedAt := time.Now().UTC()
 	for _, id := range itemIDs {
 		if id == "" {
 			continue
 		}
-		if err := store.AddFavorite(ctx, profileID, id); err != nil {
+		inserted, err := store.AddFavoriteAt(ctx, profileID, id, addedAt)
+		if err != nil {
 			slog.WarnContext(ctx, "TasteSeed: failed to add favorite", "component", "api", "user_id", userID, "profile_id", profileID, "item_id", id, "error", err)
 			continue
 		}
-		added++
+		if inserted {
+			added++
+		}
 	}
 	if added > 0 {
 		var staler ProfileStaler

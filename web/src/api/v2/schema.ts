@@ -300,7 +300,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every root the scanner skipped, across libraries. */
+    /** Page roots the scanner skipped, across libraries. */
     get: operations["listSkippedRoots"];
     put?: never;
     post?: never;
@@ -317,7 +317,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List provider identifiers that no longer resolve, with the items carrying them. */
+    /** List provider identifiers that no longer resolve, with the items carrying them, a page at a time. */
     get: operations["listStaleIds"];
     put?: never;
     post?: never;
@@ -3600,7 +3600,7 @@ export interface components {
     };
     WatchTonightCardPage: {
       /**
-       * @description Whether more cards remain beyond this page
+       * @description Whether eligible cards remain beyond this page; paging_limited may require restarting the swipe session
        * @example true
        */
       has_more: boolean;
@@ -3611,6 +3611,11 @@ export interface components {
       is_cold: boolean;
       /** @description Empty, never null */
       items: components["schemas"]["WatchTonightCard"][];
+      /**
+       * @description True when eligible cards remain but the 200-card exclusion budget is full; restart with no exclusions
+       * @example false
+       */
+      paging_limited: boolean;
     };
     WatchTonightCastMember: {
       /** @example Lt. Vincent Hanna */
@@ -4214,6 +4219,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
@@ -5529,6 +5535,7 @@ export interface operations {
       /** @description Accepted */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6013,6 +6020,8 @@ export interface operations {
         library_id: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Case-insensitive substring over root path, title and sample file path */
+        q?: string;
         /** @description Only roots in this inference state */
         state?: string;
       };
@@ -6383,7 +6392,14 @@ export interface operations {
   };
   listSkippedRoots: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over root path, library name or reason */
+        q?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;
@@ -6489,7 +6505,14 @@ export interface operations {
   };
   listStaleIds: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over title, provider, provider ID or library name */
+        q?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;

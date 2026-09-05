@@ -182,9 +182,10 @@ type WatchTonightCard struct {
 // not cursor: the client passes the identifiers it has swiped as
 // exclude_ids, so has_more is a plain flag.
 type WatchTonightCardPage struct {
-	Items   []WatchTonightCard `json:"items" doc:"Empty, never null"`
-	HasMore bool               `json:"has_more" doc:"Whether more cards remain beyond this page" example:"true"`
-	IsCold  bool               `json:"is_cold" doc:"True when the cards are a generic fallback rather than taste-driven" example:"false"`
+	Items         []WatchTonightCard `json:"items" doc:"Empty, never null"`
+	HasMore       bool               `json:"has_more" doc:"Whether eligible cards remain beyond this page; paging_limited may require restarting the swipe session" example:"true"`
+	PagingLimited bool               `json:"paging_limited" doc:"True when eligible cards remain but the 200-card exclusion budget is full; restart with no exclusions" example:"false"`
+	IsCold        bool               `json:"is_cold" doc:"True when the cards are a generic fallback rather than taste-driven" example:"false"`
 }
 
 // WatchTonightCardPageOutput is the listWatchTonightCards response.
@@ -193,7 +194,8 @@ type WatchTonightCardPageOutput struct {
 }
 
 const (
-	opListTasteSeedItems = "listTasteSeedItems"
+	watchTonightExclusionLimit = 200
+	opListTasteSeedItems       = "listTasteSeedItems"
 )
 
 func registerRecommendations(reg *Registry) {
@@ -228,10 +230,10 @@ func registerRecommendations(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPost, Prefix+"/recommendations/taste-seed", "createTasteSeed", "recommendations",
 			"Record the picked items as the acting profile's favorites and queue a taste-profile refresh."),
-		// Naturally idempotent: a favorite is a set membership, so a
-		// retried submission converges on the same favorite set and
-		// reports 0 added.
+		// Favorites converge and retries report 0 added, but a crash after
+		// insertion can lose the separate refresh dispatch.
 		Class:          ClassProfileScoped,
+		RetrySafety:    RetrySafetyNonRetryable,
 		DemoRestricted: true,
 		ServiceBacked:  true,
 	}, reg.createTasteSeed)
@@ -508,6 +510,12 @@ func (reg *Registry) listWatchTonightCards(ctx context.Context, in *WatchTonight
 		}
 	}
 	view := svc.WatchTonightCards(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
+	remaining := max(0, watchTonightExclusionLimit-len(excludeIDs))
+	if len(view.Cards) > remaining {
+		view.Cards = view.Cards[:remaining]
+		view.HasMore = true
+	}
+	pagingLimited := view.HasMore && len(view.Cards) >= remaining
 	items := make([]WatchTonightCard, 0, len(view.Cards))
 	for _, c := range view.Cards {
 		cast := make([]WatchTonightCastMember, 0, len(c.Cast))
@@ -516,7 +524,7 @@ func (reg *Registry) listWatchTonightCards(ctx context.Context, in *WatchTonight
 		}
 		items = append(items, WatchTonightCard{CatalogItem: catalogItemOfSection(c.Card()), WatchTonightSource: c.WatchTonightSource, Cast: cast})
 	}
-	return &WatchTonightCardPageOutput{Body: WatchTonightCardPage{Items: items, HasMore: view.HasMore, IsCold: view.IsCold}}, nil
+	return &WatchTonightCardPageOutput{Body: WatchTonightCardPage{Items: items, HasMore: view.HasMore, PagingLimited: pagingLimited, IsCold: view.IsCold}}, nil
 }
 
 // watchTonightGenres validates the genre filter against the seam's known

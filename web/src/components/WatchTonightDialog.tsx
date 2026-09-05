@@ -1,3 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { recKeys } from "@/hooks/queries/keys";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, History, Sparkles } from "lucide-react";
 import {
@@ -20,6 +22,7 @@ interface WatchTonightDialogProps {
 }
 
 export default function WatchTonightDialog({ open, onOpenChange }: WatchTonightDialogProps) {
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("mode-select");
   const [mode, setMode] = useState<SwipeMode>("discover");
   const [genres, setGenres] = useState<string[]>([]);
@@ -72,9 +75,10 @@ export default function WatchTonightDialog({ open, onOpenChange }: WatchTonightD
   }, [onOpenChange]);
 
   const handleReset = useCallback(() => {
+    queryClient.removeQueries({ queryKey: recKeys.watchTonightCards(mode, genres), exact: true });
     setStep("mode-select");
     setGenres([]);
-  }, []);
+  }, [queryClient, mode, genres]);
 
   // Dynamic dialog sizing based on step.
   const dialogClass =
@@ -163,6 +167,7 @@ export default function WatchTonightDialog({ open, onOpenChange }: WatchTonightD
             <CardStack
               cards={cards}
               hasMore={hasMore}
+              pagingLimited={data?.pages.at(-1)?.paging_limited}
               isFetching={isFetching || isFetchingNextPage}
               onNeedMore={handleNeedMore}
               onClose={handleClose}

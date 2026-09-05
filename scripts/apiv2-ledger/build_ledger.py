@@ -73,6 +73,11 @@ if os.path.exists(OUT):
 
 CURATED = ("capability_endpoint", "section", "release_flow", "tier", "disposition", "disposition_rule",
            "disposition_rationale", "owner", "review_state", "v2", "notes")
+# Optional curated fields: preserved when the prior entry carries them, never
+# seeded. "concurrency" (if_match) marks a row whose v2 operation is Guarded.
+# "retry_safety" classifies a tier-1 ported mutation row by the contract's
+# "Mutation retry safety" strategy; "retry_safety_note" explains the choice.
+CURATED_OPTIONAL = ("concurrency", "retry_safety", "retry_safety_note")
 
 def key(r): return f"{r['listener']} {r['method']} {r['path']}"
 
@@ -467,6 +472,9 @@ for r in rows:
     if prior is not None:
         for field in CURATED:
             entry[field] = prior[field]
+        for field in CURATED_OPTIONAL:
+            if field in prior:
+                entry[field] = prior[field]
     entries.append(entry)
 
 doc = OrderedDict([

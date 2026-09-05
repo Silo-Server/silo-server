@@ -65,3 +65,9 @@ func jsonDocument(raw json.RawMessage) json.RawMessage {
 	}
 	return raw
 }
+
+// acceptedJob renders a queued job with its Location. The job read lives at
+// /admin/jobs/{id}, the resource the admin-tasks section owns.
+func acceptedJob(job *models.AdminJob) *AdminJobAcceptedOutput {
+	return &AdminJobAcceptedOutput{Location: Prefix + "/admin/jobs/" + job.ID, Body: adminJobOf(job)}
+}

@@ -3,7 +3,9 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -27,6 +29,7 @@ type fakeRecommendations struct {
 	lastGenres          []string
 	lastExclude         map[string]struct{}
 	cardsHasMore        bool
+	swipePool           int
 }
 
 func fakeRecommendationRow() handlers.DiscoverRowView {
@@ -136,6 +139,24 @@ func (f *fakeRecommendations) WatchTonight(_ context.Context, _ int, _ string, _
 
 func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView {
 	f.lastMode, f.lastGenres, f.lastExclude, f.lastLimit = mode, genres, excludeIDs, limit
+	if f.swipePool > 0 {
+		cards := make([]handlers.WatchTonightCardView, 0, limit)
+		more := false
+		for i := range f.swipePool {
+			id := fmt.Sprintf("movie:swipe-%d", i)
+			if _, ok := excludeIDs[id]; ok {
+				continue
+			}
+			if len(cards) == limit {
+				more = true
+				break
+			}
+			card := fakeWatchTonightCard()
+			card.ContentID = id
+			cards = append(cards, card)
+		}
+		return handlers.WatchTonightCardsView{Cards: cards, HasMore: more}
+	}
 	return handlers.WatchTonightCardsView{Cards: []handlers.WatchTonightCardView{fakeWatchTonightCard()}, HasMore: f.cardsHasMore}
 }
 
@@ -157,7 +178,7 @@ type recommendationRowDoc struct {
 
 func requireFakeCard(t *testing.T, card map[string]json.RawMessage) {
 	t.Helper()
-	for k, want := range map[string]string{"content_id": `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`} {
+	for k, want := range map[string]string{fieldContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`} {
 		if string(card[k]) != want {
 			t.Errorf("%s = %s, want %s", k, card[k], want)
 		}
@@ -487,4 +508,43 @@ func fakeWatchTonightCard() handlers.WatchTonightCardView {
 	// the swipe card; mirror that so the test proves v2 reads the outer member.
 	card.Runtime = 0
 	return handlers.NewWatchTonightCardView(card, "recommendation", 170, []handlers.WatchTonightCastMemberView{{Name: "Al Pacino", Character: "Lt. Vincent Hanna"}})
+}
+
+func TestRecommendationSwipeSessionBudget(t *testing.T) {
+	for _, pool := range []int{199, 200, 250} {
+		t.Run(fmt.Sprint(pool), func(t *testing.T) {
+			deps, fake := recommendationDeps(t)
+			fake.swipePool = pool
+			h := newTestHandler(t, deps)
+			query := url.Values{"mode": {"discover"}, "limit": {"12"}}
+			seen := map[string]bool{}
+			for page := 0; ; page++ {
+				if page > 20 {
+					t.Fatal("pagination did not stop")
+				}
+				rec := do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?"+query.Encode(), "", viewerHeaders())
+				if rec.Code != 200 {
+					t.Fatal(rec.Body.String())
+				}
+				var body WatchTonightCardPage
+				decodeJSON(t, rec.Body, &body)
+				for _, card := range body.Items {
+					if seen[card.ContentID] {
+						t.Fatalf("repeated %s", card.ContentID)
+					}
+					seen[card.ContentID] = true
+					query.Add("exclude_ids", card.ContentID)
+				}
+				if len(seen) > 200 {
+					t.Fatal("exclusion budget exceeded")
+				}
+				if body.PagingLimited || !body.HasMore {
+					if len(seen) != min(pool, 200) || body.PagingLimited != (pool > 200) || body.HasMore != (pool > 200) {
+						t.Fatalf("seen=%d page=%+v", len(seen), body)
+					}
+					break
+				}
+			}
+		})
+	}
 }

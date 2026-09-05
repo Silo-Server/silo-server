@@ -192,8 +192,8 @@ export function useSwipeCards(enabled: boolean, mode: SwipeMode, genres: string[
       }).then(swipeCardsPageFromV2),
     initialPageParam: [] as string[],
     getNextPageParam: (lastPage, allPages) => {
-      if (!lastPage.has_more) return undefined;
-      return allPages.flatMap((p) => p.cards.map((c) => c.content_id));
+      if (!lastPage.has_more || lastPage.paging_limited) return undefined;
+      return [...new Set(allPages.flatMap((p) => p.cards.map((c) => c.content_id)))];
     },
     staleTime: 0,
     enabled,
