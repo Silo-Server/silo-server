@@ -225,10 +225,32 @@ export function adminUserFromV2(user: AdminUserV2): AdminUser {
   };
 }
 
+/** Page size for the admin account walk: the v2 maximum. */
+const ADMIN_USERS_PAGE_LIMIT = 200;
+
+/**
+ * Fetches every account by walking the cursor-paginated v2 listing. The admin
+ * screens render, filter, and pick from the full list, so the walk runs to
+ * completion; a page the server marks as the last one ends it.
+ */
+export async function fetchAllAdminUsers(signal?: AbortSignal): Promise<AdminUser[]> {
+  const users: AdminUser[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await v2("GET /api/v2/admin/users", {
+      query: { limit: ADMIN_USERS_PAGE_LIMIT, ...(cursor === undefined ? {} : { cursor }) },
+      signal,
+    });
+    users.push(...page.items.map(adminUserFromV2));
+    if (!page.page?.has_more || !page.page.next_cursor) return users;
+    cursor = page.page.next_cursor;
+  }
+}
+
 export function useAdminUsers() {
   return useQuery({
     queryKey: adminKeys.users(),
-    queryFn: () => v2("GET /api/v2/admin/users").then((d) => d.items.map(adminUserFromV2)),
+    queryFn: ({ signal }) => fetchAllAdminUsers(signal),
     staleTime: ADMIN_STALE_TIME,
   });
 }
