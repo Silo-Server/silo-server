@@ -77,7 +77,7 @@ func (d *DurableCompatPlaybackStore) TouchActiveForToken(ctx context.Context, id
 	if err != nil {
 		return err
 	}
-	tag, err := d.pool.Exec(ctx, `UPDATE jellycompat_playback_sessions SET data=jsonb_set(data,'{UpdatedAt}',$3::jsonb) WHERE id=$1 AND compat_token=$2 AND expires_at>$4 AND COALESCE((data->>'Terminal')::boolean,false)=false`, id, token, stamp, now)
+	tag, err := d.pool.Exec(ctx, `UPDATE jellycompat_playback_sessions SET data=jsonb_set(data,'{UpdatedAt}',to_jsonb(GREATEST((data->>'UpdatedAt')::timestamptz,($3::jsonb #>> '{}')::timestamptz))) WHERE id=$1 AND compat_token=$2 AND expires_at>$4 AND COALESCE((data->>'Terminal')::boolean,false)=false`, id, token, stamp, now)
 	if err != nil {
 		return err
 	}

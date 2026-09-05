@@ -108,6 +108,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		autoscanVirtualFoldersRegistered = true
 	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)
+	if store, ok := deps.PlaybackStore.(*DurableCompatPlaybackStore); ok && store.pool != nil {
+		if manager, ok := deps.SessionMgr.(interface {
+			SetCompatActivityReader(playback.SessionActivityReader)
+			SetCompatExpiryClaimer(playback.SessionExpiryClaimer)
+		}); ok {
+			manager.SetCompatActivityReader(store.NativeSessionActivity)
+			manager.SetCompatExpiryClaimer(store.ClaimNativeSessionExpiry)
+		}
+	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {

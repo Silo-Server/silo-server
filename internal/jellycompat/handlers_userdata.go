@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // UserDataHandler serves Jellyfin favorites and played-state routes.
@@ -62,6 +65,35 @@ func (h *UserDataHandler) HandleGetUserData(w http.ResponseWriter, r *http.Reque
 	}
 	isFavorite := favMap[detail.ContentID]
 	progress := progressMap[detail.ContentID]
+
+	if strings.EqualFold(detail.Type, "series") || strings.EqualFold(detail.Type, "season") {
+		targets, err := h.resolvePlayedTargets(r, session, chi.URLParam(r, "itemId"))
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		counts := userstore.SeriesWatchCounts{TotalEpisodes: len(targets)}
+		for chunk := range slices.Chunk(targets, 500) {
+			childProgress, err := resolveProgressForContentIDs(r.Context(), session, h.userData, chunk)
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			for _, target := range chunk {
+				if child := childProgress[target]; child != nil {
+					if child.Completed {
+						counts.WatchedCount++
+					} else if child.PositionSeconds > 0 {
+						counts.InProgressCount++
+					}
+				}
+			}
+		}
+		// Parents derive played state solely from their children, even when
+		// an old parent progress row remains in the configured user store.
+		detail.UserData = catalog.SeasonUserDataFromCounts(counts)
+		progress = nil
+	}
 
 	writeJSON(w, http.StatusOK, h.mapper.itemFromDetail(*detail, isFavorite, progress).UserData)
 }
@@ -165,23 +197,7 @@ func (h *UserDataHandler) handleFavoriteMutation(w http.ResponseWriter, r *http.
 		return
 	}
 
-	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-
-	favMap, progressMap, err := resolveUserStateForContentIDs(
-		r.Context(), session, h.userData, []string{detail.ContentID},
-	)
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-	isFavorite := favMap[detail.ContentID]
-	progress := progressMap[detail.ContentID]
-
-	writeJSON(w, http.StatusOK, h.mapper.itemFromDetail(*detail, isFavorite, progress).UserData)
+	h.HandleGetUserData(w, r)
 }
 
 func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Request, played bool) {

@@ -25,13 +25,16 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
 Positional updates require a playable item; marking a series or season played
-uses its child episodes. A combined played/favorite update commits the child
-progress and history together with the series or season's favorite status; a
-storage failure rolls back the entire update. Marking played or unplayed clears
-the resume position unless the request supplies an explicit position. Read-only echoed fields such
-as `UnplayedItemCount`, `Key`, and `ItemId` are ignored. Ratings, likes, and play
-counts above 1 return 400. Inaccessible items and another profile's user ID are
-rejected before mutation.
+uses its child episodes. Parent reads and mutation responses derive `Played`,
+`PlayCount`, and `UnplayedItemCount` from those episodes while retaining the
+parent's favorite status; an empty parent remains unplayed. A combined
+played/favorite update commits the child progress and history together with the
+series or season's favorite status; a storage failure rolls back the entire
+update. Marking played or unplayed clears the resume position unless the request
+supplies an explicit position. Read-only
+echoed fields such as `UnplayedItemCount`, `Key`, and `ItemId` are ignored.
+Ratings, likes, and play counts above 1 return 400. Inaccessible items and another
+profile's user ID are rejected before mutation.
 
 Configuration maps audio language, subtitle language, autoplay, and subtitle
 mode into Silo's canonical profile settings. `Default` and `Smart` map to
@@ -155,8 +158,13 @@ available and its account/profile ownership matches; unavailable remote state
 is omitted.
 
 `POST /Sessions/Playing/Ping` touches the caller-owned playback activity without
-changing position or paused state. Pings do not extend the absolute playback-grant
-lifetime; expiry requires fresh playback negotiation. `/socket` uses the Jellyfin keepalive
+changing position or paused state. The native session owner consumes persisted
+activity before idle cleanup, so pings remain effective across API replicas.
+Shared expiry and pings are serialized: a successful ping prevents stale cleanup,
+while an already-retired session rejects the ping. A shared-store failure defers
+compat session cleanup instead of treating unknown activity as inactivity.
+Pings do not extend the absolute playback-grant lifetime; expiry requires fresh
+playback negotiation. `/socket` uses the Jellyfin keepalive
 exchange: `ForceKeepAlive` with a 60-second timeout and `KeepAlive`
 acknowledgements. Connections are bounded and periodically revalidate login/API
 credentials. Remote-control capabilities are false; accepting a socket does not

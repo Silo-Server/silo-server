@@ -287,15 +287,17 @@ func ClientInfoFromContext(ctx context.Context) ClientInfo {
 
 // SessionManager tracks active playback sessions and enforces stream limits.
 type SessionManager struct {
-	sessions         map[string]*Session
-	mu               sync.RWMutex
-	maxStreams       int
-	maxTranscodes    int
-	limitProvider    SessionLimitProvider
-	admissionDecider AdmissionDecider
-	activeGrace      time.Duration
-	pausedGrace      time.Duration
-	expireHooks      []func(*Session)
+	sessions             map[string]*Session
+	mu                   sync.RWMutex
+	maxStreams           int
+	maxTranscodes        int
+	limitProvider        SessionLimitProvider
+	admissionDecider     AdmissionDecider
+	activeGrace          time.Duration
+	pausedGrace          time.Duration
+	expireHooks          []func(*Session)
+	compatActivityReader SessionActivityReader
+	compatExpiryClaimer  SessionExpiryClaimer
 	// transportStops holds the stop channels of media transports this replica
 	// is currently serving, keyed by session ID. See WatchTransportStop.
 	transportStops map[string]map[chan struct{}]struct{}
@@ -1660,11 +1662,16 @@ func (m *SessionManager) CleanStale() []*Session {
 // provided grace period. Sessions with an active media transport request are
 // preserved even if they have not emitted a recent heartbeat yet.
 func (m *SessionManager) CleanInactive(activeIdle, pausedIdle time.Duration) []*Session {
+	protected := m.refreshCompatActivity(activeIdle, pausedIdle)
 	m.mu.Lock()
 
 	now := time.Now()
+	claimed := m.claimCompatExpiryLocked(now, activeIdle, pausedIdle, protected)
 	var expired []*Session
 	for id, s := range m.sessions {
+		if protected[s] || s.IsJellyfinCompat && claimed != nil && !claimed[id] {
+			continue
+		}
 		if s.activeTransportCount > 0 {
 			continue
 		}
