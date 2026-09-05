@@ -523,17 +523,6 @@ export interface CreateHistoryImportMappingRequest {
   silo_profile_id: string;
 }
 
-export type HistoryRemovalScope = "item" | "show";
-
-export interface HistoryRemovalTargetRequest {
-  content_id: string;
-  scope: HistoryRemovalScope;
-}
-
-export interface RemoveHistoryRequest {
-  targets: HistoryRemovalTargetRequest[];
-}
-
 export interface UpdateHistoryImportMappingRequest {
   silo_user_id?: number;
   silo_profile_id?: string;
@@ -3992,19 +3981,6 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
-}
-
-// Progress entry from GET /progress
-export interface ProgressEntry {
-  media_item_id: string;
-  position_seconds: number;
-  duration_seconds: number;
-  completed: boolean;
-  updated_at: string;
-}
-
-export interface ProgressListResponse {
-  progress: ProgressEntry[];
 }
 
 // Sections

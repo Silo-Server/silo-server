@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BrowseItem, HistoryRemovalTargetRequest } from "@/api/types";
+import type { BrowseItem } from "@/api/types";
 import { catalogItemFromV2 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
 import { toast } from "sonner";
 import { historyKeys } from "./keys";
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
+import type { HistoryRemovalTarget } from "@/lib/historyRemoval";
 
 export function useHistory() {
   return useQuery({
@@ -19,7 +20,7 @@ export function useRemoveHistory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (targets: HistoryRemovalTargetRequest[]) =>
+    mutationFn: (targets: HistoryRemovalTarget[]) =>
       v2("POST /api/v2/history/remove", { body: { targets } }),
     onSuccess: async (_data, targets) => {
       toast.success(

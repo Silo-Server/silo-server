@@ -42,6 +42,7 @@ export default tseslint.config(
       "src/api/v2/**/*.{ts,tsx}",
       "src/hooks/useAuth.tsx",
       "src/hooks/queries/progress.ts",
+      "src/hooks/queries/history.ts",
       "src/hooks/queries/profiles.ts",
       "src/hooks/queries/admin/users.ts",
       "src/hooks/queries/admin/libraries.ts",
