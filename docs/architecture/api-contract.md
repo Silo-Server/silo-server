@@ -945,8 +945,9 @@ are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/`
 `completeOAuthLogin`, `startOAuthLogin`, `completeOAuthCallback`, `getDeviceLoginCapability`,
 `startDeviceLogin`, `getDeviceLogin`, `pollDeviceLogin`, `approveDeviceLogin`,
 `approveDeviceHandoff`, `denyDeviceLogin`, `getOnboardingFlow`, `getOnboardingState`,
-`recordOnboardingProgress`, `getPolicyCapability`, `listUserLibraries` (plus the pilot
-`getSetupStatus` and `getCurrentUser`). Every v2 handler calls a seam extracted from its v1
+`recordOnboardingProgress`, `getPolicyCapability`, `listUserLibraries`,
+`getAccountPasswordCapability`, `changePassword` (plus the pilot `getSetupStatus` and
+`getCurrentUser`). Every v2 handler calls a seam extracted from its v1
 handler, so both surfaces run one code path. The two OAuth browser legs are the first entries in
 the manual registry: each is served on the listener's own chi router outside Huma, documented in
 `openapi.json` as an operation marked `x-silo-raw-handshake: redirect` with its parameters and

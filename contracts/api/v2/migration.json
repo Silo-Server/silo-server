@@ -20493,7 +20493,7 @@
         "path": "/api/v2/auth/plugin-launch",
         "operation_id": null
       },
-      "notes": "Ported as launchPlugin (profile scoped with an optional X-Profile-Id, as v1's optional viewer-access group: an unknown profile is 404 and a PIN-locked one without X-Profile-Token is 403 before any cookie is minted): same {expires_in} body and the same five-minute HttpOnly SameSite=Lax silo_plugin_access cookie, issued on Path=/api/v2/plugins instead of /api/v1; Set-Cookie is a documented response header. Stays proposed until the redesign names an owner: the gate refuses ratifying a redesigned row with a placeholder owner."
+      "notes": "Ported as launchPlugin (profile scoped with an optional X-Profile-Id, as v1's optional viewer-access group: an unknown profile is 404 and a PIN-locked one without X-Profile-Token is 403 before any cookie is minted): same {expires_in} body and the same five-minute HttpOnly SameSite=Lax silo_plugin_access cookie, issued on Path=/api/v2/plugins instead of /api/v1; Set-Cookie is a documented response header. Stays proposed until the redesign names an owner: the gate refuses ratifying a redesigned row with a placeholder owner. The operation ships ahead of ratification: it is registered, documented and fixture-covered on v2 pending the #135 owner assignment."
     },
     {
       "listener": "api",
@@ -33942,7 +33942,7 @@
         "path": "/api/v2/onboarding/state",
         "operation_id": "getOnboardingState"
       },
-      "notes": "Profile scoped. Same body."
+      "notes": "Profile scoped. Same body, except that completed_at and skipped_at are emitted as the strings the store holds (RFC 3339 at second precision, as v1) rather than the section's Instant wire type (millisecond precision): the store persists the string v1 wrote and reformatting it here would change a value clients already compare; moving the column to a timestamp is a follow-up."
     },
     {
       "listener": "api",
@@ -35835,7 +35835,7 @@
         "path": "/api/v2/policy/capability",
         "operation_id": "getPolicyCapability"
       },
-      "notes": "Profile scoped with an optional X-Profile-Id, as v1's viewer-access group. Capability document in the system/info shape: revision and state head, then the v1 members; an unconfigured policy engine is state not_configured with a 200 (v1: 503). decision_types and degraded_domains are always arrays. Cache-Control: no-cache."
+      "notes": "Profile scoped with an optional X-Profile-Id, as v1's viewer-access group. Capability document in the system/info shape: revision and state head, then the v1 members other than enabled, which the head's state replaces (available when the engine runs, not_configured otherwise); an unconfigured policy engine is state not_configured with a 200 (v1: 503). decision_types and degraded_domains are always arrays. Cache-Control: no-cache."
     },
     {
       "listener": "api",
