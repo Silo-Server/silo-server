@@ -20493,7 +20493,7 @@
         "path": "/api/v2/auth/plugin-launch",
         "operation_id": null
       },
-      "notes": "Ported as launchPlugin (authenticated): same {expires_in} body and the same five-minute HttpOnly SameSite=Lax silo_plugin_access cookie, issued on Path=/api/v2/plugins instead of /api/v1; the profile is the declared X-Profile-Id, as on v1; Set-Cookie is a documented response header. Stays proposed until the redesign names an owner: the gate refuses ratifying a redesigned row with a placeholder owner."
+      "notes": "Ported as launchPlugin (profile scoped with an optional X-Profile-Id, as v1's optional viewer-access group: an unknown profile is 404 and a PIN-locked one without X-Profile-Token is 403 before any cookie is minted): same {expires_in} body and the same five-minute HttpOnly SameSite=Lax silo_plugin_access cookie, issued on Path=/api/v2/plugins instead of /api/v1; Set-Cookie is a documented response header. Stays proposed until the redesign names an owner: the gate refuses ratifying a redesigned row with a placeholder owner."
     },
     {
       "listener": "api",

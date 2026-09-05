@@ -583,6 +583,27 @@
       "body_file": "launch_plugin_ok.json"
     },
     {
+      "name": "launch_plugin_profile_verification_required",
+      "operation_id": "launchPlugin",
+      "scenario": "A declared PIN-locked profile without X-Profile-Token is judged by viewer access before any cookie is minted.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/plugin-launch",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "launch_plugin_profile_verification_required.json"
+    },
+    {
       "name": "list_admin_users_offset_rejected",
       "operation_id": "listAdminUsers",
       "scenario": "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",

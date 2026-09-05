@@ -180,7 +180,7 @@ func registerAuthSessions(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPost, Prefix+"/auth/plugin-launch", "launchPlugin", "auth",
 			"Issue the short-lived HttpOnly cookie plugin pages authenticate with."),
-		Class: ClassAuthenticated, ServiceBacked: true,
+		Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
 	}, reg.launchPlugin)
 }
 
@@ -322,7 +322,9 @@ func registrationProblem(err error) *Problem {
 
 // launchPlugin mints the same five-minute plugin access token v1 POST
 // /auth/plugin-launch does, on the v2 plugin content parent path instead of
-// /api/v1. The profile is the declared X-Profile-Id, unverified as on v1.
+// /api/v1. The profile bound into the token is the one viewer access
+// resolved from the optional X-Profile-Id, as on v1: an unknown profile is
+// 404 and a PIN-locked one without X-Profile-Token is 403 before this runs.
 func (reg *Registry) launchPlugin(ctx context.Context, _ *struct{}) (*PluginLaunchOutput, error) {
 	if reg.deps.Sessions == nil {
 		return nil, unavailable(loginDomain)
@@ -331,14 +333,11 @@ func (reg *Registry) launchPlugin(ctx context.Context, _ *struct{}) (*PluginLaun
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	r := requestFrom(ctx)
-	profileID := ""
 	secure := false
-	if r != nil {
-		profileID = r.Header.Get("X-Profile-Id")
-		secure = r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	if r := requestFrom(ctx); r != nil {
+		secure = handlers.IsSecureRequest(r)
 	}
-	token, err := reg.deps.Sessions.PluginLaunchToken(claims, profileID)
+	token, err := reg.deps.Sessions.PluginLaunchToken(claims, profileFrom(ctx))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

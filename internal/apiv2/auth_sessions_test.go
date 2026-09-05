@@ -118,6 +118,14 @@ func TestLaunchPlugin(t *testing.T) {
 		t.Fatalf("cookie %q is not Secure behind TLS", rec.Header().Get("Set-Cookie"))
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/plugin-launch", "", nil), TypeAuthenticationRequired)
+	// The declared profile goes through viewer access as on v1: a PIN-locked
+	// profile without proof and an unknown profile never reach the token.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/plugin-launch", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/plugin-launch", "", with(bearer(memberToken), "X-Profile-Id", "p-missing")), TypeNotFound)
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/plugin-launch", "", with(with(bearer(memberToken), "X-Profile-Id", "p-locked"), "X-Profile-Token", "pvt-ok"))
+	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Set-Cookie"), "silo_plugin_access=plugin-s1-p-locked") {
+		t.Fatalf("%d %s", rec.Code, rec.Header().Get("Set-Cookie"))
+	}
 }
 
 func TestOAuthHandshakes(t *testing.T) {

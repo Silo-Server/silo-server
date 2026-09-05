@@ -145,7 +145,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"getDeviceLoginCapability": {http.StatusServiceUnavailable: false},
 	}
 	profileToken := map[string]bool{"listProgress": true, "listAdminUsers": true, "updateProfile": true, "approveDeviceHandoff": true,
-		"getOnboardingFlow": true, "getOnboardingState": true, "recordOnboardingProgress": true, "getPolicyCapability": true, "listUserLibraries": true}
+		"getOnboardingFlow": true, "getOnboardingState": true, "recordOnboardingProgress": true, "getPolicyCapability": true, "listUserLibraries": true, "launchPlugin": true}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
 		for method, raw := range item.(map[string]any) {

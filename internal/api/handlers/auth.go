@@ -584,6 +584,11 @@ func isSecureRequest(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
+// IsSecureRequest reports whether the request arrived over TLS, directly or
+// behind a proxy that forwards the scheme. It is the seam v2 shares with the
+// v1 cookie handlers so both surfaces mark cookies Secure the same way.
+func IsSecureRequest(r *http.Request) bool { return isSecureRequest(r) }
+
 func (h *AuthHandler) loadImpersonator(ctx context.Context, claims *auth.Claims) (*models.User, error) {
 	if claims == nil || claims.ImpersonatorUserID == nil {
 		return nil, nil
