@@ -77,6 +77,10 @@ func fixtureCases() []fixtureCase {
 			scenario: "A path under /api/v2/ with no operation registered at it.",
 			method:   http.MethodGet, path: "/api/v2/library/items/fixture-missing",
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "head_not_found",
+			scenario: "HEAD on a path under /api/v2/ with no operation registered at it: the 404 problem's headers with no body.",
+			method:   http.MethodHead, path: "/api/v2/library/items/fixture-missing",
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}},
 		{name: "authentication_required",
 			scenario: "An authenticated operation called without a credential.",
 			method:   http.MethodPost, path: "/api/v2/probe/authenticated", body: validBody,
@@ -364,10 +368,14 @@ func generateFixtures(t *testing.T) map[string][]byte {
 		if c.method == http.MethodHead {
 			// A HEAD answer carries the headers of the GET it mirrors
 			// (Content-Type included) and never a body, whatever the
-			// status: the index entry records the headers alone.
-			if rec.Body.Len() != 0 {
-				t.Fatalf("%s: HEAD %d carries a body %q", c.name, c.status, rec.Body.String())
-			}
+			// status: the index entry records the headers alone. The
+			// recorder still holds whatever the handler wrote, because
+			// suppressing the body of a HEAD response is net/http's job
+			// (a real server's ResponseWriter discards it after Write
+			// counts it for Content-Length), which httptest.ResponseRecorder
+			// does not perform; the listener leaves it to the server rather
+			// than duplicating it, so the capture discards the bytes here.
+			rec.Body.Reset()
 		} else if c.status == http.StatusNotModified || c.status == http.StatusNoContent {
 			// A 204 or 304 has no representation: no body file, no media
 			// type, no schema. The index entry records the headers alone.

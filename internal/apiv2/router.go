@@ -393,7 +393,10 @@ func (b *bufferedWriter) flush() {
 	}
 	if b.status == http.StatusNotModified || b.status == http.StatusNoContent {
 		// No body travels with these statuses, so no representation header
-		// describes one; Huma negotiates Content-Type before it knows.
+		// describes one; Huma negotiates Content-Type before it knows. A
+		// HEAD body is not cleared here: net/http's ResponseWriter discards
+		// it on a real connection (after counting it for Content-Length),
+		// so the listener leaves that to the server.
 		b.w.Header().Del("Content-Type")
 		b.body.Reset()
 	}

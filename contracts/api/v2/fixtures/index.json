@@ -261,6 +261,23 @@
       "body_file": null
     },
     {
+      "name": "head_not_found",
+      "operation_id": null,
+      "scenario": "HEAD on a path under /api/v2/ with no operation registered at it: the 404 problem's headers with no body.",
+      "request": {
+        "method": "HEAD",
+        "path": "/api/v2/library/items/fixture-missing"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "list_admin_users_offset_rejected",
       "operation_id": "listAdminUsers",
       "scenario": "The v1 offset parameter is not part of v2 pagination; the account listing refuses it as unknown.",
