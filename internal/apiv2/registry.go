@@ -76,8 +76,9 @@ const (
 type RetrySafety string
 
 const (
-	// RetrySafetyNaturalIdempotent: a PUT or DELETE that converges on one
-	// resource state however often it runs.
+	// RetrySafetyNaturalIdempotent: repeating the same request converges on
+	// one resource state without duplicating durable state or side effects,
+	// regardless of HTTP method (including assignment PATCH and read-only POST).
 	RetrySafetyNaturalIdempotent RetrySafety = "natural_idempotent"
 	// RetrySafetyUniqueConstraint: a natural key or client-supplied resource
 	// identity enforced by a database uniqueness constraint.

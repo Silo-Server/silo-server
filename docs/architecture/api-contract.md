@@ -432,9 +432,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (108
+  tier-1 ported mutation rows (219 distinct operations) are classified (101
   `natural_idempotent`, 26 `unique_constraint`, 14 `domain_identity`, 10 `coalescing`, 10
-  `durable_dispatch`, 51 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 58 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
@@ -463,12 +463,15 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   lost response destroys a resource re-created after the first success (email-address
   clear, push-device unregister, library and collection poster delete, profile avatar
   delete, Discord unlink, collection item add and remove, profile section overrides
-  replace and reset, device forget and device-settings reset), so each stays `non_retryable`
+  replace and reset, device forget and device-settings reset, dashboard-layout reset, web-push
+  unsubscribe by endpoint, and root-override deletion whose path can resolve to a different content group), so each stays `non_retryable`
   until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
   (email-address verification; favorites, watchlist, and rating add and remove; taste seed;
   account and node deletion) name the durable dispatch or cleanup the v2 port must add before
   their retry is safe. The existing v2 profile creation and deletion operations remain
-  `non_retryable` until their durable identity and cleanup defects are fixed. Forty rows
+  `non_retryable` until their durable identity and cleanup defects are fixed. Subtitle and
+  personal-collection deletion also remain `non_retryable` until object cleanup is durable
+  and resumable after the database row is removed. Forty-three rows (42 distinct operations)
   carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
@@ -489,8 +492,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   password branch re-hashes and revokes every session on each attempt, profile creation,
   whose name and limit checks run in application code with no unique index on the
   account-scoped name, account deletion, whose impersonation-session revocation follows
-  the commit, node deletion, whose pool invalidation follows the commit, and profile
-  deletion, whose object and device cleanup cannot resume after the row disappears,
+  the commit, node deletion, whose pool invalidation follows the commit, subtitle deletion,
+  whose S3 key is lost before cleanup, collection deletion, which never removes uploaded
+  poster variants, and profile deletion, whose object and device cleanup cannot resume after the row disappears,
   library creation,
   whose seeding and initial scan run after the insert without a transaction, and the
   library provider chain, whose matcher wake fires unconditionally after the save); their
@@ -769,7 +773,9 @@ V2 does not impose a global mandatory `Idempotency-Key` mechanism. Every durable
 records its duplicate-submission and connection-loss behavior in the endpoint ledger and selects
 the smallest mechanism that supplies a real guarantee:
 
-- naturally idempotent `PUT` or `DELETE` semantics that converge on one resource state;
+- naturally idempotent semantics: repeating the same request converges on one resource state
+  without duplicating durable state or side effects, regardless of HTTP method (including
+  absolute-assignment `PATCH` and read-only `POST`);
 - a natural key or client-supplied resource identity enforced by a database uniqueness constraint;
 - a durable domain operation identity such as a playback attempt, upload, job, or webhook delivery
   ID;
@@ -799,7 +805,10 @@ An absolute assignment can remain `natural_idempotent` without a concurrency gua
 identical invite-code updates converge and do not increment usage or dispatch another effect.
 That classification does not protect a later administrator edit from an older request. Whether
 admission-control edits require version guarding belongs to the admin-invitations section;
-retry classification and protection against concurrent edits are separate decisions.
+retry classification and protection against concurrent edits are separate decisions. The
+watch-together vote pair follows the same distinction: membership and tally change in one
+transaction, and duplicates stop before broadcasting. A newer opposite vote is a concurrent
+membership edit; preserving its order requires a separate sequencing policy.
 
 ### Optimistic concurrency
 
