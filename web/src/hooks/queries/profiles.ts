@@ -81,10 +81,13 @@ function optionalNumber(value: string | null): number | undefined {
  * same ids rendered as strings on v2.
  */
 export function sessionFromV2(session: components["schemas"]["PlaybackSession"]): AdminSession {
-  const { id, user_id, media_file_id, requested_media_file_id, ...rest } = session;
+  const { id, user_id, media_file_id, requested_media_file_id, profile_id, ...rest } = session;
   return {
     ...rest,
     session_id: id,
+    // v2 reports a session with no profile as null; the shared admin shape
+    // predates that and spells it as the empty string v1 emitted.
+    profile_id: profile_id ?? "",
     user_id: Number(user_id),
     media_file_id: Number(media_file_id),
     requested_media_file_id: Number(requested_media_file_id),
