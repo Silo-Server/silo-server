@@ -63,6 +63,85 @@
       "body_file": "create_profile_name_required.json"
     },
     {
+      "name": "delete_profile_avatar_authentication_required",
+      "operation_id": "deleteProfileAvatar",
+      "scenario": "An avatar removal needs a signed-in account.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/profiles/p-owner/avatar"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_profile_avatar_authentication_required.json"
+    },
+    {
+      "name": "delete_profile_avatar_not_found",
+      "operation_id": "deleteProfileAvatar",
+      "scenario": "The profile is not on the account.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/profiles/p-missing/avatar",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_profile_avatar_not_found.json"
+    },
+    {
+      "name": "delete_profile_primary_protected",
+      "operation_id": "deleteProfile",
+      "scenario": "The primary profile cannot be deleted: a conflict, as v1 answered.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/profiles/p-primary",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_profile_primary_protected.json"
+    },
+    {
+      "name": "delete_profile_verification_required",
+      "operation_id": "deleteProfile",
+      "scenario": "A household mutation declared as a PIN-locked profile without its token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/profiles/p-owner",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "delete_profile_verification_required.json"
+    },
+    {
       "name": "get_current_user_ok",
       "operation_id": "getCurrentUser",
       "scenario": "The signed-in account with no profile selected; impersonation is absent outside an admin impersonation session.",
@@ -221,6 +300,48 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_admin_users_permission_denied.json"
+    },
+    {
+      "name": "list_household_sessions_ok",
+      "operation_id": "listHouseholdSessions",
+      "scenario": "The account's live playback sessions for a household manager; bounded by the stream limit and unpaginated.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/profiles/household/sessions",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PlaybackSessionCollection",
+      "body_file": "list_household_sessions_ok.json"
+    },
+    {
+      "name": "list_household_sessions_verification_required",
+      "operation_id": "listHouseholdSessions",
+      "scenario": "A household read declared as a PIN-locked profile without its token.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/profiles/household/sessions",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_household_sessions_verification_required.json"
     },
     {
       "name": "list_profile_section_overrides_library_id_required",
@@ -550,6 +671,94 @@
       "body_file": "update_profile_ok.json"
     },
     {
+      "name": "upload_profile_avatar_ok",
+      "operation_id": "uploadProfileAvatar",
+      "scenario": "A multipart form with the avatar part: the profile with its uploaded avatar.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/profiles/p-owner/avatar",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "Content-Type": "multipart/form-data; boundary=silo-fixture-boundary"
+        },
+        "body": "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"me.png\"\r\nContent-Type: image/png\r\n\r\npng-bytes\r\n--silo-fixture-boundary--\r\n"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Profile",
+      "body_file": "upload_profile_avatar_ok.json"
+    },
+    {
+      "name": "upload_profile_avatar_part_type_rejected",
+      "operation_id": "uploadProfileAvatar",
+      "scenario": "A part outside the declared image types is a validation failure naming the part.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/profiles/p-owner/avatar",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "Content-Type": "multipart/form-data; boundary=silo-fixture-boundary"
+        },
+        "body": "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"me.gif\"\r\nContent-Type: image/gif\r\n\r\ngif-bytes\r\n--silo-fixture-boundary--\r\n"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "upload_profile_avatar_part_type_rejected.json"
+    },
+    {
+      "name": "upload_profile_avatar_unsupported_media_type",
+      "operation_id": "uploadProfileAvatar",
+      "scenario": "The avatar is a multipart form, not a JSON document.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/profiles/p-owner/avatar",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"avatar\":\"...\"}"
+      },
+      "expected_status": 415,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "upload_profile_avatar_unsupported_media_type.json"
+    },
+    {
+      "name": "upload_profile_avatar_verification_required",
+      "operation_id": "uploadProfileAvatar",
+      "scenario": "An upload declared as a PIN-locked profile without its token.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/profiles/p-owner/avatar",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "Content-Type": "multipart/form-data; boundary=silo-fixture-boundary",
+          "X-Profile-Id": "p-locked"
+        },
+        "body": "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"me.png\"\r\nContent-Type: image/png\r\n\r\npng-bytes\r\n--silo-fixture-boundary--\r\n"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "upload_profile_avatar_verification_required.json"
+    },
+    {
       "name": "validation_failed_body",
       "operation_id": null,
       "scenario": "A JSON body with a missing required member and an out-of-range member: one errors[] entry per failure, the rejected values never echoed.",
@@ -566,6 +775,87 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "validation_failed_body.json"
+    },
+    {
+      "name": "verify_profile_pin_authentication_required",
+      "operation_id": "verifyProfilePIN",
+      "scenario": "A PIN check needs a signed-in account; the profile header is not needed.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/profiles/p-owner/verify-pin",
+        "body": "{\"pin\":\"1234\"}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "verify_profile_pin_authentication_required.json"
+    },
+    {
+      "name": "verify_profile_pin_ok",
+      "operation_id": "verifyProfilePIN",
+      "scenario": "A matching PIN: the X-Profile-Token that unlocks the profile for this login session, with its expiry.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/profiles/p-owner/verify-pin",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"pin\":\"1234\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileVerification",
+      "body_file": "verify_profile_pin_ok.json"
+    },
+    {
+      "name": "verify_profile_pin_required",
+      "operation_id": "verifyProfilePIN",
+      "scenario": "The PIN member is required.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/profiles/p-owner/verify-pin",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "verify_profile_pin_required.json"
+    },
+    {
+      "name": "verify_profile_pin_wrong",
+      "operation_id": "verifyProfilePIN",
+      "scenario": "A wrong PIN is not an error: valid is false and no token is issued.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/profiles/p-owner/verify-pin",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"pin\":\"0000\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileVerification",
+      "body_file": "verify_profile_pin_wrong.json"
     }
   ]
 }
