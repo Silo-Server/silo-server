@@ -544,7 +544,7 @@ export interface components {
        */
       name?: string;
       /**
-       * @description New PIN; null removes the PIN
+       * @description New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear
        * @example 1234
        */
       pin?: string | null;

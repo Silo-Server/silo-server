@@ -46,7 +46,7 @@ type Profile struct {
 type ProfileUpdate struct {
 	Name                       *string       `json:"name,omitempty" nullable:"false" minLength:"1" maxLength:"64" doc:"Display name; leading and trailing spaces are trimmed" example:"Alice"`
 	Avatar                     Patch[string] `json:"avatar,omitzero" doc:"Preset avatar reference; null removes the avatar" example:"preset:fox"`
-	PIN                        Patch[string] `json:"pin,omitzero" doc:"New PIN; null removes the PIN" example:"1234"`
+	PIN                        Patch[string] `json:"pin,omitzero" minLength:"1" maxLength:"72" doc:"New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear" example:"1234"`
 	IsChild                    *bool         `json:"is_child,omitempty" nullable:"false" example:"false"`
 	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
 	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" enum:"auto,original" example:"auto"`
@@ -79,7 +79,10 @@ type ProfileUpdateInput struct {
 const fieldMaxPlaybackQuality = "max_playback_quality"
 
 // locationAllowedLibraryIDs is the problem location of the allowlist member.
-const locationAllowedLibraryIDs = locationBody + ".allowed_library_ids"
+const (
+	locationAllowedLibraryIDs = locationBody + ".allowed_library_ids"
+	locationPIN               = locationBody + ".pin"
+)
 
 // profileUpdateNullable names the members whose null is a clearing value;
 // null on any other member is a type failure.
@@ -195,9 +198,36 @@ func profileProblem(err error) *Problem {
 	return serviceProblem(err)
 }
 
+// maxPINBytes is bcrypt's input limit; a longer PIN fails to hash.
+const maxPINBytes = 72
+
+// validatePIN rejects a present, non-null PIN that would otherwise be lowered
+// to the "" clearing sentinel (only null clears) or overflow bcrypt. The
+// schema's minLength/maxLength count runes, so the byte bound is enforced
+// here.
+func validatePIN(p Patch[string]) *Problem {
+	if !p.Present || p.Null {
+		return nil
+	}
+	var detail string
+	switch {
+	case p.Value == "":
+		detail = "PIN must not be empty"
+	case len(p.Value) > maxPINBytes:
+		detail = "PIN must be at most 72 bytes"
+	default:
+		return nil
+	}
+	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+		WithErrors(ProblemError{Location: locationPIN, Code: codeOutOfRange, Detail: detail})
+}
+
 // toRequest lowers the presence-aware body onto the v1 request, where "" is
 // the clearing value the store already understands.
 func (u ProfileUpdate) toRequest() (handlers.ProfileUpdateRequest, *Problem) {
+	if p := validatePIN(u.PIN); p != nil {
+		return handlers.ProfileUpdateRequest{}, p
+	}
 	clear := func(p Patch[string]) *string {
 		if !p.Present {
 			return nil

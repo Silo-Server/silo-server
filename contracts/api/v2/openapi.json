@@ -910,10 +910,12 @@
             "type": "string"
           },
           "pin": {
-            "description": "New PIN; null removes the PIN",
+            "description": "New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear",
             "examples": [
               "1234"
             ],
+            "maxLength": 72,
+            "minLength": 1,
             "type": [
               "string",
               "null"

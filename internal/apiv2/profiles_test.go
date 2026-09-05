@@ -95,11 +95,26 @@ func TestUpdateProfileValidation(t *testing.T) {
 		// A repeated identifier would abort the store's primary-key insert;
 		// it is the client's error, answered before the store sees it.
 		{`{"allowed_library_ids":["1","1"]}`, "body.allowed_library_ids", codeInvalid},
+		// Only null clears the PIN: "" must never reach the store as the
+		// clearing sentinel, and bcrypt refuses more than 72 bytes.
+		{`{"pin":""}`, locationPIN, codeOutOfRange},
+		{`{"pin":"` + strings.Repeat("7", 73) + `"}`, locationPIN, codeOutOfRange},
+		{`{"pin":"` + strings.Repeat("é", 37) + `"}`, locationPIN, codeOutOfRange}, // 37 runes, 74 bytes
 	} {
 		p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", tc.body, auth), TypeValidationFailed)
 		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
 			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
 		}
+	}
+	long := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"pin":"`+strings.Repeat("é", 37)+`"}`, auth), TypeValidationFailed)
+	if len(long.Errors) != 1 || long.Errors[0].Detail != "PIN must be at most 72 bytes" {
+		t.Errorf("long pin detail: errors = %+v", long.Errors)
+	}
+	// A 72-byte PIN is the longest bcrypt accepts and reaches the store intact.
+	profiles := &fakeProfiles{view: fixtureProfileView()}
+	h = newTestHandler(t, pilotDeps(nil, profiles))
+	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"pin":"`+strings.Repeat("7", 72)+`"}`, auth); rec.Code != 200 || profiles.last.Request.PIN == nil || len(*profiles.last.Request.PIN) != 72 {
+		t.Errorf("72-byte pin: %d %s", rec.Code, rec.Body.String())
 	}
 	dup := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":["2","3","2"]}`, auth), TypeValidationFailed)
 	if len(dup.Errors) != 1 || dup.Errors[0].Detail != "duplicate library identifier" {
