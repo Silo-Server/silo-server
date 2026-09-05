@@ -1052,6 +1052,26 @@
       "body_file": "logout_authentication_required.json"
     },
     {
+      "name": "logout_permission_denied",
+      "operation_id": "logout",
+      "scenario": "An API key passes the gate but owns no login session to end (v1: 401, because its logout only accepts a JWT).",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/logout",
+        "headers": {
+          "Authorization": "Bearer sa_member"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "logout_permission_denied.json"
+    },
+    {
       "name": "not_acceptable",
       "operation_id": "getSystemInfo",
       "scenario": "An Accept header that admits no JSON representation.",

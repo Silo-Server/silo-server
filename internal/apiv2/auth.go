@@ -75,11 +75,12 @@ func registerAuth(reg *Registry) {
 	// An unknown, used or expired code is 401 invalid_token.
 	complete.Errors = []int{http.StatusUnauthorized}
 	Register(reg, Operation{Operation: complete, Class: ClassPublic, ServiceBacked: true}, reg.completeOAuthLogin)
-	Register(reg, Operation{
-		Operation: humaOp(http.MethodPost, Prefix+"/auth/logout", "logout", "auth",
-			"Revoke the caller's login session."),
-		Class: ClassAuthenticated, ServiceBacked: true,
-	}, reg.logout)
+	logout := humaOp(http.MethodPost, Prefix+"/auth/logout", "logout", "auth",
+		"Revoke the caller's login session.")
+	// An API key passes the gate but owns no login session: 403 (v1: 401,
+	// because its logout only accepts a JWT).
+	logout.Errors = []int{http.StatusForbidden}
+	Register(reg, Operation{Operation: logout, Class: ClassAuthenticated, ServiceBacked: true}, reg.logout)
 }
 
 func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
@@ -109,6 +110,13 @@ func (reg *Registry) logout(ctx context.Context, _ *struct{}) (*struct{}, error)
 	claims := claimsFrom(ctx)
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	// The gate admits an API key with no session id. v1 refuses one with 401
+	// because its logout re-validates the bearer as a JWT; here the credential
+	// was accepted, so the refusal is a permission problem rather than a
+	// session-not-found 500 from revoking "".
+	if claims.TokenType == auth.TokenTypeAPIKey || claims.SessionID == "" {
+		return nil, NewProblem(TypePermissionDenied, "API keys cannot end a login session.")
 	}
 	if err := reg.deps.Sessions.Logout(ctx, claims); err != nil {
 		return nil, serviceProblem(err)

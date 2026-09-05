@@ -76,6 +76,12 @@ func TestLogout(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/logout", "", nil), TypeAuthenticationRequired)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/logout", "", bearer(expiredToken)), TypeSessionExpired)
+	// An API key is admitted by the gate with no session id; it is refused
+	// rather than handed to the store as a revoke of "".
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/logout", "", bearer(apiKeyToken)), TypePermissionDenied)
+	if len(sessions.loggedOut) != 1 {
+		t.Fatalf("api key reached the session store: logged out = %v", sessions.loggedOut)
+	}
 	deps.Sessions = &fakeSessionService{err: errStore}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/logout", "", bearer(memberToken)), TypeInternalError)
 }

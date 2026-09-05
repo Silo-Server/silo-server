@@ -20182,7 +20182,7 @@
         "path": "/api/v2/auth/logout",
         "operation_id": "logout"
       },
-      "notes": "Authenticated. Same 204 with no body; the session id comes from the gate claims."
+      "notes": "Authenticated. Same 204 with no body; the session id comes from the gate claims. An API key is 403 permission_denied (API keys cannot end a login session): v1 answers 401 because its logout re-validates the bearer as a JWT, while v2's gate admits the key with no session id, and the shared AuthHandler.Logout now refuses an empty session id instead of asking the store to revoke it (v1 unchanged)."
     },
     {
       "listener": "api",
