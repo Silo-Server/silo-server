@@ -723,9 +723,10 @@ change, and includes the current ETag when the caller remains authorized to see 
 is missing or intentionally hidden returns `404` before precondition evaluation; a request that
 passes its precondition but conflicts with current domain state returns `409`.
 
-Successful protected reads and mutations return the current ETag, and first-party clients handle
-`412` by fetching the canonical representation and offering reload, comparison, or a deliberate
-overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
+Successful protected reads and mutations return the current ETag, except a protected `DELETE`,
+whose bodyless `204` has no representation left to validate and carries none. First-party
+clients handle `412` by fetching the canonical representation and offering reload, comparison,
+or a deliberate overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
 Conditional reads may return `304`. V2 does not add a generic response-body revision; a body
 revision exists only for a domain requirement such as capability invalidation or future offline
 synchronization. The implementation follows RFC 9110 parsing and precedence, including lists,
