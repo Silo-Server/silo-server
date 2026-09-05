@@ -56,6 +56,10 @@ const (
 	metaGuarded         = "silo.guarded"
 	metaConditional     = "silo.conditional"
 	metaCreateOnly      = "silo.create_only"
+	// metaIdentityOnly marks an operation whose output declares an ETag: its
+	// responses are served identity-encoded (IdentityEncoded), so a request
+	// that forbids identity is refused up front (encodingGuard).
+	metaIdentityOnly = "silo.identity_only"
 	// metaFormSchema names the multipart form type of an operation whose
 	// RawBody is a huma.MultipartFormFiles[T]; the document hook registers
 	// the form under that name so the request schema is not anonymous.
@@ -188,6 +192,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaGuarded] = op.Guarded
 	op.Metadata[metaConditional] = op.Conditional
 	op.Metadata[metaCreateOnly] = op.CreateOnly
+	op.Metadata[metaIdentityOnly] = declaresHeader(reflect.TypeOf(out), etagField)
 	documentDeclaration(&op, reflect.TypeOf(in))
 	limit := op.MaxBodyBytes
 	if limit == 0 {

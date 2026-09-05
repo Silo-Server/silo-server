@@ -733,7 +733,9 @@ its content coding (RFC 9110 8.8.1), so the listener's compression layer skips v
 responses (`apiv2.IdentityEncoded`) rather than letting a gzip body and an identity body share one
 strong tag or rewriting the tag per coding. The tag a client received is therefore the tag it echoes
 in `If-Match` or `If-None-Match`, whichever coding it accepts; responses without a validator
-compress as usual. V2 does not add a generic response-body revision; a body
+compress as usual. A request whose `Accept-Encoding` excludes identity (`identity;q=0`, or `*;q=0`
+without a positive `identity` entry, RFC 9110 12.5.3) is answered `406 not_acceptable` on a
+validator-bearing operation rather than with a coding the client refused. V2 does not add a generic response-body revision; a body
 revision exists only for a domain requirement such as capability invalidation or future offline
 synchronization. The implementation follows RFC 9110 parsing and precedence, including lists,
 optional whitespace, wildcard rules, and strong comparison, independent of Huma helper behavior.
