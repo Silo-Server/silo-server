@@ -3015,26 +3015,32 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 // curated order, keeping only those the viewer's access filter admits
 // (library allow/deny lists, content-rating ceiling); inaccessible items are
 // dropped and the order of the survivors is preserved. A page is a window
-// of the stored order, cut before the access-filtered lookup so only that
-// window's items are ever loaded; hasMore reports whether stored positions
-// follow the window. A page may therefore hold fewer than Limit items when
-// the filter drops some, while still pointing at the next window.
+// of the stored order, read from the database as that window only so a
+// large collection never loads every membership per request; hasMore
+// reports whether stored positions follow the window. A page may therefore
+// hold fewer than Limit items when the filter drops some, while still
+// pointing at the next window. The zero page loads the whole stored order,
+// as v1 always has.
 func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Context, collectionID string, access catalog.AccessFilter, page CollectionItemPage) ([]itemListResponse, bool, error) {
-	collectionItems, err := h.repo.ListItems(ctx, collectionID)
-	if err != nil {
-		return nil, false, err
-	}
-	hasMore := false
+	var (
+		contentIDs []string
+		hasMore    bool
+	)
 	if page.paged() {
-		start := min(max(page.Offset, 0), len(collectionItems))
-		end := min(start+page.Limit, len(collectionItems))
-		hasMore = end < len(collectionItems)
-		collectionItems = collectionItems[start:end]
-	}
-
-	contentIDs := make([]string, 0, len(collectionItems))
-	for _, item := range collectionItems {
-		contentIDs = append(contentIDs, item.MediaItemID)
+		var err error
+		contentIDs, hasMore, err = h.repo.ListItemIDsPage(ctx, collectionID, page.Limit, page.Offset)
+		if err != nil {
+			return nil, false, err
+		}
+	} else {
+		collectionItems, err := h.repo.ListItems(ctx, collectionID)
+		if err != nil {
+			return nil, false, err
+		}
+		contentIDs = make([]string, 0, len(collectionItems))
+		for _, item := range collectionItems {
+			contentIDs = append(contentIDs, item.MediaItemID)
+		}
 	}
 
 	items, err := h.itemRepo.GetByIDsWithAccess(ctx, contentIDs, access)
@@ -3047,9 +3053,9 @@ func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Contex
 		itemByID[item.ContentID] = item
 	}
 
-	resp := make([]itemListResponse, 0, len(collectionItems))
-	for _, collectionItem := range collectionItems {
-		item, ok := itemByID[collectionItem.MediaItemID]
+	resp := make([]itemListResponse, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		item, ok := itemByID[contentID]
 		if !ok {
 			continue
 		}
