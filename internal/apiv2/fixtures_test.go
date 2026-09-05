@@ -139,6 +139,10 @@ func fixtureCases() []fixtureCase {
 		// no body, which the fixture index cannot carry, so they contribute
 		// only their denial and validation cases; the manifest getSettingsContract
 		// serves is contracts/settings/v1 itself and is not duplicated here.
+		{name: "get_settings_contract_authentication_required", operationID: "getSettingsContract",
+			scenario: "The settings manifest is served behind authentication; the byte-identical document itself is not vendored as a fixture.",
+			method:   http.MethodGet, path: "/api/v2/settings/contract",
+			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "get_settings_contract_capabilities_ok", operationID: "getSettingsContractCapabilities",
 			scenario: "What this server's settings API supports, for feature detection.",
 			method:   http.MethodGet, path: "/api/v2/settings/contract/capabilities", headers: bearer(memberToken),

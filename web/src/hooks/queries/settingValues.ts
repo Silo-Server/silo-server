@@ -88,12 +88,36 @@ export type EffectiveSetting<T = unknown> = Omit<
 /** The cache shape one effective-settings query resolves to. */
 export type EffectiveSettingsMap = Partial<Record<SettingKey, EffectiveSetting>>;
 
-function effectiveSettingFromV2(item: EffectiveSettingV2): EffectiveSetting {
+const SETTING_SCOPES: readonly SettingScope[] = [
+  "account",
+  "profile",
+  "profile_device",
+  "profile_client",
+  "profile_library",
+  "profile_series",
+];
+const KNOWN_SETTING_KEYS = new Set<string>(Object.values(SETTING_KEYS));
+
+function isSettingScope(value: string | undefined): value is SettingScope {
+  return value !== undefined && (SETTING_SCOPES as readonly string[]).includes(value);
+}
+
+/**
+ * Narrow one v2 effective-setting item onto the client's closed vocabularies.
+ * The contract leaves key, source and scope as open strings (a newer server may
+ * add values); an item this client does not know is dropped rather than
+ * asserted, so callers never see a key outside SETTING_KEYS.
+ */
+function effectiveSettingFromV2(item: EffectiveSettingV2): EffectiveSetting | undefined {
+  if (!KNOWN_SETTING_KEYS.has(item.key)) return undefined;
+  const source: SettingSource | undefined =
+    item.source === "default" ? "default" : isSettingScope(item.source) ? item.source : undefined;
+  if (source === undefined) return undefined;
   return {
     ...item,
     key: item.key as SettingKey,
-    source: item.source as SettingSource,
-    scope: item.scope as SettingScope | undefined,
+    source,
+    scope: isSettingScope(item.scope) ? item.scope : undefined,
     library_id: item.library_id === undefined ? undefined : Number(item.library_id),
   };
 }
@@ -182,7 +206,7 @@ export function useEffectiveSettings(options?: {
       const byKey: EffectiveSettingsMap = {};
       for (const item of result.items) {
         const setting = effectiveSettingFromV2(item);
-        byKey[setting.key] = setting;
+        if (setting) byKey[setting.key] = setting;
       }
       return byKey;
     },

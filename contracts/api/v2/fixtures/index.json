@@ -329,6 +329,23 @@
       "body_file": "get_setting_value_scope_required.json"
     },
     {
+      "name": "get_settings_contract_authentication_required",
+      "operation_id": "getSettingsContract",
+      "scenario": "The settings manifest is served behind authentication; the byte-identical document itself is not vendored as a fixture.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/settings/contract"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_settings_contract_authentication_required.json"
+    },
+    {
       "name": "get_settings_contract_capabilities_authentication_required",
       "operation_id": "getSettingsContractCapabilities",
       "scenario": "The capability document is served behind authentication.",
