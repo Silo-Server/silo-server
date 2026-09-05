@@ -150,7 +150,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	for _, id := range libraryViewOperationIDs {
 		profileToken[id] = true
 	}
-	for _, id := range []string{"listFavorites", "getFavorite", "addFavorite", "deleteFavorite", "listRatings", "deleteRating"} {
+	for _, id := range []string{"listFavorites", "getFavorite", "addFavorite", "deleteFavorite", "listRatings", "getRating", "setRating", "deleteRating", "listWatchlist", "getWatchlistEntry", "addToWatchlist", "deleteWatchlistEntry"} {
 		profileToken[id] = true
 	}
 	expect["refreshLibraryMetadata"] = map[int]bool{http.StatusNotFound: true, http.StatusConflict: true, http.StatusAccepted: true}

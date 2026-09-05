@@ -208,6 +208,7 @@ func registerAll(reg *Registry) {
 	registerProgress(reg)
 	registerRatings(reg)
 	registerSystem(reg)
+	registerWatchlist(reg)
 	registerOpenAPIDocument(reg)
 }
 

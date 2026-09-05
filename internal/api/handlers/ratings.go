@@ -92,18 +92,25 @@ func (h *RatingsHandler) HandleSetRating(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.itemRepo.EnsureAccessible(r.Context(), itemID, requestAccessFilter(r)); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
+	if err := h.SetRating(r.Context(), userID, profileID, itemID, requestAccessFilter(r), req.Rating); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	if err := h.ratingsRepo.Set(r.Context(), userID, profileID, itemID, req.Rating); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set rating")
-		return
-	}
-
-	h.markStale(r.Context(), userID, profileID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetRating sets the profile's rating of an item the viewer may see. The
+// caller validates the range; an item outside the viewer's access is 404.
+// Setting the same rating twice converges, so a retried set is safe.
+func (h *RatingsHandler) SetRating(ctx context.Context, userID int, profileID, itemID string, access catalog.AccessFilter, rating int) error {
+	if err := h.itemRepo.EnsureAccessible(ctx, itemID, access); err != nil {
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	if err := h.ratingsRepo.Set(ctx, userID, profileID, itemID, rating); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set rating")
+	}
+	h.markStale(ctx, userID, profileID)
+	return nil
 }
 
 // HandleDeleteRating handles DELETE /ratings/{item_id}.
@@ -147,13 +154,13 @@ func (h *RatingsHandler) HandleGetRating(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	rating, err := h.ratingsRepo.Get(r.Context(), userID, profileID, itemID)
+	rating, found, err := h.GetRating(r.Context(), userID, profileID, itemID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get rating")
+		writeAPIError(w, err)
 		return
 	}
 
-	if rating == nil {
+	if !found {
 		writeError(w, http.StatusNotFound, "not_found", "Rating not found")
 		return
 	}
@@ -162,6 +169,20 @@ func (h *RatingsHandler) HandleGetRating(w http.ResponseWriter, r *http.Request)
 		Rating:  rating.Rating,
 		RatedAt: rating.RatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	})
+}
+
+// GetRating answers the profile's rating of an item; found is false when
+// the profile has not rated it. No access check runs, matching v1: a rating
+// is the profile's own data.
+func (h *RatingsHandler) GetRating(ctx context.Context, userID int, profileID, itemID string) (rating catalog.UserRating, found bool, err error) {
+	r, err := h.ratingsRepo.Get(ctx, userID, profileID, itemID)
+	if err != nil {
+		return catalog.UserRating{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to get rating")
+	}
+	if r == nil {
+		return catalog.UserRating{}, false, nil
+	}
+	return *r, true, nil
 }
 
 // ListRatings answers the store page [offset, offset+limit) of the profile's

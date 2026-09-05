@@ -17,6 +17,7 @@ import (
 // id is not in missing).
 type fakePersonalLists struct {
 	favorites []userstore.Favorite
+	watchlist []userstore.WatchlistEntry
 	missing   map[string]bool
 	err       error
 	viewers   []handlers.PersonalListViewer
@@ -87,6 +88,73 @@ func (f *fakePersonalLists) RemoveFavorite(_ context.Context, viewer handlers.Pe
 		}
 	}
 	f.favorites = kept
+	return nil
+}
+
+func (f *fakePersonalLists) ListWatchlist(_ context.Context, viewer handlers.PersonalListViewer, limit, offset int) ([]userstore.WatchlistEntry, []handlers.CollectionItemView, error) {
+	f.viewers = append(f.viewers, viewer)
+	f.limits = append(f.limits, limit)
+	if f.err != nil {
+		return nil, nil, f.err
+	}
+	var page []userstore.WatchlistEntry
+	for i := offset; i < len(f.watchlist) && len(page) < limit; i++ {
+		if f.watchlist[i].ProfileID == viewer.ProfileID {
+			page = append(page, f.watchlist[i])
+		}
+	}
+	cards := make([]handlers.CollectionItemView, 0, len(page))
+	for _, e := range page {
+		if f.missing[e.MediaItemID] {
+			continue
+		}
+		cards = append(cards, handlers.CollectionItemView{ContentID: e.MediaItemID, Type: "series", Title: "Title " + e.MediaItemID, Status: "matched"})
+	}
+	return page, cards, nil
+}
+
+func (f *fakePersonalLists) GetWatchlistEntry(_ context.Context, viewer handlers.PersonalListViewer, itemID string) (userstore.WatchlistEntry, bool, error) {
+	if f.err != nil {
+		return userstore.WatchlistEntry{}, false, f.err
+	}
+	if f.missing[itemID] {
+		return userstore.WatchlistEntry{}, false, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
+	}
+	for _, e := range f.watchlist {
+		if e.ProfileID == viewer.ProfileID && e.MediaItemID == itemID {
+			return e, true, nil
+		}
+	}
+	return userstore.WatchlistEntry{}, false, nil
+}
+
+func (f *fakePersonalLists) AddToWatchlist(_ context.Context, viewer handlers.PersonalListViewer, itemID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.missing[itemID] {
+		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
+	}
+	for _, e := range f.watchlist {
+		if e.ProfileID == viewer.ProfileID && e.MediaItemID == itemID {
+			return nil
+		}
+	}
+	f.watchlist = append([]userstore.WatchlistEntry{{ProfileID: viewer.ProfileID, MediaItemID: itemID, AddedAt: "2026-01-03T00:00:00Z"}}, f.watchlist...)
+	return nil
+}
+
+func (f *fakePersonalLists) RemoveFromWatchlist(_ context.Context, viewer handlers.PersonalListViewer, itemID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	kept := f.watchlist[:0]
+	for _, e := range f.watchlist {
+		if e.ProfileID != viewer.ProfileID || e.MediaItemID != itemID {
+			kept = append(kept, e)
+		}
+	}
+	f.watchlist = kept
 	return nil
 }
 

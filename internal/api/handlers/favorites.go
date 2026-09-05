@@ -337,38 +337,40 @@ func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http
 	if !rejectInvalidImageSize(w, r) {
 		return
 	}
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
 	limit, offset := parsePagination(r)
-
-	entries, err := store.ListWatchlist(r.Context(), profileID, limit, offset)
+	entries, items, err := h.ListWatchlist(r.Context(), personalListViewerFromRequest(r), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
+		writeAPIError(w, err)
 		return
 	}
-	// Capture has_more from the raw store page, before hidden-series filtering
+	// has_more comes from the raw store page, before hidden-series filtering
 	// shrinks it — a full page that filters down still has more to fetch.
-	watchlistHasMore := len(entries) == limit
-	entries, err = h.filterHiddenWatchlistSeries(r.Context(), store, profileID, entries)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
-		return
-	}
+	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(entries) == limit})
+}
 
-	items, err := resolveItems(h, r.Context(), personalListViewerFromRequest(r), entries, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
+// ListWatchlist answers the store page [offset, offset+limit) of the
+// profile's watchlist, newest first, and the cards of those entries in the
+// same order. Fully-watched series, entries the catalog no longer has, and
+// entries the viewer may not see have no card, so the raw entries, not the
+// cards, decide whether another page follows.
+func (h *PersonalDataHandler) ListWatchlist(ctx context.Context, viewer PersonalListViewer, limit, offset int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
-		return
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: watchlistHasMore})
+	entries, err := store.ListWatchlist(ctx, viewer.ProfileID, limit, offset)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
+	}
+	visible, err := h.filterHiddenWatchlistSeries(ctx, store, viewer.ProfileID, append([]userstore.WatchlistEntry(nil), entries...))
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
+	}
+	items, err := resolveItems(h, ctx, viewer, visible, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
+	}
+	return entries, items, nil
 }
 
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
@@ -399,11 +401,72 @@ func (h *PersonalDataHandler) filterHiddenWatchlistSeries(ctx context.Context, s
 	return filtered, nil
 }
 
+// GetWatchlistEntry answers the profile's watchlist entry for an item the
+// viewer may see. found is false when the item is not on the watchlist; an
+// item the viewer may not see is a 404 error, as v1 answers it.
+func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return userstore.WatchlistEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
+		return userstore.WatchlistEntry{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	e, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
+	if err != nil {
+		return userstore.WatchlistEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
+	}
+	if e == nil {
+		return userstore.WatchlistEntry{}, false, nil
+	}
+	return *e, true, nil
+}
+
+// AddToWatchlist adds an item the viewer may see to the profile's
+// watchlist. Adding an item that is already on it is a no-op that still
+// notifies the same listeners, so a retried add converges.
+func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	if err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
+	}
+	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
+		InWatchlist: boolPtr(true),
+	})
+	return nil
+}
+
+// RemoveFromWatchlist removes an item from the profile's watchlist.
+// Removing an item that is not on it succeeds, so a retried remove
+// converges. No access check runs: the item may have left the viewer's
+// scope since it was added, and the profile must still be able to drop it.
+func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
+	}
+	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
+		InWatchlist: boolPtr(false),
+	})
+	return nil
+}
+
 // HandleCheckWatchlist handles GET /watchlist/{item_id}.
 // Returns 204 if the item is on the watchlist, 404 if not.
 func (h *PersonalDataHandler) HandleCheckWatchlist(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -411,22 +474,11 @@ func (h *PersonalDataHandler) HandleCheckWatchlist(w http.ResponseWriter, r *htt
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	_, ok, err := h.GetWatchlistEntry(r.Context(), personalListViewerFromRequest(r), itemID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
-	if err := h.ensureAccessibleItem(r.Context(), itemID, requestAccessFilter(r)); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-
-	ok, err := store.InWatchlist(r.Context(), profileID, itemID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
-		return
-	}
-
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -436,8 +488,6 @@ func (h *PersonalDataHandler) HandleCheckWatchlist(w http.ResponseWriter, r *htt
 
 // HandleAddToWatchlist handles PUT /watchlist/{item_id}.
 func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -445,33 +495,15 @@ func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *htt
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.AddToWatchlist(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	if err := h.ensureAccessibleItem(r.Context(), itemID, requestAccessFilter(r)); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-
-	if err := store.AddToWatchlist(r.Context(), profileID, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
-		return
-	}
-
-	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindWatchlist, watchsync.ListChangeAdded, userID, profileID, itemID)
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(true),
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleRemoveFromWatchlist handles DELETE /watchlist/{item_id}.
 func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -479,22 +511,10 @@ func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.RemoveFromWatchlist(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	if err := store.RemoveFromWatchlist(r.Context(), profileID, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
-		return
-	}
-
-	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, userID, profileID, itemID)
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(false),
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

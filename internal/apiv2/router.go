@@ -452,7 +452,7 @@ type LibraryCollectionService interface {
 }
 
 // PersonalListService is the slice of *handlers.PersonalDataHandler the
-// favorites operations use. Every method acts as the viewer's profile and
+// favorites and watchlist operations use. Every method acts as the viewer's profile and
 // returns an *handlers.APIError on failure.
 type PersonalListService interface {
 	// ListFavorites answers the store page [offset, offset+limit) of the
@@ -464,12 +464,27 @@ type PersonalListService interface {
 	GetFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.Favorite, found bool, err error)
 	AddFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
 	RemoveFavorite(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+	// ListWatchlist answers the store page [offset, offset+limit) of the
+	// profile's watchlist, newest first, and the cards of the entries the
+	// viewer may see (fully-watched series hidden), in the same order.
+	ListWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, limit, offset int) ([]userstore.WatchlistEntry, []handlers.CollectionItemView, error)
+	// GetWatchlistEntry answers the entry of an item the viewer may see;
+	// found is false when the item is not on the watchlist.
+	GetWatchlistEntry(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error)
+	AddToWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+	RemoveFromWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
 }
 
 // RatingService is the slice of *handlers.RatingsHandler the ratings
 // operations use.
 type RatingService interface {
 	ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalogpkg.UserRating, error)
+	// GetRating answers the profile's rating of the item; found is false
+	// when the profile has not rated it.
+	GetRating(ctx context.Context, userID int, profileID, itemID string) (rating catalogpkg.UserRating, found bool, err error)
+	// SetRating records a validated rating of an item the access filter
+	// admits; an item outside it is a 404 error.
+	SetRating(ctx context.Context, userID int, profileID, itemID string, access catalogpkg.AccessFilter, rating int) error
 	DeleteRating(ctx context.Context, userID int, profileID, itemID string) error
 }
 
