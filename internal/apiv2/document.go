@@ -228,12 +228,7 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 			resp = &huma.Response{Description: "The representation named by If-None-Match is current; no body."}
 			registered.Responses[key] = resp
 		}
-		if resp.Headers == nil {
-			resp.Headers = map[string]*huma.Header{}
-		}
-		if resp.Headers[etagField] == nil {
-			resp.Headers[etagField] = etag()
-		}
+		mergeETagHeader(resp, etag)
 	}
 	for status, resp := range registered.Responses {
 		code, err := strconv.Atoi(status)
@@ -257,13 +252,29 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 		default:
 			continue
 		}
-		if resp.Headers == nil {
-			resp.Headers = map[string]*huma.Header{}
+		mergeETagHeader(resp, etag)
+	}
+}
+
+// mergeETagHeader documents ETag on resp unless a header already binds it
+// under any spelling: a registration that declares its own 304 or success
+// with Headers["etag"] keeps that entry, renamed to the canonical key so the
+// document never carries two case-equivalent headers.
+func mergeETagHeader(resp *huma.Response, etag func() *huma.Header) {
+	if resp.Headers == nil {
+		resp.Headers = map[string]*huma.Header{}
+	}
+	for name, h := range resp.Headers {
+		if name == etagField {
+			return
 		}
-		if resp.Headers[etagField] == nil {
-			resp.Headers[etagField] = etag()
+		if strings.EqualFold(name, etagField) {
+			delete(resp.Headers, name)
+			resp.Headers[etagField] = h
+			return
 		}
 	}
+	resp.Headers[etagField] = etag()
 }
 
 // resolvesProfile reports whether the class runs viewer access and so needs

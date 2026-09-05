@@ -283,7 +283,9 @@ func registerConcurrencyDocProbes(reg *Registry) {
 			// it rather than replacing it.
 			o.Responses = map[string]*huma.Response{"304": {
 				Description: "Still current; poll again after Retry-After.",
-				Headers:     map[string]*huma.Header{"Retry-After": {Schema: &huma.Schema{Type: "integer"}}},
+				// A lower-case etag key: the merge must fold it into the
+				// canonical entry rather than add a second one.
+				Headers: map[string]*huma.Header{"Retry-After": {Schema: &huma.Schema{Type: "integer"}}, "etag": {Description: "declared by the registration", Schema: &huma.Schema{Type: "string"}}},
 			}}
 			return o
 		}(),
@@ -428,6 +430,15 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	}
 	if get.Responses["304"].Headers["Retry-After"] == nil {
 		t.Fatalf("a pre-declared 304 lost its own header: %+v", get.Responses["304"])
+	}
+	etagKeys := 0
+	for name := range get.Responses["304"].Headers {
+		if strings.EqualFold(name, "ETag") {
+			etagKeys++
+		}
+	}
+	if etagKeys != 1 || get.Responses["304"].Headers["ETag"] == nil {
+		t.Fatalf("a declared lower-case etag header must merge into one canonical ETag entry: %+v", get.Responses["304"].Headers)
 	}
 	if _, ok := get.Responses["412"]; ok {
 		t.Fatal("a conditional read must not document 412")
