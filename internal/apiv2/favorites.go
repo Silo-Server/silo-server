@@ -58,7 +58,7 @@ func registerFavorites(reg *Registry) {
 	}
 	mutation := func(op huma.Operation) Operation {
 		op.DefaultStatus = http.StatusNoContent
-		return Operation{Operation: op, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true}
+		return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}
 	}
 
 	Register(reg, viewer(humaOp(http.MethodGet, Prefix+"/favorites", opListFavorites, "favorites",

@@ -945,7 +945,8 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 `{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a naturally idempotent
 bodiless `PUT` add (ratings take `{rating}`) answering `204`, and a naturally idempotent `DELETE`
-answering `204` whether or not the entry existed. The mutations are demo-guarded. `has_more` is
+answering `204` whether or not the entry existed. The mutations are not demo-restricted: v1's demo
+guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. `has_more` is
 decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
 see never hides the rows behind it. The v1 handlers call the same seams
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their

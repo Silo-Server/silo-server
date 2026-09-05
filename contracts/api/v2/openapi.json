@@ -4964,7 +4964,6 @@
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true,
         "x-silo-service-backed": true
       },
       "get": {
@@ -5268,7 +5267,6 @@
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true,
         "x-silo-service-backed": true
       }
     },
@@ -11184,7 +11182,6 @@
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true,
         "x-silo-service-backed": true
       },
       "get": {
@@ -11528,7 +11525,6 @@
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true,
         "x-silo-service-backed": true
       }
     },
@@ -12013,7 +12009,6 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true,
         "x-silo-service-backed": true
       },
       "get": {
@@ -12317,7 +12312,6 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true,
         "x-silo-service-backed": true
       }
     }

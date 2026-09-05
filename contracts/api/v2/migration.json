@@ -27335,7 +27335,7 @@
         "path": "/api/v2/favorites/{item_id}",
         "operation_id": "deleteFavorite"
       },
-      "notes": "Section personal-lists (profile_scoped, demo-guarded). Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -27490,7 +27490,7 @@
         "path": "/api/v2/favorites/{item_id}",
         "operation_id": "addFavorite"
       },
-      "notes": "Section personal-lists (profile_scoped, demo-guarded). Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being a favorite. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being a favorite. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -37004,7 +37004,7 @@
         "path": "/api/v2/ratings/{item_id}",
         "operation_id": "deleteRating"
       },
-      "notes": "Section personal-lists (profile_scoped, demo-guarded). Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not a rating existed. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not a rating existed. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -37136,7 +37136,7 @@
         "path": "/api/v2/ratings/{item_id}",
         "operation_id": "setRating"
       },
-      "notes": "Section personal-lists (profile_scoped, demo-guarded). Media kind confirmed from the handler: JSON request body {rating} and a bodiless 204 answer. The 1..5 range and unknown members are typed validation answered 422 instead of v1's 400; an item the viewer may not see is 404. A repeated PUT converges on the same rating. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind confirmed from the handler: JSON request body {rating} and a bodiless 204 answer. The 1..5 range and unknown members are typed validation answered 422 instead of v1's 400; an item the viewer may not see is 404. A repeated PUT converges on the same rating. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil; ratingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -45244,7 +45244,7 @@
         "path": "/api/v2/watchlist/{item_id}",
         "operation_id": "deleteWatchlistEntry"
       },
-      "notes": "Section personal-lists (profile_scoped, demo-guarded). Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -45399,7 +45399,7 @@
         "path": "/api/v2/watchlist/{item_id}",
         "operation_id": "addToWatchlist"
       },
-      "notes": "Section personal-lists (profile_scoped, demo-guarded). Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being on the watchlist. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being on the watchlist. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",

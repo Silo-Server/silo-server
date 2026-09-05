@@ -155,9 +155,12 @@ func TestDeleteRating(t *testing.T) {
 	if len(ratings.ratings) != 3 {
 		t.Fatalf("ratings = %+v", ratings.ratings)
 	}
+	// Demo mode lets the mutation through, as v1's demo guard does.
 	demo := ratingsDeps(ratings)
 	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/ratings/movie:b", "", viewerHeaders()), TypePermissionDenied)
+	if rec := do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/ratings/movie:b", "", viewerHeaders()); rec.Code != http.StatusNoContent {
+		t.Fatalf("demo delete: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestGetRating(t *testing.T) {
@@ -207,9 +210,12 @@ func TestSetRating(t *testing.T) {
 			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
 		}
 	}
+	// Demo mode lets the mutation through, as v1's demo guard does.
 	demo := ratingsDeps(ratings)
 	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPut, "/api/v2/ratings/movie:b", `{"rating":2}`, viewerHeaders()), TypePermissionDenied)
+	if rec := do(t, newTestHandler(t, demo), http.MethodPut, "/api/v2/ratings/movie:b", `{"rating":2}`, viewerHeaders()); rec.Code != http.StatusNoContent {
+		t.Fatalf("demo put: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestRatingsDenied(t *testing.T) {

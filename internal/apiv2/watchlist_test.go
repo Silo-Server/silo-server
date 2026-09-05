@@ -115,11 +115,17 @@ func TestAddAndDeleteWatchlistEntry(t *testing.T) {
 	if len(lists.watchlist) != 4 {
 		t.Fatalf("watchlist = %+v", lists.watchlist)
 	}
+	// Demo mode lets the mutations through, as v1's demo guard does.
 	demo := favoritesDeps(lists)
 	demo.DemoSettings = fakeSettings{demo: true}
 	dh := newTestHandler(t, demo)
-	requireProblem(t, do(t, dh, http.MethodPut, "/api/v2/watchlist/series:new", "", viewerHeaders()), TypePermissionDenied)
-	requireProblem(t, do(t, dh, http.MethodDelete, "/api/v2/watchlist/series:c", "", viewerHeaders()), TypePermissionDenied)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPut, "/api/v2/watchlist/series:new"}, {http.MethodDelete, "/api/v2/watchlist/series:c"},
+	} {
+		if rec := do(t, dh, tc.method, tc.path, "", viewerHeaders()); rec.Code != http.StatusNoContent {
+			t.Fatalf("demo %s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
 }
 
 func TestWatchlistDenied(t *testing.T) {

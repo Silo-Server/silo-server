@@ -75,11 +75,11 @@ func registerRatings(reg *Registry) {
 	set := humaOp(http.MethodPut, Prefix+"/ratings/{item_id}", "setRating", "ratings",
 		"Set the acting profile's rating of the item, replacing any earlier rating; a repeated PUT converges on the same rating.")
 	set.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: set, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true}, reg.setRating)
+	Register(reg, Operation{Operation: set, Class: ClassProfileScoped, ServiceBacked: true}, reg.setRating)
 	del := humaOp(http.MethodDelete, Prefix+"/ratings/{item_id}", "deleteRating", "ratings",
 		"Remove the acting profile's rating of the item; succeeds whether or not one existed, so a retry converges.")
 	del.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: del, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true}, reg.deleteRating)
+	Register(reg, Operation{Operation: del, Class: ClassProfileScoped, ServiceBacked: true}, reg.deleteRating)
 }
 
 func (reg *Registry) getRating(ctx context.Context, in *RatingItemInput) (*RatingEntryOutput, error) {
