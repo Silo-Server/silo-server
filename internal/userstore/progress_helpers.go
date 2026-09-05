@@ -134,6 +134,17 @@ type SeriesEpisodeRollupStore interface {
 	SeriesEpisodeWatchCounts(ctx context.Context, profileID string, seriesIDs []string) (map[string]SeriesWatchCounts, error)
 }
 
+// EpisodeParentCompletionStore determines whether every available episode of a
+// series or season is completed. Empty parents are not completed. Implementations
+// must use the same progress and completed-history visibility rules as
+// ListProgressWithCompletedHistory, and count episode-library membership as
+// availability, including missing files. Callers needing only a played flag can
+// stop at the first incomplete episode instead of materializing all child IDs.
+type EpisodeParentCompletionStore interface {
+	SeriesCompletion(ctx context.Context, profileID string, seriesIDs []string) (map[string]bool, error)
+	SeasonCompletion(ctx context.Context, profileID string, seasonIDs []string) (map[string]bool, error)
+}
+
 // CompletedHistoryItemMap returns the latest completed-history item row for a
 // scoped item query. Lookup failures degrade to an empty map so user-data
 // enrichment can keep returning progress rows.
