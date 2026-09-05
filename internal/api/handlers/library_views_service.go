@@ -71,23 +71,33 @@ type LibraryCollectionTabUngroupedView = libraryTabUngrouped
 
 // requireViewableLibrary is the gate every profile-scoped section read
 // shares: the viewer scope must admit the library and, when a folder
-// repository is wired, the library must exist. Both refusals are the same
-// not_found so a restricted profile cannot probe which libraries exist, and
-// an unrestricted one is not handed a fabricated default layout for an id
-// that was never a library.
+// repository is wired, the library must exist and be enabled. Every refusal
+// is the same not_found so a restricted profile cannot probe which libraries
+// exist, an unrestricted one is not handed a fabricated default layout for
+// an id that was never a library, and a library an administrator disabled
+// (including one DeleteLibrary disabled ahead of its asynchronous removal)
+// stops serving the moment the flag flips.
 func (h *SectionHandler) requireViewableLibrary(ctx context.Context, libraryID int) error {
+	return requireViewableLibrary(ctx, h.FolderRepo, libraryID)
+}
+
+func requireViewableLibrary(ctx context.Context, folders *catalog.FolderRepository, libraryID int) error {
 	if !viewerCanAccessLibrary(ctx, libraryID) {
 		return apiError(http.StatusNotFound, "not_found", "Library not found")
 	}
-	if h.FolderRepo == nil {
+	if folders == nil {
 		return nil
 	}
-	if _, err := h.FolderRepo.GetByID(ctx, libraryID); err != nil {
+	folder, err := folders.GetByID(ctx, libraryID)
+	if err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
 			return apiError(http.StatusNotFound, "not_found", "Library not found")
 		}
-		slog.ErrorContext(ctx, "loading library for section read", "component", "api", "library_id", libraryID, "error", err)
+		slog.ErrorContext(ctx, "loading library for profile-scoped read", "component", "api", "library_id", libraryID, "error", err)
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load library")
+	}
+	if !folder.Enabled {
+		return apiError(http.StatusNotFound, "not_found", "Library not found")
 	}
 	return nil
 }

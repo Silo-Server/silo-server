@@ -79,8 +79,13 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 
 func seedLibrary(t *testing.T, pool *pgxpool.Pool, name string) int {
 	t.Helper()
+	return seedLibraryEnabled(t, pool, name, true)
+}
+
+func seedLibraryEnabled(t *testing.T, pool *pgxpool.Pool, name string, enabled bool) int {
+	t.Helper()
 	var id int
-	if err := pool.QueryRow(context.Background(), `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, name).Scan(&id); err != nil {
+	if err := pool.QueryRow(context.Background(), `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, $2) RETURNING id`, name, enabled).Scan(&id); err != nil {
 		t.Fatalf("seed folder: %v", err)
 	}
 	t.Cleanup(func() { mustExec(t, pool, `DELETE FROM media_folders WHERE id = $1`, id) })
@@ -150,5 +155,26 @@ func TestLibraryViewsRefuseHiddenLibrary(t *testing.T) {
 		if rec := do(t, h, http.MethodGet, path, "", viewerHeaders()); rec.Code != 200 {
 			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// TestLibraryViewsRefuseDisabledLibraryDB: a library that exists but is
+// disabled (the state DeleteLibrary leaves it in ahead of the asynchronous
+// removal) is not_found on every section read for an unrestricted profile,
+// exactly like a library that never existed.
+func TestLibraryViewsRefuseDisabledLibraryDB(t *testing.T) {
+	pool := viewerAccessTestPool(t)
+	suffix := time.Now().UnixNano()
+	enabledID := seedLibrary(t, pool, fmt.Sprintf("scope-enabled-%d", suffix))
+	disabledID := seedLibraryEnabled(t, pool, fmt.Sprintf("scope-disabled-%d", suffix), false)
+	svc := handlers.NewSectionHandler(sections.NewRepository(pool), sections.NewFetcher(pool))
+	svc.FolderRepo = catalogpkg.NewFolderRepository(pool)
+	h := newTestHandler(t, scopedViewerDeps(t, &access.Scope{}, svc, &fakeLibraryViews{}))
+	if rec := do(t, h, http.MethodGet, fmt.Sprintf("/api/v2/library/%d/layout", enabledID), "", viewerHeaders()); rec.Code != 200 {
+		t.Fatalf("enabled library: %d %s", rec.Code, rec.Body.String())
+	}
+	base := fmt.Sprintf("/api/v2/library/%d", disabledID)
+	for _, path := range []string{base + "/layout", base + "/sections", base + "/sections/default-recently-added/items"} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", viewerHeaders()), TypeNotFound)
 	}
 }
