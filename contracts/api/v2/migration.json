@@ -30438,8 +30438,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; libraryHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Resets queue rows to retry-now; repeating converges on the same reset state."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "DEFECT: RetryNowByFolder sets rerun_requested unconditionally; a worker claim clears it and completion keeps a newer request, so a retry after the first run is leased schedules a second provider pipeline. The v2 port must bind the retry to a queue generation."
     },
     {
       "listener": "api",
@@ -44641,7 +44641,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; watchTogetherHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "DEFECT: selectItem always resets the anchor, pauses, bumps SelectionRevision, and clears every member session, so a retry after a lost response restarts playback and invalidates sessions attached in between. The v2 port must make an identical selection a no-op or key it by a stable id."
     },
     {
       "listener": "api",
@@ -44857,8 +44858,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; watchTogetherHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Commits the winning suggestion as the selection; a retry converges on that selection."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "DEFECT: promotion runs selectItem, which resets the anchor, pauses, bumps SelectionRevision, and clears member sessions, so a retry restarts playback for members attached in between. The v2 port must make promoting the already-selected suggestion a no-op."
     },
     {
       "listener": "api",
