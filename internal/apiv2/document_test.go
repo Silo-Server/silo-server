@@ -389,6 +389,12 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	if put.Responses["200"].Headers["ETag"] == nil {
 		t.Fatalf("put 200 lacks the ETag header: %+v", put.Responses["200"])
 	}
+	if put.Responses["412"].Headers["ETag"] == nil {
+		t.Fatalf("put 412 lacks the ETag header a stale tag is answered with: %+v", put.Responses["412"])
+	}
+	if put.Responses["428"].Headers["ETag"] != nil {
+		t.Fatalf("put 428 documents an ETag it never sends: %+v", put.Responses["428"])
+	}
 	get := doc.Paths[Prefix+"/docprobe/{id}"]["get"]
 	if ext("get", extConditional) != true || ext("get", extGuarded) != nil {
 		t.Fatalf("get extensions: guarded=%v conditional=%v", ext("get", extGuarded), ext("get", extConditional))
@@ -421,6 +427,9 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	}
 	if !ifNoneMatch {
 		t.Fatalf("If-None-Match is not documented on the create-only put: %+v", created.Parameters)
+	}
+	if r, ok := created.Responses["412"]; !ok || r.Headers["ETag"] == nil {
+		t.Fatalf("create-only 412 must be documented with the existing ETag: %+v", created.Responses["412"])
 	}
 	if _, ok := created.Responses["412"]; !ok {
 		t.Fatalf("create-only put lacks 412: %v", created.Responses)

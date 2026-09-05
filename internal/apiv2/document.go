@@ -210,9 +210,20 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 	}
 	for status, resp := range registered.Responses {
 		code, err := strconv.Atoi(status)
-		if err != nil || code < 200 || code >= 300 || code == http.StatusNoContent {
+		if err != nil {
+			continue
+		}
+		switch {
+		case code >= 200 && code < 300 && code != http.StatusNoContent:
 			// A 204 has no representation to validate; Register refuses an
 			// ETag field on a guarded DELETE's output for the same reason.
+		case code == http.StatusPreconditionFailed && (op.Guarded || op.CreateOnly):
+			// A stale If-Match, a refused create-only If-None-Match, and a
+			// lost compare-and-update race all answer 412 with the current
+			// validator when the caller may see it (EvaluateIfMatch,
+			// EvaluateCreateOnly, StaleVersionProblem), so a client can
+			// reload without a second round trip.
+		default:
 			continue
 		}
 		if resp.Headers == nil {

@@ -309,6 +309,16 @@ func TestCreateOnlyProbe(t *testing.T) {
 	if row, _ := store.Get("new"); row.Name != "replaced" || row.Version != 2 {
 		t.Fatalf("resource not replaced: %+v", row)
 	}
+	// No field, racing a concurrent writer: the request supplied no
+	// precondition, so nothing can fail it; the replace lands on top.
+	store.Upsert("new", "intruder")
+	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"after-race"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unconditional replace after a race: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if row, _ := store.Get("new"); row.Name != "after-race" || row.Version != 4 {
+		t.Fatalf("resource after race: %+v", row)
+	}
 	// Malformed: 400 without echo.
 	rec = do(t, h, http.MethodPut, "/api/v2/probe/created/new", `{"name":"x"}`, map[string]string{"If-None-Match": "not-a-tag"})
 	p := requireProblem(t, rec, TypeMalformedRequest)

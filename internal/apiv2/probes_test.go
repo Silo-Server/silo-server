@@ -224,6 +224,18 @@ func (s *guardedProbeStore) Create(id string, name string) (guardedProbeRow, err
 	return row, nil
 }
 
+// Upsert is the unconditional create-or-replace: it never fails on a race,
+// because a request that supplied no precondition has none to lose.
+func (s *guardedProbeStore) Upsert(id string, name string) guardedProbeRow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.rows[id]
+	row.Name = name
+	row.Version++
+	s.rows[id] = row
+	return row
+}
+
 func (s *guardedProbeStore) Delete(id string, expected int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -371,19 +383,25 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 			if p := EvaluateCreateOnly(in.IfNoneMatch, existing); p != nil {
 				return nil, p
 			}
-			var (
-				updated guardedProbeRow
-				err     error
-			)
-			if ok {
-				updated, err = store.Update(in.ID, row.Version, in.Body.Name)
+			var updated guardedProbeRow
+			if in.IfNoneMatch == "" {
+				// No precondition: an ordinary create-or-replace that no
+				// concurrent writer can make fail.
+				updated = store.Upsert(in.ID, in.Body.Name)
 			} else {
-				updated, err = store.Create(in.ID, in.Body.Name)
-			}
-			if err != nil {
-				// Lost the race with a concurrent writer at the same id.
-				latest, _ := store.Get(in.ID)
-				return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				// The precondition passed against the row read above; the
+				// write re-checks it atomically, and a writer that landed in
+				// between is the 412 the precondition exists to report.
+				var err error
+				if ok {
+					updated, err = store.Update(in.ID, row.Version, in.Body.Name)
+				} else {
+					updated, err = store.Create(in.ID, in.Body.Name)
+				}
+				if err != nil {
+					latest, _ := store.Get(in.ID)
+					return nil, StaleVersionProblem(RenderETag(latest.Version, guardedProbeScope))
+				}
 			}
 			return &guardedProbeWriteOutput{
 				ETag: RenderETag(updated.Version, guardedProbeScope).String(),

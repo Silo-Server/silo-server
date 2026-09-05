@@ -360,9 +360,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   output. Header fields count only as direct struct fields: Huma binds and writes no header
   from an embedded struct, so one declared there is refused rather than silently unsent. A
   guarded operation documents `412` and `428`, a required `If-Match` parameter, and the
-  `ETag` header on every `2xx` other than `204`; a conditional read documents `304` with
-  `ETag`; a create-only PUT documents `412`, an optional `If-None-Match` parameter and
-  `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
+  `ETag` header on every `2xx` other than `204` and on the `412`; a conditional read
+  documents `304` with `ETag`; a create-only PUT documents `412` with `ETag`, an optional
+  `If-None-Match` parameter and `ETag` on every `2xx`; each carries `x-silo-guarded` / `x-silo-conditional` /
   `x-silo-create-only` so a reader can enumerate them. The router joins repeated `If-Match`
   and `If-None-Match` lines into one comma-separated list before the input is bound (RFC
   9110 5.3), so a tag on a second line is evaluated, and rewrites a present but empty field
