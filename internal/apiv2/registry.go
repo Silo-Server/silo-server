@@ -336,6 +336,9 @@ func declaresHeader(t reflect.Type, name string) bool {
 			continue
 		}
 		if strings.EqualFold(f.Tag.Get("header"), name) {
+			// Any spelling counts here: this is the "must not declare" and
+			// "binds but not as a string" side, which wants to catch every
+			// variant.
 			return true
 		}
 	}
@@ -351,17 +354,20 @@ func declaresHeaderString(t reflect.Type, name string) bool {
 	if t == nil || t.Kind() != reflect.Struct {
 		return false
 	}
-	// Exactly one direct exported field may bind the header, and it must be
-	// a string: a second binding of another type would satisfy a "some
-	// string field" check while NotModified's SetString panics on it, and
-	// Huma would write whichever it visits last.
+	// Exactly one direct exported field may bind the header, it must be a
+	// string, and its tag must be spelled canonically: a second binding of
+	// another type would satisfy a "some string field" check while
+	// NotModified's SetString panics on it and Huma writes whichever it
+	// visits last; a case-variant spelling would survive into the response
+	// header map under that spelling, so the document's exact-key merge
+	// would add a second, case-equivalent OpenAPI header.
 	matches := 0
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		if f.Anonymous || !f.IsExported() || !strings.EqualFold(f.Tag.Get("header"), name) {
 			continue
 		}
-		if f.Type.Kind() != reflect.String {
+		if f.Type.Kind() != reflect.String || f.Tag.Get("header") != name {
 			return false
 		}
 		matches++
