@@ -727,7 +727,13 @@ Successful protected reads and mutations return the current ETag, except a prote
 whose bodyless `204` has no representation left to validate and carries none. First-party
 clients handle `412` by fetching the canonical representation and offering reload, comparison,
 or a deliberate overwrite. `If-None-Match: *` supports create-only semantics for client-selected resource IDs.
-Conditional reads may return `304`. V2 does not add a generic response-body revision; a body
+Conditional reads may return `304`. A response that carries an `ETag` is served identity-encoded
+whatever `Accept-Encoding` asked for: a strong validator names the representation data including
+its content coding (RFC 9110 8.8.1), so the listener's compression layer skips validator-bearing v2
+responses (`apiv2.IdentityEncoded`) rather than letting a gzip body and an identity body share one
+strong tag or rewriting the tag per coding. The tag a client received is therefore the tag it echoes
+in `If-Match` or `If-None-Match`, whichever coding it accepts; responses without a validator
+compress as usual. V2 does not add a generic response-body revision; a body
 revision exists only for a domain requirement such as capability invalidation or future offline
 synchronization. The implementation follows RFC 9110 parsing and precedence, including lists,
 optional whitespace, wildcard rules, and strong comparison, independent of Huma helper behavior.
