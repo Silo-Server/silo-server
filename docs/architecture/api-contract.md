@@ -357,12 +357,15 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   9110 13.2.2 evaluates after the first; an input that did not bind it would let the field
   be dropped and a forbidden write applied) or its output a string `header:"ETag"` (a
   guarded DELETE answers a bodyless `204` and nothing else: its output declares no `ETag`
-  of any type, no body, and no `Status`), when a conditional input does not bind
+  of any type, no body, and no `Status`, and its `DefaultStatus` is unset or `204`), when a
+  conditional input does not bind
   `header:"If-None-Match"` with a string `ETag` and an int `Status` on the output, and when a
   create-only input does not bind `header:"If-None-Match"` with a string `ETag` on the
   output. Header fields and the conditional `Status` count only as direct exported struct
-  fields: Huma binds and writes no header from an embedded struct or an unexported field,
-  so one declared either way is refused rather than silently unsent. A guarded handler
+  fields, and exactly one field may bind a given header: Huma binds and writes no header
+  from an embedded struct or an unexported field, and a second binding of another type
+  would be written last or panic the 304 path, so either shape is refused rather than
+  silently wrong. A guarded handler
   treats `If-Match: *` as a deliberate overwrite through the compare-and-update as well:
   a race lost to a writer who left the resource in place is retried against the latest
   version, however many writers land, with `If-None-Match` and the domain rule judged again

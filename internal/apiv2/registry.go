@@ -300,6 +300,12 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 			if _, ok := out.FieldByName("Status"); ok {
 				return fmt.Errorf("guarded delete: output must not declare Status; the only success is 204")
 			}
+			if op.DefaultStatus != 0 && op.DefaultStatus != http.StatusNoContent {
+				// Huma derives the success status from DefaultStatus when
+				// the output has no Status field; anything but 204 would be
+				// a representation-bearing success without a validator.
+				return fmt.Errorf("guarded delete: DefaultStatus must be unset or 204, not %d", op.DefaultStatus)
+			}
 		} else if !declaresHeaderString(out, etagField) {
 			return fmt.Errorf("guarded: output must declare a string field with `header:\"%s\"`", etagField)
 		}
@@ -345,16 +351,22 @@ func declaresHeaderString(t reflect.Type, name string) bool {
 	if t == nil || t.Kind() != reflect.Struct {
 		return false
 	}
+	// Exactly one direct exported field may bind the header, and it must be
+	// a string: a second binding of another type would satisfy a "some
+	// string field" check while NotModified's SetString panics on it, and
+	// Huma would write whichever it visits last.
+	matches := 0
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		if f.Anonymous || !f.IsExported() {
+		if f.Anonymous || !f.IsExported() || !strings.EqualFold(f.Tag.Get("header"), name) {
 			continue
 		}
-		if strings.EqualFold(f.Tag.Get("header"), name) && f.Type.Kind() == reflect.String {
-			return true
+		if f.Type.Kind() != reflect.String {
+			return false
 		}
+		matches++
 	}
-	return false
+	return matches == 1
 }
 
 // declaresPathParam reports whether a route path declares {name} as one whole

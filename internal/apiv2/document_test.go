@@ -597,6 +597,18 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 				return nil, nil
 			})
 		}, "If-None-Match"},
+		"conditional with a second typed ETag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*struct {
+				Status int
+				ETag   string `header:"ETag"`
+				Other  int    `header:"ETag"`
+			}, error) {
+				return nil, nil
+			})
+		}, "ETag"},
+		"guarded DELETE with DefaultStatus 200": {func() Operation { op := guarded(http.MethodDelete); op.DefaultStatus = http.StatusOK; return op }(), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
+		}, "DefaultStatus"},
 		"guarded DELETE with typed ETag": {guarded(http.MethodDelete), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*struct {
 				ETag int `header:"ETag"`
