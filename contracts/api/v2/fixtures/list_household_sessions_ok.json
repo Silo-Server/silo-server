@@ -25,7 +25,7 @@
       "position_seconds": 61.5,
       "is_paused": false,
       "has_playback_control": true,
-      "client_ip": "192.0.2.10",
+      "client_ip": "",
       "client_name": "Silo for Apple TV",
       "client_version": "1.4.0",
       "client_build": "1400",
