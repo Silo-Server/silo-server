@@ -30596,7 +30596,7 @@
         "path": "/api/v2/library-playback-prefs",
         "operation_id": "listLibraryPlaybackPreferences"
       },
-      "notes": "Section settings-prefs. The v1 {preferences:[...]} envelope became the standard {items:[...]} collection without pagination (the per-profile set is bounded by the library count; limit/offset are refused as unknown); library_id is a string ID (v1 int); an override the profile has not set is absent rather than null; instants are UTC ms."
+      "notes": "Section settings-prefs. The v1 {preferences:[...]} envelope became the standard {items:[...]} collection without pagination (the per-profile set is bounded by the library count; limit/offset are refused as unknown); library_id is a string ID (v1 int); an override the profile has not set is absent rather than null; instants are UTC ms. The list is assembled from the canonical profile_library setting rows (seam ListLibraryPlaybackPreferencesCanonical), one entry per library with at least one of the four keys set and updated_at the newest of its rows, not the legacy user_library_playback_preferences table v1 GET still lists: PUT /settings/values and the web library editor write only the canonical rows, so the legacy row can be stale. A library whose overrides exist only in the legacy row is not listed; every v1 PUT since the sync existed mirrors into canonical rows, so such rows are data written before the sync."
     },
     {
       "listener": "api",

@@ -51,7 +51,9 @@ func (f *fakeAudioPreferences) DeleteAudioPreference(_ context.Context, _ int, p
 
 // fakeLibraryPlaybackPreferences keeps one profile's library overrides and
 // refuses a library id outside known with 404 not_found, as the real seam
-// does through its library lookup.
+// does through its library lookup. Its listing stands in for the canonical
+// seam entry point (ListLibraryPlaybackPreferencesCanonical): the kept rows
+// are the assembled per-library canonical state, never the legacy table.
 type fakeLibraryPlaybackPreferences struct {
 	known map[int]bool
 	prefs []userstore.LibraryPlaybackPreference
@@ -59,7 +61,7 @@ type fakeLibraryPlaybackPreferences struct {
 	err   error
 }
 
-func (f *fakeLibraryPlaybackPreferences) ListLibraryPlaybackPreferences(_ context.Context, _ int, profileID string) ([]userstore.LibraryPlaybackPreference, error) {
+func (f *fakeLibraryPlaybackPreferences) ListLibraryPlaybackPreferencesCanonical(_ context.Context, _ int, profileID string) ([]userstore.LibraryPlaybackPreference, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -582,7 +584,7 @@ func TestUpdateLibraryPlaybackPreference(t *testing.T) {
 		t.Fatalf("null subtitle_mode = %+v", got.SubtitleMode)
 	}
 	// The row the seam keeps holds the untouched member alongside the patch.
-	rows, _ := library.ListLibraryPlaybackPreferences(context.Background(), 0, "p-owner")
+	rows, _ := library.ListLibraryPlaybackPreferencesCanonical(context.Background(), 0, "p-owner")
 	if rows[0].LibraryID != 1 || !rows[0].HasAudioLanguage || rows[0].AudioLanguage != "en" || rows[0].SubtitleLanguage != "fr" || rows[0].HasSubtitleMode || !rows[0].ShowForcedSubtitles {
 		t.Fatalf("row = %+v", rows[0])
 	}
@@ -592,7 +594,7 @@ func TestUpdateLibraryPlaybackPreference(t *testing.T) {
 	if rec.Code != 204 || !library.last.SubtitleLanguage.Present || library.last.SubtitleLanguage.Value != nil {
 		t.Fatalf("%d %+v", rec.Code, library.last.SubtitleLanguage)
 	}
-	rows, _ = library.ListLibraryPlaybackPreferences(context.Background(), 0, "p-owner")
+	rows, _ = library.ListLibraryPlaybackPreferencesCanonical(context.Background(), 0, "p-owner")
 	if rows[0].HasSubtitleLanguage {
 		t.Fatalf("\"\" left the override: %+v", rows[0])
 	}
@@ -607,7 +609,7 @@ func TestUpdateLibraryPlaybackPreference(t *testing.T) {
 		!library.last.ShowForcedSubtitles.Present || library.last.ShowForcedSubtitles.Value != nil {
 		t.Fatalf("%d %+v", rec.Code, library.last)
 	}
-	rows, _ = library.ListLibraryPlaybackPreferences(context.Background(), 0, "p-owner")
+	rows, _ = library.ListLibraryPlaybackPreferencesCanonical(context.Background(), 0, "p-owner")
 	if len(rows) != 1 || rows[0].LibraryID != 3 {
 		t.Fatalf("cleared row still listed: %+v", rows)
 	}

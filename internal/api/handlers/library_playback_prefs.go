@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -84,9 +85,9 @@ func (h *LibraryPlaybackPrefHandler) HandleListLibraryPlaybackPrefs(w http.Respo
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ListLibraryPlaybackPreferences is the listing v1 GET
-// /library-playback-prefs and v2 listLibraryPlaybackPreferences share. A
-// failure is an *APIError.
+// ListLibraryPlaybackPreferences is the listing behind v1 GET
+// /library-playback-prefs: the legacy user_library_playback_preferences rows
+// as stored. A failure is an *APIError.
 func (h *LibraryPlaybackPrefHandler) ListLibraryPlaybackPreferences(ctx context.Context, userID int, profileID string) ([]userstore.LibraryPlaybackPreference, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
@@ -97,6 +98,89 @@ func (h *LibraryPlaybackPrefHandler) ListLibraryPlaybackPreferences(ctx context.
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list library playback preferences")
 	}
 	return prefs, nil
+}
+
+// libraryPlaybackSettingKeys are the four canonical profile_library keys the
+// library playback preference is made of.
+var libraryPlaybackSettingKeys = map[string]bool{
+	settingskeys.PlaybackAudioLanguage:       true,
+	settingskeys.PlaybackSubtitleLanguage:    true,
+	settingskeys.PlaybackSubtitleMode:        true,
+	settingskeys.PlaybackShowForcedSubtitles: true,
+}
+
+// ListLibraryPlaybackPreferencesCanonical is the listing behind v2
+// listLibraryPlaybackPreferences. It assembles one preference per library
+// from the canonical profile_library setting rows — the rows playback
+// resolves and PUT /settings/values, the web library editor and
+// PatchLibraryPlaybackPreference write — so the list shows the current
+// overrides even when the legacy composite row is stale or missing. A
+// library appears when it has at least one of the four keys set; its
+// UpdatedAt is the newest of its rows. A library whose overrides exist only
+// in the legacy row does not appear: every legacy write since the sync
+// existed mirrors into canonical rows, so a legacy-only row is data written
+// before the sync and is not the current state. Libraries come back in
+// ascending id order, as the legacy listing does. A failure is an *APIError.
+func (h *LibraryPlaybackPrefHandler) ListLibraryPlaybackPreferencesCanonical(ctx context.Context, userID int, profileID string) ([]userstore.LibraryPlaybackPreference, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	// The per-user store bounds the read to one account; filtering the
+	// account's explicit values in Go avoids a per-library query and needs
+	// no library list up front (a resolution query requires the ids).
+	values, err := store.ListAllSettingValues(ctx)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list library playback preferences")
+	}
+	byLibrary := map[int]*userstore.LibraryPlaybackPreference{}
+	for _, v := range values {
+		if v.Scope != settingscontract.ScopeProfileLibrary || v.ProfileID != profileID || !libraryPlaybackSettingKeys[v.Key] {
+			continue
+		}
+		pref := byLibrary[v.LibraryID]
+		if pref == nil {
+			pref = &userstore.LibraryPlaybackPreference{ProfileID: profileID, LibraryID: v.LibraryID}
+			byLibrary[v.LibraryID] = pref
+		}
+		if err := setLibraryPlaybackMember(pref, v); err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list library playback preferences")
+		}
+		if v.UpdatedAt > pref.UpdatedAt {
+			pref.UpdatedAt = v.UpdatedAt
+		}
+	}
+	prefs := make([]userstore.LibraryPlaybackPreference, 0, len(byLibrary))
+	for _, pref := range byLibrary {
+		prefs = append(prefs, *pref)
+	}
+	sort.Slice(prefs, func(i, j int) bool { return prefs[i].LibraryID < prefs[j].LibraryID })
+	return prefs, nil
+}
+
+// setLibraryPlaybackMember decodes one canonical row into the member of pref
+// its key names.
+func setLibraryPlaybackMember(pref *userstore.LibraryPlaybackPreference, v userstore.SettingValue) error {
+	if v.Key == settingskeys.PlaybackShowForcedSubtitles {
+		if err := json.Unmarshal(v.Value, &pref.ShowForcedSubtitles); err != nil {
+			return fmt.Errorf("decoding %s: %w", v.Key, err)
+		}
+		pref.HasShowForcedSubtitles = true
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(v.Value, &s); err != nil {
+		return fmt.Errorf("decoding %s: %w", v.Key, err)
+	}
+	switch v.Key {
+	case settingskeys.PlaybackAudioLanguage:
+		pref.AudioLanguage, pref.HasAudioLanguage = s, true
+	case settingskeys.PlaybackSubtitleLanguage:
+		pref.SubtitleLanguage, pref.HasSubtitleLanguage = s, true
+	case settingskeys.PlaybackSubtitleMode:
+		pref.SubtitleMode, pref.HasSubtitleMode = s, true
+	}
+	return nil
 }
 
 // LibraryPlaybackPrefUpdate is the whole-row write v1 PUT

@@ -216,6 +216,86 @@ func TestPatchLibraryPlaybackPreferenceMergesOntoCanonicalRows(t *testing.T) {
 	}
 }
 
+// The v2 listing is assembled from the canonical profile_library rows: a
+// row written through the settings writer shows up with the legacy table
+// empty, and a legacy-only row (written before the sync existed) does not.
+func TestListLibraryPlaybackPreferencesCanonicalReadsSettingRows(t *testing.T) {
+	_, store := newValuesTestHandler(t)
+	handler := NewLibraryPlaybackPrefHandler(testUserStoreProvider{store: store})
+	ctx := context.Background()
+	const profileID = "profile-1"
+
+	canonical := func(libraryID int, key string, value string) {
+		t.Helper()
+		if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+			Key: key, Scope: settingscontract.ScopeProfileLibrary, ProfileID: profileID, LibraryID: libraryID,
+		}, []byte(value)); err != nil {
+			t.Fatalf("canonical write %s: %v", key, err)
+		}
+	}
+	canonical(9, settingskeys.PlaybackSubtitleLanguage, `"de"`)
+	canonical(9, settingskeys.PlaybackShowForcedSubtitles, `true`)
+	canonical(4, settingskeys.PlaybackSubtitleMode, `"off"`)
+	// Another profile's row and a profile_library key outside the four are
+	// not part of the preference.
+	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key: settingskeys.PlaybackAudioLanguage, Scope: settingscontract.ScopeProfileLibrary, ProfileID: "profile-2", LibraryID: 9,
+	}, []byte(`"fr"`)); err != nil {
+		t.Fatalf("other profile write: %v", err)
+	}
+	// A legacy-only row: written straight to the composite table, as data
+	// predating the canonical sync would be.
+	if err := store.UpsertLibraryPlaybackPreference(ctx, userstore.LibraryPlaybackPreference{
+		ProfileID: profileID, LibraryID: 2, AudioLanguage: "ja", HasAudioLanguage: true,
+	}); err != nil {
+		t.Fatalf("legacy write: %v", err)
+	}
+
+	got, err := handler.ListLibraryPlaybackPreferencesCanonical(ctx, 1, profileID)
+	if err != nil {
+		t.Fatalf("canonical list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("canonical list = %+v, want libraries 4 and 9", got)
+	}
+	if got[0].LibraryID != 4 || !got[0].HasSubtitleMode || got[0].SubtitleMode != "off" ||
+		got[0].HasAudioLanguage || got[0].HasSubtitleLanguage || got[0].HasShowForcedSubtitles {
+		t.Fatalf("library 4 = %+v", got[0])
+	}
+	if got[1].LibraryID != 9 || got[1].ProfileID != profileID || !got[1].HasSubtitleLanguage || got[1].SubtitleLanguage != "de" ||
+		!got[1].HasShowForcedSubtitles || !got[1].ShowForcedSubtitles || got[1].HasAudioLanguage || got[1].HasSubtitleMode {
+		t.Fatalf("library 9 = %+v", got[1])
+	}
+	for _, pref := range got {
+		if pref.UpdatedAt == "" {
+			t.Fatalf("library %d has no updated_at", pref.LibraryID)
+		}
+	}
+
+	// The v1 listing still reads the legacy table unchanged: it sees the
+	// legacy-only row and nothing of the canonical-only libraries.
+	legacy, err := handler.ListLibraryPlaybackPreferences(ctx, 1, profileID)
+	if err != nil {
+		t.Fatalf("legacy list: %v", err)
+	}
+	if len(legacy) != 1 || legacy[0].LibraryID != 2 || legacy[0].AudioLanguage != "ja" {
+		t.Fatalf("legacy list = %+v", legacy)
+	}
+
+	// A canonical clear drops the library from the list once no key is left.
+	for _, key := range []string{settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackShowForcedSubtitles} {
+		if _, err := store.DeleteSettingValue(ctx, userstore.SettingIdentity{
+			Key: key, Scope: settingscontract.ScopeProfileLibrary, ProfileID: profileID, LibraryID: 9,
+		}); err != nil {
+			t.Fatalf("clearing %s: %v", key, err)
+		}
+	}
+	got, err = handler.ListLibraryPlaybackPreferencesCanonical(ctx, 1, profileID)
+	if err != nil || len(got) != 1 || got[0].LibraryID != 4 {
+		t.Fatalf("after clear = %+v err=%v", got, err)
+	}
+}
+
 func libraryPrefHandlerPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

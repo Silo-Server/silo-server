@@ -960,7 +960,14 @@ override removes the row). The `PATCH` goes through its own seam entry point,
 `profile_library` setting rows — not the legacy composite row, which `PUT /settings/values` and
 the web library editor do not mirror into — inside one store transaction behind the per-user
 advisory lock, so an omitted member keeps a newer canonical write and concurrent patches of
-different members both land; v1 `PUT` keeps its whole-row replacement path unchanged. And
+different members both land; v1 `PUT` keeps its whole-row replacement path unchanged. For the
+same reason the v2 list reads through its own seam entry point,
+`ListLibraryPlaybackPreferencesCanonical`, which assembles one entry per library from the
+canonical `profile_library` rows (the four keys the patch writes; `updated_at` is the newest of
+them) rather than the legacy table v1 `GET` still lists, so the list matches what playback
+resolves. A library whose overrides exist only in the legacy row is not listed: canonical is
+the source of truth, and every v1 `PUT` since the sync existed mirrors into canonical rows, so a
+legacy-only row is data written before the sync. And
 a member the seam rejects
 (`audio_language` on audio, any of the four on the library patch, a non-integer `library_id`)
 is a `422` naming it where v1 answered `400`.

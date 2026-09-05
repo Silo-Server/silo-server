@@ -410,7 +410,7 @@ type SubtitlePreferenceService interface {
 // LibraryPlaybackPreferenceService is the slice of
 // *handlers.LibraryPlaybackPrefHandler the library preference operations use.
 type LibraryPlaybackPreferenceService interface {
-	ListLibraryPlaybackPreferences(ctx context.Context, userID int, profileID string) ([]userstore.LibraryPlaybackPreference, error)
+	ListLibraryPlaybackPreferencesCanonical(ctx context.Context, userID int, profileID string) ([]userstore.LibraryPlaybackPreference, error)
 	PatchLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int, patch handlers.LibraryPlaybackPrefPatch) error
 	DeleteLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int) error
 }

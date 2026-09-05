@@ -304,8 +304,13 @@ func (reg *Registry) deleteAudioPreference(ctx context.Context, in *AudioPrefere
 	return &struct{}{}, nil
 }
 
-// listLibraryPlaybackPreferences answers from the same listing v1 GET
-// /library-playback-prefs uses, as a standard unpaginated collection.
+// listLibraryPlaybackPreferences answers as a standard unpaginated
+// collection from the canonical profile_library setting rows — the state
+// playback resolves and PUT /settings/values, the web library editor and the
+// PATCH write — not the legacy composite row v1 GET /library-playback-prefs
+// lists, which those writers do not keep current. A library with overrides
+// only in the legacy row (written before the canonical sync existed) is not
+// listed.
 func (reg *Registry) listLibraryPlaybackPreferences(ctx context.Context, _ *struct{}) (*LibraryPlaybackPreferenceCollectionOutput, error) {
 	if reg.deps.LibraryPlaybackPreferences == nil {
 		return nil, unavailable("preference")
@@ -315,7 +320,7 @@ func (reg *Registry) listLibraryPlaybackPreferences(ctx context.Context, _ *stru
 	if claims == nil || profileID == "" {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	prefs, err := reg.deps.LibraryPlaybackPreferences.ListLibraryPlaybackPreferences(ctx, claims.UserID, profileID)
+	prefs, err := reg.deps.LibraryPlaybackPreferences.ListLibraryPlaybackPreferencesCanonical(ctx, claims.UserID, profileID)
 	if err != nil {
 		return nil, preferenceProblem(err)
 	}
