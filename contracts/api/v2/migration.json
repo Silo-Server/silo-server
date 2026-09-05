@@ -30407,7 +30407,7 @@
         "path": "/api/v2/libraries/{id}/providers",
         "operation_id": "getLibraryProviders"
       },
-      "notes": "Section catalog-libraries (acting_admin, demo-guarded). The levels map became an ordered array of {content_level, entries}; plugin_installation_id is a string ID."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). The levels map became an ordered array of {content_level, entries}; plugin_installation_id is a string ID. Legacy unlevelled rows (content_level '', kept by SyncBuiltinProviderChains on an upgraded database) are not exposed on v2; v1 still returns them under the empty key."
     },
     {
       "listener": "api",
@@ -30466,7 +30466,7 @@
         "path": "/api/v2/libraries/{id}/providers",
         "operation_id": "setLibraryProviders"
       },
-      "notes": "Section catalog-libraries (acting_admin, demo-guarded). The levels map became an array of {content_level, entries}; a repeated level or non-numeric plugin_installation_id is 422; same 204."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). The levels map became an array of {content_level, entries}; a repeated level or non-numeric plugin_installation_id is 422; same 204. content_level must be non-empty: the legacy unlevelled rows v2 does not expose are carried across a save unchanged rather than deleted."
     },
     {
       "listener": "api",

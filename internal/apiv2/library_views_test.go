@@ -103,6 +103,9 @@ func (f *fakeLibraryAdmin) LibraryProviders(_ context.Context, id int) (map[stri
 	if err := f.knownLibrary(id); err != nil {
 		return nil, err
 	}
+	if f.providers != nil {
+		return f.providers, nil
+	}
 	return map[string][]handlers.ChainLevelEntryView{
 		"movie": {{PluginInstallationID: 3, CapabilityID: "tmdb", ProviderSlug: "tmdb", Priority: 0, Enabled: true}},
 	}, nil
@@ -325,6 +328,34 @@ func TestLibraryProviders(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/libraries/1/providers", `{"levels":[{"content_level":"movie","entries":[]}],"extra":1}`, bearer(adminToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/9/providers", "", bearer(adminToken)), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(memberToken)), TypePermissionDenied)
+}
+
+// TestLibraryProvidersLegacyLevel: an upgraded database keeps unlevelled
+// (content_level empty) rows; v2 omits that level and a save of the remaining levels carries the
+// legacy rows across unchanged instead of dropping them.
+func TestLibraryProvidersLegacyLevel(t *testing.T) {
+	deps, fake := libraryDeps(t)
+	fake.providers = map[string][]handlers.ChainLevelEntryView{
+		"":      {{PluginInstallationID: 2, CapabilityID: "omdb", ProviderSlug: "omdb", Priority: 0, Enabled: false}},
+		"movie": {{PluginInstallationID: 3, CapabilityID: "tmdb", ProviderSlug: "tmdb", Priority: 0, Enabled: true}},
+	}
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
+	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true}]}]}`+"\n" {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPut, "/api/v2/libraries/1/providers", `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","priority":1,"enabled":true}]}]}`, bearer(adminToken))
+	if rec.Code != 204 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if len(fake.lastChain) != 2 || fake.lastChain["movie"][0].Priority != 1 {
+		t.Fatalf("chain = %+v", fake.lastChain)
+	}
+	if legacy := fake.lastChain[""]; len(legacy) != 1 || legacy[0].PluginInstallationID != 2 || legacy[0].CapabilityID != "omdb" || legacy[0].Enabled {
+		t.Fatalf("legacy rows = %+v", legacy)
+	}
+	// A client cannot address the legacy level itself.
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/libraries/1/providers", `{"levels":[{"content_level":"","entries":[]}]}`, bearer(adminToken)), TypeValidationFailed)
 }
 
 func posterForm(t *testing.T, field, contentType string, size int) (string, string) {

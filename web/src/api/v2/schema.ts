@@ -179,9 +179,9 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The library's metadata provider chain, per content level. */
+    /** The library's metadata provider chain, per content level. Legacy unlevelled rows (content_level '') that an upgraded database keeps are not exposed; setLibraryProviders preserves them. */
     get: operations["getLibraryProviders"];
-    /** Replace the library's whole provider chain and wake the matcher. */
+    /** Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers. */
     put: operations["setLibraryProviders"];
     post?: never;
     delete?: never;

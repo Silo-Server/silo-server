@@ -39,6 +39,8 @@ type fakeLibraryAdmin struct {
 	lastPosterType  string
 	lastPosterSize  int
 	lastChain       map[string][]handlers.ProviderChainEntryInput
+	// providers overrides the chain LibraryProviders answers when set.
+	providers map[string][]handlers.ChainLevelEntryView
 }
 
 func libraryFixture(id int, name string) handlers.LibraryView {
