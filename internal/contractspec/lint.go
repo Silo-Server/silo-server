@@ -19,6 +19,9 @@ const (
 	extClass          = "x-silo-class"
 	extDemoRestricted = "x-silo-demo-restricted"
 	extServiceBacked  = "x-silo-service-backed"
+	extGuarded        = "x-silo-guarded"
+	extConditional    = "x-silo-conditional"
+	extCreateOnly     = "x-silo-create-only"
 	extExtensionBag   = "x-silo-extension-bag"
 	// extRawHandshake marks a manual-registry route served outside Huma;
 	// its value is the protocol name.
@@ -99,6 +102,9 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 		lintRawHandshake(fail, where, class, raw, op)
 		return
 	}
+	guarded, _ := op.Extensions[extGuarded].(bool)
+	conditional, _ := op.Extensions[extConditional].(bool)
+	createOnly, _ := op.Extensions[extCreateOnly].(bool)
 	success := false
 	for status := range op.Responses {
 		if code, err := strconv.Atoi(status); err == nil && code >= 200 && code < 300 {
@@ -108,7 +114,7 @@ func lintStatuses(fail func(string, ...any), where, path string, op operation) {
 	if !success {
 		fail("%s: no success status is documented", where)
 	}
-	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"))
+	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"), guarded, conditional, createOnly)
 	for _, status := range implied {
 		if _, ok := op.Responses[strconv.Itoa(status)]; !ok {
 			fail("%s: status %d is implied by class %s but not documented", where, status, class)

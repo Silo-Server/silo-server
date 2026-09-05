@@ -64,3 +64,30 @@ Success returns `204 No Content`.
 The Jellyfin-compatibility listener does not expose password mutation. Jellyfin-compatible clients
 continue to authenticate with the account's current local password, while password management stays
 on Silo's native API.
+
+## Login sessions on v2
+
+`GET /api/v2/auth/sessions` lists the authenticated account's live login sessions, including
+sessions on its other devices. Authentication is required; no active profile is needed.
+Expired and revoked sessions are excluded before pagination.
+
+The response uses the v2 collection envelope: `items` and `page`. Each item contains `id`,
+`device_name`, `ip_address`, `created_at`, and `expires_at`. Timestamps use UTC with millisecond
+precision. There is no `revoked_at` member because every returned session is active.
+
+- `limit` defaults to 50 and accepts 1 through 200.
+- Results are ordered by `created_at` descending, then `id` descending.
+- Pass `page.next_cursor` unchanged as `cursor` to retrieve the next page. The cursor retains
+  the full stored timestamp precision and is bound to the account and operation.
+- `page.has_more` reports whether another page exists. The last page omits `next_cursor`.
+- `offset` and out-of-range limits return `422 validation_failed`; an invalid or mismatched
+  cursor returns `400 invalid_cursor`.
+
+`DELETE /api/v2/auth/sessions/{id}` revokes a session owned by the caller's account and returns
+`204 No Content`. A missing session or one owned by another account returns `404 not_found`.
+
+The `cleanup_auth_sessions` scheduled task deletes expired login-session rows at startup and
+once every 24 hours by default. Revoked sessions remain stored until their expiry passes. The v1
+session-list response shape and query remain unchanged, but expired rows disappear from that
+listing once cleanup deletes them. Jellyfin-compatible clients continue to use the shared login
+session validity checks; cleanup removes only sessions that have already expired.

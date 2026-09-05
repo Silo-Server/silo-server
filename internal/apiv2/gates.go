@@ -14,6 +14,14 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
 
+// Legacy v1 error codes the gates translate that have no v2 problem type of
+// their own (the others reuse the matching ProblemType's ID).
+const (
+	legacyForbiddenCode      = "forbidden"
+	legacyDemoRestrictedCode = "demo_restricted"
+	legacyBadRequestCode     = "bad_request"
+)
+
 // classGate composes the existing chi-style gates onto a Huma operation from
 // the class it declared. It runs first among the API middlewares so nothing
 // about an operation (media type, parameters, body) is judged before the
@@ -208,9 +216,9 @@ func (d *denialWriter) problem() *Problem {
 		// keeps a type of its own rather than collapsing into permission_denied.
 		p = NewProblem(TypeProfileVerificationRequired,
 			"The declared profile is locked; verify it and retry with X-Profile-Token.")
-	case "forbidden", "demo_restricted":
+	case legacyForbiddenCode, legacyDemoRestrictedCode:
 		p = NewProblem(TypePermissionDenied, safeDetail(legacy.Message, "The caller is not permitted to perform this operation."))
-	case "not_found":
+	case TypeNotFound.ID:
 		p = NewProblem(TypeNotFound, safeDetail(legacy.Message, "The requested resource does not exist."))
 	case "rate_limit_exceeded":
 		p = NewProblem(TypeRateLimited, "Too many requests; retry after the Retry-After delay.")
@@ -219,9 +227,9 @@ func (d *denialWriter) problem() *Problem {
 		} else {
 			p = p.WithRetryAfter(1)
 		}
-	case "bad_request":
+	case legacyBadRequestCode:
 		p = badRequestProblem(d.reason)
-	case "internal_error":
+	case TypeInternalError.ID:
 		p = NewProblem(TypeInternalError, "An unexpected error occurred.")
 	default:
 		if d.status >= 500 || d.status == 0 {

@@ -1,21 +1,23 @@
 {
   "items": [
     {
-      "id": "s1",
+      "id": "s3",
       "device_name": "Silo/1.0 (tvOS)",
       "ip_address": "127.0.0.1",
-      "created_at": "2026-01-02T03:04:05.678Z",
-      "expires_at": "2026-02-01T03:04:05.678Z",
-      "revoked_at": null
+      "created_at": "2026-01-02T04:04:05.678Z",
+      "expires_at": "2026-02-01T03:04:05.678Z"
     },
     {
-      "id": "s9",
-      "device_name": "",
-      "ip_address": "",
-      "created_at": "2026-01-02T03:04:05.678Z",
-      "expires_at": "2026-02-01T03:04:05.678Z",
-      "revoked_at": "2026-01-02T04:04:05.678Z"
+      "id": "s2",
+      "device_name": "Silo/1.0 (iOS)",
+      "ip_address": "127.0.0.2",
+      "created_at": "2026-01-02T04:04:05.678Z",
+      "expires_at": "2026-02-01T03:04:05.678Z"
     }
-  ]
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImMiOiIyMDI2LTAxLTAyVDA0OjA0OjA1LjY3OFoiLCJpIjoiczIifX0.4Hs93Cq23NS7iCdmu0Z0X3AR6nOoqqxR3grIEP3aWoI",
+    "has_more": true
+  }
 }
 

@@ -65,6 +65,26 @@ func editIndex(t *testing.T, m fstest.MapFS, edit func(fixtures []map[string]any
 	m["fixtures/index.json"] = &fstest.MapFile{Data: b}
 }
 
+// TestFixtureValidationAcceptsHeadFallback pins that a bodyless HEAD answer
+// from the router's operationless 404 fallback is a valid fixture: it names
+// no operation and no probe path, like the GET fallback fixture.
+func TestFixtureValidationAcceptsHeadFallback(t *testing.T) {
+	m := seededFixtures(t)
+	editIndex(t, m, func(f []map[string]any) []map[string]any {
+		for _, e := range f {
+			if e["name"] == "not_found" {
+				e["request"].(map[string]any)["method"] = "HEAD"
+				e["response_media_type"], e["schema"], e["body_file"] = nil, nil, nil
+			}
+		}
+		return f
+	})
+	delete(m, "fixtures/not_found.json")
+	if findings := ValidateFixtures(m, contracts.OpenAPI); len(findings) != 0 {
+		t.Fatalf("a bodyless HEAD 404 fallback fixture should validate, got:\n%s", strings.Join(findings, "\n"))
+	}
+}
+
 func TestFixtureValidationSeededFailures(t *testing.T) {
 	cases := []struct {
 		name string
@@ -114,6 +134,61 @@ func TestFixtureValidationSeededFailures(t *testing.T) {
 		{"unknown schema pointer", func(t *testing.T, m fstest.MapFS) {
 			editIndex(t, m, func(f []map[string]any) []map[string]any { f[0]["schema"] = "#/components/schemas/Nope"; return f })
 		}, "schema #/components/schemas/Nope"},
+		{"guarded 204 DELETE records an ETag", func(t *testing.T, m fstest.MapFS) {
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "guarded_delete_ok" {
+						e["response_headers"].(map[string]any)["ETag"] = `"stale"`
+					}
+				}
+				return f
+			})
+		}, "a guarded 204 DELETE fixture records an ETag"},
+		{"response headers spell ETag twice", func(t *testing.T, m fstest.MapFS) {
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "guarded_delete_ok" {
+						h := e["response_headers"].(map[string]any)
+						h["ETag"] = ""
+						h["etag"] = `"stale"`
+					}
+				}
+				return f
+			})
+		}, `response headers spell "ETag/etag" more than once`},
+		{"HEAD fixture with a body file", func(t *testing.T, m fstest.MapFS) {
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "get_system_info_ok" {
+						e["request"].(map[string]any)["method"] = "HEAD"
+					}
+				}
+				return f
+			})
+		}, "/body_file': got string, want null"},
+		{"guarded 204 DELETE records a lowercase etag", func(t *testing.T, m fstest.MapFS) {
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "guarded_delete_ok" {
+						e["response_headers"].(map[string]any)["etag"] = `"stale"`
+					}
+				}
+				return f
+			})
+		}, "a guarded 204 DELETE fixture records an ETag"},
+		{"HEAD 429 without Retry-After", func(t *testing.T, m fstest.MapFS) {
+			// A bodyless HEAD answer still owes its status-specific headers.
+			editIndex(t, m, func(f []map[string]any) []map[string]any {
+				for _, e := range f {
+					if e["name"] == "rate_limited" {
+						e["request"].(map[string]any)["method"] = "HEAD"
+						delete(e["response_headers"].(map[string]any), "Retry-After")
+						e["response_media_type"], e["schema"], e["body_file"] = nil, nil, nil
+					}
+				}
+				return f
+			})
+		}, "a 429 fixture must record Retry-After"},
 		{"429 without Retry-After", func(t *testing.T, m fstest.MapFS) {
 			editIndex(t, m, func(f []map[string]any) []map[string]any {
 				for _, e := range f {

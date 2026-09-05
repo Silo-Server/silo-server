@@ -272,7 +272,7 @@ func (f *fakeProfiles) DeleteProfile(_ context.Context, cmd handlers.ProfileDele
 		return &handlers.APIError{Status: http.StatusConflict, Code: "primary_profile_protected", Message: "The primary profile cannot be deleted. Delete the user account instead."}
 	}
 	if cmd.ProfileID != f.view.ID {
-		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+		return &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found"}
 	}
 	return nil
 }
@@ -291,7 +291,7 @@ func (f *fakeProfiles) VerifyPIN(_ context.Context, cmd handlers.ProfileVerifyPI
 		return handlers.ProfileVerification{}, f.err
 	}
 	if cmd.ProfileID != f.view.ID {
-		return handlers.ProfileVerification{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found or has no PIN"}
+		return handlers.ProfileVerification{}, &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found or has no PIN"}
 	}
 	if cmd.PIN != "1234" {
 		return handlers.ProfileVerification{Valid: false}, nil
@@ -309,7 +309,7 @@ func (f *fakeProfiles) UploadAvatar(_ context.Context, up handlers.ProfileAvatar
 		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Avatar upload storage is not configured"}
 	}
 	if up.ProfileID != f.view.ID {
-		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found"}
 	}
 	if len(data) > 10<<20 {
 		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: "Avatar must be under 10 MB"}
@@ -328,7 +328,7 @@ func (f *fakeProfiles) DeleteAvatar(_ context.Context, _ int, profileID string) 
 		return handlers.ProfileView{}, f.err
 	}
 	if profileID != f.view.ID {
-		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: TypeNotFound.ID, Message: "Profile not found"}
 	}
 	return f.view, nil
 }
@@ -634,6 +634,10 @@ func fixtureDevices() fakeDevices {
 // fakeSessionService stands in for the login-session seam on
 // *handlers.AuthHandler.
 type fakeSessionService struct {
+	// sessions overrides the default live-session set; pageCalls records
+	// every ListSessionsPage query.
+	sessions  []*models.AuthSession
+	pageCalls []sessionPageQuery
 	// loggedOut, ended and revoked record the session ids the calls received.
 	loggedOut []string
 	ended     []string
@@ -699,15 +703,47 @@ func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.
 	return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "invalid_token", Message: "Invalid or expired refresh token"}
 }
 
-func (f *fakeSessionService) ListSessions(_ context.Context, userID int) ([]*models.AuthSession, error) {
-	if f.err != nil {
-		return nil, f.err
+// sessionPageQuery records one ListSessionsPage call.
+type sessionPageQuery struct {
+	After *auth.SessionKey
+	Limit int
+}
+
+// liveSessions is the fake's live-session set: three rows, newest first by
+// (created_at DESC, id DESC), with s3 and s2 sharing a created_at so the id
+// tiebreaker is exercised. The store's own filters (expired, revoked) are
+// modeled by simply not holding such rows.
+func (f *fakeSessionService) liveSessions(userID int) []*models.AuthSession {
+	if f.sessions != nil {
+		return f.sessions
 	}
-	revoked := fixedTime().Add(time.Hour)
+	expires := fixedTime().Add(30 * 24 * time.Hour)
 	return []*models.AuthSession{
-		{ID: "s1", UserID: userID, DeviceName: "Silo/1.0 (tvOS)", IPAddress: "127.0.0.1", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(30 * 24 * time.Hour)},
-		{ID: "s9", UserID: userID, DeviceName: "", IPAddress: "", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(30 * 24 * time.Hour), RevokedAt: &revoked},
-	}, nil
+		{ID: "s3", UserID: userID, DeviceName: "Silo/1.0 (tvOS)", IPAddress: "127.0.0.1", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
+		{ID: "s2", UserID: userID, DeviceName: "Silo/1.0 (iOS)", IPAddress: "127.0.0.2", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
+		{ID: "s1", UserID: userID, DeviceName: "", IPAddress: "", CreatedAt: fixedTime(), ExpiresAt: expires},
+	}
+}
+
+// ListSessionsPage applies the keyset the way SessionRepository.ListByUserPage
+// does: rows strictly after (created_at, id) in descending order, limit rows,
+// and has_more when one more follows.
+func (f *fakeSessionService) ListSessionsPage(_ context.Context, userID int, after *auth.SessionKey, limit int) ([]*models.AuthSession, bool, error) {
+	f.pageCalls = append(f.pageCalls, sessionPageQuery{After: after, Limit: limit})
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	var page []*models.AuthSession
+	for _, s := range f.liveSessions(userID) {
+		if after != nil && !s.CreatedAt.Before(after.CreatedAt) && (!s.CreatedAt.Equal(after.CreatedAt) || s.ID >= after.ID) {
+			continue
+		}
+		page = append(page, s)
+	}
+	if len(page) > limit {
+		return page[:limit], true, nil
+	}
+	return page, false, nil
 }
 
 func (f *fakeSessionService) RevokeSession(_ context.Context, sessionID string, _ int) error {

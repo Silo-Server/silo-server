@@ -352,7 +352,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the caller's login sessions, active and revoked. */
+    /** List the caller's live login sessions, newest first. */
     get: operations["listSessions"];
     put?: never;
     post?: never;
@@ -1256,12 +1256,6 @@ export interface components {
        * @example 203.0.113.7
        */
       ip_address: string;
-      /**
-       * Format: date-time
-       * @description When the session was revoked; null while it is active
-       * @example 2026-01-03T03:04:05.678Z
-       */
-      revoked_at: string | null;
     };
     LoginSessionCollection: {
       /** @description The page's items; empty, never null */
@@ -4646,7 +4640,12 @@ export interface operations {
   };
   listSessions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
       header?: never;
       path?: never;
       cookie?: never;

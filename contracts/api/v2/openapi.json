@@ -1111,19 +1111,6 @@
               "203.0.113.7"
             ],
             "type": "string"
-          },
-          "revoked_at": {
-            "description": "When the session was revoked; null while it is active",
-            "examples": [
-              "2026-01-03T03:04:05.678Z"
-            ],
-            "format": "date-time",
-            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
-            "patternDescription": "a non-zero RFC 3339 instant",
-            "type": [
-              "string",
-              "null"
-            ]
           }
         },
         "required": [
@@ -1131,8 +1118,7 @@
           "device_name",
           "ip_address",
           "created_at",
-          "expires_at",
-          "revoked_at"
+          "expires_at"
         ],
         "type": "object"
       },
@@ -6343,6 +6329,38 @@
     "/api/v2/auth/sessions": {
       "get": {
         "operationId": "listSessions",
+        "parameters": [
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJjIjoiMjAyNi0wMS0wMlQwMzowNDowNS42NzhaIiwiaSI6InMxIn0"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6430,7 +6448,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List the caller's login sessions, active and revoked.",
+        "summary": "List the caller's live login sessions, newest first.",
         "tags": [
           "auth"
         ],

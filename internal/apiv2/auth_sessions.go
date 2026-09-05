@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
@@ -55,18 +58,32 @@ type RefreshSessionOutput struct {
 	Body RefreshedTokens
 }
 
-// LoginSession is one login session of the caller's account.
+// LoginSession is one live login session of the caller's account.
 type LoginSession struct {
-	ID         ID              `json:"id" doc:"Session identifier; the value deleteSession takes" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
-	DeviceName string          `json:"device_name" doc:"User-Agent recorded at login; empty when none was sent" example:"Silo/1.0 (tvOS)"`
-	IPAddress  string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown" example:"203.0.113.7"`
-	CreatedAt  Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
-	ExpiresAt  Instant         `json:"expires_at" example:"2026-02-01T03:04:05.678Z"`
-	RevokedAt  NullableInstant `json:"revoked_at" doc:"When the session was revoked; null while it is active" example:"2026-01-03T03:04:05.678Z"`
+	ID         ID      `json:"id" doc:"Session identifier; the value deleteSession takes" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
+	DeviceName string  `json:"device_name" doc:"User-Agent recorded at login; empty when none was sent" example:"Silo/1.0 (tvOS)"`
+	IPAddress  string  `json:"ip_address" doc:"Client address recorded at login; empty when unknown" example:"203.0.113.7"`
+	CreatedAt  Instant `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
+	ExpiresAt  Instant `json:"expires_at" example:"2026-02-01T03:04:05.678Z"`
 }
 
-// LoginSessionCollection is the listSessions response: every session of the
-// account, not paginated.
+// LoginSessionListInput is the listSessions query.
+type LoginSessionListInput struct {
+	LimitParam
+	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJjIjoiMjAyNi0wMS0wMlQwMzowNDowNS42NzhaIiwiaSI6InMxIn0"`
+}
+
+// loginSessionPosition is the cursor payload: the keyset (created_at, id) of
+// the last session the previous page emitted. created_at is carried at full
+// precision (RFC 3339 with nanoseconds) so the store resumes strictly after
+// the row it names; equal timestamps are ordered by the unique id.
+type loginSessionPosition struct {
+	CreatedAt string `json:"c"`
+	ID        string `json:"i"`
+}
+
+// LoginSessionCollection is the listSessions response: one page of the
+// account's live sessions, newest first.
 type LoginSessionCollection struct {
 	Collection[LoginSession]
 }
@@ -138,7 +155,11 @@ const pluginCookiePath = Prefix + "/plugins"
 // opSignup is the signup operation id and its v1 rate limit bucket.
 const opSignup = "signup"
 
+// opListSessions is the operation id; the cursor scope is bound to it.
+const opListSessions = "listSessions"
+
 func registerAuthSessions(reg *Registry) {
+	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/auth/providers", "listAuthProviders", "auth",
 			"List the sign-in providers a client may offer."),
@@ -151,10 +172,12 @@ func registerAuthSessions(reg *Registry) {
 	refresh.Errors = []int{http.StatusUnauthorized}
 	Register(reg, Operation{Operation: refresh, Class: ClassPublic, ServiceBacked: true}, reg.refreshSession)
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions", "listSessions", "auth",
-			"List the caller's login sessions, active and revoked."),
+		Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions", opListSessions, "auth",
+			"List the caller's live login sessions, newest first."),
 		Class: ClassAuthenticated, ServiceBacked: true,
-	}, reg.listSessions)
+	}, func(ctx context.Context, in *LoginSessionListInput) (*LoginSessionCollectionOutput, error) {
+		return reg.listSessions(ctx, cursors, in)
+	})
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
 	del.Errors = []int{http.StatusNotFound}
@@ -218,7 +241,11 @@ func (reg *Registry) refreshSession(ctx context.Context, in *RefreshSessionInput
 	return &RefreshSessionOutput{Body: RefreshedTokens{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}}, nil
 }
 
-func (reg *Registry) listSessions(ctx context.Context, _ *struct{}) (*LoginSessionCollectionOutput, error) {
+// listSessions pages the caller's live sessions by keyset. Unlike v1 GET
+// /auth/sessions, which returns every retained row, expired and revoked
+// sessions are excluded: they are not something the caller can act on, and
+// the retained set is unbounded until retention deletes them.
+func (reg *Registry) listSessions(ctx context.Context, cursors *Cursors, in *LoginSessionListInput) (*LoginSessionCollectionOutput, error) {
 	if reg.deps.Sessions == nil {
 		return nil, unavailable(loginDomain)
 	}
@@ -226,19 +253,41 @@ func (reg *Registry) listSessions(ctx context.Context, _ *struct{}) (*LoginSessi
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	sessions, err := reg.deps.Sessions.ListSessions(ctx, claims.UserID)
+	scope := CursorScope{
+		OperationID: opListSessions,
+		Security:    strconv.Itoa(claims.UserID),
+		Sort:        "-created_at,-id",
+		Tiebreaker:  "id",
+	}
+	var after *auth.SessionKey
+	if in.Cursor != "" {
+		var pos loginSessionPosition
+		if p := cursors.Decode(scope, in.Cursor, &pos); p != nil {
+			return nil, p
+		}
+		createdAt, err := time.Parse(time.RFC3339Nano, pos.CreatedAt)
+		if err != nil {
+			return nil, NewProblem(TypeInvalidCursor, "The cursor is malformed, tampered with, or belongs to a different query.")
+		}
+		after = &auth.SessionKey{CreatedAt: createdAt, ID: pos.ID}
+	}
+	sessions, hasMore, err := reg.deps.Sessions.ListSessionsPage(ctx, claims.UserID, after, in.Limit)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	next := ""
+	if hasMore && len(sessions) > 0 {
+		last := sessions[len(sessions)-1]
+		next, err = cursors.Encode(scope, loginSessionPosition{CreatedAt: last.CreatedAt.UTC().Format(time.RFC3339Nano), ID: last.ID})
+		if err != nil {
+			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+		}
+	}
 	items := make([]LoginSession, 0, len(sessions))
 	for _, s := range sessions {
-		item := LoginSession{ID: ID(s.ID), DeviceName: s.DeviceName, IPAddress: s.IPAddress, CreatedAt: NewInstant(s.CreatedAt), ExpiresAt: NewInstant(s.ExpiresAt)}
-		if s.RevokedAt != nil {
-			item.RevokedAt = NullableInstant{Valid: true, Time: NewInstant(*s.RevokedAt)}
-		}
-		items = append(items, item)
+		items = append(items, LoginSession{ID: ID(s.ID), DeviceName: s.DeviceName, IPAddress: s.IPAddress, CreatedAt: NewInstant(s.CreatedAt), ExpiresAt: NewInstant(s.ExpiresAt)})
 	}
-	return &LoginSessionCollectionOutput{Body: LoginSessionCollection{NewCollection(items)}}, nil
+	return &LoginSessionCollectionOutput{Body: LoginSessionCollection{Collection: Paginated(items, next)}}, nil
 }
 
 func (reg *Registry) deleteSession(ctx context.Context, in *DeleteSessionInput) (*struct{}, error) {

@@ -612,6 +612,12 @@ func (s *Service) GetSessions(ctx context.Context, userID int) ([]*models.AuthSe
 	return s.sessions.ListByUser(ctx, userID)
 }
 
+// GetSessionsPage returns one keyset page of the user's live sessions; see
+// SessionRepository.ListByUserPage.
+func (s *Service) GetSessionsPage(ctx context.Context, userID int, after *SessionKey, limit int) ([]*models.AuthSession, error) {
+	return s.sessions.ListByUserPage(ctx, userID, after, limit)
+}
+
 // RevokeSession revokes a specific session. It verifies the session belongs
 // to the given user before revoking.
 func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID int) error {

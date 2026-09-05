@@ -2437,6 +2437,7 @@ func main() {
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
 		taskMgr.Register(tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo))
+		taskMgr.Register(tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)))
 		var diagnosticsStore diagnostics.ObjectStore
 		if deps.S3Private != nil {
 			diagnosticsStore = diagnostics.NewS3ObjectStore(deps.S3Private)

@@ -60,14 +60,30 @@ func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (Refresh
 	return RefreshedTokensView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}, nil
 }
 
-// ListSessions lists the caller's login sessions. v1 GET /auth/sessions and
-// v2 listSessions both call it.
+// ListSessions lists every retained login session of the caller, active,
+// revoked and expired alike. v1 GET /auth/sessions calls it.
 func (h *AuthHandler) ListSessions(ctx context.Context, userID int) ([]*models.AuthSession, error) {
 	sessions, err := h.service.GetSessions(ctx, userID)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 	return sessions, nil
+}
+
+// ListSessionsPage is the keyset listing v2 listSessions serves: up to limit
+// of the caller's live sessions (not expired, not revoked), newest first by
+// (created_at DESC, id DESC) and strictly after the key; the bool reports
+// whether at least one more follows. The repository applies every filter
+// before the limit, so has_more is decided on rows the page could emit.
+func (h *AuthHandler) ListSessionsPage(ctx context.Context, userID int, after *auth.SessionKey, limit int) ([]*models.AuthSession, bool, error) {
+	sessions, err := h.service.GetSessionsPage(ctx, userID, after, limit+1)
+	if err != nil {
+		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	if len(sessions) > limit {
+		return sessions[:limit], true, nil
+	}
+	return sessions, false, nil
 }
 
 // RevokeSession revokes one of the caller's sessions. v1 DELETE
