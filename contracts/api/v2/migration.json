@@ -40369,13 +40369,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/settings/plugins/{installation_id}",
+        "operation_id": "updatePluginSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil; deps.PluginUserConfig != nil && deps.PluginService != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, profile optional, demo-restricted). Same {values} body, a declared extension bag of strings the plugin's schema keys; the plugin's own refusal is a 422 at body.values (v1: 400). The write answers 200 with the same {installation, values} document getPluginSettings serves (v1: 204). Installation id is a string ID; one that names nothing, numeric or not, is a 404 (v1: 400 for a non-numeric id)."
     },
     {
       "listener": "api",
@@ -40440,13 +40440,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/subtitle-appearance/effective",
+        "operation_id": "getEffectiveSubtitleAppearance"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped). Same ten members and the same X-Silo-Device-Id/-Name/-Platform headers v1 reads, declared as optional parameters with v1's length clamps as bounds (over-long is a 422, v1 truncated); profile_id is a string ID and updated_at an instant (omitted when the store's text form does not parse). Path uses subtitle-appearance. Also the response of updateSubtitleAppearanceDeviceOverride."
     },
     {
       "listener": "api",
@@ -40492,13 +40492,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/values",
+        "operation_id": "listSettingValues"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped). keys is a repeated query parameter (v1: one comma-separated value); scope is a required enum parameter and the profile_id/device_id/library_id/series_id identity members keep their v1 names, with library ids as string IDs on both sides. The v1 {values:[...], revision} envelope becomes the collection envelope {items:[...], revision}, unpaginated (bounded by the requested keys). A key the contract does not define is a 422 at query.keys (v1: 404 unknown_setting); every seam refusal of a request member is a 422 at its declared location (v1: 400)."
     },
     {
       "listener": "api",
@@ -40574,13 +40574,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/values/effective",
+        "operation_id": "listEffectiveSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped). Same resolution order and effective value shape as internal/settingsresolve (value, source, constraint members, definition_revision, winning-row scope members); keys, library_ids and series_ids are repeated query parameters (v1: comma-separated), library ids are string IDs, updated_at is an instant. The v1 {settings:[...], revision} envelope becomes {items:[...], revision}. A key the contract does not define is a 422 at query.keys (v1: 404 unknown_setting)."
     },
     {
       "listener": "api",
@@ -40626,13 +40626,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/settings/values/effective",
+        "operation_id": "resolveEffectiveSettings"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped). Same {keys, contexts:[{context_id, library_id | series_id}]} body with library_id as a string ID (v1 also accepted a JSON number), strict unknown-field rejection, and keys/contexts required and non-empty at the schema (v1: 400 from the handler). The v1 {contexts:[...], revision} envelope becomes {items:[{context_id, settings:[...]}], revision}. A key the contract does not define is a 422 at body.keys (v1: 404 unknown_setting)."
     },
     {
       "listener": "api",
@@ -40696,13 +40696,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/settings/values/nav.shortcuts/item",
+        "operation_id": "updateNavigationShortcut"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, demo-restricted). Same {item, present} desired-state list mutation on the acting profile's nav.shortcuts; item is a declared extension bag whose members the contract's navigation-shortcuts.json schema fixes, present is required at the schema (v1: 400 present is required). Answers the stored document as a SettingValue, as v1. The X-Silo-Mutation-Id idempotent replay is not carried; it lands with the foundation mutation-retry work."
     },
     {
       "listener": "api",
@@ -40783,13 +40783,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "DELETE",
+        "path": "/api/v2/settings/values/{key}",
+        "operation_id": "deleteSettingValue"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, demo-restricted). Same scope/identity query parameters and device/client-family headers as v1; 204 on success and 404 when nothing is stored at the scope, as v1. A key the contract does not define, and the nav.shortcuts whole-document refusal, are 422s at path.key (v1: 404 unknown_setting and 400 atomic_update_required)."
     },
     {
       "listener": "api",
@@ -40835,13 +40835,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/settings/values/{key}",
+        "operation_id": "getSettingValue"
       },
-      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped). Same scope/identity query parameters and device/client-family headers as v1 and the same row shape (key, scope, identity members, value, revision, updated_at) with profile and library ids as string IDs and updated_at as an instant; 404 when nothing is stored at the scope, as v1. A key the contract does not define is a 422 at path.key (v1: 404 unknown_setting); a rejected scope, header or identity member is a 422 at its declared location (v1: 400)."
     },
     {
       "listener": "api",
@@ -40922,13 +40922,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "PUT",
+        "path": "/api/v2/settings/values/{key}",
+        "operation_id": "updateSettingValue"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; settingsHandler != nil; settingValuesHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Settings (profile_scoped, demo-restricted). Same {value} body, validated and normalized against the key's value_schema by the seam (a refusal is a 422 at body.value; v1: 400 invalid_value), and the same stored-row answer as getSettingValue. A key the contract does not define, and the nav.shortcuts whole-document refusal, are 422s at path.key (v1: 404 and 400). The X-Silo-Mutation-Id idempotent replay is not carried; it lands with the foundation mutation-retry work."
     },
     {
       "listener": "api",
