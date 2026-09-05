@@ -157,6 +157,7 @@ type Entry struct {
 	ProfileRequired   bool       `json:"profile_required"`
 	AdminRequired     bool       `json:"admin_required"`
 	ConsumerCallSites []CallSite `json:"consumer_call_sites"`
+	Section           string     `json:"section"`
 	Disposition       string     `json:"disposition"`
 	DispositionRule   string     `json:"disposition_rule"`
 	Owner             *string    `json:"owner"`
