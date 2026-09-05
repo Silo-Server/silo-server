@@ -1217,6 +1217,10 @@
       "request": {
         "method": "POST",
         "path": "/api/v2/auth/device/start",
+        "headers": {
+          "X-Forwarded-Host": "silo.example.test",
+          "X-Forwarded-Proto": "https"
+        },
         "body": "{\"device_name\":\"Living room TV\",\"device_platform\":\"tvos\"}"
       },
       "expected_status": 201,

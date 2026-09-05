@@ -475,7 +475,7 @@ func (f *fakeSessionService) ListSessions(_ context.Context, userID int) ([]*mod
 	}
 	revoked := fixedTime().Add(time.Hour)
 	return []*models.AuthSession{
-		{ID: "s1", UserID: userID, DeviceName: "Silo/1.0 (tvOS)", IPAddress: "203.0.113.7", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(30 * 24 * time.Hour)},
+		{ID: "s1", UserID: userID, DeviceName: "Silo/1.0 (tvOS)", IPAddress: "127.0.0.1", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(30 * 24 * time.Hour)},
 		{ID: "s9", UserID: userID, DeviceName: "", IPAddress: "", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(30 * 24 * time.Hour), RevokedAt: &revoked},
 	}, nil
 }

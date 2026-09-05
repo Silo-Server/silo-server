@@ -41,7 +41,7 @@ func TestListAndDeleteSessions(t *testing.T) {
 	deps.Sessions = sessions
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/auth/sessions", "", bearer(memberToken))
-	want := `{"items":[{"id":"s1","device_name":"Silo/1.0 (tvOS)","ip_address":"203.0.113.7","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","revoked_at":null},{"id":"s9","device_name":"","ip_address":"","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","revoked_at":"2026-01-02T04:04:05.678Z"}]}` + "\n"
+	want := `{"items":[{"id":"s1","device_name":"Silo/1.0 (tvOS)","ip_address":"127.0.0.1","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","revoked_at":null},{"id":"s9","device_name":"","ip_address":"","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","revoked_at":"2026-01-02T04:04:05.678Z"}]}` + "\n"
 	if rec.Code != 200 || rec.Body.String() != want {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
