@@ -33580,7 +33580,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authMiddleware != nil; deps.Notifications != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "unique_constraint"
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "The signing secret is shown once, in the creating response, so a retry after that response is lost finds or rejects the row but cannot recover the secret; the client must rotate. The v2 port must keep a replayable creation result until first read, or accept this as one-shot."
     },
     {
       "listener": "api",
@@ -38511,7 +38512,7 @@
       },
       "notes": "Conditionally registered: authMiddleware != nil; requestHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
       "retry_safety": "unique_constraint",
-      "retry_safety_note": "idx_media_requests_active_tmdb: one active request per title; a duplicate resolves to the active request."
+      "retry_safety_note": "DEFECT: idx_media_requests_active_tmdb is partial (outcome active, not completed), so once the first request reaches a terminal state a retry deletes the failed row, mints a fresh id, and re-notifies and re-submits. The v2 port must key on an immutable client request identity across terminal states."
     },
     {
       "listener": "api",
@@ -48962,7 +48963,7 @@
       },
       "notes": "v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described in the manual registry, not aliased under /api/v2.",
       "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by the session_id the API server minted; a retry replaces the half-started session under the same id."
+      "retry_safety_note": "DEFECT: keyed by the API-minted session_id, but handleStart closes any existing session under that id, discards its segments, and starts a replacement, so a retry after a lost response interrupts a playable stream. The v2 port must return the identical active generation instead of replacing it."
     },
     {
       "listener": "transcode_node",

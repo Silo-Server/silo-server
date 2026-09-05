@@ -431,8 +431,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 224
   tier-1 ported mutation rows (218 distinct operations) are classified (129
-  `natural_idempotent`, 29 `unique_constraint`, 15 `domain_identity`, 10 `coalescing`, 8
-  `durable_dispatch`, 27 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `natural_idempotent`, 28 `unique_constraint`, 15 `domain_identity`, 10 `coalescing`, 8
+  `durable_dispatch`, 28 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual
   group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
@@ -445,7 +445,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   pause and resume, whose delayed retry reverts the newer state), a fresh server-side cutoff a retry would move (history remove,
   mark-unwatched), an external call made before any durable claim (provider device-auth
   start), a one-shot token-bearing or secret-bearing response that cannot be replayed
-  (device-pairing poll, OAuth completion, API-key creation), an unconditional repoint of
+  (device-pairing poll, OAuth completion, API-key and webhook creation), an unconditional
+  repoint of
   cluster-wide state (policy version activation, whose stale retry restores an obsolete
   policy), or a one-shot destructive allowance a retry would re-arm (empty-root cleanup
   confirmation), a
@@ -456,7 +457,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   (email-address verification; favorites, watchlist, and rating add and remove, and the
   taste seed, whose store converges but whose provider dispatch or recommendation refresh
   fires unconditionally) name the outbox or change-gated claim the v2 port must add before
-  their retry is safe. Twenty-six rows carry a `DEFECT` note where v1 gates on
+  their retry is safe. Twenty-eight rows carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
   sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
@@ -464,9 +465,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   watch-together selection and promotion, metadata-match-queue retry, playback session
   progress, sync progress, download status, ebook reader progress, and onboarding progress,
   whose last-write-wins update lets a delayed retry rewind a newer report, favorites,
-  watchlist, and rating add and remove, the taste seed, and subtitle download and upload,
+  watchlist, and rating add and remove, the taste seed, subtitle download and upload,
   whose unique key resolves a retry but whose losing insert deletes the winner's S3
-  object); their v2 port must move the gate
+  object, transcode start, which replaces a live session under the same id, and media
+  request creation, whose partial unique index stops covering a request once it reaches a
+  terminal state); their v2 port must move the gate
   to shared durable state, add the missing unique constraint or event time, gate the
   dispatch on a reported change, or make the repeat a no-op before the declared strategy
   holds.
