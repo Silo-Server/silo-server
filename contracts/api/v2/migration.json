@@ -28456,13 +28456,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/home/sections",
+        "operation_id": "listHomeSections"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-home (profile_scoped). Same body as v1 with each card as the shared CatalogItem; image_size is a strict enum answered 422."
     },
     {
       "listener": "api",
@@ -28527,13 +28527,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/home/sections/{id}/items",
+        "operation_id": "getHomeSectionItems"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-home (profile_scoped). Answers the Section itself rather than v1's {section} wrapper; image_size is a strict enum answered 422."
     },
     {
       "listener": "api",
@@ -39373,13 +39373,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/sections/recipes",
+        "operation_id": "listSectionRecipes"
       },
-      "notes": "Conditionally registered: authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-home (profile_scoped). categories is an ordered array of {category, recipes} rather than v1's map keyed by category; hidden is never emitted; preset default_params is the section-config extension bag and description_long is always present."
     },
     {
       "listener": "api",
@@ -39432,13 +39432,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/sections/recipes/{type}/candidates",
+        "operation_id": "listSectionRecipeCandidates"
       },
-      "notes": "Conditionally registered: authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section catalog-home (profile_scoped). Same body; subtitle is always present (empty when none) and an unknown recipe type is a not_found problem."
     },
     {
       "listener": "api",
