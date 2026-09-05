@@ -621,7 +621,7 @@ export interface components {
     };
     LibraryPlaybackPreference: {
       /**
-       * @description Audio language override (ISO 639-1); empty means none
+       * @description Audio language override (BCP 47 language tag); empty means none
        * @example en
        */
       audio_language?: string;
@@ -638,7 +638,7 @@ export interface components {
       /** @example false */
       show_forced_subtitles?: boolean;
       /**
-       * @description Subtitle language override (ISO 639-1); empty means none
+       * @description Subtitle language override (BCP 47 language tag); empty means none
        * @example en
        */
       subtitle_language?: string;
@@ -662,7 +662,7 @@ export interface components {
     };
     LibraryPlaybackPreferenceUpdate: {
       /**
-       * @description Audio language override (ISO 639-1); null or empty clears it
+       * @description Audio language override (BCP 47 language tag); null or empty clears it
        * @example en
        */
       audio_language?: string | null;
@@ -672,7 +672,7 @@ export interface components {
        */
       show_forced_subtitles?: boolean | null;
       /**
-       * @description Subtitle language override (ISO 639-1); null or empty clears it
+       * @description Subtitle language override (BCP 47 language tag); null or empty clears it
        * @example en
        */
       subtitle_language?: string | null;

@@ -120,8 +120,8 @@ type SubtitlePreferenceOutput struct {
 type LibraryPlaybackPreference struct {
 	ProfileID           ID      `json:"profile_id" example:"p-1"`
 	LibraryID           ID      `json:"library_id" example:"1"`
-	AudioLanguage       *string `json:"audio_language,omitempty" nullable:"false" doc:"Audio language override (ISO 639-1); empty means none" example:"en"`
-	SubtitleLanguage    *string `json:"subtitle_language,omitempty" nullable:"false" doc:"Subtitle language override (ISO 639-1); empty means none" example:"en"`
+	AudioLanguage       *string `json:"audio_language,omitempty" nullable:"false" doc:"Audio language override (BCP 47 language tag); empty means none" example:"en"`
+	SubtitleLanguage    *string `json:"subtitle_language,omitempty" nullable:"false" doc:"Subtitle language override (BCP 47 language tag); empty means none" example:"en"`
 	SubtitleMode        *string `json:"subtitle_mode,omitempty" nullable:"false" doc:"Subtitle mode override. Canonical values: auto, always, off; empty means none" example:"auto"`
 	ShowForcedSubtitles *bool   `json:"show_forced_subtitles,omitempty" nullable:"false" example:"false"`
 	UpdatedAt           Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
@@ -150,8 +150,8 @@ type LibraryPlaybackPreferenceInput struct {
 // unchanged; explicit null (or "" on a string member) clears that override;
 // a value sets it. Clearing every override removes the library's row.
 type LibraryPlaybackPreferenceUpdate struct {
-	AudioLanguage       Patch[string] `json:"audio_language,omitzero" doc:"Audio language override (ISO 639-1); null or empty clears it" example:"en"`
-	SubtitleLanguage    Patch[string] `json:"subtitle_language,omitzero" doc:"Subtitle language override (ISO 639-1); null or empty clears it" example:"en"`
+	AudioLanguage       Patch[string] `json:"audio_language,omitzero" doc:"Audio language override (BCP 47 language tag); null or empty clears it" example:"en"`
+	SubtitleLanguage    Patch[string] `json:"subtitle_language,omitzero" doc:"Subtitle language override (BCP 47 language tag); null or empty clears it" example:"en"`
 	SubtitleMode        Patch[string] `json:"subtitle_mode,omitzero" doc:"Subtitle mode override: auto, always or off; null or empty clears it" example:"always"`
 	ShowForcedSubtitles Patch[bool]   `json:"show_forced_subtitles,omitzero" doc:"Forced-subtitle override; null clears it" example:"true"`
 }

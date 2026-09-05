@@ -645,7 +645,7 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Audio language override (ISO 639-1); empty means none",
+            "description": "Audio language override (BCP 47 language tag); empty means none",
             "examples": [
               "en"
             ],
@@ -674,7 +674,7 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Subtitle language override (ISO 639-1); empty means none",
+            "description": "Subtitle language override (BCP 47 language tag); empty means none",
             "examples": [
               "en"
             ],
@@ -729,7 +729,7 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Audio language override (ISO 639-1); null or empty clears it",
+            "description": "Audio language override (BCP 47 language tag); null or empty clears it",
             "examples": [
               "en"
             ],
@@ -749,7 +749,7 @@
             ]
           },
           "subtitle_language": {
-            "description": "Subtitle language override (ISO 639-1); null or empty clears it",
+            "description": "Subtitle language override (BCP 47 language tag); null or empty clears it",
             "examples": [
               "en"
             ],
