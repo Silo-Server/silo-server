@@ -68,7 +68,9 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   shouldLoad: boolean;
 }) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
-  const loaded = loadedUrl === slide.backdrop_url;
+  // Keep the browser's loaded image visible while a refreshed URL is pending.
+  // Distant slides retain their loaded source until they become a neighbor.
+  const imageUrl = shouldLoad ? slide.backdrop_url : loadedUrl;
   const thumbhash = slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
 
   return (
@@ -85,15 +87,15 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
           : undefined
       }
     >
-      {slide.backdrop_url && (shouldLoad || loaded) && (
+      {slide.backdrop_url && imageUrl && (
         <img
-          src={slide.backdrop_url}
+          src={imageUrl}
           alt=""
           fetchPriority={isActive ? "high" : "low"}
           className={cn(
             "h-full w-full object-cover object-[center_20%] transition-opacity duration-(--duration-slow)",
             isActive && "will-change-transform",
-            loaded ? "opacity-100" : "opacity-0",
+            loadedUrl ? "opacity-100" : "opacity-0",
           )}
           style={{
             animation: keepsMotion
@@ -102,7 +104,7 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
             filter:
               "brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))",
           }}
-          onLoad={() => setLoadedUrl(slide.backdrop_url)}
+          onLoad={() => setLoadedUrl(imageUrl)}
         />
       )}
     </div>

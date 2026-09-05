@@ -292,6 +292,37 @@ describe("HeroBanner", () => {
     expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-9.jpg"]);
   });
 
+  it.each([0, 1])("keeps loaded slide %i visible while its URL refreshes", (index) => {
+    const slides = Array.from({ length: 10 }, (_, index) =>
+      movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+    );
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <HeroBanner items={slides} />
+      </MemoryRouter>,
+    );
+    const image = container.querySelector(`img[src="/movie-${index}.jpg"]`)!;
+    expect(image).toHaveClass("opacity-0");
+    fireEvent.load(image);
+    expect(image).toHaveClass("opacity-100");
+
+    rerender(
+      <MemoryRouter>
+        <HeroBanner
+          items={slides.map((slide, slideIndex) =>
+            slideIndex === index ? { ...slide, backdrop_url: "/refreshed.jpg" } : slide,
+          )}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector('img[src="/refreshed.jpg"]')).toBe(image);
+    expect(image).toHaveClass("opacity-100");
+    fireEvent.load(image);
+    expect(image).toHaveClass("opacity-100");
+    expect(container.querySelectorAll("img")).toHaveLength(3);
+  });
+
   it("does not eagerly load a replacement URL on a distant loaded slide", () => {
     const slides = Array.from({ length: 10 }, (_, index) =>
       movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
@@ -301,7 +332,8 @@ describe("HeroBanner", () => {
         <HeroBanner items={slides} />
       </MemoryRouter>,
     );
-    fireEvent.load(container.querySelector('img[src="/movie-9.jpg"]')!);
+    const image = container.querySelector('img[src="/movie-9.jpg"]')!;
+    fireEvent.load(image);
     fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
     rerender(
       <MemoryRouter>
@@ -314,11 +346,15 @@ describe("HeroBanner", () => {
     );
 
     expect(container.querySelector('img[src="/replacement.jpg"]')).toBeNull();
+    expect(container.querySelector('img[src="/movie-9.jpg"]')).toBe(image);
     fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
     const replacement = container.querySelector('img[src="/replacement.jpg"]');
-    expect(replacement).toHaveClass("opacity-0");
+    expect(replacement).toBe(image);
+    expect(replacement).toHaveClass("opacity-100");
     fireEvent.load(replacement!);
     expect(replacement).toHaveClass("opacity-100");
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    expect(container.querySelector('img[src="/replacement.jpg"]')).toBe(image);
   });
 
   it("does not retain outgoing backdrop motion for reduced motion", () => {
