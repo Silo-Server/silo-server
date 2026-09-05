@@ -39,12 +39,38 @@ func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (use
 		return store, err
 	}
 	tracked := &interestTrackingStore{UserStore: store, userID: userID, system: p.system, updater: p.system.Interest}
-	// Preserve the interface upgrades callers probe for. Both are conditional
+	// Preserve the interface upgrades callers probe for. These are conditional
 	// on the backing store: advertising a capability it does not have would
 	// send callers down a fast path that can only fail.
 	registry, hasDevices := store.(userstore.DeviceRegistry)
 	rollup, hasRollup := store.(userstore.SeriesEpisodeRollupStore)
+	completion, hasCompletion := store.(userstore.EpisodeParentCompletionStore)
 	switch {
+	case hasDevices && hasRollup && hasCompletion:
+		return &interestTrackingStoreWithDevicesRollupAndCompletion{
+			interestTrackingStoreWithDevicesAndRollup: &interestTrackingStoreWithDevicesAndRollup{
+				interestTrackingStore: tracked, DeviceRegistry: registry, SeriesEpisodeRollupStore: rollup,
+			},
+			EpisodeParentCompletionStore: completion,
+		}, nil
+	case hasDevices && hasCompletion:
+		return &interestTrackingStoreWithDevicesAndCompletion{
+			interestTrackingStoreWithDevices: &interestTrackingStoreWithDevices{
+				interestTrackingStore: tracked, DeviceRegistry: registry,
+			},
+			EpisodeParentCompletionStore: completion,
+		}, nil
+	case hasRollup && hasCompletion:
+		return &interestTrackingStoreWithRollupAndCompletion{
+			interestTrackingStoreWithRollup: &interestTrackingStoreWithRollup{
+				interestTrackingStore: tracked, SeriesEpisodeRollupStore: rollup,
+			},
+			EpisodeParentCompletionStore: completion,
+		}, nil
+	case hasCompletion:
+		return &interestTrackingStoreWithCompletion{
+			interestTrackingStore: tracked, EpisodeParentCompletionStore: completion,
+		}, nil
 	case hasDevices && hasRollup:
 		return &interestTrackingStoreWithDevicesAndRollup{
 			interestTrackingStore:    tracked,
@@ -100,6 +126,28 @@ type interestTrackingStoreWithDevicesAndRollup struct {
 	userstore.SeriesEpisodeRollupStore
 }
 
+// Completion reads also need catalog tables, so preserve this capability only
+// for supporting backends while retaining all mutation hooks on the base wrapper.
+type interestTrackingStoreWithCompletion struct {
+	*interestTrackingStore
+	userstore.EpisodeParentCompletionStore
+}
+
+type interestTrackingStoreWithDevicesAndCompletion struct {
+	*interestTrackingStoreWithDevices
+	userstore.EpisodeParentCompletionStore
+}
+
+type interestTrackingStoreWithRollupAndCompletion struct {
+	*interestTrackingStoreWithRollup
+	userstore.EpisodeParentCompletionStore
+}
+
+type interestTrackingStoreWithDevicesRollupAndCompletion struct {
+	*interestTrackingStoreWithDevicesAndRollup
+	userstore.EpisodeParentCompletionStore
+}
+
 var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStore)(nil)
 var _ userstore.SettingMutationTransactioner = (*interestTrackingStore)(nil)
 var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStoreWithDevices)(nil)
@@ -110,9 +158,9 @@ var _ userstore.SettingMutationTransactioner = (*interestTrackingStoreWithDevice
 // needs an explicit forward below; the assertions make a missing one a compile
 // error instead of a silent production slowdown.
 //
-// SeriesEpisodeRollupStore is deliberately absent here: it is conditional on
-// the backing store, so it lives on the wrapper types above rather than being
-// forwarded unconditionally.
+// SeriesEpisodeRollupStore and EpisodeParentCompletionStore are conditional
+// on the backing store, so they live on the wrapper types above rather than
+// being forwarded unconditionally.
 var _ userstore.WatchedBatchWriter = (*interestTrackingStore)(nil)
 var _ userstore.VisibleHistoryAdder = (*interestTrackingStore)(nil)
 var _ userstore.HistoryVisibilityStore = (*interestTrackingStore)(nil)
@@ -122,6 +170,11 @@ var _ userstore.HistoryVisibilityStore = (*interestTrackingStoreWithDevices)(nil
 var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithRollup)(nil)
 var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithDevicesAndRollup)(nil)
 var _ userstore.DeviceRegistry = (*interestTrackingStoreWithDevicesAndRollup)(nil)
+
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithCompletion)(nil)
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithDevicesAndCompletion)(nil)
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithRollupAndCompletion)(nil)
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithDevicesRollupAndCompletion)(nil)
 
 // WithPreferenceSettingsTransaction preserves the optional atomic-settings
 // capability of the wrapped store. Preference writes do not affect interest
