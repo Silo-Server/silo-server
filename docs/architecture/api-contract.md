@@ -954,7 +954,8 @@ v1 clients store; v1 accepted any negative) and refuse unknown members; the
 every member optional and are shared by the read and write bodies; the library list is the
 standard `{items: [...]}` collection without pagination instead of v1's `{preferences: [...]}`,
 with `library_id` as a string `ID`; the library `PUT` became a `PATCH` (omitted unchanged, `null`
-clears the override so it is absent from the list, clearing every override removes the row). The `PATCH` goes through its own seam entry point,
+or `""` on a string member clears the override so it is absent from the list, clearing every
+override removes the row). The `PATCH` goes through its own seam entry point,
 `PatchLibraryPlaybackPreference`, which merges the present members onto the canonical
 `profile_library` setting rows — not the legacy composite row, which `PUT /settings/values` and
 the web library editor do not mirror into — inside one store transaction behind the per-user

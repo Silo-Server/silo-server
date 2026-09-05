@@ -30734,7 +30734,7 @@
         "path": "/api/v2/library-playback-prefs/{library_id}",
         "operation_id": "updateLibraryPlaybackPreference"
       },
-      "notes": "Section settings-prefs. v1 PUT became PATCH: an omitted member is unchanged, explicit null clears that override, and clearing every override removes the row; the seam merges the present members onto the canonical profile_library setting rows inside one transaction behind the per-user advisory lock, so an omitted member keeps a newer /settings/values write and concurrent patches of different members both land; answers 204 as v1; a non-integer library_id is 422 at path.library_id (v1 400), an unknown library 404; a subtitle_mode outside auto/always/off or a value the canonical contract rejects is 422 at body.<member> (v1 400)."
+      "notes": "Section settings-prefs. v1 PUT became PATCH: an omitted member is unchanged, explicit null (or \"\" on a string member) clears that override, and clearing every override removes the row; the seam merges the present members onto the canonical profile_library setting rows inside one transaction behind the per-user advisory lock, so an omitted member keeps a newer /settings/values write and concurrent patches of different members both land; answers 204 as v1; a non-integer library_id is 422 at path.library_id (v1 400), an unknown library 404; a subtitle_mode outside auto/always/off or a value the canonical contract rejects is 422 at body.<member> (v1 400)."
     },
     {
       "listener": "api",

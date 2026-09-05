@@ -146,8 +146,8 @@ type LibraryPlaybackPreferenceInput struct {
 
 // LibraryPlaybackPreferenceUpdate is the updateLibraryPlaybackPreference
 // body: a partial update of the four overrides. An omitted member is
-// unchanged; explicit null clears that override; a value sets it. Clearing
-// every override removes the library's row.
+// unchanged; explicit null (or "" on a string member) clears that override;
+// a value sets it. Clearing every override removes the library's row.
 type LibraryPlaybackPreferenceUpdate struct {
 	AudioLanguage       Patch[string] `json:"audio_language,omitzero" doc:"Audio language override (ISO 639-1); null or empty clears it" example:"en"`
 	SubtitleLanguage    Patch[string] `json:"subtitle_language,omitzero" doc:"Subtitle language override (ISO 639-1); null or empty clears it" example:"en"`
@@ -501,8 +501,9 @@ func (reg *Registry) deleteSubtitlePreference(ctx context.Context, in *SubtitleP
 // which merges them onto the current canonical rows inside one locked
 // transaction, so an omitted member keeps whatever /settings/values or the
 // web library editor last wrote and two patches of different members both
-// land. null clears a member, and clearing every override removes the row.
-// It answers 204 as v1 does; an unknown library is 404.
+// land. null and "" both clear a string member (the contract documents both
+// spellings), and clearing every override removes the row. It answers 204
+// as v1 does; an unknown library is 404.
 func (reg *Registry) updateLibraryPlaybackPreference(ctx context.Context, in *LibraryPlaybackPreferenceUpdateInput) (*struct{}, error) {
 	if reg.deps.LibraryPlaybackPreferences == nil {
 		return nil, unavailable("preference")
@@ -516,12 +517,12 @@ func (reg *Registry) updateLibraryPlaybackPreference(ctx context.Context, in *Li
 	if p != nil {
 		return nil, p
 	}
-	// A present member replaces the stored override; null is no override at
-	// all (a nil member), so a body that clears every override reaches the
-	// seam's row-removal path rather than storing empty strings.
+	// A present member replaces the stored override; null or "" is no
+	// override at all (a nil member), never the seam's empty-string spelling,
+	// which the legacy row would keep and the list would still show.
 	clearable := func(p Patch[string]) handlers.PrefPatch[string] {
 		out := handlers.PrefPatch[string]{Present: p.Present}
-		if p.Present && !p.Null {
+		if p.Present && !p.Null && p.Value != "" {
 			out.Value = ptr(p.Value)
 		}
 		return out

@@ -586,9 +586,20 @@ func TestUpdateLibraryPlaybackPreference(t *testing.T) {
 	if rows[0].LibraryID != 1 || !rows[0].HasAudioLanguage || rows[0].AudioLanguage != "en" || rows[0].SubtitleLanguage != "fr" || rows[0].HasSubtitleMode || !rows[0].ShowForcedSubtitles {
 		t.Fatalf("row = %+v", rows[0])
 	}
-	// Nulling every override reaches the seam with every member present and
-	// empty, its row-removal form, and the row leaves the list.
-	rec = do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{"audio_language":null,"subtitle_language":null,"subtitle_mode":null,"show_forced_subtitles":null}`, owner)
+	// "" clears a string member exactly as null does, as the contract
+	// documents; the member is present with no value.
+	rec = do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{"subtitle_language":""}`, owner)
+	if rec.Code != 204 || !library.last.SubtitleLanguage.Present || library.last.SubtitleLanguage.Value != nil {
+		t.Fatalf("%d %+v", rec.Code, library.last.SubtitleLanguage)
+	}
+	rows, _ = library.ListLibraryPlaybackPreferences(context.Background(), 0, "p-owner")
+	if rows[0].HasSubtitleLanguage {
+		t.Fatalf("\"\" left the override: %+v", rows[0])
+	}
+	// Clearing every override — null or "" alike — reaches the seam with
+	// every member present and empty, its row-removal form, and the row
+	// leaves the list.
+	rec = do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{"audio_language":"","subtitle_language":null,"subtitle_mode":"","show_forced_subtitles":null}`, owner)
 	if rec.Code != 204 || library.last == nil ||
 		!library.last.AudioLanguage.Present || library.last.AudioLanguage.Value != nil ||
 		!library.last.SubtitleLanguage.Present || library.last.SubtitleLanguage.Value != nil ||
