@@ -594,7 +594,7 @@ func (e *Env) guardScratchDatabase() {
 		// ratelimit.* keys are budgets the server seeds on startup, and
 		// ratelimit.auth.password_change.* would otherwise match `password`.
 		{"non-fixture server settings", "server_settings",
-			"(key !~ '^ratelimit\\.' AND key ~ '(secret|password|api_key|access_key|token_secret|jwt)' AND value <> '') OR (key = 'branding.server_name' AND value <> $1)",
+			"(key NOT LIKE 'ratelimit.%' AND key ~ '(secret|password|api_key|access_key|token_secret|jwt)' AND value <> '') OR (key = 'branding.server_name' AND value <> $1)",
 			[]any{serverName}},
 	}
 	var found []string
