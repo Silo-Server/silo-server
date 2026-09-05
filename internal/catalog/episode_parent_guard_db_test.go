@@ -63,6 +63,7 @@ func TestEpisodeParentGuardTracksCatalogMutations(t *testing.T) {
 	check(2)
 	exec(`DELETE FROM episode_libraries WHERE episode_id=$1 AND media_folder_id=$2`, episodeID, folderID)
 	check(1)
-	exec(`DELETE FROM episodes WHERE content_id=$1`, episodeID)
+	// Parent deletion exercises the supported cascade that removes episodes.
+	exec(`DELETE FROM media_items WHERE content_id=$1`, seriesID)
 	check(0)
 }
