@@ -1887,6 +1887,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if progressHandler != nil {
 		v2deps.Progress = progressHandler
 	}
+	if personalDataHandler != nil {
+		v2deps.History = personalDataHandler
+	}
+	if itemsHandler != nil {
+		v2deps.Watch = itemsHandler
+	}
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
 	}
@@ -1897,6 +1903,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if adminHandler != nil {
 		v2deps.AdminUsers = adminHandler
+	}
+	if libraryHandler != nil {
+		v2deps.LibraryAdmin = libraryHandler
+	}
+	if sectionHandler != nil {
+		v2deps.LibrarySections = sectionHandler
+	}
+	if libraryCollectionHandler != nil {
+		v2deps.LibraryCollections = libraryCollectionHandler
 	}
 	if sectionHandler != nil {
 		v2deps.ProfileSections = sectionHandler

@@ -1,0 +1,15 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The collection's query definition could not be run; see errors.",
+  "instance": "urn:silo:request:000000000000000000000043",
+  "errors": [
+    {
+      "location": "path.collection_id",
+      "code": "invalid",
+      "detail": "validating smart collection query definition: unknown filter"
+    }
+  ]
+}
+

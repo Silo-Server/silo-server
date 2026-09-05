@@ -523,17 +523,6 @@ export interface CreateHistoryImportMappingRequest {
   silo_profile_id: string;
 }
 
-export type HistoryRemovalScope = "item" | "show";
-
-export interface HistoryRemovalTargetRequest {
-  content_id: string;
-  scope: HistoryRemovalScope;
-}
-
-export interface RemoveHistoryRequest {
-  targets: HistoryRemovalTargetRequest[];
-}
-
 export interface UpdateHistoryImportMappingRequest {
   silo_user_id?: number;
   silo_profile_id?: string;
@@ -3183,41 +3172,6 @@ export interface LibraryMetadataMatchQueueStatus {
   parked_count: number;
 }
 
-export interface LibraryMovieMatchQueueEntry {
-  media_file_id: number;
-  media_folder_id: number;
-  file_path: string;
-  first_queued_at: string;
-  available_at: string;
-  last_attempted_at?: string;
-  attempt_count: number;
-  last_error?: string;
-  state: "pending" | "parked";
-  failure_kind?: string;
-  failure_detail?: LibraryMetadataMatchFailureDetail;
-  deterministic_attempt_count: number;
-  matcher_revision: number;
-  parked_at?: string;
-  updated_at: string;
-}
-
-export interface LibrarySeriesMatchQueueEntry {
-  media_folder_id: number;
-  observed_root_path: string;
-  first_queued_at: string;
-  available_at: string;
-  last_attempted_at?: string;
-  attempt_count: number;
-  last_error?: string;
-  state: "pending" | "parked";
-  failure_kind?: string;
-  failure_detail?: LibraryMetadataMatchFailureDetail;
-  deterministic_attempt_count: number;
-  matcher_revision: number;
-  parked_at?: string;
-  updated_at: string;
-}
-
 export interface LibraryMetadataMatchFailureDetail {
   message?: string;
   decision?: {
@@ -3235,37 +3189,6 @@ export interface LibraryMetadataMatchFailureDetail {
     }>;
   };
   [key: string]: unknown;
-}
-
-export interface LibraryRawMatchBacklogEntry {
-  media_file_id: number;
-  media_folder_id: number;
-  file_path: string;
-  base_title?: string;
-  base_year?: number;
-  base_type?: string;
-  last_attempted_at?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface LibraryMetadataMatchQueueDetail extends LibraryMetadataMatchQueueStatus {
-  limit: number;
-  offset: number;
-  movies: LibraryMovieMatchQueueEntry[];
-  series: LibrarySeriesMatchQueueEntry[];
-  raw_files: LibraryRawMatchBacklogEntry[];
-}
-
-export interface LibraryMetadataMatchQueueActionResponse {
-  status: "queued" | "cancelled";
-  library_id: number;
-  movie_cancelled?: number;
-  series_cancelled?: number;
-  raw_file_cancelled?: number;
-  raw_file_retried?: number;
-  total_cancelled?: number;
-  queue: LibraryMetadataMatchQueueStatus;
 }
 
 export interface LibrarySkippedRoot {
@@ -3312,11 +3235,6 @@ export interface LibraryRoot {
   content_id?: string;
 }
 
-export interface LibraryRootsResponse {
-  items: LibraryRoot[];
-  total: number;
-}
-
 export interface UpsertLibraryRootOverrideRequest extends LibraryRootOverride {
   library_id: number;
   root_path: string;
@@ -3351,8 +3269,6 @@ export interface CreateLibraryRequest {
   intro_detection_enabled?: boolean;
   trailer_kinds?: string[];
 }
-
-export interface UpdateLibraryRequest extends Partial<CreateLibraryRequest> {}
 
 export interface ScanRequest {
   library_id?: number;
@@ -4065,19 +3981,6 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
-}
-
-// Progress entry from GET /progress
-export interface ProgressEntry {
-  media_item_id: string;
-  position_seconds: number;
-  duration_seconds: number;
-  completed: boolean;
-  updated_at: string;
-}
-
-export interface ProgressListResponse {
-  progress: ProgressEntry[];
 }
 
 // Sections
@@ -5157,11 +5060,6 @@ export interface UnmatchedLibraryItem {
   library_id: number;
   library_name: string;
   status: string;
-}
-
-export interface UnmatchedLibraryItemsResponse {
-  items: UnmatchedLibraryItem[];
-  total: number;
 }
 
 export interface FilesystemBrowseEntry {

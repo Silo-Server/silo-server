@@ -3,12 +3,12 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "The request did not pass validation; see errors.",
-  "instance": "urn:silo:request:000000000000000000000027",
+  "instance": "urn:silo:request:000000000000000000000058",
   "errors": [
     {
       "location": "body.avatar",
       "code": "invalid",
-      "detail": "Invalid mime type: got image/gif, expected image/jpeg,image/png,image/webp"
+      "detail": "expected a part of media type image/jpeg, image/png, image/webp"
     }
   ]
 }

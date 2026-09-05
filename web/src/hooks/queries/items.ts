@@ -14,6 +14,8 @@ import type {
   ItemSplitResponse,
   WatchDetail,
 } from "@/api/types";
+import { v2 } from "@/api/v2/request";
+import { watchDetailFromV2 } from "@/api/v2/watch";
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
 import {
@@ -38,11 +40,15 @@ export async function fetchWatchDetail(
   libraryId?: number,
   options?: RequestInit,
 ): Promise<WatchDetail> {
-  const searchParams = new URLSearchParams();
-  if (fileId != null) searchParams.set("fileId", String(fileId));
-  if (libraryId != null) searchParams.set("library_id", String(libraryId));
-  const query = searchParams.toString();
-  return api<WatchDetail>(`/watch/${itemPathID(id)}${query ? `?${query}` : ""}`, options);
+  const detail = await v2("GET /api/v2/watch/{id}", {
+    path: { id },
+    query: {
+      file_id: fileId != null ? String(fileId) : undefined,
+      library_id: libraryId != null ? String(libraryId) : undefined,
+    },
+    signal: options?.signal ?? undefined,
+  });
+  return watchDetailFromV2(detail);
 }
 
 export function useWatchDetail(id: string | undefined, fileId?: number, libraryId?: number) {
@@ -293,15 +299,14 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
 
   return useMutation({
     mutationFn: (nextPlayed: boolean) =>
-      api(`/watched/${itemPathID(item.content_id)}`, {
-        method: nextPlayed ? "POST" : "DELETE",
-        // Marking a series expands to every episode server-side. keepalive
-        // lets the browser finish the request after a navigation or tab close,
-        // so a large series no longer depends on the user staying on the page.
-        // The server applies the mark in one transaction, so a request that
-        // never arrives leaves nothing marked rather than a partial subset.
-        keepalive: true,
-      }),
+      // Marking a series expands to every episode server-side. keepalive
+      // lets the browser finish the request after a navigation or tab close,
+      // so a large series no longer depends on the user staying on the page.
+      // The server applies the mark in one transaction, so a request that
+      // never arrives leaves nothing marked rather than a partial subset.
+      nextPlayed
+        ? v2("POST /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true })
+        : v2("DELETE /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true }),
     onMutate: async (nextPlayed: boolean) => {
       await cancelItemDetailQueries(queryClient, item.content_id);
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({

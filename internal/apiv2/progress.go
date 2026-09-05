@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -55,6 +56,36 @@ type ProgressCollection struct {
 	Collection[ProgressEntry]
 }
 
+// ProgressSyncItem is one progress write of a sync batch.
+type ProgressSyncItem struct {
+	MediaItemID    ID       `json:"media_item_id" minLength:"1" doc:"The catalog item" example:"movie-8f2c1a"`
+	PositionMs     int64    `json:"position_ms" minimum:"0" doc:"Playback position in milliseconds" example:"1325500"`
+	DurationMs     int64    `json:"duration_ms" minimum:"0" doc:"Known runtime in milliseconds; 0 when unknown" example:"5400000"`
+	ForceOverwrite bool     `json:"force_overwrite,omitempty" doc:"Write the position as given instead of merging it with the stored one" example:"false"`
+	UpdatedAt      *Instant `json:"updated_at,omitempty" doc:"Client event time of an offline-queued write; the server clamps it to now and merges last-write-wins on it" example:"2026-01-02T03:04:05.000Z"`
+}
+
+// ProgressSyncInput is the syncProgress command.
+type ProgressSyncInput struct {
+	Body struct {
+		Items []ProgressSyncItem `json:"items" minItems:"1" doc:"Writes to apply, in order"`
+	}
+}
+
+// ProgressSyncResult is the answer to one write of the batch.
+type ProgressSyncResult struct {
+	MediaItemID ID     `json:"media_item_id" example:"movie-8f2c1a"`
+	Status      string `json:"status" enum:"ok,error" doc:"ok when the write was applied (or skipped as below a threshold); error when it was not" example:"ok"`
+	Error       string `json:"error,omitempty" doc:"Why the write was not applied" example:"failed to update progress"`
+}
+
+// ProgressSyncOutput is the syncProgress response.
+type ProgressSyncOutput struct {
+	Body struct {
+		Results []ProgressSyncResult `json:"results" doc:"One per item, in request order"`
+	}
+}
+
 // opListProgress is the operation id; the cursor scope is bound to it.
 const opListProgress = "listProgress"
 
@@ -68,6 +99,48 @@ func registerProgress(reg *Registry) {
 	}, func(ctx context.Context, in *ProgressListInput) (*ProgressCollectionOutput, error) {
 		return reg.listProgress(ctx, cursors, in)
 	})
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodPost, Prefix+"/sync/progress", "syncProgress", "progress",
+			"Apply a batch of progress writes for the acting profile and answer one result per item; a replayed write with the same updated_at is a no-op."),
+		Class:         ClassProfileScoped,
+		ServiceBacked: true,
+	}, reg.syncProgress)
+}
+
+// syncProgress runs the same batch write as v1 POST /sync/progress; a write
+// that fails is an error result, not a failed batch.
+func (reg *Registry) syncProgress(ctx context.Context, in *ProgressSyncInput) (*ProgressSyncOutput, error) {
+	if reg.deps.Progress == nil {
+		return nil, unavailable("progress")
+	}
+	userID, profileID, p := viewerIdentity(ctx)
+	if p != nil {
+		return nil, p
+	}
+	updates := make([]handlers.ProgressSyncUpdate, 0, len(in.Body.Items))
+	for _, item := range in.Body.Items {
+		update := handlers.ProgressSyncUpdate{
+			MediaItemID:    string(item.MediaItemID),
+			Position:       float64(item.PositionMs) / 1000,
+			Duration:       float64(item.DurationMs) / 1000,
+			ForceOverwrite: item.ForceOverwrite,
+		}
+		if item.UpdatedAt != nil {
+			t := item.UpdatedAt.Time
+			update.UpdatedAt = &t
+		}
+		updates = append(updates, update)
+	}
+	results, err := reg.deps.Progress.SyncProgress(ctx, userID, profileID, updates)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	out := &ProgressSyncOutput{}
+	out.Body.Results = make([]ProgressSyncResult, 0, len(results))
+	for _, r := range results {
+		out.Body.Results = append(out.Body.Results, ProgressSyncResult{MediaItemID: ID(r.MediaItemID), Status: r.Status, Error: r.Error})
+	}
+	return out, nil
 }
 
 // listProgress answers from the same listing v1 GET /progress (without

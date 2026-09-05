@@ -115,6 +115,8 @@ type QueryValue = string | number | boolean | null | undefined;
 
 interface CommonOptions {
   signal?: AbortSignal;
+  /** Let the browser finish the request after navigation or tab close. */
+  keepalive?: boolean;
 }
 
 export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
@@ -263,6 +265,7 @@ export async function v2<K extends V2OperationKey>(
     ...V2_CLIENT_HEADERS,
   };
   const init: RequestInit = { method, headers, signal: options.signal };
+  if (options.keepalive) init.keepalive = true;
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body);

@@ -1,0 +1,42 @@
+{
+  "items": [
+    {
+      "library_id": "1",
+      "library_name": "Movies",
+      "root_path": "/media/movies/Alien",
+      "state": "resolved",
+      "inferred_type": "movie",
+      "type_confidence": "high",
+      "title": "Alien",
+      "year": 1979,
+      "observed_file_count": 1,
+      "evidence_json": {
+        "k": 1
+      },
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "library_id": "1",
+      "library_name": "Movies",
+      "root_path": "/media/movies/Blade Runner",
+      "state": "resolved",
+      "inferred_type": "movie",
+      "type_confidence": "high",
+      "title": "Blade Runner",
+      "year": 1980,
+      "observed_file_count": 1,
+      "evidence_json": {
+        "k": 1
+      },
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7Im8iOjJ9fQ.ApwLCegwpbmnzZTV30QoS7k6lDPUZQfetac5xd3ba2U",
+    "has_more": true
+  },
+  "total": 3
+}
+

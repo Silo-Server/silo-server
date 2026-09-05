@@ -1,0 +1,24 @@
+{
+  "id": "1",
+  "paths": [
+    "/media/movies"
+  ],
+  "type": "movies",
+  "name": "Films",
+  "enabled": true,
+  "metadata_language": "en",
+  "auto_translate_metadata": false,
+  "chapter_thumbnails_enabled": false,
+  "chapter_thumbnails_supported": true,
+  "intro_detection_enabled": false,
+  "trailer_kinds": [
+    "trailer"
+  ],
+  "sort_order": 0,
+  "poster_url": "https://s3.example.test/poster.jpg",
+  "last_scanned_at": "2026-01-02T03:04:05.678Z",
+  "scan_warning_code": "empty_root",
+  "scan_warning_message": "Root is empty",
+  "scan_warning_at": "2026-01-02T03:04:05.678Z"
+}
+

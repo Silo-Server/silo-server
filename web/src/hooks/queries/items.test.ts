@@ -3,6 +3,7 @@ import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
+  v2: vi.fn(),
   cancelItemDetailQueries: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
   scheduleMediaSurfaceInvalidation: vi.fn(),
@@ -29,6 +30,11 @@ vi.mock("@tanstack/react-query", async () => {
 vi.mock("@/api/client", () => ({
   api: mocks.api,
 }));
+
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: (...args: unknown[]) => mocks.v2(...args) };
+});
 
 vi.mock("@/components/realtimeEventsContext", () => ({
   useRealtimeEvents: () => ({ awaitAdminJob: vi.fn() }),
@@ -107,6 +113,14 @@ describe("item query helpers", () => {
   beforeEach(() => {
     mocks.api.mockReset();
     mocks.api.mockResolvedValue({});
+    mocks.v2.mockReset();
+    mocks.v2.mockResolvedValue({
+      content_id: "ebook 1/isbn:978",
+      type: "ebook",
+      title: "Book",
+      versions: [],
+      subtitles: [],
+    });
     mocks.cancelItemDetailQueries.mockReset();
     mocks.cancelItemDetailQueries.mockResolvedValue(undefined);
     mocks.invalidateMediaSurfaceQueries.mockReset();
@@ -126,13 +140,16 @@ describe("item query helpers", () => {
     mocks.useQueryClient.mockReturnValue({});
   });
 
-  it("encodes item IDs in watch detail endpoints", async () => {
-    await fetchWatchDetail("ebook 1/isbn:978", 42, 12);
+  it("reads watch detail through the v2 operation with file and library ids", async () => {
+    const detail = await fetchWatchDetail("ebook 1/isbn:978", 42, 12);
 
-    expect(mocks.api).toHaveBeenCalledWith(
-      "/watch/ebook%201%2Fisbn%3A978?fileId=42&library_id=12",
-      undefined,
-    );
+    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/watch/{id}", {
+      path: { id: "ebook 1/isbn:978" },
+      query: { file_id: "42", library_id: "12" },
+      signal: undefined,
+    });
+    expect(detail.content_id).toBe("ebook 1/isbn:978");
+    expect(detail.intro).toBeNull();
   });
 
   it("encodes item IDs in admin item endpoints", async () => {
@@ -228,14 +245,14 @@ describe("item query helpers", () => {
     ]?.[0] as WatchedMutationOptions;
 
     await options.mutationFn(true);
-    expect(mocks.api).toHaveBeenCalledWith("/watched/ebook%201%2Fisbn%3A978", {
-      method: "POST",
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/watched/{id}", {
+      path: { id: "ebook 1/isbn:978" },
       keepalive: true,
     });
 
     await options.mutationFn(false);
-    expect(mocks.api).toHaveBeenCalledWith("/watched/ebook%201%2Fisbn%3A978", {
-      method: "DELETE",
+    expect(mocks.v2).toHaveBeenCalledWith("DELETE /api/v2/watched/{id}", {
+      path: { id: "ebook 1/isbn:978" },
       keepalive: true,
     });
   });
@@ -249,8 +266,8 @@ describe("item query helpers", () => {
     // Marking a large series expands to every episode server-side; without
     // keepalive the request dies with the document and nothing is marked.
     await options.mutationFn(true);
-    expect(mocks.api).toHaveBeenCalledWith("/watched/series-1", {
-      method: "POST",
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/watched/{id}", {
+      path: { id: "series-1" },
       keepalive: true,
     });
   });

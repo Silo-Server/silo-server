@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "id": "u1",
+      "creator_profile_id": "p-owner",
+      "name": "Rainy days",
+      "collection_type": "manual",
+      "item_count": 4,
+      "created_at": "2026-01-02T03:04:05.000Z",
+      "updated_at": "2026-01-02T03:04:05.000Z"
+    }
+  ]
+}
+

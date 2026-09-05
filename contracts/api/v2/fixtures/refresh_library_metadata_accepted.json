@@ -1,0 +1,17 @@
+{
+  "id": "job-2",
+  "job_type": "library_refresh",
+  "status": "queued",
+  "created_by_user_id": "2",
+  "request_payload": {
+    "library_id": 1,
+    "mode": "full"
+  },
+  "result_payload": {},
+  "message": "Queued full library metadata refresh",
+  "progress_current": 0,
+  "progress_total": 0,
+  "artifact_size_bytes": 0,
+  "requested_at": "2026-01-02T03:04:05.678Z"
+}
+

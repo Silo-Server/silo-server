@@ -201,10 +201,14 @@ func registerAll(reg *Registry) {
 	// Alphabetical by domain file; registration order is deterministic.
 	registerAccount(reg)
 	registerAdminUsers(reg)
+	registerHistory(reg)
+	registerLibraries(reg)
+	registerLibraryViews(reg)
 	registerProfileSections(reg)
 	registerProfiles(reg)
 	registerProgress(reg)
 	registerSystem(reg)
+	registerWatch(reg)
 	registerOpenAPIDocument(reg)
 }
 

@@ -60,6 +60,28 @@ type fakeProgress struct {
 	// the handler asked for.
 	calls []fakeProgressQuery
 	err   error
+	// synced records each SyncProgress batch; failID names an item the
+	// fake answers as a failed write.
+	synced [][]handlers.ProgressSyncUpdate
+	failID string
+}
+
+// SyncProgress records the batch and answers ok for every item, error for
+// an item the fake is told to fail.
+func (f *fakeProgress) SyncProgress(_ context.Context, _ int, _ string, updates []handlers.ProgressSyncUpdate) ([]handlers.ProgressSyncResultView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.synced = append(f.synced, updates)
+	out := make([]handlers.ProgressSyncResultView, 0, len(updates))
+	for _, u := range updates {
+		r := handlers.ProgressSyncResultView{MediaItemID: u.MediaItemID, Status: "ok"}
+		if u.MediaItemID == f.failID {
+			r.Status, r.Error = "error", "failed to update progress"
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 func (f *fakeProgress) ListProgressPage(_ context.Context, _ int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error) {

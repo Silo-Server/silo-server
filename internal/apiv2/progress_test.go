@@ -346,3 +346,63 @@ func TestListProgressDenied(t *testing.T) {
 	// A store failure is the v1 decision (500) as a problem.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/progress", "", with(bearer(memberToken), "X-Profile-Id", "p-owner")), TypeInternalError)
 }
+
+func TestSyncProgress(t *testing.T) {
+	progress := &fakeProgress{failID: "movie-broken"}
+	h := newTestHandler(t, pilotDeps(progress, nil))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	body := `{"items":[{"media_item_id":"movie-8f2c1a","position_ms":1325500,"duration_ms":5400000,"updated_at":"2026-01-02T03:04:05.250Z"},{"media_item_id":"movie-broken","position_ms":10,"duration_ms":0,"force_overwrite":true}]}`
+	rec := do(t, h, http.MethodPost, "/api/v2/sync/progress", body, owner)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	var out struct {
+		Results []struct {
+			MediaItemID string `json:"media_item_id"`
+			Status      string `json:"status"`
+			Error       string `json:"error"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Results) != 2 || out.Results[0].Status != "ok" || out.Results[0].Error != "" ||
+		out.Results[1].MediaItemID != "movie-broken" || out.Results[1].Status != "error" || out.Results[1].Error != "failed to update progress" {
+		t.Fatalf("results = %+v", out.Results)
+	}
+	// Milliseconds on the wire became the seconds the store keeps; the
+	// instant reached the seam in UTC.
+	if len(progress.synced) != 1 || len(progress.synced[0]) != 2 {
+		t.Fatalf("synced = %+v", progress.synced)
+	}
+	first, second := progress.synced[0][0], progress.synced[0][1]
+	if first.Position != 1325.5 || first.Duration != 5400 || first.ForceOverwrite || first.UpdatedAt == nil || first.UpdatedAt.Format("2006-01-02T15:04:05.000Z07:00") != "2026-01-02T03:04:05.250Z" {
+		t.Fatalf("first = %+v", first)
+	}
+	if second.Position != 0.01 || !second.ForceOverwrite || second.UpdatedAt != nil {
+		t.Fatalf("second = %+v", second)
+	}
+}
+
+func TestSyncProgressRejectsBadInput(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/sync/progress", `{"items":[]}`, owner), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.items" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/sync/progress", `{"items":[{"media_item_id":"","position_ms":-1,"duration_ms":0}]}`, owner), TypeValidationFailed)
+	if len(p.Errors) != 2 || p.Errors[0].Location != "body.items[0].media_item_id" || p.Errors[1].Location != "body.items[0].position_ms" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// v1's seconds member and a malformed instant are rejected, not silently accepted.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/sync/progress", `{"items":[{"media_item_id":"m","position":5,"duration":10}]}`, owner), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/sync/progress", `{"items":[{"media_item_id":"m","position_ms":5,"duration_ms":10,"updated_at":"yesterday"}]}`, owner), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/sync/progress", `{"items":[{"media_item_id":"m","position_ms":5,"duration_ms":10}]}`, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/sync/progress", `{"items":[{"media_item_id":"m","position_ms":5,"duration_ms":10}]}`, nil), TypeAuthenticationRequired)
+
+	off := newTestHandler(t, parityDeps(false))
+	requireProblem(t, do(t, off, http.MethodPost, "/api/v2/sync/progress", `{"items":[{"media_item_id":"m","position_ms":5,"duration_ms":10}]}`, owner), TypeDependencyUnavailable)
+}

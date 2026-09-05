@@ -195,13 +195,21 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 func TestReconcileSpecSeeded(t *testing.T) {
 	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
 	observed := []string{
-		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json",
-		"GET " + Prefix + "/profile/sections", "PUT " + Prefix + "/profile/sections", "DELETE " + Prefix + "/profile/sections",
-		"GET " + Prefix + "/profile/sections/flags", "GET " + Prefix + "/profile/sections/settings",
-		"GET " + Prefix + "/profiles", "POST " + Prefix + "/profiles", "PATCH " + Prefix + "/profiles/{id}", "DELETE " + Prefix + "/profiles/{id}",
-		"GET " + Prefix + "/profiles/household/sessions", "POST " + Prefix + "/profiles/{id}/verify-pin",
-		"PUT " + Prefix + "/profiles/{id}/avatar", "DELETE " + Prefix + "/profiles/{id}/avatar",
-		"GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
+		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json", "PATCH " + Prefix + "/profiles/{id}",
+		"GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup", "GET " + Prefix + "/libraries",
+		"POST " + Prefix + "/libraries", "PATCH " + Prefix + "/libraries/{id}", "DELETE " + Prefix + "/libraries/{id}", "POST " + Prefix + "/libraries/{id}/check-mount",
+		"GET " + Prefix + "/libraries/metadata-match-queue", "GET " + Prefix + "/libraries/provider-defaults", "POST " + Prefix + "/libraries/reorder", "GET " + Prefix + "/libraries/roots",
+		"PUT " + Prefix + "/libraries/roots/override", "DELETE " + Prefix + "/libraries/roots/override", "GET " + Prefix + "/libraries/skipped-roots", "GET " + Prefix + "/libraries/stale-ids",
+		"POST " + Prefix + "/libraries/stale-ids/{content_id}/rematch", "GET " + Prefix + "/libraries/unmatched-items", "POST " + Prefix + "/libraries/{id}/confirm-empty-root-cleanup", "GET " + Prefix + "/libraries/{id}/metadata-match-queue",
+		"POST " + Prefix + "/libraries/{id}/metadata-match-queue/retry", "POST " + Prefix + "/libraries/{id}/metadata-match-queue/cancel", "POST " + Prefix + "/libraries/{id}/refresh-metadata", "GET " + Prefix + "/libraries/{id}/providers",
+		"PUT " + Prefix + "/libraries/{id}/providers", "PUT " + Prefix + "/libraries/{id}/poster", "DELETE " + Prefix + "/libraries/{id}/poster", "GET " + Prefix + "/library/{id}/layout",
+		"GET " + Prefix + "/library/{id}/sections", "GET " + Prefix + "/library/{id}/sections/{section_id}/items", "GET " + Prefix + "/library/{id}/collections", "GET " + Prefix + "/library/{id}/collections/{collection_id}/items",
+		"GET " + Prefix + "/library/{id}/user-collections", "GET " + Prefix + "/profile/sections", "PUT " + Prefix + "/profile/sections", "DELETE " + Prefix + "/profile/sections",
+		"GET " + Prefix + "/profile/sections/flags", "GET " + Prefix + "/profile/sections/settings", "GET " + Prefix + "/profiles", "POST " + Prefix + "/profiles",
+		"DELETE " + Prefix + "/profiles/{id}", "GET " + Prefix + "/profiles/household/sessions", "POST " + Prefix + "/profiles/{id}/verify-pin", "PUT " + Prefix + "/profiles/{id}/avatar",
+		"DELETE " + Prefix + "/profiles/{id}/avatar", "GET " + Prefix + "/history", "POST " + Prefix + "/history/remove",
+		"POST " + Prefix + "/sync/progress",
+		"GET " + Prefix + "/watch/{id}", "POST " + Prefix + "/watched/{id}", "DELETE " + Prefix + "/watched/{id}",
 	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)

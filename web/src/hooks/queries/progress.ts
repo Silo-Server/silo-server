@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
 import { v2, type V2Result } from "@/api/v2/request";
 import { catalogKeys, progressKeys } from "./keys";
@@ -85,18 +84,17 @@ export function useReportMediaProgress() {
       durationSeconds,
       forceOverwrite = true,
     }: ReportMediaProgressVars) =>
-      api("/sync/progress", {
-        method: "POST",
-        body: JSON.stringify({
+      v2("POST /api/v2/sync/progress", {
+        body: {
           items: [
             {
               media_item_id: contentId,
-              position: positionSeconds,
-              duration: durationSeconds,
+              position_ms: Math.round(positionSeconds * 1000),
+              duration_ms: Math.round(durationSeconds * 1000),
               force_overwrite: forceOverwrite,
             },
           ],
-        }),
+        },
       }),
     onSuccess: (_data, variables) => {
       // Progress genuinely changed → refresh progress-derived surfaces

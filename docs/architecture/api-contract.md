@@ -957,6 +957,48 @@ server without an upload store answers `503`; section overrides drop the `/reset
 method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
 casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
+**Section catalog-libraries (Phase 4).** Thirty operations under the `libraries` tag: the
+acting-admin, demo-guarded management surface `listLibraries`, `createLibrary`, `updateLibrary`,
+`deleteLibrary`, `checkLibraryMount`, `confirmEmptyRootCleanup`, `listMetadataMatchQueues`,
+`getMetadataMatchQueue`, `retryMetadataMatchQueue`, `cancelMetadataMatchQueue`,
+`refreshLibraryMetadata`, `getLibraryProviderDefaults`, `getLibraryProviders`,
+`setLibraryProviders`, `uploadLibraryPoster`, `deleteLibraryPoster`, `reorderLibraries`,
+`listLibraryRoots`, `setRootOverride`, `deleteRootOverride`, `listSkippedRoots`, `listStaleIds`,
+`rematchStaleId`, `listUnmatchedItems`; and the profile-scoped viewer reads `getLibraryLayout`,
+`listLibrarySections`, `getLibrarySectionItems`, `getLibraryCollections`,
+`getLibraryCollectionItems`, `listLibraryUserCollections`. Every card these reads answer is the
+one `CatalogItem` schema (`internal/apiv2/catalog_types.go`), which the catalog-items and
+catalog-home sections reuse. Deliberate differences from v1, all recorded on the ledger rows:
+`PUT` full updates are `PATCH`; offset paging (roots, unmatched items, the per-library match
+queue) is `limit` plus an opaque cursor; ids are string `ID`s and timestamps UTC-millisecond
+instants; the provider-chain `levels` map is an ordered array of `{content_level, entries}` and
+`library_type` is required on the defaults read; `deleteRootOverride` takes its root in the query;
+the refresh `mode` and `image_size` are strict enums answered `422`; the queued-work operations
+(`deleteLibrary`, `refreshLibraryMetadata`) answer `409` without v1's `active_job` echo, pending
+the long-running-work foundation rule; `uploadLibraryPoster` is the first multipart operation
+(`multipart/form-data` only, else `415`; a wrong part media type is `422` at `body.poster`; over
+10 MiB is `413`); `getLibrarySectionItems` answers the section itself rather than a `{section}`
+wrapper, `getLibraryCollectionItems` drops v1's `total`/`has_more` on a bounded list, and
+`getLibraryCollections` has one shape whether or not collection groups are configured.
+
+**Section personal-progress (Phase 4).** Seven profile-scoped rows: the pilot's `listProgress`
+plus `listHistory`, `removeHistoryEntries`, `syncProgress` (tags `history`, `progress`) and
+`getWatchState`, `markWatched`, `unmarkWatched` (tag `watch`). Every operation calls the seam its
+v1 handler now calls (`PersonalDataHandler.HistoryEntries`/`HistoryCards`/`RemoveHistory`,
+`ProgressHandler.SyncProgress`, `ItemsHandler.WatchDetail`/`SetWatchedState`). Deliberate
+differences from v1, all recorded on the ledger rows: `listHistory` pages by `limit` plus an
+opaque cursor and answers `CatalogItem` cards with a `watch` record (`media_item_id`,
+`watched_at` instant, `duration_seconds`, `completed`, `source`); `removeHistoryEntries` takes a
+closed `scope` enum and answers `204`; `syncProgress` takes `position_ms`/`duration_ms` as
+integer milliseconds, string item ids and an `updated_at` instant (a malformed one is `422`, not a
+per-item error) and answers the v1 `results` list; `getWatchState` keeps the profile header
+optional as v1 does, takes `file_id` (string ID) and a strict `image_size`, renders file ids as
+string IDs, `added_at` as an instant, `duration`/`total_duration` as `*_seconds`, markers as
+`{start_seconds, end_seconds}`, and answers a series (not directly playable) as `422` at `path.id`;
+`markWatched`/`unmarkWatched` answer `204` instead of v1's `{content_id, type, affected_count,
+played}` echo. The three writes are naturally idempotent (a replayed mark or an upsert with the
+same `updated_at` converges on the same row) and are not `If-Match` protected.
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;

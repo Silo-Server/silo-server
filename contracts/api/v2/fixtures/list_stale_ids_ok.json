@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "content_id": "movie:heat-1995",
+      "library_id": "1",
+      "library_name": "Movies",
+      "title": "Heat",
+      "year": 1995,
+      "content_type": "movie",
+      "provider": "tmdb",
+      "provider_id": "949",
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
+    }
+  ]
+}
+

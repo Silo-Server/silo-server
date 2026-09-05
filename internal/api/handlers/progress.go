@@ -369,30 +369,75 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	// The wire string is parsed here so a malformed one keeps its v1 per-item
+	// answer; the seam takes the parsed event time.
+	updates := make([]ProgressSyncUpdate, 0, len(req.Items))
+	for _, item := range req.Items {
+		update := ProgressSyncUpdate{MediaItemID: item.MediaItemID, Position: item.Position, Duration: item.Duration, ForceOverwrite: item.ForceOverwrite}
+		if item.UpdatedAt != nil {
+			client, parseErr := parseClientEventTime(*item.UpdatedAt)
+			if parseErr != nil {
+				update.invalidUpdatedAt = true
+			} else {
+				update.UpdatedAt = &client
+			}
+		}
+		updates = append(updates, update)
+	}
+
+	results, err := h.SyncProgress(r.Context(), userID, profileID, updates)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, syncProgressResponse{Results: results})
+}
+
+// ProgressSyncUpdate is one progress write of a sync batch.
+type ProgressSyncUpdate struct {
+	MediaItemID    string
+	Position       float64
+	Duration       float64
+	ForceOverwrite bool
+	// UpdatedAt is the client event time of an offline-queued item; nil
+	// for a live write.
+	UpdatedAt *time.Time
+	// invalidUpdatedAt marks a v1 wire value that did not parse; the item is
+	// answered as an error rather than written.
+	invalidUpdatedAt bool
+}
+
+// ProgressSyncResultView is the per-item answer of a sync batch.
+type ProgressSyncResultView = syncProgressResultItem
+
+// SyncProgress applies a batch of progress writes for the profile and
+// answers one result per item, in order. A failed write is an error result,
+// never a failed batch; only a store that cannot be opened fails the whole
+// call. The v1 handler and the v2 operation share it.
+func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileID string, updates []ProgressSyncUpdate) ([]ProgressSyncResultView, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
 	var thresholds userstore.ProgressThresholds
 	if h.SettingsRepo != nil {
-		if v, _ := h.SettingsRepo.Get(r.Context(), "playback.watched_threshold"); v != "" {
+		if v, _ := h.SettingsRepo.Get(ctx, "playback.watched_threshold"); v != "" {
 			if pct, err := strconv.Atoi(v); err == nil && pct > 0 {
 				thresholds.WatchedPct = pct
 			}
 		}
-		if v, _ := h.SettingsRepo.Get(r.Context(), "playback.min_resume_threshold"); v != "" {
+		if v, _ := h.SettingsRepo.Get(ctx, "playback.min_resume_threshold"); v != "" {
 			if pct, err := strconv.Atoi(v); err == nil && pct > 0 {
 				thresholds.MinResumePct = pct
 			}
 		}
 	}
 
-	results := make([]syncProgressResultItem, 0, len(req.Items))
+	results := make([]syncProgressResultItem, 0, len(updates))
 	hadSuccessfulUpdate := false
 
-	for _, item := range req.Items {
+	for _, item := range updates {
 		result := syncProgressResultItem{
 			MediaItemID: item.MediaItemID,
 		}
@@ -400,6 +445,12 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 		if item.MediaItemID == "" {
 			result.Status = "error"
 			result.Error = "media_item_id is required"
+			results = append(results, result)
+			continue
+		}
+		if item.invalidUpdatedAt {
+			result.Status = "error"
+			result.Error = "updated_at must be RFC3339"
 			results = append(results, result)
 			continue
 		}
@@ -411,27 +462,21 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 			// last-write-wins on the bounded event_at. synced_seq (the cursor) is
 			// stamped server-side; completion still comes from the threshold logic,
 			// never the timestamp alone.
-			client, parseErr := parseClientEventTime(*item.UpdatedAt)
-			if parseErr != nil {
-				result.Status = "error"
-				result.Error = "updated_at must be RFC3339"
-				results = append(results, result)
-				continue
-			}
+			client := item.UpdatedAt.UTC()
 			now := time.Now()
 			eventAt := clampEventAt(client, now)
 			if !client.IsZero() && client.After(now.Add(progressClockSkew)) {
-				slog.WarnContext(r.Context(), "clamped future-dated progress event time", "component", "api",
+				slog.WarnContext(ctx, "clamped future-dated progress event time", "component", "api",
 					"profile_id", profileID, "media_item_id", item.MediaItemID)
 			}
 			pos, completed, skip := userstore.ResolveProgressState(item.Position, item.Duration, thresholds)
 			if !skip {
-				_, updateErr = store.SetProgressIfNewer(r.Context(), profileID, item.MediaItemID, pos, item.Duration, completed, eventAt)
+				_, updateErr = store.SetProgressIfNewer(ctx, profileID, item.MediaItemID, pos, item.Duration, completed, eventAt)
 			}
 		case item.ForceOverwrite:
-			updateErr = store.SetProgress(r.Context(), profileID, item.MediaItemID, item.Position, item.Duration, thresholds)
+			updateErr = store.SetProgress(ctx, profileID, item.MediaItemID, item.Position, item.Duration, thresholds)
 		default:
-			updateErr = store.UpdateProgress(r.Context(), profileID, item.MediaItemID, item.Position, item.Duration, thresholds)
+			updateErr = store.UpdateProgress(ctx, profileID, item.MediaItemID, item.Position, item.Duration, thresholds)
 		}
 
 		if updateErr != nil {
@@ -446,13 +491,13 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 	}
 
 	if hadSuccessfulUpdate {
-		triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-		for _, item := range req.Items {
+		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+		for _, item := range updates {
 			if item.MediaItemID == "" {
 				continue
 			}
 			publishUserStateEvent(
-				r.Context(),
+				ctx,
 				h.EventsHub,
 				userID,
 				profileID,
@@ -464,5 +509,5 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	writeJSON(w, http.StatusOK, syncProgressResponse{Results: results})
+	return results, nil
 }

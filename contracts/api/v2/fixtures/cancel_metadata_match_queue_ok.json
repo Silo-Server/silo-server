@@ -1,0 +1,18 @@
+{
+  "status": "cancelled",
+  "library_id": "1",
+  "movie_cancelled": 2,
+  "series_cancelled": 1,
+  "raw_file_cancelled": 1,
+  "total_cancelled": 4,
+  "queue": {
+    "library_id": "1",
+    "movie_count": 0,
+    "series_count": 0,
+    "raw_file_count": 0,
+    "total_count": 0,
+    "pending_count": 0,
+    "parked_count": 0
+  }
+}
+

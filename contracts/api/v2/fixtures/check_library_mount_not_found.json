@@ -1,0 +1,8 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/not_found",
+  "title": "Not found",
+  "status": 404,
+  "detail": "Library not found",
+  "instance": "urn:silo:request:00000000000000000000001e"
+}
+
