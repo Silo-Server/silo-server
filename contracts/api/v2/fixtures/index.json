@@ -1181,10 +1181,10 @@
     {
       "name": "list_stale_ids_ok",
       "operation_id": "listStaleIds",
-      "scenario": "Provider identifiers that no longer resolve, with the items carrying them.",
+      "scenario": "The first page of provider identifiers that no longer resolve, with the items carrying them.",
       "request": {
         "method": "GET",
-        "path": "/api/v2/libraries/stale-ids",
+        "path": "/api/v2/libraries/stale-ids?limit=2",
         "headers": {
           "Authorization": "Bearer tok-admin"
         }

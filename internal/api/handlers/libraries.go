@@ -1700,7 +1700,7 @@ func metadataContentLevelsForLibraryType(libraryType string) []string {
 
 // HandleListStaleIDs handles GET /libraries/stale-ids.
 func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListStaleIDs(r.Context())
+	resp, err := h.ListStaleIDs(r.Context(), 0, 0)
 	if err != nil {
 		writeAPIError(w, err)
 		return

@@ -29685,7 +29685,7 @@
         "path": "/api/v2/libraries/stale-ids",
         "operation_id": "listStaleIds"
       },
-      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Bare array became {items:[...]}; library_id is a string ID; first/last_seen_at are UTC ms instants instead of second-precision strings."
+      "notes": "Section catalog-libraries (acting_admin, demo-guarded). Bare array became a paged {items:[...], page} collection: limit plus an opaque cursor (page.next_cursor, page.has_more), the actionable-ID predicate and the page cut in the repository query rather than after loading every row; v1 keeps its unpaginated list. library_id is a string ID; first/last_seen_at are UTC ms instants instead of second-precision strings. The web admin loads the first page when the Stale External IDs section opens and pages with Load more."
     },
     {
       "listener": "api",

@@ -38,6 +38,8 @@ import {
   useRefreshLibraryMetadata,
   useSetLibraryProviders,
   useStaleMediaIDs,
+  flattenStaleMediaIDs,
+  STALE_MEDIA_IDS_PAGE_LIMIT,
   useUpdateLibrary,
 } from "./libraries";
 
@@ -278,26 +280,56 @@ describe("library admin hooks on the v2 contract", () => {
     expect(page.movies[0]?.failure_detail).toEqual({ candidates: 0 });
   });
 
-  it("lists matcher queue statuses and stale ids with numeric library ids", async () => {
-    stubFetch((url) =>
-      url.pathname.endsWith("/stale-ids")
-        ? jsonResponse(listStaleIdsOk)
-        : jsonResponse(listMetadataMatchQueuesOk),
-    );
+  it("lists matcher queue statuses with numeric library ids", async () => {
+    stubFetch(() => jsonResponse(listMetadataMatchQueuesOk));
 
     const queues = renderHook(() => useLibraryMetadataMatchQueues(), {
       wrapper: createWrapper(),
     });
-    const stale = renderHook(() => useStaleMediaIDs(), { wrapper: createWrapper() });
     await waitFor(() => expect(queues.result.current.isSuccess).toBe(true));
-    await waitFor(() => expect(stale.result.current.isSuccess).toBe(true));
 
     expect(queues.result.current.data?.map((q) => q.library_id)).toEqual(
       listMetadataMatchQueuesOk.items.map((q) => Number(q.library_id)),
     );
-    expect(stale.result.current.data?.map((s) => s.library_id)).toEqual(
+  });
+
+  it("pages the stale ids listing on demand with numeric library ids", async () => {
+    const fetchMock = stubFetch((url) => {
+      expect(url.pathname).toBe("/api/v2/libraries/stale-ids");
+      expect(url.searchParams.get("limit")).toBe(String(STALE_MEDIA_IDS_PAGE_LIMIT));
+      if (url.searchParams.get("cursor") === null) return jsonResponse(listStaleIdsOk);
+      expect(url.searchParams.get("cursor")).toBe(listStaleIdsOk.page.next_cursor);
+      return jsonResponse({
+        items: [{ ...listStaleIdsOk.items[0], content_id: "series:lost-2004", library_id: "0" }],
+        page: { has_more: false },
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useStaleMediaIDs({ enabled }),
+      { wrapper: createWrapper(), initialProps: { enabled: false } },
+    );
+
+    // Nothing loads until the diagnostics section opens.
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.hasNextPage).toBe(true);
+    expect(flattenStaleMediaIDs(result.current.data).map((s) => s.library_id)).toEqual(
       listStaleIdsOk.items.map((s) => Number(s.library_id)),
     );
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(flattenStaleMediaIDs(result.current.data).map((s) => s.content_id)).toEqual([
+      ...listStaleIdsOk.items.map((s) => s.content_id),
+      "series:lost-2004",
+    ]);
+    expect(flattenStaleMediaIDs(result.current.data)[2]?.library_id).toBe(0);
   });
 
   it("maps the provider chain both ways between the level list and the form map", async () => {

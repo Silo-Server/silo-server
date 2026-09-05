@@ -11,7 +11,23 @@
       "provider_id": "949",
       "first_seen_at": "2026-01-02T03:04:05.678Z",
       "last_seen_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "content_id": "movie:alien-1979",
+      "library_id": "1",
+      "library_name": "Movies",
+      "title": "Alien",
+      "year": 1979,
+      "content_type": "movie",
+      "provider": "imdb",
+      "provider_id": "tt0078748",
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
     }
-  ]
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7Im8iOjJ9fQ.2Szmb-uUBmnNnbPRJRZFbWMSdnSVYEwnJrFb5Bl-OsI",
+    "has_more": true
+  }
 }
 

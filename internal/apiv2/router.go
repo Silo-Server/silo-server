@@ -467,7 +467,7 @@ type LibraryAdminService interface {
 	SetRootOverride(ctx context.Context, userID int, req handlers.RootOverrideUpsertRequest) error
 	DeleteRootOverride(ctx context.Context, req handlers.RootOverrideDeleteRequest) error
 	ListSkippedRoots(ctx context.Context) ([]handlers.SkippedRootView, error)
-	ListStaleIDs(ctx context.Context) ([]handlers.StaleMediaIDView, error)
+	ListStaleIDs(ctx context.Context, limit, offset int) ([]handlers.StaleMediaIDView, error)
 	RematchStaleID(ctx context.Context, contentID string) error
 	ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
 	GetMetadataMatchQueue(ctx context.Context, id, limit, offset int) (handlers.MetadataMatchQueueDetailView, error)

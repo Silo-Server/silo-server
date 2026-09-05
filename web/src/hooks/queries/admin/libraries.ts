@@ -337,15 +337,56 @@ export function useDeleteLibraryRootOverride() {
   });
 }
 
-export function useStaleMediaIDs() {
-  return useQuery({
+export const STALE_MEDIA_IDS_PAGE_LIMIT = 50;
+
+export interface StaleMediaIDsPage {
+  staleIDs: StaleMediaID[];
+  /** Cursor of the next page, or undefined on the last page. */
+  nextCursor: string | undefined;
+}
+
+/**
+ * Fetches one page of the stale provider identifiers. The listing is cursor
+ * paginated; `cursor` is `page.next_cursor` of the previous page.
+ */
+export async function fetchStaleMediaIDsPage(
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<StaleMediaIDsPage> {
+  const page = await v2("GET /api/v2/libraries/stale-ids", {
+    query: {
+      limit: STALE_MEDIA_IDS_PAGE_LIMIT,
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+    signal,
+  });
+  return {
+    staleIDs: page.items.map(staleMediaIDFromV2),
+    nextCursor: page.page?.has_more && page.page.next_cursor ? page.page.next_cursor : undefined,
+  };
+}
+
+/**
+ * Pages the stale provider identifiers by cursor. The first page loads only
+ * while `enabled` holds (the diagnostics section that shows the rows is
+ * collapsed by default); further pages load through `fetchNextPage`.
+ */
+export function useStaleMediaIDs({ enabled = true }: { enabled?: boolean } = {}) {
+  return useInfiniteQuery({
     queryKey: adminKeys.staleMediaIDs(),
-    queryFn: ({ signal }): Promise<StaleMediaID[]> =>
-      v2("GET /api/v2/libraries/stale-ids", { signal }).then((page) =>
-        page.items.map(staleMediaIDFromV2),
-      ),
+    queryFn: ({ pageParam, signal }) => fetchStaleMediaIDsPage(pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled,
     staleTime: ADMIN_STALE_TIME,
   });
+}
+
+/** Flattens the loaded pages of useStaleMediaIDs into one list. */
+export function flattenStaleMediaIDs(
+  data: { pages: StaleMediaIDsPage[] } | undefined,
+): StaleMediaID[] {
+  return data?.pages.flatMap((page) => page.staleIDs) ?? [];
 }
 
 export function useRematchStaleMediaID() {

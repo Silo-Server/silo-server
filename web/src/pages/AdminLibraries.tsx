@@ -21,6 +21,7 @@ import {
   useUpsertLibraryRootOverride,
   useDeleteLibraryRootOverride,
   useStaleMediaIDs,
+  flattenStaleMediaIDs,
   useCheckLibraryMount,
   useDeleteLibrary,
   useScanLibrary,
@@ -166,7 +167,6 @@ export default function AdminLibraries() {
   const { data: activeScans = [] } = useActiveScans();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
   const { data: skippedRoots = [] } = useSkippedLibraryRoots();
-  const { data: staleIDs = [] } = useStaleMediaIDs();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingLib, setEditingLib] = useState<Library | null>(null);
   const [confirmDeleteLib, setConfirmDeleteLib] = useState<Library | null>(null);
@@ -769,7 +769,7 @@ export default function AdminLibraries() {
           <MetadataMatcherQueuesSection libraries={libraries} />
           <AmbiguousRootsSection libraries={libraries} />
           {skippedRoots.length > 0 ? <SkippedRootsSection skippedRoots={skippedRoots} /> : null}
-          {staleIDs.length > 0 && <StaleIDsSection staleIDs={staleIDs} />}
+          <StaleIDsSection />
         </TabsContent>
 
         <TabsContent value="autoscan">
@@ -2080,11 +2080,22 @@ function UnmatchedItemsSection() {
 
 type StaleSortField = "title" | "year" | "library" | "provider" | "first_seen" | "last_seen";
 
-function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
+function StaleIDsSection() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [matchItem, setMatchItem] = useState<StaleMediaID | null>(null);
   const { sortField, sortDir, toggle } = useSort<StaleSortField>("last_seen", "desc");
+  // The listing is paged on demand: the first page loads when the section
+  // opens and "Load more" fetches the rest, so a large stale-id table does
+  // not make the server walk every row on mount.
+  const {
+    data: stalePages,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetched,
+  } = useStaleMediaIDs({ enabled: open });
+  const staleIDs = useMemo(() => flattenStaleMediaIDs(stalePages), [stalePages]);
 
   const filtered = useMemo(() => {
     if (!search) return staleIDs;
@@ -2121,6 +2132,11 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
   }, [filtered, sortField, sortDir]);
 
   const pag = usePagination(sorted);
+
+  // Nothing to show once the first page confirms the table is empty.
+  if (isFetched && staleIDs.length === 0 && !hasNextPage) {
+    return null;
+  }
 
   return (
     <CollapsibleDiagnosticsSection
@@ -2233,6 +2249,24 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
         </Table>
       </div>
       <PaginationBar {...pag} />
+      {hasNextPage ? (
+        <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground tabular-nums">
+            Showing {staleIDs.length} stale IDs
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={isFetchingNextPage}
+            onClick={() => {
+              void fetchNextPage();
+            }}
+          >
+            {isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      ) : null}
       {matchItem && (
         <MatchItemDialog
           item={{

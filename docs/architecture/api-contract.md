@@ -970,7 +970,7 @@ acting-admin, demo-guarded management surface `listLibraries`, `createLibrary`, 
 one `CatalogItem` schema (`internal/apiv2/catalog_types.go`), which the catalog-items and
 catalog-home sections reuse. Deliberate differences from v1, all recorded on the ledger rows:
 `PUT` full updates are `PATCH`; offset paging (roots, unmatched items, the per-library match
-queue) is `limit` plus an opaque cursor; ids are string `ID`s and timestamps UTC-millisecond
+queue) is `limit` plus an opaque cursor, and v1's unpaginated stale-ID list pages the same way; ids are string `ID`s and timestamps UTC-millisecond
 instants; the provider-chain `levels` map is an ordered array of `{content_level, entries}` and
 `library_type` is required on the defaults read; `deleteRootOverride` takes its root in the query;
 the refresh `mode` and `image_size` are strict enums answered `422`; the queued-work operations

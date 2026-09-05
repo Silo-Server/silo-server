@@ -317,7 +317,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List provider identifiers that no longer resolve, with the items carrying them. */
+    /** List provider identifiers that no longer resolve, with the items carrying them, a page at a time. */
     get: operations["listStaleIds"];
     put?: never;
     post?: never;
@@ -5922,7 +5922,12 @@ export interface operations {
   };
   listStaleIds: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;

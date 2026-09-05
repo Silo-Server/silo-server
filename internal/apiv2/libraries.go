@@ -315,6 +315,12 @@ type StaleMediaID struct {
 	LastSeenAt  Instant `json:"last_seen_at" example:"2026-01-02T03:04:05.678Z"`
 }
 
+// StaleMediaIDListInput is the listStaleIds query.
+type StaleMediaIDListInput struct {
+	LimitParam
+	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
+}
+
 // StaleMediaIDCollectionOutput is the listStaleIds response.
 type StaleMediaIDCollectionOutput struct {
 	Body StaleMediaIDCollection
@@ -526,6 +532,8 @@ type offsetPosition struct {
 const (
 	opListLibraryRoots     = "listLibraryRoots"
 	opListUnmatchedItems   = "listUnmatchedItems"
+	opListStaleIDs         = "listStaleIds"
+	tiebreakerContentID    = "content_id"
 	locationBodyLibraryID  = locationBody + ".library_id"
 	locationQueryLibraryID = "query.library_id"
 	detailNotLibraryID     = "not a library identifier"
@@ -589,8 +597,10 @@ func registerLibraries(reg *Registry) {
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/skipped-roots", "listSkippedRoots", "libraries",
 		"List every root the scanner skipped, across libraries.")), reg.listSkippedRoots)
 
-	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/stale-ids", "listStaleIds", "libraries",
-		"List provider identifiers that no longer resolve, with the items carrying them.")), reg.listStaleIDs)
+	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/stale-ids", opListStaleIDs, "libraries",
+		"List provider identifiers that no longer resolve, with the items carrying them, a page at a time.")), func(ctx context.Context, in *StaleMediaIDListInput) (*StaleMediaIDCollectionOutput, error) {
+		return reg.listStaleIDs(ctx, cursors, in)
+	})
 
 	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/stale-ids/{content_id}/rematch", "rematchStaleId", "libraries",
 		"Clear an item's provider identifiers and refresh its metadata in the background.")), reg.rematchStaleID)
@@ -1288,14 +1298,27 @@ func (reg *Registry) listSkippedRoots(ctx context.Context, _ *struct{}) (*Skippe
 	return &SkippedRootCollectionOutput{Body: SkippedRootCollection{Collection: NewCollection(items)}}, nil
 }
 
-func (reg *Registry) listStaleIDs(ctx context.Context, _ *struct{}) (*StaleMediaIDCollectionOutput, error) {
+func (reg *Registry) listStaleIDs(ctx context.Context, cursors *Cursors, in *StaleMediaIDListInput) (*StaleMediaIDCollectionOutput, error) {
 	svc, p := reg.libraryAdmin()
 	if p != nil {
 		return nil, p
 	}
-	views, err := svc.ListStaleIDs(ctx)
+	userID, p := actingUserID(ctx)
+	if p != nil {
+		return nil, p
+	}
+	scope := CursorScope{OperationID: opListStaleIDs, Security: strconv.Itoa(userID), Sort: "last_seen_at", Tiebreaker: tiebreakerContentID}
+	offset, p := decodeOffset(cursors, scope, in.Cursor)
+	if p != nil {
+		return nil, p
+	}
+	views, err := svc.ListStaleIDs(ctx, in.Limit+1, offset)
 	if err != nil {
 		return nil, libraryProblem(err)
+	}
+	views, next, p := offsetPage(cursors, scope, len(views), in.Limit, offset, views)
+	if p != nil {
+		return nil, p
 	}
 	items := make([]StaleMediaID, 0, len(views))
 	for _, v := range views {
@@ -1312,7 +1335,7 @@ func (reg *Registry) listStaleIDs(ctx context.Context, _ *struct{}) (*StaleMedia
 			LastSeenAt:  NewInstant(v.LastSeen),
 		})
 	}
-	return &StaleMediaIDCollectionOutput{Body: StaleMediaIDCollection{Collection: NewCollection(items)}}, nil
+	return &StaleMediaIDCollectionOutput{Body: StaleMediaIDCollection{Collection: Paginated(items, next)}}, nil
 }
 
 func (reg *Registry) rematchStaleID(ctx context.Context, in *StaleIDRematchInput) (*struct{}, error) {
@@ -1341,7 +1364,7 @@ func (reg *Registry) listUnmatchedItems(ctx context.Context, cursors *Cursors, i
 		Security:    strconv.Itoa(userID),
 		Filter:      "q=" + search,
 		Sort:        "title",
-		Tiebreaker:  "content_id",
+		Tiebreaker:  tiebreakerContentID,
 	}
 	offset, p := decodeOffset(cursors, scope, in.Cursor)
 	if p != nil {

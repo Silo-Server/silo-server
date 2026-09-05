@@ -189,3 +189,82 @@ func (r *StaleMediaIDRepository) ListAll(ctx context.Context) ([]*models.StaleMe
 	defer rows.Close()
 	return scanStaleMediaIDs(rows)
 }
+
+// ActionableStaleMediaID is one actionable stale ID with the catalog item
+// carrying it, as the admin listing renders it.
+type ActionableStaleMediaID struct {
+	models.StaleMediaID
+	Title       string
+	Year        int
+	ContentType string
+	LibraryID   int
+	LibraryName string
+}
+
+// actionableStaleIDWhere is IsActionableStaleProviderID as a SQL predicate
+// over stale_media_ids s joined to media_items mi, so a page can be cut in
+// the database. Keep the two in step: the anchor regexes mirror
+// contentid.ProviderAnchor's accepted shapes, and the comparisons trim and
+// (for IMDb) case-fold exactly as the Go predicate does.
+const actionableStaleIDWhere = `
+	btrim(s.provider_id) <> ''
+	AND lower(btrim(s.provider)) IN ('tmdb', 'tvdb', 'imdb')
+	AND (
+		(
+			btrim(s.content_id) ~ '^(movie|series)-(tmdb|tvdb)-[0-9]+$|^season-(tmdb|tvdb)-[0-9]+-[0-9]+$|^episode-(tmdb|tvdb)-[0-9]+-[0-9]+-[0-9]+$|^(movie|series)-imdb-[tT][tT][0-9]+$|^season-imdb-[tT][tT][0-9]+-[0-9]+$|^episode-imdb-[tT][tT][0-9]+-[0-9]+-[0-9]+$'
+			AND split_part(btrim(s.content_id), '-', 2) = lower(btrim(s.provider))
+			AND CASE WHEN lower(btrim(s.provider)) = 'imdb'
+				THEN lower(split_part(btrim(s.content_id), '-', 3)) = lower(btrim(s.provider_id))
+				ELSE split_part(btrim(s.content_id), '-', 3) = btrim(s.provider_id)
+			END
+		)
+		OR CASE lower(btrim(s.provider))
+			WHEN 'tmdb' THEN btrim(COALESCE(mi.tmdb_id, '')) = btrim(s.provider_id)
+			WHEN 'tvdb' THEN btrim(COALESCE(mi.tvdb_id, '')) = btrim(s.provider_id)
+			ELSE lower(btrim(COALESCE(mi.imdb_id, ''))) = lower(btrim(s.provider_id))
+		END
+		OR lower(btrim(COALESCE(mi.status, ''))) <> 'matched'
+	)`
+
+// ListActionable answers one page of the actionable stale IDs with their
+// items, most recent sighting first; the caller passes limit+1 to probe for
+// a following page. The predicate runs in SQL so the page is cut there
+// rather than after loading every row.
+func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offset int) ([]ActionableStaleMediaID, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT s.content_id, s.provider, s.provider_id, s.first_seen_at, s.last_seen_at,
+		       COALESCE(mi.title, ''), COALESCE(mi.year, 0), COALESCE(mi.type, ''),
+		       COALESCE(lib.folder_id, 0), COALESCE(lib.folder_name, '')
+		FROM stale_media_ids s
+		LEFT JOIN media_items mi ON mi.content_id = s.content_id
+		LEFT JOIN LATERAL (
+			SELECT mf.media_folder_id AS folder_id, f.name AS folder_name
+			FROM media_files mf
+			JOIN media_folders f ON f.id = mf.media_folder_id
+			WHERE mf.content_id = s.content_id
+			LIMIT 1
+		) lib ON true
+		WHERE `+actionableStaleIDWhere+`
+		ORDER BY s.last_seen_at DESC, s.content_id ASC, s.provider ASC, s.provider_id ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("listing actionable stale media IDs: %w", err)
+	}
+	defer rows.Close()
+	out := []ActionableStaleMediaID{}
+	for rows.Next() {
+		var row ActionableStaleMediaID
+		if err := rows.Scan(
+			&row.ContentID, &row.Provider, &row.ProviderID, &row.FirstSeenAt, &row.LastSeenAt,
+			&row.Title, &row.Year, &row.ContentType, &row.LibraryID, &row.LibraryName,
+		); err != nil {
+			return nil, fmt.Errorf("scanning actionable stale media ID row: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating actionable stale media ID rows: %w", err)
+	}
+	return out, nil
+}

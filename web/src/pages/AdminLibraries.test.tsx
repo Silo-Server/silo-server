@@ -41,6 +41,8 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryRefreshJobs: (...args: unknown[]) => mocks.useLibraryRefreshJobs(...args),
   useSkippedLibraryRoots: (...args: unknown[]) => mocks.useSkippedLibraryRoots(...args),
   useStaleMediaIDs: (...args: unknown[]) => mocks.useStaleMediaIDs(...args),
+  flattenStaleMediaIDs: (data?: { pages: { staleIDs: unknown[] }[] }) =>
+    data?.pages.flatMap((page) => page.staleIDs) ?? [],
   useRematchStaleMediaID: (...args: unknown[]) => mocks.useRematchStaleMediaID(...args),
   useCheckLibraryMount: (...args: unknown[]) => mocks.useCheckLibraryMount(...args),
   useCreateLibrary: (...args: unknown[]) => mocks.useCreateLibrary(...args),
@@ -134,8 +136,11 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useStaleMediaIDs.mockReturnValue({
-      data: [],
-      isLoading: false,
+      data: undefined,
+      isFetched: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
     });
     mocks.useRematchStaleMediaID.mockReturnValue(queryState);
     mocks.useCreateLibrary.mockReturnValue(queryState);
@@ -338,29 +343,55 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("Scanner roots that stay visible");
   });
 
-  it("renders Stale External IDs collapsed by default", () => {
+  it("renders Stale External IDs collapsed by default and loads the first page on demand", () => {
     mocks.useStaleMediaIDs.mockReturnValue({
-      data: [
-        {
-          content_id: "movie-1",
-          library_id: 1,
-          library_name: "Movies",
-          title: "Inception",
-          year: 2010,
-          content_type: "movie",
-          provider: "tmdb",
-          provider_id: "27205",
-          first_seen_at: "2026-03-23T20:00:00Z",
-          last_seen_at: "2026-03-23T21:00:00Z",
-        },
-      ],
-      isLoading: false,
+      data: {
+        pages: [
+          {
+            staleIDs: [
+              {
+                content_id: "movie-1",
+                library_id: 1,
+                library_name: "Movies",
+                title: "Inception",
+                year: 2010,
+                content_type: "movie",
+                provider: "tmdb",
+                provider_id: "27205",
+                first_seen_at: "2026-03-23T20:00:00Z",
+                last_seen_at: "2026-03-23T21:00:00Z",
+              },
+            ],
+            nextCursor: undefined,
+          },
+        ],
+      },
+      isFetched: true,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
     });
 
     const markup = renderPage();
 
     expect(markup).toContain("Stale External IDs");
     expect(markup).not.toContain("Re-match");
+    // The section is collapsed on mount, so the first page is not requested yet.
+    expect(mocks.useStaleMediaIDs).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("hides Stale External IDs once the first page confirms there are none", () => {
+    mocks.useStaleMediaIDs.mockReturnValue({
+      data: { pages: [{ staleIDs: [], nextCursor: undefined }] },
+      isFetched: true,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    });
+
+    const markup = renderPage();
+
+    expect(markup).not.toContain("Stale External IDs");
   });
 
   it("renders an unmatched items section collapsed by default when unmatched items exist", () => {

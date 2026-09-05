@@ -203,12 +203,23 @@ func (f *fakeLibraryAdmin) ListSkippedRoots(context.Context) ([]handlers.Skipped
 	return []handlers.SkippedRootView{{LibraryID: 1, LibraryName: "Movies", RootPath: "/media/movies/Extras", Reason: "no_media_files", SampleFilePath: "/media/movies/Extras/a.txt", FileCount: 3, FirstSeenAt: fixedTime(), LastSeenAt: fixedTime()}}, nil
 }
 
-func (f *fakeLibraryAdmin) ListStaleIDs(context.Context) ([]handlers.StaleMediaIDView, error) {
+func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, limit, offset int) ([]handlers.StaleMediaIDView, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return []handlers.StaleMediaIDView{{ContentID: "movie:heat-1995", LibraryID: 1, LibraryName: "Movies", Title: "Heat", Year: 1995, ContentType: "movie", Provider: "tmdb", ProviderID: "949",
-		FirstSeenAt: "2026-01-02T03:04:05Z", LastSeenAt: "2026-01-02T03:04:05Z", FirstSeen: fixedTime(), LastSeen: fixedTime()}}, nil
+	f.lastLimit, f.lastOffset = limit, offset
+	all := []handlers.StaleMediaIDView{
+		{ContentID: "movie:heat-1995", LibraryID: 1, LibraryName: "Movies", Title: "Heat", Year: 1995, ContentType: "movie", Provider: "tmdb", ProviderID: "949",
+			FirstSeenAt: "2026-01-02T03:04:05Z", LastSeenAt: "2026-01-02T03:04:05Z", FirstSeen: fixedTime(), LastSeen: fixedTime()},
+		{ContentID: "movie:alien-1979", LibraryID: 1, LibraryName: "Movies", Title: "Alien", Year: 1979, ContentType: "movie", Provider: "imdb", ProviderID: "tt0078748",
+			FirstSeenAt: "2026-01-02T03:04:05Z", LastSeenAt: "2026-01-02T03:04:05Z", FirstSeen: fixedTime(), LastSeen: fixedTime()},
+		{ContentID: "series:lost-2004", LibraryID: 0, LibraryName: "", Title: "Lost", Year: 2004, ContentType: "series", Provider: "tvdb", ProviderID: "73739",
+			FirstSeenAt: "2026-01-02T03:04:05Z", LastSeenAt: "2026-01-02T03:04:05Z", FirstSeen: fixedTime(), LastSeen: fixedTime()},
+	}
+	if offset > len(all) {
+		return []handlers.StaleMediaIDView{}, nil
+	}
+	return all[offset:min(offset+limit, len(all))], nil
 }
 
 func (f *fakeLibraryAdmin) RematchStaleID(_ context.Context, contentID string) error {
@@ -591,15 +602,30 @@ func TestListSkippedRootsAndStaleIDs(t *testing.T) {
 	if len(body.Items) != 1 || string(body.Items[0]["library_id"]) != `"1"` || string(body.Items[0]["first_seen_at"]) != `"2026-01-02T03:04:05.678Z"` || string(body.Items[0]["file_count"]) != `3` {
 		t.Fatalf("skipped = %s", rec.Body.String())
 	}
-	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids", "", bearer(adminToken))
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=2", "", bearer(adminToken))
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	decodeJSON(t, rec.Body, &body)
-	// v1 rendered second-precision strings; v2 carries the instants.
-	if len(body.Items) != 1 || string(body.Items[0]["provider_id"]) != `"949"` || string(body.Items[0]["last_seen_at"]) != `"2026-01-02T03:04:05.678Z"` {
+	var stale rootPage
+	decodeJSON(t, rec.Body, &stale)
+	// v1 rendered second-precision strings; v2 carries the instants and pages.
+	if len(stale.Items) != 2 || !stale.Page.HasMore || stale.Page.NextCursor == "" || string(stale.Items[0]["provider_id"]) != `"949"` || string(stale.Items[0]["last_seen_at"]) != `"2026-01-02T03:04:05.678Z"` {
 		t.Fatalf("stale = %s", rec.Body.String())
 	}
+	if fake.lastLimit != 3 || fake.lastOffset != 0 {
+		t.Fatalf("seam query = limit %d offset %d, want the limit+1 probe from offset 0", fake.lastLimit, fake.lastOffset)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=2&cursor="+stale.Page.NextCursor, "", bearer(adminToken))
+	decodeJSON(t, rec.Body, &stale)
+	if len(stale.Items) != 1 || stale.Page.HasMore || string(stale.Items[0]["content_id"]) != `"series:lost-2004"` || string(stale.Items[0]["library_id"]) != `"0"` || fake.lastOffset != 2 {
+		t.Fatalf("second stale page = %s (offset %d)", rec.Body.String(), fake.lastOffset)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids", "", bearer(adminToken))
+	decodeJSON(t, rec.Body, &stale)
+	if len(stale.Items) != 3 || stale.Page.HasMore || fake.lastLimit != 51 {
+		t.Fatalf("default stale page = %s (limit %d)", rec.Body.String(), fake.lastLimit)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?cursor=nope", "", bearer(adminToken)), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/skipped-roots", "", bearer(memberToken)), TypePermissionDenied)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids", "", bearer(memberToken)), TypePermissionDenied)
 

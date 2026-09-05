@@ -626,11 +626,17 @@ func (h *LibraryHandler) ListSkippedRoots(ctx context.Context) ([]SkippedRootVie
 	return resp, nil
 }
 
-// ListStaleIDs answers every actionable stale provider identifier with the
-// item it belongs to. Without a stale-id store the list is empty.
-func (h *LibraryHandler) ListStaleIDs(ctx context.Context) ([]StaleMediaIDView, error) {
+// ListStaleIDs answers actionable stale provider identifiers with the item
+// each belongs to, most recent sighting first. A positive limit answers one
+// page cut in the database (pass limit+1 to probe for a following page); a
+// zero limit answers the whole list the way v1 renders it. Without a
+// stale-id store the list is empty.
+func (h *LibraryHandler) ListStaleIDs(ctx context.Context, limit, offset int) ([]StaleMediaIDView, error) {
 	if h.StaleIDRepo == nil {
 		return []StaleMediaIDView{}, nil
+	}
+	if limit > 0 {
+		return h.listStaleIDPage(ctx, limit, offset)
 	}
 	staleIDs, err := h.StaleIDRepo.ListAll(ctx)
 	if err != nil {
@@ -723,6 +729,32 @@ func (h *LibraryHandler) ListStaleIDs(ctx context.Context) ([]StaleMediaIDView, 
 			LastSeenAt:  s.LastSeenAt.Format("2006-01-02T15:04:05Z"),
 			FirstSeen:   s.FirstSeenAt,
 			LastSeen:    s.LastSeenAt,
+		})
+	}
+	return resp, nil
+}
+
+func (h *LibraryHandler) listStaleIDPage(ctx context.Context, limit, offset int) ([]StaleMediaIDView, error) {
+	rows, err := h.StaleIDRepo.ListActionable(ctx, limit, offset)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing stale media IDs", "component", "api", "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list stale IDs")
+	}
+	resp := make([]StaleMediaIDView, 0, len(rows))
+	for _, row := range rows {
+		resp = append(resp, StaleMediaIDView{
+			ContentID:   row.ContentID,
+			LibraryID:   row.LibraryID,
+			LibraryName: row.LibraryName,
+			Title:       row.Title,
+			Year:        row.Year,
+			ContentType: row.ContentType,
+			Provider:    row.Provider,
+			ProviderID:  row.ProviderID,
+			FirstSeenAt: row.FirstSeenAt.Format("2006-01-02T15:04:05Z"),
+			LastSeenAt:  row.LastSeenAt.Format("2006-01-02T15:04:05Z"),
+			FirstSeen:   row.FirstSeenAt,
+			LastSeen:    row.LastSeenAt,
 		})
 	}
 	return resp, nil
