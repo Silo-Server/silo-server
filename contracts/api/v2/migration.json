@@ -45403,8 +45403,8 @@
         "operation_id": null
       },
       "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Sets watched state; converges."
+      "retry_safety": "domain_identity",
+      "retry_safety_note": "DEFECT: the watched flag converges, but each call inserts a fresh-uuid user_watch_history row unconditionally and re-dispatches the watch-provider event, so a retry duplicates history and notifications. The v2 port needs a client-supplied watch identity with a unique constraint."
     },
     {
       "listener": "api",
