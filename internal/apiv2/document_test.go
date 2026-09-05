@@ -128,15 +128,23 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	doc := generatedDocument(t)
 	bodies := 0
 	expect := map[string]map[int]bool{
-		"getSetupStatus":     {http.StatusServiceUnavailable: true},
-		"getSystemInfo":      {http.StatusServiceUnavailable: false},
-		"getOpenAPIDocument": {http.StatusServiceUnavailable: false},
-		"getCurrentUser":     {http.StatusNotFound: false},
-		"listProgress":       {http.StatusNotFound: true},
-		"listAdminUsers":     {http.StatusNotFound: true},
-		"updateProfile":      {http.StatusNotFound: true, http.StatusConflict: true},
+		"getSetupStatus":                 {http.StatusServiceUnavailable: true},
+		"getSystemInfo":                  {http.StatusServiceUnavailable: false},
+		"getOpenAPIDocument":             {http.StatusServiceUnavailable: false},
+		"getCurrentUser":                 {http.StatusNotFound: false},
+		"listProgress":                   {http.StatusNotFound: true},
+		"listAdminUsers":                 {http.StatusNotFound: true},
+		"updateProfile":                  {http.StatusNotFound: true, http.StatusConflict: true},
+		"listProfiles":                   {http.StatusNotFound: true, http.StatusConflict: false},
+		"createProfile":                  {http.StatusNotFound: true, http.StatusConflict: true, http.StatusCreated: true, http.StatusOK: false},
+		"replaceProfileSectionOverrides": {http.StatusNoContent: true, http.StatusForbidden: true},
+		"resetProfileSectionOverrides":   {http.StatusNoContent: true},
 	}
-	profileToken := map[string]bool{"listProgress": true, "listAdminUsers": true, "updateProfile": true}
+	profileToken := map[string]bool{
+		"listProgress": true, "listAdminUsers": true, "updateProfile": true, "listProfiles": true, "createProfile": true,
+		"listProfileSectionOverrides": true, "replaceProfileSectionOverrides": true, "resetProfileSectionOverrides": true,
+		"getProfileSectionSettings": true, "getProfileSectionFlags": true,
+	}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {
 		for method, raw := range item.(map[string]any) {

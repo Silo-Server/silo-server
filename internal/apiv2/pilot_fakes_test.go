@@ -2,14 +2,18 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -128,14 +132,38 @@ func (f *fakeProgress) page(profileID, status string, after *userstore.ProgressK
 }
 
 type fakeProfiles struct {
-	last *handlers.ProfileUpdateCommand
-	view handlers.ProfileView
-	err  error
+	last        *handlers.ProfileUpdateCommand
+	lastCreate  *handlers.ProfileCreateCommand
+	view        handlers.ProfileView
+	err         error
+	avatarStore bool
 	// lockedPrimary, when set, is the PIN-locked primary profile the fake
 	// treats as managing the household: like v1 canManageHouseholdAs it runs
 	// the command's verifier for it and answers an unverified one with the
 	// 403 profile_management the real service returns.
 	lockedPrimary string
+}
+
+func (f *fakeProfiles) ListProfiles(_ context.Context, _ int) (handlers.ProfileListView, error) {
+	if f.err != nil {
+		return handlers.ProfileListView{}, f.err
+	}
+	return handlers.ProfileListView{Profiles: []handlers.ProfileView{f.view}, AvatarUploadEnabled: f.avatarStore}, nil
+}
+
+func (f *fakeProfiles) CreateProfile(_ context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error) {
+	f.lastCreate = &cmd
+	if f.err != nil {
+		return handlers.ProfileView{}, f.err
+	}
+	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
+		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
+		}
+	}
+	view := f.view
+	view.ID, view.Name = "p-new", cmd.Request.Name
+	return view, nil
 }
 
 func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error) {
@@ -226,6 +254,8 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	}
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
+	deps.ProfileSections = &fakeProfileSections{rows: fixtureSectionOverrides()}
+	deps.SectionFlags = fakeSectionFlags{allow: true}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
@@ -239,4 +269,59 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
 	return deps
+}
+
+// fakeProfileSections stores one override set and resolves a fixed page.
+type fakeProfileSections struct {
+	rows       []userstore.SectionOverride
+	lastQuery  handlers.SectionOverridesQuery
+	lastWrites []handlers.SectionOverrideWrite
+	lastFilter mediacatalog.AccessFilter
+	reset      bool
+	err        error
+}
+
+func (f *fakeProfileSections) ListProfileOverrides(_ context.Context, q handlers.SectionOverridesQuery) ([]userstore.SectionOverride, error) {
+	f.lastQuery = q
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.rows, nil
+}
+
+func (f *fakeProfileSections) SaveProfileOverrides(_ context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error {
+	f.lastQuery, f.lastWrites = q, writes
+	return f.err
+}
+
+func (f *fakeProfileSections) ResetProfileOverrides(_ context.Context, q handlers.SectionOverridesQuery) error {
+	f.lastQuery, f.reset = q, true
+	return f.err
+}
+
+func (f *fakeProfileSections) ResolveProfileSectionSettings(_ context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error) {
+	f.lastQuery = handlers.SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: scope}
+	if libraryID != nil {
+		f.lastQuery.LibraryID = strconv.Itoa(*libraryID)
+	}
+	f.lastFilter = filter
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []sections.ResolvedSection{
+		{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
+		{ID: "u-gems", SectionType: "hidden_gems", Title: "Hidden gems", ItemLimit: 12, Position: 1, IsCustom: true, Config: json.RawMessage(`{"library_ids":[3]}`)},
+	}, nil
+}
+
+type fakeSectionFlags struct{ allow bool }
+
+func (f fakeSectionFlags) AllowProfileCustomSections(context.Context) bool { return f.allow }
+
+func fixtureSectionOverrides() []userstore.SectionOverride {
+	pos, featured, limit := 2, false, 10
+	return []userstore.SectionOverride{
+		{ID: "o-1", ProfileID: "p-owner", Scope: "home", SectionID: "s-continue", Position: &pos, Hidden: true, Featured: &featured, ItemLimit: &limit, Title: "Keep watching", CreatedAt: "2026-01-02T03:04:05Z", UpdatedAt: "2026-01-02T03:04:05Z"},
+		{ID: "o-2", ProfileID: "p-owner", Scope: "home", IsUserAdded: true, UserSectionType: "hidden_gems", UserConfig: `{"library_ids":[3]}`, UserTitle: "Hidden gems"},
+	}
 }

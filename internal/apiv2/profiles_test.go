@@ -237,3 +237,119 @@ func TestUpdateProfileServesLegacyStoredEnum(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
+
+func TestListProfiles(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView(), avatarStore: true}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	// No profile header: the picker calls this before one is selected.
+	rec := do(t, h, http.MethodGet, "/api/v2/profiles", "", bearer(memberToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	want := `{"items":[{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}],"avatar_upload_enabled":true}` + "\n"
+	if rec.Body.String() != want {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// A declared profile is still judged; the offset parameter is unknown.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles", "", with(bearer(memberToken), "X-Profile-Id", "p-other")), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles?offset=1", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles", "", nil), TypeAuthenticationRequired)
+	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: errors.New("boom")})), http.MethodGet, "/api/v2/profiles", "", bearer(memberToken)), TypeInternalError)
+}
+
+func TestCreateProfile(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView()}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	rec := do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid","is_child":true,"pin":"1234","allowed_library_ids":["3","4"],"max_playback_quality":"1080p"}`, with(bearer(memberToken), "X-Profile-Id", "p-owner"))
+	if rec.Code != 201 {
+		t.Fatal(rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/api/v2/profiles/p-new" {
+		t.Fatalf("Location = %q", loc)
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"p-new","name":"Kid"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	cmd := profiles.lastCreate
+	if cmd == nil || cmd.UserID != 1 || cmd.ActiveProfileID != "p-owner" {
+		t.Fatalf("command = %+v", cmd)
+	}
+	req := cmd.Request
+	if req.Name != "Kid" || !req.IsChild || req.PIN != "1234" || len(req.AllowedLibraryIDs) != 2 || req.AllowedLibraryIDs[1] != 4 || req.MaxPlaybackQuality != "1080p" {
+		t.Fatalf("request = %+v", req)
+	}
+	// Omitted members take v1's defaults: show_forced_subtitles is left to
+	// the handler (nil), the rest are the zero value.
+	if req.ShowForcedSubtitles != nil || req.AutoSkipIntro || req.Avatar != "" || req.AllowedLibraryIDs == nil {
+		t.Fatalf("defaults = %+v", req)
+	}
+	if err := cmd.VerifyProfile("p-owner"); err != nil {
+		t.Fatalf("verified profile rejected: %v", err)
+	}
+	// The first profile on an account is created without a profile header.
+	rec = do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Laura","show_forced_subtitles":false}`, bearer(memberToken))
+	if rec.Code != 201 || profiles.lastCreate.ActiveProfileID != "" || profiles.lastCreate.Request.ShowForcedSubtitles == nil || *profiles.lastCreate.Request.ShowForcedSubtitles {
+		t.Fatalf("%d %+v", rec.Code, profiles.lastCreate)
+	}
+}
+
+func TestCreateProfileValidation(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	auth := bearer(memberToken)
+	for _, tc := range []struct{ body, location, code string }{
+		{`{}`, "body.name", codeRequired},
+		{`{"name":""}`, "body.name", codeOutOfRange},
+		{`{"name":"Kid","is_child":null}`, "body.is_child", codeInvalidType},
+		{`{"name":"Kid","pin":null}`, locationPIN, codeInvalidType},
+		{`{"name":"Kid","pin":""}`, locationPIN, codeOutOfRange},
+		{`{"name":"Kid","pin":"` + strings.Repeat("é", 37) + `"}`, locationPIN, codeOutOfRange},
+		{`{"name":"Kid","max_playback_quality":"4K"}`, "body.max_playback_quality", codeInvalidEnum},
+		{`{"name":"Kid","allowed_library_ids":["1","1"]}`, locationAllowedLibraryIDs, codeInvalid},
+		{`{"name":"Kid","allowed_library_ids":["9"]}`, locationAllowedLibraryIDs, codeInvalid},
+		{`{"name":"Kid","nickname":"x"}`, "body.nickname", codeUnknownField},
+	} {
+		p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", tc.body, auth), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
+			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
+		}
+	}
+}
+
+func TestCreateProfileDecisions(t *testing.T) {
+	auth := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	for _, tc := range []struct {
+		err  error
+		want ProblemType
+	}{
+		{&handlers.APIError{Status: http.StatusConflict, Code: "name_conflict", Message: "A profile with this name already exists"}, TypeConflict},
+		{&handlers.APIError{Status: http.StatusConflict, Code: "profile_limit_reached", Message: "This account has reached its profile limit (5)"}, TypeConflict},
+		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
+		{&handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}, TypeProfileVerificationRequired},
+		{&handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Invalid avatar", Field: "avatar"}, TypeValidationFailed},
+		{errors.New("boom"), TypeInternalError},
+	} {
+		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, auth), tc.want)
+	}
+	// A PIN-locked primary profile manages the household only once the
+	// gate verified it by X-Profile-Token.
+	profiles := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
+	if rec := do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, with(with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "t")); rec.Code != 201 {
+		t.Fatalf("verified: %d %s", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, with(bearer(apiKeyToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
+}
+
+func TestCreateProfileDenied(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, nil), TypeAuthenticationRequired)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
+	demo := pilotDeps(nil, nil)
+	demo.DemoSettings = fakeSettings{demo: true}
+	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, bearer(memberToken)), TypePermissionDenied)
+	unwired := pilotDeps(nil, nil)
+	unwired.Profiles = nil
+	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, bearer(memberToken)), TypeDependencyUnavailable)
+}

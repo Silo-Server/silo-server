@@ -121,7 +121,85 @@ type ProfileOutput struct {
 	Body Profile
 }
 
+// ProfileCollection is the listProfiles envelope: the whole household, which
+// the account's profile limit bounds, so it is not paginated.
+type ProfileCollection struct {
+	Collection[Profile]
+	AvatarUploadEnabled bool `json:"avatar_upload_enabled" doc:"Whether this server accepts avatar uploads (an avatar store is configured)" example:"true"`
+}
+
+// ProfileCollectionOutput is the listProfiles response.
+type ProfileCollectionOutput struct {
+	Body ProfileCollection
+}
+
+// ProfileCreate is the createProfile body. Only the name is required; an
+// omitted member takes the v1 default (show_forced_subtitles on, everything
+// else off or empty). No member admits null: there is nothing to clear on a
+// profile that does not exist yet.
+type ProfileCreate struct {
+	Name                       string  `json:"name" minLength:"1" maxLength:"64" doc:"Display name; leading and trailing spaces are trimmed" example:"Alice"`
+	Avatar                     *string `json:"avatar,omitempty" nullable:"false" doc:"Preset avatar reference" example:"preset:fox"`
+	PIN                        *string `json:"pin,omitempty" nullable:"false" minLength:"1" maxLength:"72" doc:"PIN, 1 to 72 bytes" example:"1234"`
+	IsChild                    *bool   `json:"is_child,omitempty" nullable:"false" example:"false"`
+	MaxContentRating           *string `json:"max_content_rating,omitempty" nullable:"false" doc:"Content-rating ceiling" example:"PG-13"`
+	QualityPreference          *string `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
+	Language                   *string `json:"language,omitempty" nullable:"false" doc:"Preferred audio language (ISO 639-1)" example:"en"`
+	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty" nullable:"false" doc:"Metadata language (ISO 639-1)" example:"en"`
+	SubtitleLanguage           *string `json:"subtitle_language,omitempty" nullable:"false" doc:"Preferred subtitle language (ISO 639-1)" example:"en"`
+	SubtitleMode               *string `json:"subtitle_mode,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, always, off, default, forced_only" example:"auto"`
+	AutoSkipIntro              *bool   `json:"auto_skip_intro,omitempty" nullable:"false" example:"true"`
+	AutoSkipCredits            *bool   `json:"auto_skip_credits,omitempty" nullable:"false" example:"false"`
+	AutoSkipRecap              *bool   `json:"auto_skip_recap,omitempty" nullable:"false" example:"false"`
+	AutoPlayNextPreview        *bool   `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
+	ShowForcedSubtitles        *bool   `json:"show_forced_subtitles,omitempty" nullable:"false" doc:"Defaults to true when omitted" example:"true"`
+	LibraryRestrictionsEnabled *bool   `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
+	AllowedLibraryIDs          *[]ID   `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Unique library identifiers the profile may see when restrictions are enabled" example:"[\"1\",\"2\"]"`
+	MaxPlaybackQuality         *string `json:"max_playback_quality,omitempty" nullable:"false" enum:"1080p,2160p" doc:"Playback ceiling" example:"1080p"`
+}
+
+// ProfileCreateInput is the createProfile request.
+type ProfileCreateInput struct {
+	Body ProfileCreate
+	// RawBody is the document as sent; see ProfileUpdateInput.
+	RawBody []byte
+}
+
+// ProfileCreatedOutput is the createProfile response: the profile and where
+// it now lives.
+type ProfileCreatedOutput struct {
+	Location string `header:"Location" doc:"The created profile's resource path"`
+	Body     Profile
+}
+
 func registerProfiles(reg *Registry) {
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/profiles", "listProfiles", "profiles",
+			"List the household profiles on the signed-in account."),
+		// Profile scoped without a required header, as v1 GET /profiles: the
+		// profile picker calls it before any profile is selected.
+		Class:           ClassProfileScoped,
+		ProfileOptional: true,
+		ServiceBacked:   true,
+	}, reg.listProfiles)
+
+	create := humaOp(http.MethodPost, Prefix+"/profiles", "createProfile", "profiles",
+		"Create a household profile.")
+	create.DefaultStatus = http.StatusCreated
+	// v1 CreateProfile answers a taken name (name_conflict) and a full
+	// household (profile_limit_reached) with 409.
+	create.Errors = []int{http.StatusConflict}
+	Register(reg, Operation{
+		Operation: create,
+		// As v1 POST /profiles: the first profile on an account is
+		// bootstrapped by anyone signed in; after that an administrator or
+		// the verified primary profile manages the household.
+		Class:           ClassProfileScoped,
+		ProfileOptional: true,
+		DemoRestricted:  true,
+		ServiceBacked:   true,
+	}, reg.createProfile)
+
 	update := humaOp(http.MethodPatch, Prefix+"/profiles/{id}", "updateProfile", "profiles",
 		"Update a household profile; omitted members are unchanged.")
 	// v1 UpdateProfile answers a taken name with 409 name_conflict, which
@@ -142,13 +220,133 @@ func registerProfiles(reg *Registry) {
 	}, reg.updateProfile)
 }
 
+// listProfiles answers from the same household read v1 GET /profiles uses.
+func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCollectionOutput, error) {
+	if reg.deps.Profiles == nil {
+		return nil, unavailable("profile")
+	}
+	claims := claimsFrom(ctx)
+	if claims == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	view, err := reg.deps.Profiles.ListProfiles(ctx, claims.UserID)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	items := make([]Profile, 0, len(view.Profiles))
+	for _, v := range view.Profiles {
+		profile, p := profileOf(v)
+		if p != nil {
+			return nil, p
+		}
+		items = append(items, profile)
+	}
+	return &ProfileCollectionOutput{Body: ProfileCollection{
+		Collection:          NewCollection(items),
+		AvatarUploadEnabled: view.AvatarUploadEnabled,
+	}}, nil
+}
+
+// createProfile runs the same authorization and write path as v1 POST
+// /profiles; the household-manager check verifies a PIN-locked primary
+// profile as updateProfile does.
+func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) (*ProfileCreatedOutput, error) {
+	if reg.deps.Profiles == nil {
+		return nil, unavailable("profile")
+	}
+	claims := claimsFrom(ctx)
+	if claims == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
+	}
+	req, p := in.Body.toRequest()
+	if p != nil {
+		return nil, p
+	}
+	if len(req.AllowedLibraryIDs) > 0 {
+		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs); p != nil {
+			return nil, p
+		}
+	}
+	view, err := reg.deps.Profiles.CreateProfile(ctx, handlers.ProfileCreateCommand{
+		UserID:          claims.UserID,
+		ActiveProfileID: profileFrom(ctx),
+		Request:         req,
+		VerifyProfile:   scopeVerifier(ctx),
+	})
+	if err != nil {
+		return nil, profileProblem(err)
+	}
+	profile, p := profileOf(view)
+	if p != nil {
+		return nil, p
+	}
+	return &ProfileCreatedOutput{Location: Prefix + "/profiles/" + string(profile.ID), Body: profile}, nil
+}
+
+// scopeVerifier is the v2 household-manager verifier: a PIN-locked primary
+// profile counts as verified only when the viewer-access gate verified it by
+// X-Profile-Token. An API-key credential is exempt from PIN verification at
+// the gate; v1 does not let that exemption stand in for the PIN when
+// managing the household, so a scope whose verification was skipped is
+// rejected.
+func scopeVerifier(ctx context.Context) func(profileID string) error {
+	return func(profileID string) error {
+		if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
+			return nil
+		}
+		return access.ErrProfileUnverified
+	}
+}
+
+// toRequest lowers the create body onto the v1 request, where an omitted
+// member is the zero value v1 decodes for an absent one.
+func (c ProfileCreate) toRequest() (handlers.ProfileCreateRequest, *Problem) {
+	if c.PIN != nil {
+		if p := validatePIN(Patch[string]{Present: true, Value: *c.PIN}); p != nil {
+			return handlers.ProfileCreateRequest{}, p
+		}
+	}
+	str := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	flag := func(p *bool) bool { return p != nil && *p }
+	req := handlers.ProfileCreateRequest{
+		Name:                       c.Name,
+		Avatar:                     str(c.Avatar),
+		PIN:                        str(c.PIN),
+		IsChild:                    flag(c.IsChild),
+		MaxContentRating:           str(c.MaxContentRating),
+		QualityPreference:          str(c.QualityPreference),
+		Language:                   str(c.Language),
+		PreferredMetadataLanguage:  str(c.PreferredMetadataLanguage),
+		SubtitleLanguage:           str(c.SubtitleLanguage),
+		SubtitleMode:               str(c.SubtitleMode),
+		AutoSkipIntro:              flag(c.AutoSkipIntro),
+		AutoSkipCredits:            flag(c.AutoSkipCredits),
+		AutoSkipRecap:              flag(c.AutoSkipRecap),
+		AutoPlayNextPreview:        flag(c.AutoPlayNextPreview),
+		ShowForcedSubtitles:        c.ShowForcedSubtitles,
+		LibraryRestrictionsEnabled: flag(c.LibraryRestrictionsEnabled),
+		MaxPlaybackQuality:         str(c.MaxPlaybackQuality),
+	}
+	if c.AllowedLibraryIDs != nil {
+		ids, p := libraryIDsOf(*c.AllowedLibraryIDs)
+		if p != nil {
+			return req, p
+		}
+		req.AllowedLibraryIDs = ids
+	}
+	return req, nil
+}
+
 // updateProfile runs the same authorization and write path as v1 PUT
-// /profiles/{id}. A PIN-locked primary profile counts as verified only when
-// the viewer-access gate verified it by X-Profile-Token, the check the v1
-// handler performs itself (verifyProfileToken, which needs a login session).
-// An API-key credential is exempt from PIN verification at the gate; v1 does
-// not let that exemption stand in for the PIN when managing the household,
-// so the verifier rejects a scope whose verification was skipped.
+// /profiles/{id}; the household-manager check is scopeVerifier.
 func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) (*ProfileOutput, error) {
 	if reg.deps.Profiles == nil {
 		return nil, unavailable("profile")
@@ -172,12 +370,7 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 		ProfileID:       string(in.ID),
 		ActiveProfileID: profileFrom(ctx),
 		Request:         req,
-		VerifyProfile: func(profileID string) error {
-			if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
-				return nil
-			}
-			return access.ErrProfileUnverified
-		},
+		VerifyProfile:   scopeVerifier(ctx),
 	})
 	if err != nil {
 		return nil, profileProblem(err)
@@ -294,27 +487,35 @@ func (u ProfileUpdate) toRequest() (handlers.ProfileUpdateRequest, *Problem) {
 		MaxPlaybackQuality:         clear(u.MaxPlaybackQuality),
 	}
 	if u.AllowedLibraryIDs != nil {
-		ids := make([]int, 0, len(*u.AllowedLibraryIDs))
-		seen := make(map[int]bool, len(*u.AllowedLibraryIDs))
-		for _, id := range *u.AllowedLibraryIDs {
-			n, err := intOfID(id)
-			if err != nil || n <= 0 {
-				return req, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-					WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "expected library identifiers"})
-			}
-			// The store replaces the allowlist row by row under a
-			// (user, profile, library) primary key, so a repeated identifier
-			// is the client's error, not a 500.
-			if seen[n] {
-				return req, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-					WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "duplicate library identifier"})
-			}
-			seen[n] = true
-			ids = append(ids, n)
+		ids, p := libraryIDsOf(*u.AllowedLibraryIDs)
+		if p != nil {
+			return req, p
 		}
 		req.AllowedLibraryIDs = &ids
 	}
 	return req, nil
+}
+
+// libraryIDsOf lowers an allowlist onto store identifiers. The store
+// replaces the allowlist row by row under a (user, profile, library) primary
+// key, so a repeated identifier is the client's error, not a 500.
+func libraryIDsOf(raw []ID) ([]int, *Problem) {
+	ids := make([]int, 0, len(raw))
+	seen := make(map[int]bool, len(raw))
+	for _, id := range raw {
+		n, err := intOfID(id)
+		if err != nil || n <= 0 {
+			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+				WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "expected library identifiers"})
+		}
+		if seen[n] {
+			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+				WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "duplicate library identifier"})
+		}
+		seen[n] = true
+		ids = append(ids, n)
+	}
+	return ids, nil
 }
 
 func profileOf(v handlers.ProfileView) (Profile, *Problem) {
