@@ -79,20 +79,14 @@ const episodeCatalogSelectBody = `(
 	  AND si.type = 'series'
 ) mi`
 
-// episodeCatalogSeriesParentGuard mirrors the load-bearing `si.type = 'series'`
-// predicate in episodeCatalogSelectBody, but expressed against an entry-scan row
-// (ece.episode_id) instead of the hydration join. episode_catalog_entries rows
-// can reference episodes parented to non-series media_items (e.g. podcast
-// episodes), which hydration silently drops. Applying this same constraint to
-// the page and count scans keeps them aligned with hydration so pages never
-// under-fill and TotalRecordCount never counts rows that can't hydrate. It binds
-// no parameters, so it can be appended to any whereParts list without touching
-// the argument index.
+// episodeCatalogSeriesParentGuard keeps entry pages and totals restricted to
+// TV episodes, matching the hydration query. Membership and episode triggers
+// maintain ece.series_id in the same transaction, including reparenting, so
+// checking the parent directly avoids another episode lookup for every entry.
 const episodeCatalogSeriesParentGuard = `EXISTS (
 		SELECT 1
-		FROM episodes e
-		JOIN media_items si ON si.content_id = e.series_id
-		WHERE e.content_id = ece.episode_id
+		FROM media_items si
+		WHERE si.content_id = ece.series_id
 		  AND si.type = 'series'
 	)`
 
