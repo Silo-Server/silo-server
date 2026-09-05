@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -256,25 +257,45 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 	}
 }
 
-// mergeETagHeader documents ETag on resp unless a header already binds it
-// under any spelling: a registration that declares its own 304 or success
-// with Headers["etag"] keeps that entry, renamed to the canonical key so the
-// document never carries two case-equivalent headers.
+// mergeETagHeader documents ETag on resp as one canonical entry. Every
+// case-equivalent key a registration declared by hand is collapsed into it,
+// the declared description is kept (the canonical key's first, else the
+// first declared one in sorted-key order), and the schema is replaced by
+// the contract's string schema: registration requires the runtime field to be a string and
+// NotModified writes one, so a hand-declared integer schema would have
+// generated clients deserialize the header with the wrong type.
 func mergeETagHeader(resp *huma.Response, etag func() *huma.Header) {
 	if resp.Headers == nil {
 		resp.Headers = map[string]*huma.Header{}
 	}
-	for name, h := range resp.Headers {
-		if name == etagField {
-			return
-		}
+	var keys []string
+	for name := range resp.Headers {
 		if strings.EqualFold(name, etagField) {
-			delete(resp.Headers, name)
-			resp.Headers[etagField] = h
-			return
+			keys = append(keys, name)
 		}
 	}
-	resp.Headers[etagField] = etag()
+	if len(keys) == 0 {
+		resp.Headers[etagField] = etag()
+		return
+	}
+	// Keep the canonical key's description when it has one, else the
+	// first declared description in sorted-key order.
+	sort.Strings(keys)
+	description := ""
+	if h := resp.Headers[etagField]; h != nil && h.Description != "" {
+		description = h.Description
+	}
+	for _, name := range keys {
+		if description == "" && resp.Headers[name] != nil && resp.Headers[name].Description != "" {
+			description = resp.Headers[name].Description
+		}
+		delete(resp.Headers, name)
+	}
+	merged := etag()
+	if description != "" {
+		merged.Description = description
+	}
+	resp.Headers[etagField] = merged
 }
 
 // resolvesProfile reports whether the class runs viewer access and so needs

@@ -285,7 +285,10 @@ func registerConcurrencyDocProbes(reg *Registry) {
 				Description: "Still current; poll again after Retry-After.",
 				// A lower-case etag key: the merge must fold it into the
 				// canonical entry rather than add a second one.
-				Headers: map[string]*huma.Header{"Retry-After": {Schema: &huma.Schema{Type: "integer"}}, "etag": {Description: "declared by the registration", Schema: &huma.Schema{Type: "string"}}},
+				// Two case-equivalent keys, one with the wrong schema: both
+				// must collapse into one canonical string-schema entry that
+				// keeps the declared description.
+				Headers: map[string]*huma.Header{"Retry-After": {Schema: &huma.Schema{Type: "integer"}}, "etag": {Description: "declared by the registration", Schema: &huma.Schema{Type: "integer"}}, "ETAG": {Schema: &huma.Schema{Type: "integer"}}},
 			}}
 			return o
 		}(),
@@ -438,7 +441,10 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 		}
 	}
 	if etagKeys != 1 || get.Responses["304"].Headers["ETag"] == nil {
-		t.Fatalf("a declared lower-case etag header must merge into one canonical ETag entry: %+v", get.Responses["304"].Headers)
+		t.Fatalf("declared case-variant etag headers must merge into one canonical ETag entry: %+v", get.Responses["304"].Headers)
+	}
+	if h := get.Responses["304"].Headers["ETag"].(map[string]any); h["schema"].(map[string]any)["type"] != "string" || h["description"] != "declared by the registration" {
+		t.Fatalf("merged ETag must carry the contract's string schema and the declared description: %+v", h)
 	}
 	if _, ok := get.Responses["412"]; ok {
 		t.Fatal("a conditional read must not document 412")
