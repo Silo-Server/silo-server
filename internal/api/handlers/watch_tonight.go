@@ -92,7 +92,7 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 	}
 
 	// Filter out already-watched and low-rated items from rec candidates.
-	recResult.Items = h.filterRecommendations(r, userID, profileID, recResult.Items)
+	recResult.Items = h.filterRecommendations(r.Context(), userID, profileID, recResult.Items)
 
 	// Build taste set from recommendation items for boost lookups.
 	tasteSet := make(map[string]struct{}, len(recResult.Items))

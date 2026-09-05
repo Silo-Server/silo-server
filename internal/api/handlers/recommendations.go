@@ -136,57 +136,23 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 
 // HandleForYouMain handles GET /recommendations/for-you/main.
 func (h *RecommendationsHandler) HandleForYouMain(w http.ResponseWriter, r *http.Request) {
-	if h.reader == nil {
-		writeJSON(w, http.StatusOK, forYouMainResponse{Row: nil})
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
 	limit, _ := parsePagination(r)
-	if limit <= 0 {
-		limit = 20
-	}
-
-	row, err := h.reader.GetForYouMain(r.Context(), userID, profileID, limit, filter)
+	row, err := h.ForYouMain(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
-		slog.ErrorContext(r.Context(), "ForYouMain failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
+		writeAPIError(w, err)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, forYouMainResponse{Row: row})
 }
 
 // HandleForYouRows handles GET /recommendations/for-you/rows.
 func (h *RecommendationsHandler) HandleForYouRows(w http.ResponseWriter, r *http.Request) {
-	if h.reader == nil {
-		writeJSON(w, http.StatusOK, recommendations.ForYouResponse{Rows: []recommendations.ForYouRow{}})
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
 	limit, _ := parsePagination(r)
-	if limit <= 0 {
-		limit = 20
-	}
-
-	rows, err := h.reader.GetForYouRows(r.Context(), userID, profileID, limit, filter)
+	rows, err := h.ForYouRows(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
-		slog.ErrorContext(r.Context(), "ForYouRows failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
+		writeAPIError(w, err)
 		return
 	}
-
-	if rows == nil {
-		rows = []recommendations.ForYouRow{}
-	}
-
 	writeJSON(w, http.StatusOK, recommendations.ForYouResponse{Rows: rows})
 }
 
@@ -197,9 +163,6 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 		return
 	}
 
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
 	itemID := chi.URLParam(r, "item_id")
 	if itemID == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
@@ -207,24 +170,11 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 	}
 
 	limit, _ := parsePagination(r)
-	if limit <= 0 {
-		limit = 20
-	}
-
-	items, err := h.engine.BecauseYouWatched(r.Context(), userID, profileID, itemID, limit)
+	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
+		writeAPIError(w, err)
 		return
 	}
-
-	items = h.filterRecommendations(r, userID, profileID, items)
-
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-
-	items = h.excludeWatchedRecommendations(r, userID, profileID, items)
-
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
 }
 
@@ -292,17 +242,11 @@ func (h *RecommendationsHandler) HandlePopular(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	items, err := h.recsRepo.GetPopularItems(r.Context(), days, limit)
+	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch popular items")
+		writeAPIError(w, err)
 		return
 	}
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-
-	items = h.excludeWatchedRecommendations(r, apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), items)
-
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
 }
 
@@ -322,31 +266,25 @@ func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *h
 		}
 	}
 
-	items, err := h.recsRepo.GetRecentlyAddedItems(r.Context(), days, limit)
+	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recently added items")
+		writeAPIError(w, err)
 		return
 	}
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-
-	items = h.excludeWatchedRecommendations(r, apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), items)
-
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
 }
 
 // filterRecommendations removes watched items and low-rated items from the list.
-func (h *RecommendationsHandler) filterRecommendations(r *http.Request, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
-	items = h.excludeWatchedRecommendations(r, userID, profileID, items)
-	return h.excludeLowRatedRecommendations(r, userID, profileID, items)
+func (h *RecommendationsHandler) filterRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
+	items = h.excludeWatchedRecommendations(ctx, userID, profileID, items)
+	return h.excludeLowRatedRecommendations(ctx, userID, profileID, items)
 }
 
-func (h *RecommendationsHandler) excludeWatchedRecommendations(r *http.Request, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
+func (h *RecommendationsHandler) excludeWatchedRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
 	if len(items) == 0 {
 		return items
 	}
-	watchedSet, err := h.watchedItemIDSet(r.Context(), userID, profileID)
+	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
 	if err != nil || len(watchedSet) == 0 {
 		return items
 	}
@@ -379,7 +317,7 @@ func (h *RecommendationsHandler) watchedItemIDSet(ctx context.Context, userID in
 	return h.recsRepo.GetWatchedItemIDSet(ctx, userID, profileID)
 }
 
-func (h *RecommendationsHandler) excludeLowRatedRecommendations(r *http.Request, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
+func (h *RecommendationsHandler) excludeLowRatedRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
 	if len(items) == 0 || h.ratingsRepo == nil {
 		return items
 	}
@@ -389,7 +327,7 @@ func (h *RecommendationsHandler) excludeLowRatedRecommendations(r *http.Request,
 		itemIDs[i] = item.MediaItemID
 	}
 
-	ratings, err := h.ratingsRepo.ListForItems(r.Context(), userID, profileID, itemIDs)
+	ratings, err := h.ratingsRepo.ListForItems(ctx, userID, profileID, itemIDs)
 	if err != nil {
 		return items
 	}
@@ -464,83 +402,11 @@ type combinedForYouItem struct {
 // Returns all recommendation rows with fully enriched item metadata for the
 // carousel-based discover page.
 func (h *RecommendationsHandler) HandleDiscover(w http.ResponseWriter, r *http.Request) {
-	if h.reader == nil || h.Fetcher == nil {
-		writeJSON(w, http.StatusOK, discoverResponse{Rows: []discoverRowResponse{}})
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
-	rows, err := h.reader.GetDiscoverRows(r.Context(), userID, profileID, 20, filter)
+	resp, err := h.Discover(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r))
 	if err != nil {
-		slog.ErrorContext(r.Context(), "Discover failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
+		writeAPIError(w, err)
 		return
 	}
-
-	discoverRows := discoverRowModelsFromRecommendations(rows)
-
-	discoverRows, upcomingErr := h.blendUpcomingIntoDiscoverRows(
-		r.Context(),
-		userID,
-		profileID,
-		filter,
-		discoverRows,
-		rows,
-	)
-	if upcomingErr != nil {
-		slog.WarnContext(r.Context(),
-			"Discover: schedule-aware blending unavailable; falling back to legacy rows", "component", "api",
-			"user_id",
-			userID,
-			"profile_id",
-			profileID,
-			"error",
-			upcomingErr,
-		)
-	}
-
-	if len(discoverRows) == 0 {
-		writeJSON(w, http.StatusOK, discoverResponse{Rows: []discoverRowResponse{}})
-		return
-	}
-
-	// Collect unique item IDs across all rows for batched enrichment.
-	seen := make(map[string]struct{})
-	var allIDs []string
-	for _, row := range discoverRows {
-		for _, item := range row.Items {
-			if _, ok := seen[item.MediaItemID]; ok {
-				continue
-			}
-			seen[item.MediaItemID] = struct{}{}
-			allIDs = append(allIDs, item.MediaItemID)
-		}
-	}
-
-	enrichment, err := h.loadItemEnrichment(r.Context(), userID, profileID, filter, allIDs)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch item details")
-		return
-	}
-
-	resp := discoverResponse{Rows: make([]discoverRowResponse, 0, len(discoverRows))}
-	for _, row := range discoverRows {
-		kind, key := discoverRowSectionKey(row.Type, row.Label, row.ClusterIndex)
-		respRow := discoverRowResponse{
-			Type:        row.Type,
-			Label:       row.Label,
-			SectionKind: kind,
-			SectionKey:  key,
-			Items:       h.buildSectionItems(r.Context(), row.Items, enrichment, row.UpcomingEvents),
-		}
-		if len(respRow.Items) > 0 {
-			resp.Rows = append(resp.Rows, respRow)
-		}
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -566,59 +432,12 @@ func (h *RecommendationsHandler) HandleSection(w http.ResponseWriter, r *http.Re
 			limit = parsed
 		}
 	}
-	if limit > recommendations.CacheCandidateLimit {
-		limit = recommendations.CacheCandidateLimit
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
-	row, err := h.reader.GetSection(r.Context(), userID, profileID, kind, key, limit, filter)
+	resp, err := h.Section(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), kind, key, limit, requestAccessFilter(r))
 	if err != nil {
-		slog.ErrorContext(r.Context(),
-			"Section failed", "component", "api",
-			"user_id", userID,
-			"profile_id", profileID,
-			"kind", kind,
-			"key", key,
-			"error", err,
-		)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch section")
+		writeAPIError(w, err)
 		return
 	}
-	if row == nil {
-		writeJSON(w, http.StatusOK, sectionDetailResponse{
-			Kind:  kind,
-			Key:   key,
-			Items: []sectionItemResponse{},
-		})
-		return
-	}
-
-	ids := make([]string, 0, len(row.Items))
-	seen := make(map[string]struct{}, len(row.Items))
-	for _, item := range row.Items {
-		if _, ok := seen[item.MediaItemID]; ok {
-			continue
-		}
-		seen[item.MediaItemID] = struct{}{}
-		ids = append(ids, item.MediaItemID)
-	}
-
-	enrichment, err := h.loadItemEnrichment(r.Context(), userID, profileID, filter, ids)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch item details")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, sectionDetailResponse{
-		Kind:  kind,
-		Key:   key,
-		Type:  row.Type,
-		Label: row.Label,
-		Items: h.buildSectionItems(r.Context(), row.Items, enrichment, nil),
-	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // itemEnrichment caches the data needed to convert ScoredItem records into

@@ -313,7 +313,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(r *http.Request, userID int,
 		}
 	}
 
-	candidates = h.filterRecommendations(r, userID, profileID, candidates)
+	candidates = h.filterRecommendations(r.Context(), userID, profileID, candidates)
 	candidates = recommendations.FilterAndRankGenreMatches(candidates, genres, genreMap)
 
 	return recommendationCardItems(candidates, excludeIDs), isCold
