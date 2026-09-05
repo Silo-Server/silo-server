@@ -139,42 +139,25 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		if dup := duplicateHeaderName(f.ResponseHeaders); dup != "" {
 			fail("%s: response headers spell %q more than once", where, dup)
 		}
-		// A 204 or 304 has no representation, and a HEAD answer carries the
-		// headers of the GET it mirrors but no body whatever the status.
-		if f.ExpectedStatus == 204 || f.ExpectedStatus == 304 || f.Request.Method == "HEAD" {
-			if f.BodyFile != nil || f.Schema != nil || f.ResponseMediaType != nil {
-				fail("%s: a bodyless fixture (%s %d) has no representation: body_file, schema and response_media_type must be null", where, f.Request.Method, f.ExpectedStatus)
-			}
-			if f.ExpectedStatus == 304 && headerValue(f.ResponseHeaders, "ETag") == "" {
-				fail("%s: a 304 fixture must record ETag", where)
-			}
-			// A guarded DELETE's 204 has no validator (Register refuses an
-			// ETag on its output); an ordinary DELETE may carry one, as may
-			// a bodyless 204 from a PUT or PATCH. Probe fixtures name no
-			// operation, so they fall back to the method-only reading the
-			// probes were written against.
-			guarded := f.OperationID == nil || ops[*f.OperationID].guarded
-			if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && guarded && headerValue(f.ResponseHeaders, "ETag") != "" {
-				fail("%s: a guarded 204 DELETE fixture records an ETag, but a deleted representation has no validator", where)
-			}
-			if f.OperationID != nil {
-				if info, ok := ops[*f.OperationID]; !ok || !info.statuses[fmt.Sprint(f.ExpectedStatus)] {
-					fail("%s: openapi.json does not document status %d on %s", where, f.ExpectedStatus, *f.OperationID)
-				}
-			} else if !strings.HasPrefix(f.Request.Path, "/api/v2/probe/") {
-				fail("%s: a bodyless fixture without an operation must target a probe path", where)
-			}
-			continue
+		// Status-specific response metadata is required whether or not the
+		// answer carries a body: a 304 names its validator, a 429 its
+		// Retry-After, and a guarded DELETE's 204 has no validator (Register
+		// refuses an ETag on its output) while an ordinary DELETE may carry
+		// one, as may a bodyless 204 from a PUT or PATCH. Probe fixtures name
+		// no operation, so they fall back to the method-only reading the
+		// probes were written against.
+		if f.ExpectedStatus == 304 && headerValue(f.ResponseHeaders, "ETag") == "" {
+			fail("%s: a 304 fixture must record ETag", where)
 		}
-		if f.BodyFile == nil || f.Schema == nil || f.ResponseMediaType == nil {
-			fail("%s: body_file, schema and response_media_type are required outside a bodyless 204 or 304", where)
-			continue
+		if f.ExpectedStatus == 429 && headerValue(f.ResponseHeaders, "Retry-After") == "" {
+			fail("%s: a 429 fixture must record Retry-After", where)
 		}
-		bodyFile, schemaRef, mediaType := *f.BodyFile, *f.Schema, *f.ResponseMediaType
-		if bodyFile != f.Name+".json" {
-			fail("%s: body_file %q must be %s.json", where, bodyFile, f.Name)
+		guarded := f.OperationID == nil || ops[*f.OperationID].guarded
+		if f.ExpectedStatus == 204 && f.Request.Method == "DELETE" && guarded && headerValue(f.ResponseHeaders, "ETag") != "" {
+			fail("%s: a guarded 204 DELETE fixture records an ETag, but a deleted representation has no validator", where)
 		}
-		indexed[bodyFile] = true
+		// Every fixture names a documented operation and status, or is a
+		// probe, or is the router's operationless 404 fallback.
 		if f.OperationID != nil {
 			info, ok := ops[*f.OperationID]
 			switch {
@@ -186,6 +169,23 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		} else if !strings.HasPrefix(f.Request.Path, "/api/v2/probe/") && f.ExpectedStatus != 404 {
 			fail("%s: a fixture without an operation must target a probe path or be the 404 fallback", where)
 		}
+		// A 204 or 304 has no representation, and a HEAD answer carries the
+		// headers of the GET it mirrors but no body whatever the status.
+		if f.ExpectedStatus == 204 || f.ExpectedStatus == 304 || f.Request.Method == "HEAD" {
+			if f.BodyFile != nil || f.Schema != nil || f.ResponseMediaType != nil {
+				fail("%s: a bodyless fixture (%s %d) has no representation: body_file, schema and response_media_type must be null", where, f.Request.Method, f.ExpectedStatus)
+			}
+			continue
+		}
+		if f.BodyFile == nil || f.Schema == nil || f.ResponseMediaType == nil {
+			fail("%s: body_file, schema and response_media_type are required outside a bodyless 204, 304 or HEAD answer", where)
+			continue
+		}
+		bodyFile, schemaRef, mediaType := *f.BodyFile, *f.Schema, *f.ResponseMediaType
+		if bodyFile != f.Name+".json" {
+			fail("%s: body_file %q must be %s.json", where, bodyFile, f.Name)
+		}
+		indexed[bodyFile] = true
 		wantMedia := mediaJSON
 		if f.ExpectedStatus >= 400 {
 			wantMedia = mediaProblem
@@ -195,9 +195,6 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 		}
 		if ct := headerValue(f.ResponseHeaders, "Content-Type"); !strings.HasPrefix(ct, wantMedia) {
 			fail("%s: response_headers.Content-Type %q does not match the media type", where, ct)
-		}
-		if f.ExpectedStatus == 429 && headerValue(f.ResponseHeaders, "Retry-After") == "" {
-			fail("%s: a 429 fixture must record Retry-After", where)
 		}
 		body, err := fs.ReadFile(fsys, path.Join(contracts.FixturesDir, bodyFile))
 		if err != nil {
