@@ -939,6 +939,47 @@ stored ones, every string member of a profile is always emitted, ids are string 
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
+**Section catalog-libraries (Phase 4).** Thirty operations under the `libraries` tag: the
+acting-admin, demo-guarded management surface `listLibraries`, `createLibrary`, `updateLibrary`,
+`deleteLibrary`, `checkLibraryMount`, `confirmEmptyRootCleanup`, `listMetadataMatchQueues`,
+`getMetadataMatchQueue`, `retryMetadataMatchQueue`, `cancelMetadataMatchQueue`,
+`refreshLibraryMetadata`, `getLibraryProviderDefaults`, `getLibraryProviders`,
+`setLibraryProviders`, `uploadLibraryPoster`, `deleteLibraryPoster`, `reorderLibraries`,
+`listLibraryRoots`, `setRootOverride`, `deleteRootOverride`, `listSkippedRoots`, `listStaleIds`,
+`rematchStaleId`, `listUnmatchedItems`; and the profile-scoped viewer reads `getLibraryLayout`,
+`listLibrarySections`, `getLibrarySectionItems`, `getLibraryCollections`,
+`getLibraryCollectionItems`, `listLibraryUserCollections`. Every card these reads answer is the
+one `CatalogItem` schema (`internal/apiv2/catalog_types.go`), which the catalog-items and
+catalog-home sections reuse. Deliberate differences from v1, all recorded on the ledger rows:
+`PUT` full updates are `PATCH`; offset paging (roots, unmatched items, the per-library match
+queue) is `limit` plus an opaque cursor; ids are string `ID`s and timestamps UTC-millisecond
+instants; the provider-chain `levels` map is an ordered array of `{content_level, entries}` and
+`library_type` is required on the defaults read; `deleteRootOverride` takes its root in the query;
+the refresh `mode` and `image_size` are strict enums answered `422`; the queued-work operations
+(`deleteLibrary`, `refreshLibraryMetadata`) answer `409` without v1's `active_job` echo, pending
+the long-running-work foundation rule; `uploadLibraryPoster` is the first multipart operation
+(`multipart/form-data` only, else `415`; a wrong part media type is `422` at `body.poster`; over
+10 MiB is `413`); `getLibrarySectionItems` answers the section itself rather than a `{section}`
+wrapper, `getLibraryCollectionItems` drops v1's `total`/`has_more` on a bounded list, and
+`getLibraryCollections` has one shape whether or not collection groups are configured.
+
+**Section catalog-home (Phase 4).** Eight profile-scoped operations under the `home` tag:
+`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeLayout`, `listHomeSections`,
+`getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
+gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registers them without
+`RequireProfile`, so an account-scoped caller reads the gallery. Home is the same
+shape as a library page with scope=home, so the layout, section, and card reads reuse
+`SectionLayout`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
+`date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
+rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
+instant; the dismissal `surface` is a path enum, `progress_updated_at` an instant, and both
+dismissal operations answer `204`; `getHomeSectionItems` answers the section itself rather than
+a `{section}` wrapper; `listSectionRecipes` groups recipes in an ordered `categories` array of
+`{category, recipes}` instead of a map, never emits `hidden`, and declares each preset's
+`default_params` as the `section-config` extension bag; `listSectionRecipeCandidates` always
+emits `subtitle` and answers an unknown recipe type as a `not_found` problem.
+
 ## v1 lifecycle and release sequence
 
 1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;

@@ -793,28 +793,10 @@ func (h *LibraryCollectionHandler) HandleListLibraryUserCollections(w http.Respo
 	if !ok {
 		return
 	}
-	if !requestCanAccessLibrary(r, libraryID) {
-		writeError(w, http.StatusNotFound, "not_found", "Library not found")
-		return
-	}
-	if h.UserCollectionPool == nil {
-		writeJSON(w, http.StatusOK, serverUserCollectionsListResponse{Collections: []usercollections.ServerVisibleCollection{}})
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	collections, err := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, profileID, libraryID)
+	collections, err := h.LibraryUserCollections(r.Context(), libraryID, apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user collections")
+		writeAPIError(w, err)
 		return
-	}
-
-	if collections == nil {
-		collections = []usercollections.ServerVisibleCollection{}
-	}
-	for i := range collections {
-		collections[i].PosterURL = h.presignGPURL(r, collections[i].PosterPath)
 	}
 	writeJSON(w, http.StatusOK, serverUserCollectionsListResponse{Collections: collections})
 }
@@ -824,117 +806,15 @@ func (h *LibraryCollectionHandler) HandleListLibraryCollections(w http.ResponseW
 	if !ok {
 		return
 	}
-	if !requestCanAccessLibrary(r, libraryID) {
-		writeError(w, http.StatusNotFound, "not_found", "Library not found")
-		return
-	}
-
-	adminCollections, err := h.repo.ListByLibrary(r.Context(), libraryID, catalog.ListLibraryCollectionsOptions{})
+	resp, err := h.LibraryCollectionsTab(r.Context(), libraryID, apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collections")
+		writeAPIError(w, err)
 		return
 	}
 	if h.GroupRepo == nil {
-		writeJSON(w, http.StatusOK, libraryCollectionsListResponse{
-			Collections: h.toLibraryCollectionResponses(r, adminCollections),
-		})
+		writeJSON(w, http.StatusOK, libraryCollectionsListResponse{Collections: resp.Collections})
 		return
 	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	groups, err := h.GroupRepo.ListByLibrary(r.Context(), libraryID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load groups")
-		return
-	}
-	adminCollectionsByGroup := groupLibraryTabCollections(adminCollections)
-
-	resp := libraryTabResponse{
-		LibraryID:   libraryID,
-		Collections: h.toLibraryCollectionResponses(r, adminCollections),
-		Groups:      []libraryTabGroup{},
-	}
-	var userCollections []usercollections.ServerVisibleCollection
-	userCollectionsLoaded := false
-	for _, g := range groups {
-		var colls []libraryTabCollection
-		switch g.Kind {
-		case models.GroupKindUserCollections:
-			if h.UserCollectionPool == nil || userID == 0 {
-				continue
-			}
-			if !userCollectionsLoaded {
-				loadedUserCollections, loadErr := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, profileID, libraryID)
-				if loadErr != nil {
-					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user collections")
-					return
-				}
-				userCollections = loadedUserCollections
-				userCollectionsLoaded = true
-			}
-			sorted := applyUserCollectionSort(userCollections, g.DefaultSortMode)
-			for i := range sorted {
-				posterURL := h.presignGPURL(r, sorted[i].PosterPath)
-				creatorProfileID := sorted[i].CreatorProfileID
-				colls = append(colls, libraryTabCollection{
-					ID:               sorted[i].ID,
-					Title:            sorted[i].Name,
-					PosterURL:        posterURL,
-					PosterThumbhash:  sorted[i].PosterThumbhash,
-					ItemCount:        sorted[i].ItemCount,
-					CreatorProfileID: &creatorProfileID,
-				})
-			}
-		default:
-			collections := adminCollectionsByGroup[g.ID]
-			collections = applyCollectionSort(collections, g.DefaultSortMode)
-			for _, c := range collections {
-				colls = append(colls, libraryTabCollection{
-					ID:              c.ID,
-					Title:           c.Title,
-					PosterURL:       h.presignGPURL(r, c.PosterURL),
-					PosterThumbhash: c.PosterThumbhash,
-					ItemCount:       c.ItemCount,
-					Featured:        c.Featured,
-				})
-			}
-		}
-		if len(colls) == 0 {
-			continue
-		}
-		resp.Groups = append(resp.Groups, libraryTabGroup{
-			ID:          g.ID,
-			Name:        g.Name,
-			Kind:        g.Kind,
-			SortMode:    g.DefaultSortMode,
-			SortOrder:   g.SortOrder,
-			Collections: colls,
-		})
-	}
-
-	ungrouped := adminCollectionsByGroup[groupKeyPtr(nil)]
-	if len(ungrouped) > 0 {
-		uColls := make([]libraryTabCollection, 0, len(ungrouped))
-		for _, c := range ungrouped {
-			uColls = append(uColls, libraryTabCollection{
-				ID:              c.ID,
-				Title:           c.Title,
-				PosterURL:       h.presignGPURL(r, c.PosterURL),
-				PosterThumbhash: c.PosterThumbhash,
-				ItemCount:       c.ItemCount,
-				Featured:        c.Featured,
-			})
-		}
-		sortOrder := 9999
-		if h.GroupRepo != nil {
-			if sortOrder, err = h.GroupRepo.GetUngroupedSortOrder(r.Context(), libraryID); err != nil {
-				sortOrder = 9999
-			}
-		}
-		resp.Ungrouped = &libraryTabUngrouped{SortOrder: sortOrder, Collections: uColls}
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1022,34 +902,11 @@ func (h *LibraryCollectionHandler) HandleGetLibraryCollectionItems(w http.Respon
 	if !ok {
 		return
 	}
-	if !requestCanAccessLibrary(r, libraryID) {
-		writeError(w, http.StatusNotFound, "not_found", "Library not found")
-		return
-	}
-
-	collectionID := chi.URLParam(r, "collection_id")
-	collection, err := h.repo.GetByID(r.Context(), collectionID)
-	if err != nil || collection.LibraryID != libraryID || collection.Visibility != "visible" {
-		writeError(w, http.StatusNotFound, "not_found", "Collection not found")
-		return
-	}
-
-	var items []itemListResponse
-	if catalog.IsLiveQueryType(collection.CollectionType) {
-		items, err = h.loadLiveCollectionItems(r, collection)
-	} else {
-		items, err = h.loadOrderedCollectionItems(r, collectionID)
-	}
+	items, err := h.LibraryCollectionItems(r.Context(), libraryID, chi.URLParam(r, "collection_id"), requestAccessFilter(r))
 	if err != nil {
-		var queryErr smartCollectionQueryError
-		if errors.As(err, &queryErr) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection items")
+		writeAPIError(w, err)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, browseResponse{Items: items, Total: len(items), HasMore: false})
 }
 
@@ -3154,8 +3011,8 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 	})
 }
 
-func (h *LibraryCollectionHandler) loadOrderedCollectionItems(r *http.Request, collectionID string) ([]itemListResponse, error) {
-	collectionItems, err := h.repo.ListItems(r.Context(), collectionID)
+func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Context, collectionID string) ([]itemListResponse, error) {
+	collectionItems, err := h.repo.ListItems(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -3165,7 +3022,7 @@ func (h *LibraryCollectionHandler) loadOrderedCollectionItems(r *http.Request, c
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
 
-	items, err := h.itemRepo.GetByIDs(r.Context(), contentIDs)
+	items, err := h.itemRepo.GetByIDs(ctx, contentIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -3181,12 +3038,12 @@ func (h *LibraryCollectionHandler) loadOrderedCollectionItems(r *http.Request, c
 		if !ok {
 			continue
 		}
-		resp = append(resp, h.toItemListResponse(r, item))
+		resp = append(resp, h.itemListResponseOf(ctx, item))
 	}
 	return resp, nil
 }
 
-func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, collection *models.LibraryCollection) ([]itemListResponse, error) {
+func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, collection *models.LibraryCollection, access catalog.AccessFilter) ([]itemListResponse, error) {
 	if h.Executor == nil {
 		return nil, fmt.Errorf("query executor is not configured")
 	}
@@ -3216,7 +3073,7 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, coll
 		}
 	}
 
-	items, total, err := h.Executor.Preview(r.Context(), def, requestAccessFilter(r), 1)
+	items, total, err := h.Executor.Preview(ctx, def, access, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -3224,7 +3081,7 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, coll
 		return []itemListResponse{}, nil
 	}
 	if total > len(items) {
-		items, _, err = h.Executor.Preview(r.Context(), def, requestAccessFilter(r), total)
+		items, _, err = h.Executor.Preview(ctx, def, access, total)
 		if err != nil {
 			return nil, err
 		}
@@ -3232,7 +3089,7 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, coll
 
 	resp := make([]itemListResponse, 0, len(items))
 	for _, item := range items {
-		resp = append(resp, h.toItemListResponse(r, item))
+		resp = append(resp, h.itemListResponseOf(ctx, item))
 	}
 	return resp, nil
 }
@@ -3253,6 +3110,10 @@ func (e smartCollectionQueryError) Unwrap() error {
 // so the web API and the Jellyfin-compat resolver share one implementation.
 
 func (h *LibraryCollectionHandler) toItemListResponse(r *http.Request, item *models.MediaItem) itemListResponse {
+	return h.itemListResponseOf(r.Context(), item)
+}
+
+func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item *models.MediaItem) itemListResponse {
 	resp := itemListResponse{
 		ContentID:         item.ContentID,
 		Type:              item.Type,
@@ -3266,19 +3127,27 @@ func (h *LibraryCollectionHandler) toItemListResponse(r *http.Request, item *mod
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropThumbhash: item.BackdropThumbhash,
 	}
-	resp.PosterURL = h.presignURL(r, cardThumbnailPath(item.PosterPath), "card")
-	resp.BackdropURL = h.presignURL(r, cardThumbnailPath(item.BackdropPath), "card")
+	resp.PosterURL = h.presignURLCtx(ctx, cardThumbnailPath(item.PosterPath), "card")
+	resp.BackdropURL = h.presignURLCtx(ctx, cardThumbnailPath(item.BackdropPath), "card")
 	return resp
 }
 
 func (h *LibraryCollectionHandler) presignURL(r *http.Request, path string, variant string) string {
+	return h.presignURLCtx(r.Context(), path, variant)
+}
+
+func (h *LibraryCollectionHandler) presignURLCtx(ctx context.Context, path string, variant string) string {
 	if h.detailSvc != nil {
-		return h.detailSvc.PresignURL(r.Context(), path, variant)
+		return h.detailSvc.PresignURL(ctx, path, variant)
 	}
 	return ""
 }
 
 func (h *LibraryCollectionHandler) presignGPURL(r *http.Request, path string) string {
+	return h.presignGPURLCtx(r.Context(), path)
+}
+
+func (h *LibraryCollectionHandler) presignGPURLCtx(ctx context.Context, path string) string {
 	if path == "" {
 		return ""
 	}
@@ -3291,7 +3160,7 @@ func (h *LibraryCollectionHandler) presignGPURL(r *http.Request, path string) st
 	if h.s3GP == nil {
 		return ""
 	}
-	url, err := h.s3GP.PresignGetURL(r.Context(), h.s3GP.Bucket(), cardThumbnailPath(path), h.presignTTL)
+	url, err := h.s3GP.PresignGetURL(ctx, h.s3GP.Bucket(), cardThumbnailPath(path), h.presignTTL)
 	if err != nil {
 		return ""
 	}
@@ -3299,6 +3168,10 @@ func (h *LibraryCollectionHandler) presignGPURL(r *http.Request, path string) st
 }
 
 func (h *LibraryCollectionHandler) toLibraryCollectionResponse(r *http.Request, collection *models.LibraryCollection) libraryCollectionResponse {
+	return h.libraryCollectionResponseOf(r.Context(), collection)
+}
+
+func (h *LibraryCollectionHandler) libraryCollectionResponseOf(ctx context.Context, collection *models.LibraryCollection) libraryCollectionResponse {
 	resp := libraryCollectionResponse{
 		ID:                collection.ID,
 		LibraryID:         collection.LibraryID,
@@ -3311,8 +3184,8 @@ func (h *LibraryCollectionHandler) toLibraryCollectionResponse(r *http.Request, 
 		SortOrder:         collection.SortOrder,
 		GroupID:           collection.GroupID,
 		Featured:          collection.Featured,
-		PosterURL:         h.presignGPURL(r, collection.PosterURL),
-		BackdropURL:       h.presignGPURL(r, collection.BackdropURL),
+		PosterURL:         h.presignGPURLCtx(ctx, collection.PosterURL),
+		BackdropURL:       h.presignGPURLCtx(ctx, collection.BackdropURL),
 		PosterThumbhash:   collection.PosterThumbhash,
 		BackdropThumbhash: collection.BackdropThumbhash,
 		SourceURL:         collection.SourceURL,
@@ -3358,7 +3231,14 @@ func parsePathLibraryID(w http.ResponseWriter, r *http.Request) (int, bool) {
 }
 
 func requestCanAccessLibrary(r *http.Request, libraryID int) bool {
-	scope, ok := access.GetScope(r.Context())
+	return viewerCanAccessLibrary(r.Context(), libraryID)
+}
+
+// viewerCanAccessLibrary reports whether the viewer scope on the context
+// admits the library; a context without a scope or allowlist admits every
+// library.
+func viewerCanAccessLibrary(ctx context.Context, libraryID int) bool {
+	scope, ok := access.GetScope(ctx)
 	if !ok || scope.AllowedLibraryIDs == nil {
 		return true
 	}

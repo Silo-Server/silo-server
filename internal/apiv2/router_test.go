@@ -196,6 +196,17 @@ func TestReconcileSpecSeeded(t *testing.T) {
 	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
 	observed := []string{
 		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json", "PATCH " + Prefix + "/profiles/{id}", "GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
+		"GET " + Prefix + "/libraries", "POST " + Prefix + "/libraries", "PATCH " + Prefix + "/libraries/{id}", "DELETE " + Prefix + "/libraries/{id}",
+		"POST " + Prefix + "/libraries/{id}/check-mount", "GET " + Prefix + "/libraries/metadata-match-queue", "GET " + Prefix + "/libraries/provider-defaults",
+		"POST " + Prefix + "/libraries/reorder", "GET " + Prefix + "/libraries/roots", "PUT " + Prefix + "/libraries/roots/override", "DELETE " + Prefix + "/libraries/roots/override",
+		"GET " + Prefix + "/libraries/skipped-roots", "GET " + Prefix + "/libraries/stale-ids", "POST " + Prefix + "/libraries/stale-ids/{content_id}/rematch", "GET " + Prefix + "/libraries/unmatched-items",
+		"POST " + Prefix + "/libraries/{id}/confirm-empty-root-cleanup", "GET " + Prefix + "/libraries/{id}/metadata-match-queue", "POST " + Prefix + "/libraries/{id}/metadata-match-queue/retry",
+		"POST " + Prefix + "/libraries/{id}/metadata-match-queue/cancel", "POST " + Prefix + "/libraries/{id}/refresh-metadata", "GET " + Prefix + "/libraries/{id}/providers",
+		"PUT " + Prefix + "/libraries/{id}/providers", "PUT " + Prefix + "/libraries/{id}/poster", "DELETE " + Prefix + "/libraries/{id}/poster",
+		"GET " + Prefix + "/library/{id}/layout", "GET " + Prefix + "/library/{id}/sections", "GET " + Prefix + "/library/{id}/sections/{section_id}/items",
+		"GET " + Prefix + "/library/{id}/collections", "GET " + Prefix + "/library/{id}/collections/{collection_id}/items", "GET " + Prefix + "/library/{id}/user-collections",
+		"GET " + Prefix + "/calendar", "PUT " + Prefix + "/home/dismissals/{surface}/{item_id}", "DELETE " + Prefix + "/home/dismissals/{surface}/{item_id}", "GET " + Prefix + "/home/layout",
+		"GET " + Prefix + "/home/sections", "GET " + Prefix + "/home/sections/{id}/items", "GET " + Prefix + "/sections/recipes", "GET " + Prefix + "/sections/recipes/{type}/candidates",
 	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
@@ -541,8 +552,11 @@ func TestGenerateOpenAPIIsDeterministic(t *testing.T) {
 			t.Errorf("document carries %q", forbidden)
 		}
 	}
+	// The home routes (/api/v2/home/...) are a real path segment, not a
+	// Unix home directory; strip that prefix before the leak check.
+	scrubbed := bytes.ReplaceAll(a, []byte(Prefix+"/home/"), nil)
 	for _, needle := range []string{"/Users/", "/home/", "localhost"} {
-		if bytes.Contains(a, []byte(needle)) {
+		if bytes.Contains(scrubbed, []byte(needle)) {
 			t.Errorf("document contains %s", needle)
 		}
 	}

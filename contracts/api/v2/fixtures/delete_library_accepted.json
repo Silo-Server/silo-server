@@ -1,0 +1,16 @@
+{
+  "id": "job-1",
+  "job_type": "delete_library",
+  "status": "queued",
+  "created_by_user_id": "2",
+  "request_payload": {
+    "library_id": 1
+  },
+  "result_payload": {},
+  "message": "Queued library deletion",
+  "progress_current": 0,
+  "progress_total": 0,
+  "artifact_size_bytes": 0,
+  "requested_at": "2026-01-02T03:04:05.678Z"
+}
+

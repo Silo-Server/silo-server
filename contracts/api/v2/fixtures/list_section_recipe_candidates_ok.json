@@ -1,0 +1,15 @@
+{
+  "candidates": [
+    {
+      "value": "action",
+      "display_name": "Action",
+      "subtitle": "12 titles"
+    },
+    {
+      "value": "drama",
+      "display_name": "Drama",
+      "subtitle": ""
+    }
+  ]
+}
+

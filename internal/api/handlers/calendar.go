@@ -97,6 +97,26 @@ type calendarResponse struct {
 	Events []calendarDayResponse `json:"events"`
 }
 
+// CalendarView is the calendar the v1 handler writes: events grouped by the
+// viewer's local day.
+type CalendarView = calendarResponse
+
+// CalendarDayView is one local day of the calendar.
+type CalendarDayView = calendarDayResponse
+
+// CalendarEventView is one airing or release on the calendar.
+type CalendarEventView = calendarEventResponse
+
+// CalendarQuery is a validated calendar request: the local-day window, the
+// preset filter, the viewer's zone and an optional library restriction.
+type CalendarQuery struct {
+	Start     time.Time
+	End       time.Time
+	Filter    string
+	Location  *time.Location
+	LibraryID *int
+}
+
 // HandleGetCalendar returns calendar events for a date range.
 func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -132,29 +152,20 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	query := CalendarQuery{Start: start, End: end, Filter: filter, Location: catalog.CalendarLocation(q.Get("timezone"))}
 	af := requestAccessFilter(r)
 
-	viewerLocation := catalog.CalendarLocation(q.Get("timezone"))
-
-	restrict, ids, err := h.resolveCalendarRestriction(r.Context(), filter, af)
+	// v1 resolves the preset before it looks at library_id: a restricting
+	// preset with no ids is an empty calendar even when library_id is
+	// malformed, and a restriction failure is 500 before library_id is judged.
+	scope, err := h.calendarScope(r.Context(), query.Filter, af)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to resolve calendar filter")
+		writeAPIError(w, err)
 		return
 	}
-	// A restricting preset with no ids can never match — skip the windowed query.
-	if restrict && len(ids) == 0 {
+	if scope.empty() {
 		writeJSON(w, http.StatusOK, calendarResponse{Events: []calendarDayResponse{}})
 		return
-	}
-
-	cf := catalog.CalendarFilter{
-		Start:              start.AddDate(0, 0, -2),
-		End:                end.AddDate(0, 0, 2),
-		AllowedLibraryIDs:  af.AllowedLibraryIDs,
-		DisabledLibraryIDs: af.DisabledLibraryIDs,
-		MaxContentRating:   af.MaxContentRating,
-		RestrictByIDs:      restrict,
-		RestrictToIDs:      ids,
 	}
 
 	if v := q.Get("library_id"); v != "" {
@@ -163,20 +174,81 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "bad_request", "library_id must be a positive integer")
 			return
 		}
-		cf.LibraryID = &id
+		query.LibraryID = &id
 	}
 
-	events, err := h.repo.ListEvents(r.Context(), cf)
+	resp, err := h.calendarEvents(r.Context(), query, af, scope)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to fetch calendar events")
+		writeAPIError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
-	watched := h.resolveWatched(r.Context(), af, events)
+// Calendar answers the viewer's calendar for a validated query. The repo
+// window is widened by two days on each side so an airing that lands on a
+// different local day than its source date is still found, then trimmed to
+// the requested local days. A restricting preset with no ids is an empty
+// calendar without a query.
+func (h *CalendarHandler) Calendar(ctx context.Context, q CalendarQuery, af catalog.AccessFilter) (CalendarView, error) {
+	scope, err := h.calendarScope(ctx, q.Filter, af)
+	if err != nil {
+		return CalendarView{}, err
+	}
+	if scope.empty() {
+		return CalendarView{Events: []calendarDayResponse{}}, nil
+	}
+	return h.calendarEvents(ctx, q, af, scope)
+}
+
+// calendarScope is a resolved preset: which ids, if any, the calendar is
+// restricted to.
+type calendarScope struct {
+	restrict bool
+	ids      []string
+}
+
+// empty reports a restricting preset with no ids, which can never match, so
+// the windowed query is skipped.
+func (s calendarScope) empty() bool { return s.restrict && len(s.ids) == 0 }
+
+// calendarScope resolves the preset filter for the viewer.
+func (h *CalendarHandler) calendarScope(ctx context.Context, filter string, af catalog.AccessFilter) (calendarScope, error) {
+	restrict, ids, err := h.resolveCalendarRestriction(ctx, filter, af)
+	if err != nil {
+		return calendarScope{}, apiError(http.StatusInternalServerError, "internal_error", "failed to resolve calendar filter")
+	}
+	return calendarScope{restrict: restrict, ids: ids}, nil
+}
+
+// calendarEvents runs the windowed query for a non-empty scope and groups the
+// events by the viewer's local day.
+func (h *CalendarHandler) calendarEvents(ctx context.Context, q CalendarQuery, af catalog.AccessFilter, scope calendarScope) (CalendarView, error) {
+	cf := catalog.CalendarFilter{
+		Start:              q.Start.AddDate(0, 0, -2),
+		End:                q.End.AddDate(0, 0, 2),
+		AllowedLibraryIDs:  af.AllowedLibraryIDs,
+		DisabledLibraryIDs: af.DisabledLibraryIDs,
+		MaxContentRating:   af.MaxContentRating,
+		RestrictByIDs:      scope.restrict,
+		RestrictToIDs:      scope.ids,
+		LibraryID:          q.LibraryID,
+	}
+
+	events, err := h.repo.ListEvents(ctx, cf)
+	if err != nil {
+		return CalendarView{}, apiError(http.StatusInternalServerError, "internal_error", "failed to fetch calendar events")
+	}
+
+	watched := h.resolveWatched(ctx, af, events)
 
 	// Group events by date and build response.
-	days := groupEventsByDate(events, r, h.detailSvc, start, end, viewerLocation, watched)
-	writeJSON(w, http.StatusOK, calendarResponse{Events: days})
+	location := q.Location
+	if location == nil {
+		location = time.UTC
+	}
+	days := groupEventsByDate(ctx, events, h.detailSvc, q.Start, q.End, location, watched)
+	return CalendarView{Events: days}, nil
 }
 
 // resolveCalendarRestriction maps a preset to an id-set restriction. restrict=false
@@ -247,7 +319,7 @@ func (h *CalendarHandler) resolveWatched(ctx context.Context, af catalog.AccessF
 	return watched
 }
 
-func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSvc *catalog.DetailService, start, end time.Time, viewerLocation *time.Location, watched map[string]bool) []calendarDayResponse {
+func groupEventsByDate(ctx context.Context, events []catalog.CalendarEvent, detailSvc *catalog.DetailService, start, end time.Time, viewerLocation *time.Location, watched map[string]bool) []calendarDayResponse {
 	if len(events) == 0 {
 		return []calendarDayResponse{}
 	}
@@ -266,7 +338,7 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 			seenPosterPaths[ev.PosterPath] = struct{}{}
 			posterPaths = append(posterPaths, ev.PosterPath)
 		}
-		posterURLs = detailSvc.PresignImageURLs(r.Context(), posterPaths, "poster", "small")
+		posterURLs = detailSvc.PresignImageURLs(ctx, posterPaths, "poster", "small")
 	}
 
 	type preparedCalendarEvent struct {

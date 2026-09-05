@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -9,21 +10,27 @@ import (
 )
 
 func requestAccessFilter(r *http.Request) catalog.AccessFilter {
-	deviceID := deviceMetadataFromRequest(r).DeviceID
-	if scope, ok := access.GetScope(r.Context()); ok {
+	return ViewerAccessFilter(r.Context(), deviceMetadataFromRequest(r).DeviceID)
+}
+
+// ViewerAccessFilter is the viewer's access filter from the identity
+// the middleware stored on the context; deviceID is the caller's declared
+// device, "" when it declared none.
+func ViewerAccessFilter(ctx context.Context, deviceID string) catalog.AccessFilter {
+	if scope, ok := access.GetScope(ctx); ok {
 		return catalog.AccessFilter{
 			AllowedLibraryIDs:  scope.AllowedLibraryIDs,
 			DisabledLibraryIDs: scope.DisabledLibraryIDs,
 			MaxContentRating:   scope.MaxContentRating,
 			MaxPlaybackQuality: scope.MaxPlaybackQuality,
-			UserID:             apimw.GetUserID(r.Context()),
-			ProfileID:          apimw.GetProfileID(r.Context()),
+			UserID:             apimw.GetUserID(ctx),
+			ProfileID:          apimw.GetProfileID(ctx),
 			DeviceID:           deviceID,
 		}
 	}
 	return catalog.AccessFilter{
-		UserID:    apimw.GetUserID(r.Context()),
-		ProfileID: apimw.GetProfileID(r.Context()),
+		UserID:    apimw.GetUserID(ctx),
+		ProfileID: apimw.GetProfileID(ctx),
 		DeviceID:  deviceID,
 	}
 }

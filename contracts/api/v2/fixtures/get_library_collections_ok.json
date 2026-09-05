@@ -1,0 +1,67 @@
+{
+  "library_id": "1",
+  "collections": [
+    {
+      "id": "c1",
+      "library_id": "1",
+      "library_ids": [
+        "1"
+      ],
+      "slug": "oscar-winners",
+      "title": "Oscar Winners",
+      "description": "",
+      "collection_type": "manual",
+      "visibility": "visible",
+      "sort_order": 0,
+      "group_id": null,
+      "featured": false,
+      "poster_url": "",
+      "backdrop_url": "",
+      "source_url": "",
+      "query_definition": {
+        "filters": []
+      },
+      "sort_config": null,
+      "source_config": null,
+      "management_mode": "manual",
+      "management_source": "",
+      "management_key": "",
+      "last_sync_status": "",
+      "last_sync_message": "",
+      "item_count": 12,
+      "created_at": "2026-01-02T03:04:05.000Z",
+      "updated_at": "2026-01-02T03:04:05.000Z"
+    }
+  ],
+  "groups": [
+    {
+      "id": "g1",
+      "name": "Mine",
+      "kind": "user_collections",
+      "sort_mode": "name_asc",
+      "sort_order": 0,
+      "collections": [
+        {
+          "id": "u1",
+          "title": "Rainy days",
+          "poster_url": "",
+          "item_count": 4,
+          "creator_profile_id": "p-owner"
+        }
+      ]
+    }
+  ],
+  "ungrouped": {
+    "sort_order": 9999,
+    "collections": [
+      {
+        "id": "c1",
+        "title": "Oscar Winners",
+        "poster_url": "",
+        "item_count": 12,
+        "featured": true
+      }
+    ]
+  }
+}
+

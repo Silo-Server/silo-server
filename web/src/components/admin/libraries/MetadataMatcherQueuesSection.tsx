@@ -55,7 +55,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
           decision: entry.failure_detail?.decision,
         })),
         ...detail.series.map((entry) => ({
-          key: `series-${entry.media_folder_id}-${entry.observed_root_path}`,
+          key: `series-${entry.library_id}-${entry.observed_root_path}`,
           path: entry.observed_root_path,
           state: entry.state,
           failureKind: entry.failure_kind,

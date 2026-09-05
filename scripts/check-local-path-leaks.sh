@@ -76,9 +76,12 @@ catalog_files=':(glob)contracts/api/v2/scenarios/*/*.json'
 generator_files=':(glob)contracts/api/v2/scenarios/tools/*.py'
 fixture_files=':(glob)contracts/api/v2/fixtures/*.json'
 
+# An absolute path starts the token: /home/ preceded by a path character is
+# a route segment (the v2 home routes, /api/v2/home/...), not a Unix home
+# directory, and is not a leak.
 check_pattern \
 	"absolute local filesystem path under contracts/api/v2/scenarios or fixtures" \
-	'(/Users/[^[:space:]"]+|/home/[^[:space:]"]+|/Volumes/[^[:space:]"]+|/var/folders/[^[:space:]"]+|/private/tmp/[^[:space:]"]+|[A-Za-z]:\\Users\\[^[:space:]"]+)' \
+	'(/Users/[^[:space:]"]+|(^|[^[:alnum:]/])/home/[^[:space:]"]+|/Volumes/[^[:space:]"]+|/var/folders/[^[:space:]"]+|/private/tmp/[^[:space:]"]+|[A-Za-z]:\\Users\\[^[:space:]"]+)' \
 	"$scenario_tree" "$fixture_tree" contracts/api/v2/fixtures.schema.json
 
 # Public TLDs a schemeless dotted token is judged by: when its last label is

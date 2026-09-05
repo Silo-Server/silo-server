@@ -16,9 +16,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -92,6 +96,25 @@ type Dependencies struct {
 	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
+	// LibraryAdmin manages libraries for administrators
+	// (*handlers.LibraryHandler).
+	LibraryAdmin LibraryAdminService
+	// LibrarySections answers a library's sections to viewers
+	// (*handlers.SectionHandler).
+	LibrarySections LibrarySectionService
+	// LibraryCollections answers a library's collections to viewers
+	// (*handlers.LibraryCollectionHandler).
+	LibraryCollections LibraryCollectionService
+	// Calendar answers the airing calendar (*handlers.CalendarHandler).
+	Calendar CalendarService
+	// HomeDismissals records and clears home-card dismissals
+	// (*handlers.HomeDismissalHandler).
+	HomeDismissals HomeDismissalService
+	// HomeSections answers the home page to viewers
+	// (*handlers.SectionHandler).
+	HomeSections HomeSectionService
+	// Recipes answers the section recipe gallery (*handlers.RecipeHandler).
+	Recipes RecipeService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -197,6 +220,11 @@ func humaConfig() huma.Config {
 // validation is untouched.
 func documentAcceptedRequestMediaTypes(_ *huma.OpenAPI, op *huma.Operation) {
 	if op.RequestBody == nil {
+		return
+	}
+	// A multipart operation (an upload with no structured Body) is the one
+	// case the guard accepts a non-JSON body; its declaration stays.
+	if len(op.RequestBody.Content) == 1 && op.RequestBody.Content[mediaTypeMultipart] != nil {
 		return
 	}
 	for mediaType := range op.RequestBody.Content {
@@ -380,6 +408,79 @@ type LibraryService interface {
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.
 type AdminUserService interface {
 	ListAdminUsersPage(ctx context.Context, afterID, limit int) ([]handlers.AdminUserView, bool, error)
+}
+
+// LibraryAdminService is the slice of *handlers.LibraryHandler the library
+// management operations use. Every method returns the view its v1 handler
+// writes and an *handlers.APIError on failure.
+type LibraryAdminService interface {
+	ListLibraries(ctx context.Context) ([]handlers.LibraryView, error)
+	CreateLibrary(ctx context.Context, req handlers.LibraryCreateRequest) (handlers.LibraryView, error)
+	UpdateLibrary(ctx context.Context, id, userID int, req handlers.LibraryUpdateRequest) (handlers.LibraryView, error)
+	DeleteLibrary(ctx context.Context, id, userID int) (*models.AdminJob, error)
+	CheckLibraryMount(ctx context.Context, id int) (handlers.LibraryMountCheckView, error)
+	ConfirmEmptyRootCleanup(ctx context.Context, id int) error
+	ListMetadataMatchQueues(ctx context.Context) ([]handlers.MetadataMatchQueueStatusView, error)
+	LibraryProviderDefaults(ctx context.Context, libraryType string) (map[string][]handlers.ChainLevelEntryView, error)
+	ReorderLibraries(ctx context.Context, entries []catalogpkg.FolderReorderEntry) error
+	ListLibraryRoots(ctx context.Context, libraryID int, state string, limit, offset int) ([]handlers.LibraryRootView, int, error)
+	SetRootOverride(ctx context.Context, userID int, req handlers.RootOverrideUpsertRequest) error
+	DeleteRootOverride(ctx context.Context, req handlers.RootOverrideDeleteRequest) error
+	ListSkippedRoots(ctx context.Context) ([]handlers.SkippedRootView, error)
+	ListStaleIDs(ctx context.Context) ([]handlers.StaleMediaIDView, error)
+	RematchStaleID(ctx context.Context, contentID string) error
+	ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
+	GetMetadataMatchQueue(ctx context.Context, id, limit, offset int) (handlers.MetadataMatchQueueDetailView, error)
+	RetryMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
+	CancelMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
+	RefreshLibraryMetadata(ctx context.Context, id, userID int, mode adminjob.LibraryRefreshMode) (*models.AdminJob, error)
+	UploadLibraryPoster(ctx context.Context, id int, contentType string, data []byte) (handlers.LibraryView, error)
+	DeleteLibraryPoster(ctx context.Context, id int) error
+	LibraryProviders(ctx context.Context, id int) (map[string][]handlers.ChainLevelEntryView, error)
+	SetLibraryProviders(ctx context.Context, id int, levels map[string][]handlers.ProviderChainEntryInput) error
+}
+
+// LibrarySectionService is the slice of *handlers.SectionHandler the
+// viewer-facing library section reads use.
+type LibrarySectionService interface {
+	LibraryLayout(ctx context.Context, libraryID int) (handlers.SectionLayoutView, error)
+	LibrarySections(ctx context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionsView, error)
+	LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error)
+}
+
+// LibraryCollectionService is the slice of *handlers.LibraryCollectionHandler
+// the viewer-facing library collection reads use.
+type LibraryCollectionService interface {
+	LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (handlers.LibraryCollectionTabView, error)
+	LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error)
+	LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalogpkg.AccessFilter) ([]handlers.CollectionItemView, error)
+}
+
+// CalendarService is the slice of *handlers.CalendarHandler getCalendar uses.
+type CalendarService interface {
+	Calendar(ctx context.Context, q handlers.CalendarQuery, access catalogpkg.AccessFilter) (handlers.CalendarView, error)
+}
+
+// HomeDismissalService is the slice of *handlers.HomeDismissalHandler the
+// dismissal operations use.
+type HomeDismissalService interface {
+	DismissHomeItem(ctx context.Context, cmd handlers.HomeDismissalCommand) error
+	UndismissHomeItem(ctx context.Context, userID int, profileID, surface, itemID string) error
+}
+
+// HomeSectionService is the slice of *handlers.SectionHandler the
+// viewer-facing home reads use.
+type HomeSectionService interface {
+	HomeLayout(ctx context.Context) (handlers.SectionLayoutView, error)
+	HomeSections(ctx context.Context, viewer handlers.SectionViewer) (handlers.SectionsView, error)
+	HomeSectionItems(ctx context.Context, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error)
+}
+
+// RecipeService is the slice of *handlers.RecipeHandler the section recipe
+// gallery reads use.
+type RecipeService interface {
+	Recipes() []handlers.RecipeCategoryView
+	RecipeCandidates(ctx context.Context, recipeType string) ([]handlers.Candidate, error)
 }
 
 // unavailable is the fail-closed answer of an operation whose service is not

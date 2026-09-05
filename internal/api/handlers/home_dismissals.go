@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -26,6 +27,34 @@ func NewHomeDismissalHandler(provider userstore.UserStoreProvider) *HomeDismissa
 	return &HomeDismissalHandler{storeProvider: provider}
 }
 
+// HomeDismissalCommand is a validated dismissal: the profile, the home
+// surface, the item, and the surface-specific anchor (the progress stamp a
+// Continue Watching dismissal holds for, or the series a Next Up dismissal
+// belongs to).
+type HomeDismissalCommand struct {
+	UserID            int
+	ProfileID         string
+	Surface           string
+	ItemID            string
+	SeriesID          string
+	ProgressUpdatedAt string
+}
+
+// validate applies the per-surface requirements the v1 handler enforces.
+func (c HomeDismissalCommand) validate() error {
+	switch c.Surface {
+	case userstore.HomeSurfaceContinueWatching:
+		if c.ProgressUpdatedAt == "" {
+			return fieldError("progress_updated_at", "progress_updated_at is required")
+		}
+	case userstore.HomeSurfaceNextUp:
+		if c.SeriesID == "" {
+			return fieldError("series_id", "series_id is required")
+		}
+	}
+	return nil
+}
+
 func (h *HomeDismissalHandler) HandleUpsertDismissal(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
@@ -47,49 +76,47 @@ func (h *HomeDismissalHandler) HandleUpsertDismissal(w http.ResponseWriter, r *h
 		return
 	}
 
-	dismissal := userstore.HomeItemDismissal{
-		ProfileID:   profileID,
-		Surface:     surface,
-		MediaItemID: itemID,
-		DismissedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	switch surface {
-	case userstore.HomeSurfaceContinueWatching:
-		if req.ProgressUpdatedAt == "" {
-			writeError(w, http.StatusBadRequest, "bad_request", "progress_updated_at is required")
-			return
-		}
-		dismissal.ProgressUpdatedAt = &req.ProgressUpdatedAt
-	case userstore.HomeSurfaceNextUp:
-		if req.SeriesID == "" {
-			writeError(w, http.StatusBadRequest, "bad_request", "series_id is required")
-			return
-		}
-		dismissal.SeriesID = &req.SeriesID
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil || store == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.DismissHomeItem(r.Context(), HomeDismissalCommand{
+		UserID: userID, ProfileID: profileID, Surface: surface, ItemID: itemID,
+		SeriesID: req.SeriesID, ProgressUpdatedAt: req.ProgressUpdatedAt,
+	}); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	if err := store.UpsertHomeDismissal(r.Context(), dismissal); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save dismissal")
-		return
-	}
-	publishUserStateEvent(
-		r.Context(),
-		h.EventsHub,
-		userID,
-		profileID,
-		itemID,
-		req.SeriesID,
-		"home_dismissal",
-		userStateEventState{},
-	)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DismissHomeItem records the dismissal and publishes the user-state event.
+// It is an idempotent upsert: repeating it refreshes the dismissal stamp.
+func (h *HomeDismissalHandler) DismissHomeItem(ctx context.Context, cmd HomeDismissalCommand) error {
+	if err := cmd.validate(); err != nil {
+		return err
+	}
+	dismissal := userstore.HomeItemDismissal{
+		ProfileID:   cmd.ProfileID,
+		Surface:     cmd.Surface,
+		MediaItemID: cmd.ItemID,
+		DismissedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	switch cmd.Surface {
+	case userstore.HomeSurfaceContinueWatching:
+		progressUpdatedAt := cmd.ProgressUpdatedAt
+		dismissal.ProgressUpdatedAt = &progressUpdatedAt
+	case userstore.HomeSurfaceNextUp:
+		seriesID := cmd.SeriesID
+		dismissal.SeriesID = &seriesID
+	}
+
+	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
+	if err != nil || store == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := store.UpsertHomeDismissal(ctx, dismissal); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to save dismissal")
+	}
+	publishUserStateEvent(ctx, h.EventsHub, cmd.UserID, cmd.ProfileID, cmd.ItemID, cmd.SeriesID, "home_dismissal", userStateEventState{})
+	return nil
 }
 
 func (h *HomeDismissalHandler) HandleDeleteDismissal(w http.ResponseWriter, r *http.Request) {
@@ -107,27 +134,26 @@ func (h *HomeDismissalHandler) HandleDeleteDismissal(w http.ResponseWriter, r *h
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil || store == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.UndismissHomeItem(r.Context(), userID, profileID, surface, itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	if err := store.DeleteHomeDismissal(r.Context(), profileID, surface, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete dismissal")
-		return
-	}
-	publishUserStateEvent(
-		r.Context(),
-		h.EventsHub,
-		userID,
-		profileID,
-		itemID,
-		"",
-		"home_dismissal",
-		userStateEventState{},
-	)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// UndismissHomeItem removes the dismissal, if any, and publishes the
+// user-state event. Removing an absent dismissal succeeds.
+func (h *HomeDismissalHandler) UndismissHomeItem(ctx context.Context, userID int, profileID, surface, itemID string) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil || store == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := store.DeleteHomeDismissal(ctx, profileID, surface, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete dismissal")
+	}
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, itemID, "", "home_dismissal", userStateEventState{})
+	return nil
 }
 
 func validHomeSurface(surface string) bool {

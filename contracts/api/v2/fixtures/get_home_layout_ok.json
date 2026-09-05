@@ -1,0 +1,23 @@
+{
+  "sections": [
+    {
+      "id": "continue_watching",
+      "section_type": "continue_watching",
+      "title": "Continue Watching",
+      "featured": false,
+      "item_limit": 20,
+      "is_custom": false,
+      "customized": false
+    },
+    {
+      "id": "next_up",
+      "section_type": "next_up",
+      "title": "Next Up",
+      "featured": false,
+      "item_limit": 20,
+      "is_custom": false,
+      "customized": true
+    }
+  ]
+}
+

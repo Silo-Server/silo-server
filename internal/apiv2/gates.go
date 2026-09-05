@@ -336,6 +336,24 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 		next(ctx)
 		return
 	}
+	if op.RequestBody.Content[mediaTypeMultipart] != nil {
+		// A multipart operation takes multipart/form-data only. Huma reads
+		// the form without a byte cap, so the operation's limit is applied
+		// here: a declared length over it is refused outright, and the body
+		// reader is capped for a body that lies about or omits its length.
+		if !multipartMediaTypeOK(ct) {
+			writeProblem(w, r, NewProblem(TypeUnsupportedMediaType, "The request media type is not supported; send multipart/form-data."))
+			return
+		}
+		limit := operationBodyLimit(op)
+		if r.ContentLength > limit {
+			writeProblem(w, r, NewProblem(TypePayloadTooLarge, humaDetail(TypePayloadTooLarge, "", limit)))
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		next(ctx)
+		return
+	}
 	if !structuredMediaTypeOK(ct) {
 		writeProblem(w, r, NewProblem(TypeUnsupportedMediaType, "The request media type is not supported; send application/json."))
 		return
@@ -344,6 +362,16 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 	// everything the accepted header said.
 	r.Header.Set("Content-Type", mediaTypeJSON)
 	next(ctx)
+}
+
+// mediaTypeMultipart is the one non-JSON request media type: file uploads.
+const mediaTypeMultipart = "multipart/form-data"
+
+// multipartMediaTypeOK reports whether ct is multipart/form-data; the
+// boundary parameter is the form's own and passes through untouched.
+func multipartMediaTypeOK(ct string) bool {
+	base, _, _ := strings.Cut(ct, ";")
+	return strings.ToLower(strings.TrimSpace(base)) == mediaTypeMultipart
 }
 
 // contentEncodingOK reports whether a request body is unencoded. An absent

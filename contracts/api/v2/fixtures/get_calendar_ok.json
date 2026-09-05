@@ -1,0 +1,38 @@
+{
+  "events": [
+    {
+      "date": "2026-01-09",
+      "items": [
+        {
+          "content_id": "episode:severance-s02e01",
+          "type": "episode",
+          "title": "Severance",
+          "episode_title": "Premiere",
+          "series_id": "series:severance",
+          "season_number": 2,
+          "episode_number": 1,
+          "air_date": "2026-01-09",
+          "air_time": "21:00",
+          "air_at": "2026-01-10T02:00:00.000Z",
+          "air_timezone": "America/New_York",
+          "local_air_date": "2026-01-09",
+          "poster_url": "https://s3.example.test/poster.jpg",
+          "watched": false,
+          "badges": [
+            "season_premiere"
+          ]
+        },
+        {
+          "content_id": "movie:heat-1995",
+          "type": "movie",
+          "title": "Heat",
+          "air_date": "2026-01-09",
+          "local_air_date": "2026-01-09",
+          "watched": true,
+          "badges": []
+        }
+      ]
+    }
+  ]
+}
+
