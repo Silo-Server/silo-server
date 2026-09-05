@@ -22,6 +22,25 @@ export class PlayerFetchError extends Error {
   }
 }
 
+export interface PlayerFetchOptions extends RequestInit {
+  /**
+   * The API major the path belongs to. Defaults to the one `apiBaseUrl`
+   * names (v1); `2` swaps that trailing version segment for `/v2` so a v2
+   * operation path is served from the same origin with the same credentials.
+   */
+  apiMajor?: 1 | 2;
+}
+
+/**
+ * The base the player's requests resolve against for one API major: the
+ * configured base as is for the default, or with its trailing `/vN` segment
+ * replaced for another.
+ */
+export function playerApiBase(config: PlayerConfig, apiMajor?: 1 | 2): string {
+  if (apiMajor === undefined) return config.apiBaseUrl;
+  return config.apiBaseUrl.replace(/\/v\d+\/?$/, "") + `/v${apiMajor}`;
+}
+
 /**
  * Performs an authenticated fetch against the configured API.
  * Returns the parsed JSON body for 2xx responses, undefined when the response
@@ -31,12 +50,13 @@ export class PlayerFetchError extends Error {
 export async function playerFetch<T>(
   config: PlayerConfig,
   path: string,
-  options: RequestInit = {},
+  options: PlayerFetchOptions = {},
 ): Promise<T> {
+  const { apiMajor, ...init } = options;
   const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string>),
+    ...(init.headers as Record<string, string>),
   };
-  if (!(options.body instanceof FormData)) {
+  if (!(init.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -57,8 +77,8 @@ export async function playerFetch<T>(
 
   headers["X-Silo-Device-Id"] = config.getDeviceId();
 
-  const res = await fetch(`${config.apiBaseUrl}${path}`, {
-    ...options,
+  const res = await fetch(`${playerApiBase(config, apiMajor)}${path}`, {
+    ...init,
     headers,
   });
 

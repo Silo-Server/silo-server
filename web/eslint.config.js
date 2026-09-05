@@ -49,7 +49,6 @@ export default tseslint.config(
       "src/hooks/queries/pluginSettings.ts",
       "src/hooks/queries/profileDefaults.ts",
       "src/hooks/queries/settingValues.ts",
-      "src/player/components/WatchPage.tsx",
       "src/hooks/queries/subtitleAppearance.ts",
       "src/hooks/useOverlayPrefs.ts",
       "src/lib/seriesSubtitleSettings.ts",

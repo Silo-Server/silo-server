@@ -10,7 +10,7 @@ import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
 import { buildSubtitleChoiceRequests } from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
-import { v2 } from "@/api/v2/request";
+import type { components } from "@/api/v2/schema";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -215,13 +215,23 @@ export function WatchPage({
         showForcedSubtitles,
       });
       for (const request of requests) {
+        // The settings write is a v2 operation (PUT /api/v2/settings/values/{key})
+        // but it must ride the player's own transport — its host decides the
+        // API origin, token, profile and device — so it goes through
+        // playerFetch with the major swapped rather than the app-global v2 client.
         const write =
           request.kind === "setting"
-            ? v2("PUT /api/v2/settings/values/{key}", {
-                path: { key: request.key },
-                query: request.identity,
-                body: { value: request.value },
-              })
+            ? playerFetch(
+                config,
+                `/settings/values/${encodeURIComponent(request.key)}?${new URLSearchParams(request.identity)}`,
+                {
+                  apiMajor: 2,
+                  method: "PUT",
+                  body: JSON.stringify({
+                    value: request.value,
+                  } satisfies components["schemas"]["SettingValueWrite"]),
+                },
+              )
             : playerFetch(config, request.path, {
                 method: "PUT",
                 body: JSON.stringify(request.body),
