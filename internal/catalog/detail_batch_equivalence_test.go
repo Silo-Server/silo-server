@@ -104,7 +104,7 @@ func batchEquivExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 // Unlike the jellycompat handler test (which stubs the content service so both
 // paths return the same canned *ItemDetail), this drives the genuinely-batched
 // repository code: ItemRepository.GetByIDs vs GetByID, EnsureAccessibleIDs vs
-// EnsureAccessible, MediaItemLocalizationRepository.GetByContentIDs vs Get, and
+// EnsureAccessible, localization grouped by target language, and
 // PersonRepository.ListForItems vs ListForItem all run against a real Postgres.
 // Media files and work summaries route through interface fakes that serve the
 // batch and per-item method shapes from one backing map (mirroring the real

@@ -1803,8 +1803,22 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		pendingTranslation = pf.pendingTranslation
 		item = pf.localizedItem
 	} else {
-		pendingTranslation = s.PendingTranslationLanguage(ctx, item, filter)
-		localizedItem, err := s.LocalizeItemModel(ctx, item, filter)
+		// Share the language and row with the pending-translation decision,
+		// just as the batch detail path does.
+		targets, localizations, err := s.loadItemLocalizations(ctx, []*models.MediaItem{item}, filter)
+		var localizedItem *models.MediaItem
+		if err != nil && strings.TrimSpace(item.Overview) != "" && s.itemLocRepo != nil {
+			// PendingTranslationLanguage historically suppressed its lookup
+			// error before the required localization read. Preserve that retry
+			// on failure without repeating successful lookups.
+			localizedItem, err = s.LocalizeItemModel(ctx, item, filter)
+		} else if err == nil {
+			language, loc := targets[item.ContentID], localizations[item.ContentID]
+			if s.itemLocRepo != nil {
+				pendingTranslation = pendingTranslationLanguageWith(item, language, loc)
+			}
+			localizedItem = s.localizeItemModelWith(item, language, loc)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("localizing item detail: %w", err)
 		}
