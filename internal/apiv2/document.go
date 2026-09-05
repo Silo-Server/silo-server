@@ -229,11 +229,20 @@ func documentConcurrencyResponses(oapi *huma.OpenAPI, op Operation) {
 			resp = &huma.Response{Description: "The representation named by If-None-Match is current; no body."}
 			registered.Responses[key] = resp
 		}
+		// A 304 is bodyless by contract and bufferResponse drops any body,
+		// so a predeclared representation would document what is never
+		// sent.
+		resp.Content = nil
 		mergeETagHeader(resp, etag)
 	}
 	for status, resp := range registered.Responses {
 		code, err := strconv.Atoi(status)
 		if err != nil {
+			if strings.EqualFold(status, "2XX") {
+				// The OpenAPI range key is a success too; the runtime output
+				// sends ETag on every one, so the range documents it.
+				mergeETagHeader(resp, etag)
+			}
 			continue
 		}
 		switch {

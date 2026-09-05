@@ -315,8 +315,28 @@ func checkConcurrencyShape(op Operation, in, out reflect.Type) error {
 				if strings.EqualFold(status, "2XX") {
 					return fmt.Errorf("guarded delete: Responses declares the 2XX range, but the only success is 204")
 				}
-				if code, err := strconv.Atoi(status); err == nil && code >= 200 && code < 300 && code != http.StatusNoContent {
+				code, err := strconv.Atoi(status)
+				if err != nil {
+					continue
+				}
+				if code >= 200 && code < 300 && code != http.StatusNoContent {
 					return fmt.Errorf("guarded delete: Responses declares %s, but the only success is 204", status)
+				}
+				if code == http.StatusNoContent {
+					// A hand-declared 204 may add a description, but no
+					// representation and no validator: the runtime sends
+					// neither.
+					resp := op.Responses[status]
+					if resp != nil && len(resp.Content) > 0 {
+						return fmt.Errorf("guarded delete: Responses[\"204\"] declares content, but the 204 is bodyless")
+					}
+					if resp != nil {
+						for name := range resp.Headers {
+							if strings.EqualFold(name, etagField) {
+								return fmt.Errorf("guarded delete: Responses[\"204\"] declares an ETag header, but a deleted representation has no validator")
+							}
+						}
+					}
 				}
 			}
 		} else if !declaresHeaderString(out, etagField) {

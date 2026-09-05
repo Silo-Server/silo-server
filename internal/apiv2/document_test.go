@@ -283,6 +283,8 @@ func registerConcurrencyDocProbes(reg *Registry) {
 			// it rather than replacing it.
 			o.Responses = map[string]*huma.Response{"304": {
 				Description: "Still current; poll again after Retry-After.",
+				// Content on a 304 can never be sent; the merge must clear it.
+				Content: map[string]*huma.MediaType{"application/json": {}},
 				// A lower-case etag key: the merge must fold it into the
 				// canonical entry rather than add a second one.
 				// Two case-equivalent keys, one with the wrong schema: both
@@ -307,9 +309,15 @@ func registerConcurrencyDocProbes(reg *Registry) {
 		return out, nil
 	})
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodPut, Prefix+"/docprobe/{id}", "putDocProbe", "probe", "guarded"),
-		Class:     ClassPublic,
-		Guarded:   true,
+		Operation: func() huma.Operation {
+			o := humaOp(http.MethodPut, Prefix+"/docprobe/{id}", "putDocProbe", "probe", "guarded")
+			// A hand-declared 2XX range is a success too and must document
+			// the ETag the runtime sends.
+			o.Responses = map[string]*huma.Response{"2XX": {Description: "any success"}}
+			return o
+		}(),
+		Class:   ClassPublic,
+		Guarded: true,
 	}, func(_ context.Context, in *struct {
 		ID          string `path:"id"`
 		IfMatch     string `header:"If-Match"`
@@ -418,6 +426,9 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 	if !ifNoneMatchOnPut {
 		t.Fatalf("a guarded put that binds If-None-Match must document it: %+v", put.Parameters)
 	}
+	if put.Responses["2XX"].Headers["ETag"] == nil {
+		t.Fatalf("a hand-declared 2XX range on a guarded put must document ETag: %+v", put.Responses["2XX"])
+	}
 	if put.Responses["412"].Headers["ETag"] == nil {
 		t.Fatalf("put 412 lacks the ETag header a stale tag is answered with: %+v", put.Responses["412"])
 	}
@@ -429,7 +440,7 @@ func TestConcurrencyDeclarationsAreDocumented(t *testing.T) {
 		t.Fatalf("get extensions: guarded=%v conditional=%v", ext("get", extGuarded), ext("get", extConditional))
 	}
 	if get.Responses["200"].Headers["ETag"] == nil || get.Responses["304"].Headers["ETag"] == nil || len(get.Responses["304"].Content) != 0 {
-		t.Fatalf("get responses: %+v", get.Responses)
+		t.Fatalf("get responses (a predeclared 304 must lose its content): %+v", get.Responses)
 	}
 	if get.Responses["304"].Headers["Retry-After"] == nil {
 		t.Fatalf("a pre-declared 304 lost its own header: %+v", get.Responses["304"])
@@ -640,6 +651,20 @@ func TestRegisterRefusesBadConcurrencyDeclarations(t *testing.T) {
 		}(), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
 		}, "2XX range"},
+		"guarded DELETE with 204 content": {func() Operation {
+			op := guarded(http.MethodDelete)
+			op.Responses = map[string]*huma.Response{"204": {Description: "gone", Content: map[string]*huma.MediaType{"application/json": {}}}}
+			return op
+		}(), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
+		}, "declares content"},
+		"guarded DELETE with 204 etag header": {func() Operation {
+			op := guarded(http.MethodDelete)
+			op.Responses = map[string]*huma.Response{"204": {Description: "gone", Headers: map[string]*huma.Header{"etag": {Schema: &huma.Schema{Type: "string"}}}}}
+			return op
+		}(), func(r *Registry, op Operation) {
+			Register(r, op, func(context.Context, *okIn) (*noHeaders, error) { return nil, nil })
+		}, "declares an ETag header"},
 		"conditional with lower-case etag tag": {conditional(http.MethodGet), func(r *Registry, op Operation) {
 			Register(r, op, func(context.Context, *okIn) (*struct {
 				Status int
