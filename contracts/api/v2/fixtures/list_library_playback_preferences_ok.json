@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "profile_id": "p-owner",
+      "library_id": "1",
+      "audio_language": "en",
+      "subtitle_mode": "always",
+      "updated_at": "2026-01-02T03:04:05.000Z"
+    },
+    {
+      "profile_id": "p-owner",
+      "library_id": "3",
+      "show_forced_subtitles": true,
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+

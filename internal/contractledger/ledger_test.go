@@ -823,6 +823,10 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 		e := entryWhere(t, doc, isMarked)
 		e["disposition"] = DispositionCompatibilityOnly
 		e["disposition_rule"] = "maintainer_decision"
+		// Drop the retry classification too, so the concurrency review rule
+		// is what fails rather than the schema's retry_safety placement.
+		delete(e, "retry_safety")
+		delete(e, "retry_safety_note")
 	}), "only for tier-1 ported rows")
 	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
 		e := entryWhere(t, doc, func(e map[string]any) bool {
@@ -989,6 +993,246 @@ func concurrencyMismatches(entries []Entry, declared []apiv2registry.Declared, e
 		}
 		if !guarded[*e.V2.OperationID] {
 			problems = append(problems, fmt.Sprintf("%s is marked concurrency %s but its v2 operation %s is not declared Guarded", e.key(), ConcurrencyIfMatch, *e.V2.OperationID))
+		}
+	}
+	return problems
+}
+
+// TestRetrySafetyPlacement pins where the curated retry_safety field may
+// appear: required on a tier-1 ported row with a mutating method, forbidden
+// on every other row, one
+// of the seven contract values, and accompanied by a note for
+// idempotency_key and non_retryable.
+func TestRetrySafetyPlacement(t *testing.T) {
+	ledger, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ledger.Entries {
+		if e.RetrySafety == "" {
+			continue
+		}
+		if !retrySafetyValues[e.RetrySafety] || !requiresRetrySafety(e) {
+			t.Errorf("%s: retry_safety %q on tier %d %s %s", e.key(), e.RetrySafety, e.Tier, e.Disposition, e.Method)
+		}
+	}
+	// Every tier-1 ported mutation row is classified; there is no allow-list
+	// any more, so the ledger itself carries no counter-example.
+	for _, e := range ledger.Entries {
+		if requiresRetrySafety(e) && e.RetrySafety == "" {
+			t.Errorf("%s: tier-1 ported mutation row without retry_safety", e.key())
+		}
+	}
+	// The required direction, exercised directly against a synthetic row.
+	unlisted := Entry{Tier: 1, Disposition: DispositionPorted}
+	unlisted.Method = http.MethodPost
+	unlisted.RouteGroup = "/api/v1/not-a-real-group"
+	if got := retrySafetyRules(unlisted.key(), unlisted); len(got) != 1 || !strings.Contains(got[0], "no retry_safety") {
+		t.Errorf("unlisted mutation row without retry_safety: got %v", got)
+	}
+	unlisted.RetrySafety = RetrySafetyNaturalIdempotent
+	if got := retrySafetyRules(unlisted.key(), unlisted); len(got) != 0 {
+		t.Errorf("classified row: got %v", got)
+	}
+
+	isGET1 := func(e map[string]any) bool {
+		return e["method"] == "GET" && e["tier"] == float64(1) && e["disposition"] == "ported"
+	}
+	isMutation1 := func(e map[string]any) bool {
+		m, _ := e["method"].(string)
+		return isMutatingMethod(m) && e["tier"] == float64(1) && e["disposition"] == "ported"
+	}
+	isTier2 := func(e map[string]any) bool { return e["tier"] == float64(2) }
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		entryWhere(t, doc, isGET1)["retry_safety"] = RetrySafetyNaturalIdempotent
+	}), "retry_safety")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		entryWhere(t, doc, isTier2)["retry_safety"] = RetrySafetyNaturalIdempotent
+	}), "retry_safety")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		entryWhere(t, doc, isMutation1)["retry_safety"] = "retry_later"
+	}), "retry_safety")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isMutation1)
+		e["retry_safety"] = RetrySafetyIdempotencyKey
+		delete(e, "retry_safety_note")
+	}), "retry_safety_note")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isMutation1)
+		e["retry_safety"] = RetrySafetyNonRetryable
+		delete(e, "retry_safety_note")
+	}), "retry_safety_note")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isMutation1)
+		e["retry_safety"] = RetrySafetyNaturalIdempotent
+		e["retry_safety_note"] = strings.Repeat("x", retrySafetyNoteMaxLen+1)
+	}), "retry_safety_note")
+	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
+		e := entryWhere(t, doc, isGET1)
+		e["retry_safety_note"] = "a note without a value"
+	}), "retry_safety")
+	// Go-side rules, reached directly because the schema refuses the same
+	// documents first.
+	mutation := Entry{Tier: 1, Disposition: DispositionPorted}
+	mutation.Method = http.MethodDelete
+	mutation.RouteGroup = "/api/v1/not-a-real-group"
+	for name, e := range map[string]func(Entry) Entry{
+		"unknown value":         func(e Entry) Entry { e.RetrySafety = "retry_later"; return e },
+		"key without note":      func(e Entry) Entry { e.RetrySafety = RetrySafetyIdempotencyKey; return e },
+		"non-retryable no note": func(e Entry) Entry { e.RetrySafety = RetrySafetyNonRetryable; return e },
+		"note without value":    func(e Entry) Entry { e.Tier = 2; e.RetrySafetyNote = "x"; return e },
+		"read row":              func(e Entry) Entry { e.Method = "GET"; e.RetrySafety = RetrySafetyNaturalIdempotent; return e },
+		"tier-2 row":            func(e Entry) Entry { e.Tier = 2; e.RetrySafety = RetrySafetyNaturalIdempotent; return e },
+		"long note": func(e Entry) Entry {
+			e.RetrySafety = RetrySafetyNaturalIdempotent
+			e.RetrySafetyNote = strings.Repeat("x", retrySafetyNoteMaxLen+1)
+			return e
+		},
+	} {
+		if got := retrySafetyRules(mutation.key(), e(mutation)); len(got) == 0 {
+			t.Errorf("%s: no finding", name)
+		}
+	}
+}
+
+// TestDeclaredRetrySafetyMatchesTheLedger reconciles the v2 registry with the
+// ledger: every mutating operation the registry declares must map (through
+// v2.operation_id) to at least one classified legacy row, and each such row's
+// retry_safety must equal the declaration. Today the registry's mutating set
+// is empty (only probes register mutations, and they live in test files), so
+// the loop is a no-op; the test still runs against the real registry so the
+// first section PR that ports a mutation cannot skip the classification.
+func TestDeclaredRetrySafetyMatchesTheLedger(t *testing.T) {
+	ledger, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := apiv2registry.DeclaredOperations()
+	if len(declared) == 0 {
+		t.Fatal("the v2 registry declares nothing")
+	}
+	for _, problem := range retrySafetyMismatches(ledger.Entries, declared, mutationWithoutLegacyRow) {
+		t.Error(problem)
+	}
+}
+
+// TestRetrySafetyMismatchesFire proves the reconcile branches with a synthetic
+// registry and ledger, since the live registry declares no mutation yet.
+func TestRetrySafetyMismatchesFire(t *testing.T) {
+	opID := func(s string) *string { return &s }
+	entries := []Entry{
+		{copied: copied{Method: http.MethodPut, Path: "/api/v1/things/{id}"}, Tier: 1, Disposition: DispositionPorted, RetrySafety: "natural_idempotent", V2: V2Target{OperationID: opID("updateThing")}},
+		{copied: copied{Method: http.MethodPost, Path: "/api/v1/things"}, Tier: 1, Disposition: DispositionPorted, RetrySafety: "unique_constraint", V2: V2Target{OperationID: opID("createThing")}},
+		// A redesigned row may name a v2 mutation; the schema keeps
+		// retry_safety off it, so the reconcile must not compare it.
+		{copied: copied{Method: http.MethodPost, Path: "/api/v1/old-things/launch"}, Tier: 1, Disposition: DispositionRedesigned, V2: V2Target{OperationID: opID("launchThing")}},
+	}
+	update := apiv2registry.Declared{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "natural_idempotent"}
+	create := apiv2registry.Declared{Method: http.MethodPost, OperationID: "createThing", RetrySafety: "unique_constraint"}
+	with := func(extra ...apiv2registry.Declared) []apiv2registry.Declared {
+		return append([]apiv2registry.Declared{update, create}, extra...)
+	}
+	cases := []struct {
+		name     string
+		declared []apiv2registry.Declared
+		exempt   map[string]string
+		want     string
+	}{
+		{"agree", with(), nil, ""},
+		{"read declares", with(apiv2registry.Declared{Method: http.MethodGet, OperationID: "getThing", RetrySafety: "natural_idempotent"}), nil, "read operation getThing declares retry safety"},
+		{"unknown value", []apiv2registry.Declared{{Method: http.MethodPut, OperationID: "updateThing", RetrySafety: "bogus"}, create}, nil, "not one of the ledger's values"},
+		{"no legacy row", with(apiv2registry.Declared{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}), nil, "maps to no legacy row"},
+		{"no legacy row, exempt with reason", with(apiv2registry.Declared{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}), map[string]string{"deleteThing": "v2-only resource"}, ""},
+		{"no legacy row, exempt without reason", with(apiv2registry.Declared{Method: http.MethodDelete, OperationID: "deleteThing", RetrySafety: "natural_idempotent"}), map[string]string{"deleteThing": ""}, "maps to no legacy row"},
+		{"disagrees", []apiv2registry.Declared{update, {Method: http.MethodPost, OperationID: "createThing", RetrySafety: "domain_identity"}}, nil, `ledger retry_safety "unique_constraint", registry declares "domain_identity"`},
+		{"row names an undeclared operation", []apiv2registry.Declared{update}, nil, "which the registry does not declare"},
+		{"row names a read", []apiv2registry.Declared{update, {Method: http.MethodGet, OperationID: "createThing"}}, nil, "carries no retry classification"},
+		{"redesigned row mapped to a mutation needs no classification", with(apiv2registry.Declared{Method: http.MethodPost, OperationID: "launchThing", RetrySafety: "domain_identity"}), nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := retrySafetyMismatches(entries, tc.declared, tc.exempt)
+			if tc.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("unexpected problems: %v", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+				t.Fatalf("want one problem containing %q, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+// retrySafetyMismatches compares every operation the v2 registry declares
+// against the legacy rows mapped to it through v2.operation_id.
+// mutationWithoutLegacyRow names the mutating v2 operations that port no
+// legacy route and so have no ledger row carrying a retry_safety value, each
+// with the reason. It is empty today; the reconcile test refuses an unmapped
+// mutation that is not listed here, the same rule guardedWithoutLegacyRow
+// applies to concurrency.
+var mutationWithoutLegacyRow = map[string]string{}
+
+// retrySafetyMismatches compares every operation the v2 registry declares
+// against the legacy rows mapped to it through v2.operation_id. exempt names
+// mutations that port no legacy route, each with a reason.
+func retrySafetyMismatches(entries []Entry, declared []apiv2registry.Declared, exempt map[string]string) []string {
+	byOperation := map[string][]Entry{}
+	for _, e := range entries {
+		if e.V2.OperationID != nil {
+			byOperation[*e.V2.OperationID] = append(byOperation[*e.V2.OperationID], e)
+		}
+	}
+	// The reverse direction: a classified row that names a v2 operation
+	// must resolve to a declared mutating operation, or the ledger would
+	// certify a port and its classification that no registration enforces.
+	declaredByID := map[string]apiv2registry.Declared{}
+	for _, op := range declared {
+		declaredByID[op.OperationID] = op
+	}
+	var problems []string
+	for _, e := range entries {
+		if e.RetrySafety == "" || e.V2.OperationID == nil {
+			continue
+		}
+		op, ok := declaredByID[*e.V2.OperationID]
+		switch {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("%s: retry_safety %s names v2 operation %s, which the registry does not declare", e.key(), e.RetrySafety, *e.V2.OperationID))
+		case !isMutatingMethod(op.Method):
+			problems = append(problems, fmt.Sprintf("%s: retry_safety %s names v2 operation %s, which is a %s and carries no retry classification", e.key(), e.RetrySafety, op.OperationID, op.Method))
+		}
+	}
+	for _, op := range declared {
+		if !isMutatingMethod(op.Method) {
+			if op.RetrySafety != "" {
+				problems = append(problems, fmt.Sprintf("read operation %s declares retry safety %q", op.OperationID, op.RetrySafety))
+			}
+			continue
+		}
+		if !retrySafetyValues[string(op.RetrySafety)] {
+			problems = append(problems, fmt.Sprintf("mutating operation %s declares retry safety %q, not one of the ledger's values", op.OperationID, op.RetrySafety))
+			continue
+		}
+		rows := byOperation[op.OperationID]
+		if len(rows) == 0 {
+			if reason := exempt[op.OperationID]; reason != "" {
+				continue
+			}
+			problems = append(problems, fmt.Sprintf("mutating operation %s maps to no legacy row; a ported mutation records its v2 operation and retry_safety in the ledger, and a v2-only mutation names itself in mutationWithoutLegacyRow with a reason", op.OperationID))
+		}
+		for _, e := range rows {
+			// Only a row eligible for the classification (tier-1 ported
+			// mutation) is compared: a redesigned or replaced row may name
+			// a v2 mutation while the schema keeps retry_safety off it, and
+			// the two rules must not contradict each other.
+			if !requiresRetrySafety(e) {
+				continue
+			}
+			if e.RetrySafety != string(op.RetrySafety) {
+				problems = append(problems, fmt.Sprintf("%s: ledger retry_safety %q, registry declares %q for %s", e.key(), e.RetrySafety, op.RetrySafety, op.OperationID))
+			}
 		}
 	}
 	return problems

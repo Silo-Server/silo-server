@@ -86,7 +86,7 @@ func (reg *Registry) listProgress(ctx context.Context, cursors *Cursors, in *Pro
 		n, err := strconv.Atoi(string(in.LibraryID))
 		if err != nil || n <= 0 {
 			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "query.library_id", Code: codeInvalid, Detail: "expected a library identifier"})
+				WithErrors(ProblemError{Location: "query.library_id", Code: codeInvalid, Detail: detailLibraryIDInvalid})
 		}
 		libraryID = n
 	}

@@ -440,6 +440,10 @@ members.
 contexts in one store read; use it for a grid or list instead of one GET per item. The body is
 `{keys, contexts}`; both are required and non-empty at the schema, unknown members are rejected,
 and each context is `{context_id, library_id | series_id}` with `library_id` as a string `ID`.
+The response preserves the requested key order, including repeated keys. Each `context_id` is an
+opaque caller token: whitespace is retained, and uniqueness is checked on the exact token. Empty
+or whitespace-only tokens are rejected. v1 retains its existing trimmed, deduplicated behavior.
+
 The batch resolves for the acting profile and declared device, so the operation declares only the
 device and client-family headers: the `profile_id`, `device_id`, `library_ids` and `series_ids`
 query parameters of the single-shot GET are not accepted here (v1 parsed and then ignored them).

@@ -126,6 +126,10 @@ func (tx *preferenceSettingsTx) DeleteLibraryPlaybackPreference(ctx context.Cont
 	return deleteLibraryPlaybackPreference(ctx, tx.exec, tx.userID, profileID, libraryID)
 }
 
+func (tx *preferenceSettingsTx) GetSettingValue(ctx context.Context, id userstore.SettingIdentity) (*userstore.SettingValue, error) {
+	return getSettingValue(ctx, tx.exec, tx.userID, id)
+}
+
 func (tx *preferenceSettingsTx) SetSetting(ctx context.Context, key, value string) error {
 	_, err := tx.exec.Exec(ctx,
 		`INSERT INTO user_settings (user_id, key, value) VALUES ($1, $2, $3)

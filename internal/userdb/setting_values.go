@@ -185,6 +185,51 @@ func ListAllSettingValues(db *sql.DB) ([]userstore.SettingValue, error) {
 	return values, rows.Err()
 }
 
+// ListSettingValuesByScope returns every explicit value one profile has
+// stored at one profile-anchored scope for the given keys, in the same order
+// as ListAllSettingValues. It is the bounded read behind a listing assembled
+// from a fixed key set across every entity at that scope.
+func ListSettingValuesByScope(
+	db *sql.DB,
+	profileID string,
+	scope settingscontract.Scope,
+	keys []string,
+) ([]userstore.SettingValue, error) {
+	if err := userstore.ValidateScopeListing(profileID, scope); err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(keys)+2)
+	args = append(args, profileID, string(scope))
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	rows, err := db.Query(`
+		SELECT `+settingValueColumns+`
+		FROM user_setting_values
+		WHERE profile_id = ? AND scope = ? AND key IN (`+placeholders(len(keys))+`)
+		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(client_family, ''), COALESCE(device_id, ''),
+		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing setting values by scope: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var values []userstore.SettingValue
+	for rows.Next() {
+		value, err := scanSettingValue(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning setting value: %w", err)
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 // UpsertSettingValue writes the explicit value at one scope and increments that
 // row's revision.
 func UpsertSettingValue(

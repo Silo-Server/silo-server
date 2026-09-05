@@ -279,6 +279,7 @@ func registerSettings(reg *Registry) {
 	}, reg.getEffectiveSubtitleAppearance)
 
 	Register(reg, Operation{
+		RetrySafety: RetrySafetyNaturalIdempotent,
 		Operation: humaOp(http.MethodPut, Prefix+"/settings/device/subtitle-appearance", "updateSubtitleAppearanceDeviceOverride", "settings",
 			"Replace this device's subtitle appearance override for the acting profile."),
 		Class:          ClassProfileScoped,
@@ -287,6 +288,7 @@ func registerSettings(reg *Registry) {
 	}, reg.updateSubtitleAppearanceDeviceOverride)
 
 	Register(reg, Operation{
+		RetrySafety: RetrySafetyNaturalIdempotent,
 		Operation: humaOp(http.MethodDelete, Prefix+"/settings/device/subtitle-appearance", "deleteSubtitleAppearanceDeviceOverride", "settings",
 			"Remove this device's subtitle appearance override for the acting profile."),
 		Class:          ClassProfileScoped,
@@ -311,6 +313,7 @@ func registerSettings(reg *Registry) {
 	}, reg.getPluginSettings)
 
 	Register(reg, Operation{
+		RetrySafety: RetrySafetyNaturalIdempotent,
 		Operation: humaOp(http.MethodPut, Prefix+"/settings/plugins/{installation_id}", "updatePluginSettings", "settings",
 			"Replace the account's values for a plugin installation's user settings."),
 		Class:           ClassProfileScoped,
@@ -334,6 +337,7 @@ func registerSettings(reg *Registry) {
 	}, reg.listEffectiveSettings)
 
 	Register(reg, Operation{
+		RetrySafety: RetrySafetyNaturalIdempotent,
 		Operation: humaOp(http.MethodPost, Prefix+"/settings/values/effective", "resolveEffectiveSettings", "settings",
 			"Resolve the effective values of settings under several content contexts at once."),
 		Class:         ClassProfileScoped,
@@ -353,6 +357,7 @@ func registerSettings(reg *Registry) {
 	}
 	Register(reg, Operation{
 		Operation:      shortcut,
+		RetrySafety:    RetrySafetyNaturalIdempotent,
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
@@ -366,6 +371,7 @@ func registerSettings(reg *Registry) {
 	}, reg.getSettingValue)
 
 	Register(reg, Operation{
+		RetrySafety: RetrySafetyNaturalIdempotent,
 		Operation: humaOp(http.MethodPut, Prefix+"/settings/values/{key}", "updateSettingValue", "settings",
 			"Replace the explicit value of a setting at one scope."),
 		Class:          ClassProfileScoped,
@@ -374,6 +380,7 @@ func registerSettings(reg *Registry) {
 	}, reg.updateSettingValue)
 
 	Register(reg, Operation{
+		RetrySafety: RetrySafetyNaturalIdempotent,
 		Operation: humaOp(http.MethodDelete, Prefix+"/settings/values/{key}", "deleteSettingValue", "settings",
 			"Remove the explicit value of a setting at one scope so it inherits again."),
 		Class:          ClassProfileScoped,

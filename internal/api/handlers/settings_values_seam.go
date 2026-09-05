@@ -834,7 +834,7 @@ func (h *SettingValuesHandler) resolveEffective(
 func (h *SettingValuesHandler) resolveEffectiveContexts(
 	ctx context.Context, store userstore.UserStore, q EffectiveSettingsQuery, requested []effectiveContextRequest,
 ) ([]effectiveContextResponse, *APIError) {
-	keys := uniqueTrimmed(q.Keys)
+	keys := q.Keys
 	if len(keys) == 0 {
 		return nil, fieldError(settingFieldKeys, "keys must contain at least one setting")
 	}
@@ -869,8 +869,8 @@ func (h *SettingValuesHandler) resolveEffectiveContexts(
 	contexts := make([]settingsresolve.Context, 0, len(requested))
 	contentIDs := 0
 	for _, request := range requested {
-		contextID := strings.TrimSpace(request.ContextID)
-		if contextID == "" {
+		contextID := request.ContextID
+		if strings.TrimSpace(contextID) == "" {
 			return nil, fieldError(settingFieldContexts, "Every context requires a non-empty context_id")
 		}
 		if _, exists := seen[contextID]; exists {
@@ -916,8 +916,17 @@ func (h *SettingValuesHandler) resolveEffectiveContexts(
 	observed := h.observedLanguageSuggestions(ctx, allResolved)
 	out := make([]effectiveContextResponse, len(resolved))
 	for i, values := range resolved {
-		out[i].ContextID = strings.TrimSpace(requested[i].ContextID)
-		out[i].Settings = h.effectiveResponsesWithObserved(values, observed)
+		out[i].ContextID = requested[i].ContextID
+		// Resolution deduplicates keys to share reads. The response still has
+		// one entry per requested key, including repeats, in request order.
+		byKey := make(map[string]effectiveSettingValueResponse, len(values))
+		for _, value := range h.effectiveResponsesWithObserved(values, observed) {
+			byKey[value.Key] = value
+		}
+		out[i].Settings = make([]effectiveSettingValueResponse, len(keys))
+		for j, key := range keys {
+			out[i].Settings[j] = byKey[key]
+		}
 	}
 	return out, nil
 }

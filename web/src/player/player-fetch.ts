@@ -22,41 +22,26 @@ export class PlayerFetchError extends Error {
   }
 }
 
-export interface PlayerFetchOptions extends RequestInit {
-  /**
-   * The API major the path belongs to. Defaults to the one `apiBaseUrl`
-   * names (v1); `2` swaps that trailing version segment for `/v2` so a v2
-   * operation path is served from the same origin with the same credentials.
-   */
-  apiMajor?: 1 | 2;
-}
-
-/**
- * The base the player's requests resolve against for one API major: the
- * configured base as is for the default, or with its trailing `/vN` segment
- * replaced for another.
- */
-export function playerApiBase(config: PlayerConfig, apiMajor?: 1 | 2): string {
-  if (apiMajor === undefined) return config.apiBaseUrl;
-  return config.apiBaseUrl.replace(/\/v\d+\/?$/, "") + `/v${apiMajor}`;
-}
-
 /**
  * Performs an authenticated fetch against the configured API.
  * Returns the parsed JSON body for 2xx responses, undefined when the response
  * carries no body.
  * Throws PlayerFetchError for non-2xx responses.
  */
-export async function playerFetch<T>(
+/**
+ * The auth, profile and device headers every player request carries, built
+ * from PlayerConfig so a host that embeds the player elsewhere keeps control
+ * of them. `hasJsonBody` adds the JSON content type for a non-FormData body.
+ */
+export function playerRequestHeaders(
   config: PlayerConfig,
-  path: string,
-  options: PlayerFetchOptions = {},
-): Promise<T> {
-  const { apiMajor, ...init } = options;
+  base: HeadersInit | undefined,
+  hasJsonBody: boolean,
+): Record<string, string> {
   const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string>),
+    ...(base as Record<string, string>),
   };
-  if (!(init.body instanceof FormData)) {
+  if (hasJsonBody) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -76,9 +61,28 @@ export async function playerFetch<T>(
   }
 
   headers["X-Silo-Device-Id"] = config.getDeviceId();
+  return headers;
+}
 
-  const res = await fetch(`${playerApiBase(config, apiMajor)}${path}`, {
-    ...init,
+/**
+ * Performs an authenticated fetch against the configured API.
+ * Returns the parsed JSON body for 2xx responses, undefined when the response
+ * carries no body.
+ * Throws PlayerFetchError for non-2xx responses.
+ */
+export async function playerFetch<T>(
+  config: PlayerConfig,
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const headers = playerRequestHeaders(
+    config,
+    options.headers,
+    !(options.body instanceof FormData),
+  );
+
+  const res = await fetch(`${config.apiBaseUrl}${path}`, {
+    ...options,
     headers,
   });
 

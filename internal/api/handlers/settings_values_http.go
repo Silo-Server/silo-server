@@ -303,6 +303,13 @@ func (h *SettingValuesHandler) HandlePostEffective(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Preserve v1 normalization at its boundary; v2 echoes caller tokens and
+	// retains repeated keys in request order.
+	body.Keys = uniqueTrimmed(body.Keys)
+	for i := range body.Contexts {
+		body.Contexts[i].ContextID = strings.TrimSpace(body.Contexts[i].ContextID)
+	}
+
 	out, err := h.resolveEffectiveContexts(r.Context(), store, h.effectiveQueryFrom(r, body.Keys), body.Contexts)
 	if err != nil {
 		writeAPIError(w, err)

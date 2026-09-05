@@ -3,26 +3,48 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 
-import { v2Problem } from "@/api/v2/problems.test-support";
+import { type SessionFetchResult } from "@/api/client";
+import { V2ProblemError } from "@/api/v2/request";
+import deleteSubtitlePreferenceProfileVerificationRequired from "../../../../contracts/api/v2/fixtures/delete_subtitle_preference_profile_verification_required.json";
+import updateSubtitlePreferenceValidationFailed from "../../../../contracts/api/v2/fixtures/update_subtitle_preference_validation_failed.json";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
-import {
-  buildSubtitleChoiceRequests,
-  type SubtitleChoiceSettingWrite,
-} from "@/player/utils/subtitleChoicePersistence";
+import { buildSubtitleChoiceRequests } from "@/player/utils/subtitleChoicePersistence";
 import type { PlayerSubtitleInfo } from "@/player/types";
-import { useDeleteSubtitlePreference } from "./subtitles";
+import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "./subtitles";
 
 const apiMock = vi.hoisted(() => vi.fn());
+const fetchWithSessionMock = vi.hoisted(() => vi.fn());
 vi.mock("@/api/client", async () => {
   const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
-  return { ...actual, api: apiMock };
+  return { ...actual, api: apiMock, fetchWithSession: fetchWithSessionMock };
 });
-const v2Mock = vi.hoisted(() => vi.fn());
-vi.mock("@/api/v2/request", async () => {
-  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
-  return { ...actual, v2: v2Mock };
-});
+
+/** The v2 transport answer for one request, as fetchWithSession hands it to v2(). */
+function sessionResponse(res: Response): SessionFetchResult {
+  return { res, requestProfileId: null, requestProfileToken: null };
+}
+
+function problemResponse(status: number, code: string, detail: string): SessionFetchResult {
+  return sessionResponse(
+    new Response(
+      JSON.stringify({
+        type: `https://siloserver.org/docs/api/v2/problems/${code}`,
+        title: code,
+        status,
+        detail,
+      }),
+      { status, headers: { "Content-Type": "application/problem+json" } },
+    ),
+  );
+}
+
+/** The v2 requests the hook issued, as `METHOD url` strings. */
+function v2Requests(): string[] {
+  return fetchWithSessionMock.mock.calls.map(
+    ([url, init]) => `${(init as RequestInit).method} ${url as string}`,
+  );
+}
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -51,21 +73,27 @@ const TRACKS: PlayerSubtitleInfo[] = [
 
 /** The profile_series rows an in-player pick leaves behind. */
 function rowsFromInPlayerPick(seriesId: string): StoredSettingRow[] {
-  return buildSubtitleChoiceRequests({ seriesId, index: 0, tracks: TRACKS })
-    .filter((request): request is SubtitleChoiceSettingWrite => request.kind === "setting")
-    .map((request) => ({
-      key: request.key,
-      scope: "profile_series" as const,
-      profileId: "profile-1",
-      seriesId,
-      value: request.value,
-    }));
+  return buildSubtitleChoiceRequests({ seriesId, index: 0, tracks: TRACKS }).flatMap((request) =>
+    request.kind === "setting"
+      ? [
+          {
+            key: request.key,
+            scope: "profile_series" as const,
+            profileId: "profile-1",
+            seriesId,
+            value: request.body.value,
+          },
+        ]
+      : [],
+  );
 }
 
 describe("useDeleteSubtitlePreference", () => {
   beforeEach(() => {
     apiMock.mockReset();
-    v2Mock.mockReset();
+    fetchWithSessionMock
+      .mockReset()
+      .mockResolvedValue(sessionResponse(new Response(null, { status: 204 })));
   });
 
   it("clears the canonical profile_series rows alongside the legacy row", async () => {
@@ -74,19 +102,21 @@ describe("useDeleteSubtitlePreference", () => {
     // in-player pick left behind kept resolving the abandoned language for
     // every episode of the series, permanently and unreachably.
     const store = rowsFromInPlayerPick("series-1");
-    apiMock.mockResolvedValue(undefined);
-    v2Mock.mockImplementation(
-      (operation: string, options: { path: { key: string }; query: unknown }) => {
-        expect(operation).toBe("DELETE /api/v2/settings/values/{key}");
-        expect(options.query).toEqual({ scope: "profile_series", series_id: "series-1" });
-        const index = store.findIndex((row) => row.key === options.path.key);
-        if (index < 0) {
-          return Promise.reject(v2Problem(404, "not_found", "No value is set at this scope"));
-        }
-        store.splice(index, 1);
-        return Promise.resolve(undefined);
-      },
-    );
+    fetchWithSessionMock.mockImplementation((url: string, options: RequestInit) => {
+      expect(options.method).toBe("DELETE");
+      if (url.startsWith("/api/v2/subtitle-prefs/")) {
+        return Promise.resolve(sessionResponse(new Response(null, { status: 204 })));
+      }
+      const parsed = new URL(url, "https://silo.example");
+      const key = decodeURIComponent(parsed.pathname.slice("/api/v2/settings/values/".length));
+      expect(parsed.searchParams.get("scope")).toBe("profile_series");
+      expect(parsed.searchParams.get("series_id")).toBe("series-1");
+      const index = store.findIndex((row) => row.key === key);
+      if (index < 0)
+        return Promise.resolve(problemResponse(404, "not_found", "No value is set at this scope"));
+      store.splice(index, 1);
+      return Promise.resolve(sessionResponse(new Response(null, { status: 204 })));
+    });
 
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });
@@ -95,9 +125,12 @@ describe("useDeleteSubtitlePreference", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(store).toEqual([]);
-    expect(apiMock.mock.calls.map(([path]) => path as string)).toContain(
-      "/subtitle-prefs/series-1",
-    );
+    expect(v2Requests()).toEqual([
+      "DELETE /api/v2/subtitle-prefs/series-1",
+      `DELETE /api/v2/settings/values/${SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE}?scope=profile_series&series_id=series-1`,
+      `DELETE /api/v2/settings/values/${SETTING_KEYS.PLAYBACK_SUBTITLE_MODE}?scope=profile_series&series_id=series-1`,
+    ]);
+    expect(apiMock).not.toHaveBeenCalled();
     // Resolution falls all the way back to the contract default again.
     const [language] = resolveSettingValues([SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE], store, {
       profileId: "profile-1",
@@ -107,8 +140,11 @@ describe("useDeleteSubtitlePreference", () => {
   });
 
   it("treats an already-absent canonical row as success", async () => {
-    apiMock.mockResolvedValue(undefined);
-    v2Mock.mockRejectedValue(v2Problem(404, "not_found", "No value is set at this scope"));
+    fetchWithSessionMock
+      .mockResolvedValueOnce(sessionResponse(new Response(null, { status: 204 })))
+      .mockImplementation(() =>
+        Promise.resolve(problemResponse(404, "not_found", "No value is set at this scope")),
+      );
 
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });
@@ -117,12 +153,124 @@ describe("useDeleteSubtitlePreference", () => {
   });
 
   it("surfaces a real failure rather than reporting a reset that did not happen", async () => {
-    apiMock.mockResolvedValue(undefined);
-    v2Mock.mockRejectedValue(v2Problem(500, "internal_error", "boom"));
+    fetchWithSessionMock
+      .mockResolvedValueOnce(sessionResponse(new Response(null, { status: 204 })))
+      .mockImplementation(() => Promise.resolve(problemResponse(500, "internal_error", "boom")));
 
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });
 
     await expect(result.current.mutateAsync("series-1")).rejects.toThrow("boom");
+  });
+
+  it("surfaces a v2 problem from the preference delete as the contract emits it", async () => {
+    // The committed fixture body for this operation; a locked profile must not
+    // be reported as a completed reset.
+    fetchWithSessionMock.mockResolvedValue(
+      sessionResponse(
+        new Response(JSON.stringify(deleteSubtitlePreferenceProfileVerificationRequired), {
+          status: 403,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+      ),
+    );
+
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useDeleteSubtitlePreference(), { wrapper });
+
+    const failure = await result.current.mutateAsync("series-1").catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(V2ProblemError);
+    expect((failure as V2ProblemError).problemType).toBe("profile_verification_required");
+    expect((failure as V2ProblemError).status).toBe(403);
+  });
+});
+
+describe("useSetSubtitlePreference", () => {
+  beforeEach(() => {
+    apiMock.mockReset();
+    fetchWithSessionMock
+      .mockReset()
+      .mockResolvedValue(sessionResponse(new Response(null, { status: 204 })));
+  });
+
+  /** The JSON body of the single v2 request the hook issued. */
+  function v2Body(): unknown {
+    const [, init] = fetchWithSessionMock.mock.calls[0] as [string, RequestInit];
+    return JSON.parse(init.body as string) as unknown;
+  }
+
+  it("replaces the preference through v2 with the chosen track's signature", async () => {
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
+
+    await result.current.mutateAsync({
+      prefId: "series-1",
+      selection: {
+        source: "embedded",
+        language: "ja",
+        codec: "subrip",
+        label: "Japanese",
+        forced: false,
+        hearing_impaired: false,
+        track_index: 0,
+      },
+      showForcedSubtitles: true,
+    });
+
+    expect(v2Requests()).toEqual(["PUT /api/v2/subtitle-prefs/series-1"]);
+    expect(v2Body()).toEqual({
+      subtitle_language: "ja",
+      subtitle_track_index: 0,
+      subtitle_mode: "always",
+      track_signature: {
+        source: "embedded",
+        language: "ja",
+        codec: "subrip",
+        label: "Japanese",
+        forced: false,
+        hearing_impaired: false,
+      },
+      show_forced_subtitles: true,
+    });
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it('stores "subtitles off" as the -1 sentinel with mode off and no signature', async () => {
+    // -1 is the "no track" value every first-party client stores; the v2
+    // contract admits it (minimum -1) and spells "no signature" as an absent
+    // member rather than null.
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
+
+    await result.current.mutateAsync({ prefId: "series-1", selection: null });
+
+    expect(v2Requests()).toEqual(["PUT /api/v2/subtitle-prefs/series-1"]);
+    expect(v2Body()).toEqual({
+      subtitle_language: "",
+      subtitle_track_index: -1,
+      subtitle_mode: "off",
+    });
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a v2 validation problem as the contract emits it", async () => {
+    fetchWithSessionMock.mockResolvedValue(
+      sessionResponse(
+        new Response(JSON.stringify(updateSubtitlePreferenceValidationFailed), {
+          status: 422,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+      ),
+    );
+
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
+
+    const failure = await result.current
+      .mutateAsync({ prefId: "series-1", selection: null })
+      .catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(V2ProblemError);
+    expect((failure as V2ProblemError).problemType).toBe("validation_failed");
+    expect((failure as V2ProblemError).status).toBe(422);
   });
 });

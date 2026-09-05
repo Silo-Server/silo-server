@@ -3,7 +3,6 @@ import { toast } from "sonner";
 
 import { api } from "@/api/client";
 import { v2 } from "@/api/v2/request";
-import { isSettingValueMissing } from "@/hooks/queries/settingValues";
 import {
   SERIES_SUBTITLE_SETTING_KEYS,
   seriesSubtitleSettingIdentity,
@@ -20,6 +19,7 @@ import type {
 } from "@/api/types";
 
 import { itemKeys, settingsKeys, subtitleKeys } from "./keys";
+import { isSettingValueMissing } from "./settingValues";
 
 interface DownloadSubtitleResponse {
   subtitle: DownloadedSubtitle;
@@ -143,7 +143,7 @@ export function useDeleteSubtitlePreference() {
 
   return useMutation({
     mutationFn: async (prefId: string) => {
-      await api<void>(`/subtitle-prefs/${prefId}`, { method: "DELETE" });
+      await v2("DELETE /api/v2/subtitle-prefs/{series_id}", { path: { series_id: prefId } });
       await Promise.all(
         SERIES_SUBTITLE_SETTING_KEYS.map((key) =>
           v2("DELETE /api/v2/settings/values/{key}", {
@@ -189,14 +189,16 @@ export function useSetSubtitlePreference() {
 
   return useMutation({
     mutationFn: ({ prefId, selection, showForcedSubtitles }: SetSubtitlePreferenceInput) =>
-      api<void>(`/subtitle-prefs/${prefId}`, {
-        method: "PUT",
-        body: JSON.stringify({
+      v2("PUT /api/v2/subtitle-prefs/{series_id}", {
+        path: { series_id: prefId },
+        body: {
           subtitle_language: selection?.language ?? "",
+          // -1 is the "no track" sentinel the contract admits for "off".
           subtitle_track_index: selection?.track_index ?? -1,
           subtitle_mode: derivePersistedSubtitleMode(
             selection ? (selection.track_index ?? -1) : null,
           ),
+          // The contract spells "no signature" as an absent member, not null.
           track_signature: selection
             ? {
                 source: selection.source,
@@ -206,9 +208,9 @@ export function useSetSubtitlePreference() {
                 forced: selection.forced,
                 hearing_impaired: selection.hearing_impaired,
               }
-            : null,
+            : undefined,
           show_forced_subtitles: showForcedSubtitles,
-        }),
+        },
       }),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {

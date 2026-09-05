@@ -206,6 +206,7 @@ func registerProfiles(reg *Registry) {
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.createProfile)
 
@@ -220,13 +221,17 @@ func registerProfiles(reg *Registry) {
 		// Profile scoped without a required header, as v1 PUT /profiles/{id}:
 		// an administrator or the verified primary profile manages the
 		// household, and any other caller may change only its own active
-		// profile's playback preferences. Naturally idempotent: repeating
-		// the same PATCH converges on the same state.
+		// profile's playback preferences. Non-retryable until the profiles
+		// section guards it: the profile row converges, but v1 bumps the
+		// account-wide access_policy_revision on field presence rather than
+		// an effective change, so an identical retry invalidates tokens
+		// minted in between across sibling profiles (ledger DEFECT note).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.updateProfile)
 
@@ -246,6 +251,7 @@ func registerProfiles(reg *Registry) {
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.deleteProfile)
 
@@ -270,6 +276,7 @@ func registerProfiles(reg *Registry) {
 		// credential.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
+		RetrySafety:     RetrySafetyNaturalIdempotent,
 		ServiceBacked:   true,
 	}, reg.verifyProfilePIN)
 
@@ -286,6 +293,7 @@ func registerProfiles(reg *Registry) {
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 		MaxBodyBytes:   maxAvatarFormBytes,
 	}, reg.uploadProfileAvatar)
@@ -294,12 +302,15 @@ func registerProfiles(reg *Registry) {
 		Operation: humaOp(http.MethodDelete, Prefix+"/profiles/{id}/avatar", "deleteProfileAvatar", "profiles",
 			"Remove a profile's uploaded avatar; a preset avatar is left as is."),
 		// As v1 DELETE /profiles/{id}/avatar: any signed-in caller on the
-		// account; idempotent, a profile with no upload is left unchanged.
+		// account; a profile with no upload is left unchanged. Non-retryable:
+		// a delayed retry would clear an avatar uploaded after the first
+		// success (ledger row note).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		// Demo restriction is a v2 addition: v1's demo guard does not list
 		// profile mutations (recorded in the ledger row).
 		DemoRestricted: true,
+		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 	}, reg.deleteProfileAvatar)
 }

@@ -15,25 +15,6 @@ afterEach(() => {
 });
 
 describe("playerFetch", () => {
-  it("serves a v2 operation path from the configured origin with the player's credentials", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await playerFetch(
-      { ...config, apiBaseUrl: "https://silo.example/api/v1", getAccessToken: () => "tok" },
-      "/settings/values/playback.subtitle_mode?scope=profile_series&series_id=s1",
-      { apiMajor: 2, method: "PUT", body: "{}" },
-    );
-
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe(
-      "https://silo.example/api/v2/settings/values/playback.subtitle_mode?scope=profile_series&series_id=s1",
-    );
-    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer tok");
-    expect((init.headers as Record<string, string>)["X-Silo-Device-Id"]).toBe("web-player-device");
-    expect("apiMajor" in init).toBe(false);
-  });
-
   it("parses a JSON body returned with 202 Accepted", async () => {
     vi.stubGlobal(
       "fetch",

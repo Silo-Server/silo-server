@@ -312,6 +312,9 @@ func (s stubStore) ListSettingValuesForResolution(context.Context, userstore.Set
 func (s stubStore) ListAllSettingValues(context.Context) ([]userstore.SettingValue, error) {
 	panic("unused")
 }
+func (s stubStore) ListSettingValuesByScope(context.Context, string, settingscontract.Scope, []string) ([]userstore.SettingValue, error) {
+	panic("unused")
+}
 func (s stubStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
 	panic("unused")
 }
