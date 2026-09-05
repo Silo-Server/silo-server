@@ -24,7 +24,14 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		permission, _ := op.Metadata[metaPermission].(string)
 		demoRestricted, _ := op.Metadata[metaDemoRestricted].(bool)
 		profileOptional, _ := op.Metadata[metaProfileOptional].(bool)
+		bucket, _ := op.Metadata[metaRateLimitBucket].(string)
 		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional)
+		if class == ClassPublic && bucket != "" && deps.PublicRateLimit != nil {
+			// A public operation with a named budget runs v1's per-endpoint
+			// limiter (AuthEndpointHandler) and nothing else; a missing
+			// limiter leaves it unlimited, as on v1.
+			chain = []func(http.Handler) http.Handler{deps.PublicRateLimit(bucket)}
+		}
 		r, w := humachi.Unwrap(ctx)
 		if missing != "" {
 			// A gate the class needs is not wired. Fail closed with a typed

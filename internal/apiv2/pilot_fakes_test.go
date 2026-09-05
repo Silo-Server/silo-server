@@ -226,6 +226,7 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	}
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
+	deps.Devices = fixtureDevices()
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
@@ -239,4 +240,156 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
 	return deps
+}
+
+// fakeDevices stands in for the device-pairing seam on *handlers.AuthHandler:
+// a fixed set of requests keyed by their codes, answering the way the real
+// seam does (*handlers.APIError with the v1 status and code).
+type fakeDevices struct {
+	configured bool
+	// requests maps a device, browser, or user code to its request.
+	requests map[string]*fakeDeviceRequest
+	err      error
+}
+
+type fakeDeviceRequest struct {
+	Status    string
+	Temporary bool
+	Purpose   string
+	ExpiresAt time.Time
+	// approvedBy is set once approved; a poll then collects tokens.
+	approvedBy int
+	profileID  string
+}
+
+func (f fakeDevices) DeviceLoginConfigured() bool { return f.configured }
+
+func (f fakeDevices) StartDeviceLogin(_ context.Context, in auth.DeviceLoginStartInput) (*auth.DeviceLoginStartResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	purpose := in.ClientPurpose
+	if purpose == "" {
+		purpose = auth.DeviceLoginPurposeLogin
+	}
+	if (purpose == auth.DeviceLoginPurposeRemote) != in.Temporary {
+		return nil, &handlers.APIError{Status: 400, Code: "bad_request", Message: "Invalid device login purpose", Field: "client_purpose"}
+	}
+	return &auth.DeviceLoginStartResult{
+		DeviceCode: "dev-1", UserCode: "ABCD-1234", MatchCode: "42",
+		VerificationURI: in.BaseURL + "/link", VerificationURIComplete: in.BaseURL + "/link?code=ABCD-1234",
+		ExpiresAt: fixedTime().Add(10 * time.Minute), ExpiresIn: 600, Interval: 5,
+		DeviceName: in.DeviceName, DevicePlatform: in.DevicePlatform, ClientPurpose: purpose, Temporary: in.Temporary,
+	}, nil
+}
+
+func (f fakeDevices) find(in auth.DeviceLoginLookupInput) (*fakeDeviceRequest, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if r := f.requests[in.BrowserCode]; r != nil && in.BrowserCode != "" {
+		return r, nil
+	}
+	if r := f.requests[in.UserCode]; r != nil && in.UserCode != "" {
+		return r, nil
+	}
+	return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+}
+
+func (f fakeDevices) LookupDeviceLogin(_ context.Context, in auth.DeviceLoginLookupInput) (*auth.DeviceLoginInfo, error) {
+	r, err := f.find(in)
+	if err != nil {
+		return nil, err
+	}
+	info := &auth.DeviceLoginInfo{Status: r.Status, UserCode: "ABCD-1234", MatchCode: "42", DeviceName: "Living room TV",
+		DevicePlatform: "tvos", IPAddressHint: "192.168.1.x", ExpiresAt: r.ExpiresAt, ClientPurpose: r.Purpose, Temporary: r.Temporary}
+	if r.Status == "expired" {
+		info.UserCode, info.MatchCode = "", ""
+	}
+	return info, nil
+}
+
+func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode string) (*handlers.DeviceLoginPollView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	r := f.requests[deviceCode]
+	if r == nil {
+		return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+	}
+	view := &handlers.DeviceLoginPollView{Status: r.Status, PollAfter: 5}
+	if r.Status == auth.DeviceLoginStatusApproved {
+		view.Tokens = &handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}, DownloadAllowed: true}}
+		if r.Temporary {
+			view.Temporary = true
+			view.ProfileID = r.profileID
+			view.ProfileToken = "ptok"
+			view.SessionExpiresAt = fixedTime().Add(2 * time.Hour)
+		}
+	}
+	return view, nil
+}
+
+func (f fakeDevices) decide(in auth.DeviceLoginLookupInput, want string) (handlers.DeviceLoginDecision, error) {
+	r, err := f.find(in)
+	if err != nil {
+		return handlers.DeviceLoginDecision{}, err
+	}
+	switch r.Status {
+	case "expired":
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 410, Code: "expired", Message: "Device login request has expired"}
+	case auth.DeviceLoginStatusConsumed:
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "consumed", Message: "Device login request has already been used"}
+	case auth.DeviceLoginStatusDenied:
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "denied", Message: "Device login request has already been denied"}
+	}
+	return handlers.DeviceLoginDecision{Status: want}, nil
+}
+
+func (f fakeDevices) ApproveDeviceLogin(_ context.Context, in auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error) {
+	if userID == 0 {
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Authentication required"}
+	}
+	r, err := f.find(in)
+	if err == nil && r.Purpose == auth.DeviceLoginPurposeRemote {
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
+	}
+	return f.decide(in, auth.DeviceLoginStatusApproved)
+}
+
+func (f fakeDevices) ApproveDeviceHandoff(_ context.Context, in auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error) {
+	if userID == 0 || profileID == "" {
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 403, Code: "profile_required", Message: "An active verified profile is required"}
+	}
+	r, err := f.find(in)
+	if err == nil && r.Purpose != auth.DeviceLoginPurposeRemote {
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
+	}
+	return f.decide(in, auth.DeviceLoginStatusApproved)
+}
+
+func (f fakeDevices) DenyDeviceLogin(_ context.Context, in auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error) {
+	if userID == 0 {
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Authentication required"}
+	}
+	return f.decide(in, auth.DeviceLoginStatusDenied)
+}
+
+// fixtureDevices is the device-pairing fake every device test starts from.
+func fixtureDevices() fakeDevices {
+	exp := fixedTime().Add(10 * time.Minute)
+	pending := &fakeDeviceRequest{Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp}
+	approved := &fakeDeviceRequest{Status: auth.DeviceLoginStatusApproved, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp, approvedBy: 1}
+	handoff := &fakeDeviceRequest{Status: auth.DeviceLoginStatusApproved, Purpose: auth.DeviceLoginPurposeRemote, Temporary: true, ExpiresAt: exp, approvedBy: 1, profileID: "p-owner"}
+	remotePending := &fakeDeviceRequest{Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeRemote, Temporary: true, ExpiresAt: exp}
+	return fakeDevices{configured: true, requests: map[string]*fakeDeviceRequest{
+		"dev-pending": pending, "br-pending": pending, "ABCD-1234": pending,
+		"dev-approved": approved,
+		"dev-handoff":  handoff,
+		"br-remote":    remotePending,
+		"br-expired":   {Status: "expired", Purpose: auth.DeviceLoginPurposeLogin},
+		"br-consumed":  {Status: auth.DeviceLoginStatusConsumed, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
+		"br-denied":    {Status: auth.DeviceLoginStatusDenied, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
+	}}
 }

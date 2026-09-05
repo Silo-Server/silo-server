@@ -41,6 +41,10 @@ type SystemInfoOutput struct {
 	Body         SystemInfo
 }
 
+// cacheNoCache is the revalidation posture of discovery and capability
+// documents (docs/architecture/api-contract.md, "Response caching").
+const cacheNoCache = "no-cache"
+
 // contractDigest is computed once from the embedded bytes, never from live
 // wiring, so the value is build-reproducible.
 var contractDigest = func() string {
@@ -89,7 +93,7 @@ func (reg *Registry) getSetupStatus(ctx context.Context, _ *struct{}) (*SetupSta
 
 func getSystemInfo(_ context.Context, _ *struct{}) (*SystemInfoOutput, error) {
 	return &SystemInfoOutput{
-		CacheControl: "no-cache",
+		CacheControl: cacheNoCache,
 		Body: SystemInfo{
 			ServerVersion:  buildinfo.Current().Display,
 			APIMajor:       APIMajor,

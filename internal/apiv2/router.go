@@ -70,6 +70,10 @@ type Dependencies struct {
 	DemoSettings apimw.DemoSettingsReader
 	// RateLimit is the generic authenticated-route limiter.
 	RateLimit func(http.Handler) http.Handler
+	// PublicRateLimit builds the per-endpoint limiter a public operation
+	// with a RateLimitBucket runs (v1's AuthEndpointHandler); nil leaves
+	// those operations unlimited.
+	PublicRateLimit func(bucket string) func(http.Handler) http.Handler
 	// CursorSecret keys pagination cursors. It must be shared by every replica
 	// (the JWT secret is); empty means a per-process random key.
 	CursorSecret []byte
@@ -92,6 +96,9 @@ type Dependencies struct {
 	Libraries LibraryService
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers AdminUserService
+	// Devices drives the device-pairing state machine
+	// (*handlers.AuthHandler).
+	Devices DeviceLoginService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
@@ -128,6 +135,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(observe)
 	r.Use(dropDelegationPattern)
 	r.Use(bufferResponse)
+	r.Use(withRequest)
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
@@ -375,6 +383,18 @@ type ProfileService interface {
 type LibraryService interface {
 	// ExistingIDs returns the subset of ids that name a library.
 	ExistingIDs(ctx context.Context, ids []int) ([]int, error)
+}
+
+// DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing
+// operations use.
+type DeviceLoginService interface {
+	DeviceLoginConfigured() bool
+	StartDeviceLogin(ctx context.Context, input auth.DeviceLoginStartInput) (*auth.DeviceLoginStartResult, error)
+	LookupDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput) (*auth.DeviceLoginInfo, error)
+	PollDeviceLogin(ctx context.Context, deviceCode string) (*handlers.DeviceLoginPollView, error)
+	ApproveDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
+	ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error)
+	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 }
 
 // AdminUserService is the slice of *handlers.AdminHandler listAdminUsers uses.

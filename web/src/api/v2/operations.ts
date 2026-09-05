@@ -7,9 +7,16 @@
 export const v2Operations = {
   "GET /api/v2/account/me": "getCurrentUser",
   "GET /api/v2/admin/users": "listAdminUsers",
+  "GET /api/v2/auth/device": "getDeviceLogin",
+  "GET /api/v2/auth/device/capability": "getDeviceLoginCapability",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
   "GET /api/v2/progress": "listProgress",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
   "PATCH /api/v2/profiles/{id}": "updateProfile",
+  "POST /api/v2/auth/device/approve": "approveDeviceLogin",
+  "POST /api/v2/auth/device/approve-handoff": "approveDeviceHandoff",
+  "POST /api/v2/auth/device/deny": "denyDeviceLogin",
+  "POST /api/v2/auth/device/poll": "pollDeviceLogin",
+  "POST /api/v2/auth/device/start": "startDeviceLogin",
 } as const;

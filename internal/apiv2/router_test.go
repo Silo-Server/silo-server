@@ -196,6 +196,8 @@ func TestReconcileSpecSeeded(t *testing.T) {
 	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
 	observed := []string{
 		"GET " + Prefix + "/account/me", "GET " + Prefix + "/admin/users", "GET " + Prefix + "/openapi.json", "PATCH " + Prefix + "/profiles/{id}", "GET " + Prefix + "/progress", "GET " + Prefix + "/system/info", "GET " + Prefix + "/system/setup",
+		"GET " + Prefix + "/auth/device", "GET " + Prefix + "/auth/device/capability", "POST " + Prefix + "/auth/device/approve", "POST " + Prefix + "/auth/device/approve-handoff",
+		"POST " + Prefix + "/auth/device/deny", "POST " + Prefix + "/auth/device/poll", "POST " + Prefix + "/auth/device/start",
 	}
 
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)

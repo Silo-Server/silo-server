@@ -19064,13 +19064,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/auth/device",
+        "operation_id": "getDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public lookup by ?token or ?code; one of the two is required (422), unlike v1 which answered 404 for neither. expires_at is a UTC-ms instant, omitted once expired; every other member is always emitted. Both registrations (plain, rate-limited) are one operation: the device_lookup bucket runs through the public rate-limit class."
     },
     {
       "listener": "api",
@@ -19159,13 +19159,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/auth/device",
+        "operation_id": "getDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public lookup by ?token or ?code; one of the two is required (422), unlike v1 which answered 404 for neither. expires_at is a UTC-ms instant, omitted once expired; every other member is always emitted. Both registrations (plain, rate-limited) are one operation: the device_lookup bucket runs through the public rate-limit class."
     },
     {
       "listener": "api",
@@ -19241,13 +19241,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/device/approve",
+        "operation_id": "approveDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Authenticated. Same {status} answer; 410 became device_login_expired (410 is otherwise client_upgrade_required); consumed/denied/purpose/conflict stay 409. A body naming neither token nor code is 422, not a 404 lookup of nothing."
     },
     {
       "listener": "api",
@@ -19315,13 +19315,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/device/approve-handoff",
+        "operation_id": "approveDeviceHandoff"
       },
-      "notes": "Conditionally registered: authHandler != nil; authMiddleware != nil; viewerAccessMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Profile scoped: the verified profile comes from the class gate (X-Profile-Id required) rather than an in-handler scope check. Same decision codes as approveDeviceLogin."
     },
     {
       "listener": "api",
@@ -19379,13 +19379,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "GET",
+        "path": "/api/v2/auth/device/capability",
+        "operation_id": "getDeviceLoginCapability"
       },
-      "notes": "Conditionally registered: authHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Capability document in the system/info shape: revision, state (available or not_configured when device login is not wired), remote_playback_handoff, protocol_versions. Cache-Control: no-cache."
     },
     {
       "listener": "api",
@@ -19468,13 +19468,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/device/deny",
+        "operation_id": "denyDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; authMiddleware != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Authenticated. Same {status} answer and the same decision codes as approveDeviceLogin."
     },
     {
       "listener": "api",
@@ -19561,13 +19561,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "operation_id": "pollDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, device_poll rate-limit bucket; both registrations are one operation. device_code is required (422). The token pair moved under tokens {access_token, refresh_token, expires_in, user}, present only on the collecting poll; profile_id, profile_token and temporary are always emitted; session_expires_at is a UTC-ms instant, present only for a temporary session. Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -19656,13 +19656,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "operation_id": "pollDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, device_poll rate-limit bucket; both registrations are one operation. device_code is required (422). The token pair moved under tokens {access_token, refresh_token, expires_in, user}, present only on the collecting poll; profile_id, profile_token and temporary are always emitted; session_expires_at is a UTC-ms instant, present only for a temporary session. Cache-Control: no-store."
     },
     {
       "listener": "api",
@@ -19767,13 +19767,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/device/start",
+        "operation_id": "startDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, device_start rate-limit bucket; both registrations are one operation. 201 with the same members; expires_at is a UTC-ms instant; client_purpose is a request enum (device_login, remote_playback) and a purpose/temporary mismatch is 422 at body.client_purpose."
     },
     {
       "listener": "api",
@@ -19880,13 +19880,13 @@
       "disposition_rule": "default_ported",
       "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
       "owner": null,
-      "review_state": "proposed",
+      "review_state": "ratified",
       "v2": {
-        "method": null,
-        "path": null,
-        "operation_id": null
+        "method": "POST",
+        "path": "/api/v2/auth/device/start",
+        "operation_id": "startDeviceLogin"
       },
-      "notes": "Conditionally registered: authHandler != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions."
+      "notes": "Public, device_start rate-limit bucket; both registrations are one operation. 201 with the same members; expires_at is a UTC-ms instant; client_purpose is a request enum (device_login, remote_playback) and a purpose/temporary mismatch is 422 at body.client_purpose."
     },
     {
       "listener": "api",
