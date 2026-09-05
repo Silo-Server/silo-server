@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
+import { v2 } from "@/api/v2/request";
 import { invalidateRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 import {
   cancelItemDetailQueries,
@@ -41,7 +42,7 @@ export function useSetRating(itemId: string) {
 export function useDeleteRating(itemId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api(`/ratings/${itemId}`, { method: "DELETE" }),
+    mutationFn: () => v2("DELETE /api/v2/ratings/{item_id}", { path: { item_id: itemId } }),
     onMutate: async () => {
       await cancelItemDetailQueries(queryClient, itemId);
       const previous = queryClient.getQueriesData<ItemDetail>({

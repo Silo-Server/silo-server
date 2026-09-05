@@ -939,6 +939,18 @@ stored ones, every string member of a profile is always emitted, ids are string 
 are UTC milliseconds. The pilot fixtures live under `contracts/api/v2/fixtures/` as
 `<operation>_<scenario>.json` and are listed in `index.json` with their `operation_id`.
 
+**Section personal-lists (Phase 4).** One pattern applied to the favorites, watchlist and
+ratings families under the `favorites`, `watchlist` and `ratings` tags: a profile-scoped list
+paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem` (ratings list
+`{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
+(`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a naturally idempotent
+bodiless `PUT` add (ratings take `{rating}`) answering `204`, and a naturally idempotent `DELETE`
+answering `204` whether or not the entry existed. The mutations are demo-guarded. `has_more` is
+decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
+see never hides the rows behind it. The v1 handlers call the same seams
+(`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite`,
+`RatingsHandler.ListRatings`/`DeleteRating`), so both surfaces read and write one store.
+
 **Section catalog-libraries (Phase 4).** Thirty operations under the `libraries` tag: the
 acting-admin, demo-guarded management surface `listLibraries`, `createLibrary`, `updateLibrary`,
 `deleteLibrary`, `checkLibraryMount`, `confirmEmptyRootCleanup`, `listMetadataMatchQueues`,

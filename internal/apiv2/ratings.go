@@ -65,7 +65,7 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 	if p != nil {
 		return nil, p
 	}
-	scope := CursorScope{OperationID: opListRatings, Security: strconv.Itoa(userID) + "/" + profileID, Sort: "store", Tiebreaker: "store"}
+	scope := CursorScope{OperationID: opListRatings, Security: strconv.Itoa(userID) + "/" + profileID, Sort: sortStore, Tiebreaker: sortStore}
 	offset, p := decodeOffset(cursors, scope, in.Cursor)
 	if p != nil {
 		return nil, p

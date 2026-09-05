@@ -98,8 +98,8 @@ func personalListScope(ctx context.Context, operationID string, viewer handlers.
 	return CursorScope{
 		OperationID: operationID,
 		Security:    strconv.Itoa(viewer.UserID) + "/" + viewer.ProfileID + "/" + viewerScopeDigest(ctx),
-		Sort:        "store",
-		Tiebreaker:  "store",
+		Sort:        sortStore,
+		Tiebreaker:  sortStore,
 	}
 }
 

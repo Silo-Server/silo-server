@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
+import { catalogItemFromV2 } from "@/api/v2/catalog";
+import { v2 } from "@/api/v2/request";
 import { favoriteKeys } from "./keys";
 import { toast } from "sonner";
 import {
@@ -12,7 +13,8 @@ import {
 export function useFavorites() {
   return useQuery({
     queryKey: favoriteKeys.list(),
-    queryFn: () => api<{ items: BrowseItem[] }>("/favorites").then((d) => d.items ?? []),
+    queryFn: ({ signal }): Promise<BrowseItem[]> =>
+      v2("GET /api/v2/favorites", { signal }).then((data) => data.items.map(catalogItemFromV2)),
   });
 }
 
@@ -21,9 +23,9 @@ export function useToggleFavorite(itemId: string) {
 
   return useMutation({
     mutationFn: (currentlyFavorite: boolean) =>
-      api(`/favorites/${itemId}`, {
-        method: currentlyFavorite ? "DELETE" : "PUT",
-      }),
+      currentlyFavorite
+        ? v2("DELETE /api/v2/favorites/{item_id}", { path: { item_id: itemId } })
+        : v2("PUT /api/v2/favorites/{item_id}", { path: { item_id: itemId } }),
     onMutate: async (currentlyFavorite: boolean) => {
       await cancelItemDetailQueries(queryClient, itemId);
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
