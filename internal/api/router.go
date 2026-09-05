@@ -1898,6 +1898,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if adminHandler != nil {
 		v2deps.AdminUsers = adminHandler
 	}
+	if libraryHandler != nil {
+		v2deps.LibraryAdmin = libraryHandler
+	}
+	if sectionHandler != nil {
+		v2deps.LibrarySections = sectionHandler
+	}
+	if libraryCollectionHandler != nil {
+		v2deps.LibraryCollections = libraryCollectionHandler
+	}
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
 	r.Route("/api/v1", func(r chi.Router) {
