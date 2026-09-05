@@ -47,6 +47,9 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("ListAll", func(t *testing.T) {
 		testSettingValueListAll(t, newStore)
 	})
+	t.Run("ListByScope", func(t *testing.T) {
+		testSettingValueListByScope(t, newStore)
+	})
 	t.Run("DeletePaths", func(t *testing.T) {
 		testSettingValueDeletePaths(t, newStore)
 	})
@@ -230,6 +233,7 @@ func testPreferenceSettingsTransactionRollback(t *testing.T, newStore func(t *te
 const (
 	audioKey    = "playback.audio_language"
 	subtitleKey = "playback.subtitle_mode"
+	otherKey    = "playback.subtitle_language"
 
 	// Fixture identities. Named so a backend that mixes up two scope columns
 	// fails on the assertion rather than on a typo in one of the literals.
@@ -432,6 +436,78 @@ func testSettingValueListAll(t *testing.T, newStore func(t *testing.T) userstore
 			t.Fatalf("ListAllSettingValues(%+v) revision/updated_at = %d/%q, want 1/set",
 				got.SettingIdentity, got.Revision, got.UpdatedAt)
 		}
+	}
+}
+
+// testSettingValueListByScope pins the bounded listing read: only the named
+// profile's rows at the named scope for the requested keys come back, in the
+// stable (key, scope, identity) order, and nothing from other profiles,
+// scopes or keys. An empty key set is empty, and the account scope — which
+// no profile anchors — is refused as an invalid identity.
+func testSettingValueListByScope(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	seedSettingProfiles(t, ctx, store, "p1", "p2")
+
+	wanted := map[userstore.SettingIdentity]string{
+		libraryID(audioKey, "p1", 42):    `"es"`,
+		libraryID(subtitleKey, "p1", 42): `"always"`,
+		libraryID(audioKey, "p1", 7):     `"fr"`,
+	}
+	unwanted := map[userstore.SettingIdentity]string{
+		accountID(audioKey):                   `"en"`,
+		profileID(audioKey, "p1"):             `"de"`,
+		libraryID(audioKey, "p2", 42):         `"it"`,
+		libraryID(otherKey, "p1", 42):         `"pt"`,
+		seriesID(audioKey, "p1", seriesOne):   `"ja"`,
+		deviceID(audioKey, "p1", deviceApple): `"nl"`,
+	}
+	for id, value := range wanted {
+		mustUpsert(t, ctx, store, id, value)
+	}
+	for id, value := range unwanted {
+		mustUpsert(t, ctx, store, id, value)
+	}
+
+	got, err := store.ListSettingValuesByScope(ctx, "p1", settingscontract.ScopeProfileLibrary, []string{audioKey, subtitleKey})
+	if err != nil {
+		t.Fatalf("ListSettingValuesByScope: %v", err)
+	}
+	if len(got) != len(wanted) {
+		t.Fatalf("ListSettingValuesByScope returned %d rows, want %d: %+v", len(got), len(wanted), got)
+	}
+	for i, row := range got {
+		want, ok := wanted[row.SettingIdentity]
+		if !ok {
+			t.Fatalf("ListSettingValuesByScope returned an unrequested row %+v", row.SettingIdentity)
+		}
+		if !jsonEqual(row.Value, json.RawMessage(want)) {
+			t.Fatalf("ListSettingValuesByScope(%+v) = %s, want %s", row.SettingIdentity, row.Value, want)
+		}
+		if row.UpdatedAt == "" || row.Revision != 1 {
+			t.Fatalf("ListSettingValuesByScope(%+v) revision/updated_at = %d/%q, want 1/set",
+				row.SettingIdentity, row.Revision, row.UpdatedAt)
+		}
+		if i > 0 {
+			prev := got[i-1].SettingIdentity
+			if prev.Key > row.Key || (prev.Key == row.Key && prev.LibraryID > row.LibraryID) {
+				t.Fatalf("ListSettingValuesByScope order: %+v before %+v", prev, row.SettingIdentity)
+			}
+		}
+	}
+
+	none, err := store.ListSettingValuesByScope(ctx, "p1", settingscontract.ScopeProfileLibrary, nil)
+	if err != nil {
+		t.Fatalf("ListSettingValuesByScope(no keys): %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("ListSettingValuesByScope(no keys) = %+v, want none", none)
+	}
+	if _, err := store.ListSettingValuesByScope(ctx, "", settingscontract.ScopeAccount, []string{audioKey}); !errors.Is(err, userstore.ErrInvalidSettingIdentity) {
+		t.Fatalf("ListSettingValuesByScope(account) error = %v, want ErrInvalidSettingIdentity", err)
+	}
+	if _, err := store.ListSettingValuesByScope(ctx, "", settingscontract.ScopeProfileLibrary, []string{audioKey}); !errors.Is(err, userstore.ErrInvalidSettingIdentity) {
+		t.Fatalf("ListSettingValuesByScope(no profile) error = %v, want ErrInvalidSettingIdentity", err)
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
 
 var ErrCollectionGroupNotFound = errors.New("collection group not found")
@@ -215,6 +217,16 @@ type UserStore interface {
 	// the admin inspection surface; resolution reads keep going through
 	// ListSettingValuesForResolution.
 	ListAllSettingValues(ctx context.Context) ([]SettingValue, error)
+	// ListSettingValuesByScope returns every explicit value one profile has
+	// stored at one profile-anchored scope for the given keys, in the same
+	// stable (key, scope, identity) order as ListAllSettingValues. It is the
+	// read for a listing assembled from a fixed key set across every entity
+	// at that scope (every library, every series) without a list of the
+	// entities up front; the cost is bounded by the matching rows, not by
+	// everything the account has stored. An empty key set returns nothing;
+	// the account scope, which no profile anchors, is an
+	// ErrInvalidSettingIdentity.
+	ListSettingValuesByScope(ctx context.Context, profileID string, scope settingscontract.Scope, keys []string) ([]SettingValue, error)
 	// UpsertSettingValue writes the explicit value at one scope and increments
 	// that row's revision. Concurrent writes to one identity are
 	// last-write-wins in server receipt order; there is no compare-and-set

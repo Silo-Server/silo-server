@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -573,6 +574,9 @@ func (s *progressCountingStore) ListSettingValuesForResolution(context.Context, 
 	panic("unused")
 }
 func (s *progressCountingStore) ListAllSettingValues(context.Context) ([]userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) ListSettingValuesByScope(context.Context, string, settingscontract.Scope, []string) ([]userstore.SettingValue, error) {
 	panic("unused")
 }
 func (s *progressCountingStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {

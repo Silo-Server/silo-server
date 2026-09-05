@@ -102,11 +102,11 @@ func (h *LibraryPlaybackPrefHandler) ListLibraryPlaybackPreferences(ctx context.
 
 // libraryPlaybackSettingKeys are the four canonical profile_library keys the
 // library playback preference is made of.
-var libraryPlaybackSettingKeys = map[string]bool{
-	settingskeys.PlaybackAudioLanguage:       true,
-	settingskeys.PlaybackSubtitleLanguage:    true,
-	settingskeys.PlaybackSubtitleMode:        true,
-	settingskeys.PlaybackShowForcedSubtitles: true,
+var libraryPlaybackSettingKeys = []string{
+	settingskeys.PlaybackAudioLanguage,
+	settingskeys.PlaybackSubtitleLanguage,
+	settingskeys.PlaybackSubtitleMode,
+	settingskeys.PlaybackShowForcedSubtitles,
 }
 
 // ListLibraryPlaybackPreferencesCanonical is the listing behind v2
@@ -126,18 +126,16 @@ func (h *LibraryPlaybackPrefHandler) ListLibraryPlaybackPreferencesCanonical(ctx
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	// The per-user store bounds the read to one account; filtering the
-	// account's explicit values in Go avoids a per-library query and needs
-	// no library list up front (a resolution query requires the ids).
-	values, err := store.ListAllSettingValues(ctx)
+	// One query bounded to this profile's profile_library rows for the four
+	// keys — the store's scope listing — rather than every value the account
+	// has stored; it needs no library list up front, which a resolution
+	// query would.
+	values, err := store.ListSettingValuesByScope(ctx, profileID, settingscontract.ScopeProfileLibrary, libraryPlaybackSettingKeys)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list library playback preferences")
 	}
 	byLibrary := map[int]*userstore.LibraryPlaybackPreference{}
 	for _, v := range values {
-		if v.Scope != settingscontract.ScopeProfileLibrary || v.ProfileID != profileID || !libraryPlaybackSettingKeys[v.Key] {
-			continue
-		}
 		pref := byLibrary[v.LibraryID]
 		if pref == nil {
 			pref = &userstore.LibraryPlaybackPreference{ProfileID: profileID, LibraryID: v.LibraryID}
