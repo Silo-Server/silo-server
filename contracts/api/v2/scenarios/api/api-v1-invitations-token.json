@@ -1,0 +1,1508 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/invitations/{token}",
+  "wave": 1,
+  "description": "Public invitation claim: preview and accept. Registered twice (#0 plain, #1 rate-limited).",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/invitations/{token}/",
+      "registration_index": 0,
+      "not_applicable": {
+        "authorization": "Public by design: the token is the credential; unknown/expired/accepted all collapse to one 404.",
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read."
+      },
+      "scenarios": [
+        {
+          "id": "inv_lookup.ok",
+          "category": "status_headers",
+          "description": "A pending token answers 200 with the claim preview.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "email",
+                  "inviter_name",
+                  "server_name",
+                  "expires_at",
+                  "show_tour"
+                ]
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.meaning",
+          "category": "data_meaning",
+          "description": "The preview shows the invited address, the inviter's username, the branded server name, and the tour flag.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/email",
+                "op": "equals",
+                "value": "fixture-invitee@silo.example.test"
+              },
+              {
+                "pointer": "/inviter_name",
+                "op": "equals",
+                "value": "${admin_username}"
+              },
+              {
+                "pointer": "/server_name",
+                "op": "equals",
+                "value": "${server_name}"
+              },
+              {
+                "pointer": "/show_tour",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/expires_at",
+                "op": "rfc3339"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.shape",
+          "category": "field_presence_nullability",
+          "description": "inviter_name is omitted (not null) when the inviter is gone; expires_at is a timestamp.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/expires_at",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/show_tour",
+                "op": "type",
+                "value": "boolean"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "inviter_name is omitempty; other fields are always present.",
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.accepted",
+          "category": "error",
+          "description": "An accepted token is the same 404 as an unknown one.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token_accepted}/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "This invitation is invalid or has expired"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.expired",
+          "category": "error",
+          "description": "An expired token is the same 404.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/fixture-invitation-token-expired/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "This invitation is invalid or has expired"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.unknown",
+          "category": "error",
+          "description": "An unknown token is 404.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/no-such-token/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.trailing_slash",
+          "category": "raw_protocol",
+          "description": "The route is registered as /invitations/{token}/ but chi also routes the slash-less form; both answer 200.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "The inventory path carries a trailing slash while clients may call either spelling. Flagged so the section PR picks one canonical form.",
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/invitations/{token}/accept",
+      "registration_index": 0,
+      "not_applicable": {
+        "authorization": "Public by design: the token is the credential.",
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "inv_accept.ok",
+          "category": "status_headers",
+          "description": "Accepting with a strong password creates the account and answers 201 with the login shape; no Cache-Control is set on the credential response.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "access_token",
+                  "refresh_token",
+                  "expires_in",
+                  "user"
+                ]
+              },
+              {
+                "pointer": "/user",
+                "op": "keys_equal",
+                "value": [
+                  "id",
+                  "username",
+                  "email",
+                  "role",
+                  "permissions",
+                  "download_allowed"
+                ]
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.meaning",
+          "category": "data_meaning",
+          "description": "The new account's username is the invited email and its role is the invited role.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/user/username",
+                "op": "equals",
+                "value": "fixture-invitee@silo.example.test"
+              },
+              {
+                "pointer": "/user/email",
+                "op": "equals",
+                "value": "fixture-invitee@silo.example.test"
+              },
+              {
+                "pointer": "/user/role",
+                "op": "equals",
+                "value": "user"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.single_use",
+          "category": "data_meaning",
+          "description": "A second accept of the same token is 404: the token was consumed.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            },
+            "repeat": 2
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.weak_password",
+          "category": "error",
+          "description": "A password under 8 characters is 400 weak_password before the token is checked.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/no-such-token/accept",
+            "body": {
+              "password": "short"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "weak_password"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Password must be at least 8 characters"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400 bad_request.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "raw_body": "nope"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.unknown",
+          "category": "error",
+          "description": "An unknown token with a strong password is 404.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/no-such-token/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.shape",
+          "category": "field_presence_nullability",
+          "description": "The login shape has no impersonation block.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/user/impersonation",
+                "op": "absent"
+              },
+              {
+                "pointer": "/expires_in",
+                "op": "type",
+                "value": "integer"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/invitations/{token}/",
+      "registration_index": 1,
+      "not_applicable": {
+        "authorization": "Public by design: the token is the credential; unknown/expired/accepted all collapse to one 404.",
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read."
+      },
+      "scenarios": [
+        {
+          "id": "inv_lookup.ok.r1",
+          "category": "status_headers",
+          "description": "A pending token answers 200 with the claim preview.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "email",
+                  "inviter_name",
+                  "server_name",
+                  "expires_at",
+                  "show_tour"
+                ]
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.meaning.r1",
+          "category": "data_meaning",
+          "description": "The preview shows the invited address, the inviter's username, the branded server name, and the tour flag.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/email",
+                "op": "equals",
+                "value": "fixture-invitee@silo.example.test"
+              },
+              {
+                "pointer": "/inviter_name",
+                "op": "equals",
+                "value": "${admin_username}"
+              },
+              {
+                "pointer": "/server_name",
+                "op": "equals",
+                "value": "${server_name}"
+              },
+              {
+                "pointer": "/show_tour",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/expires_at",
+                "op": "rfc3339"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.shape.r1",
+          "category": "field_presence_nullability",
+          "description": "inviter_name is omitted (not null) when the inviter is gone; expires_at is a timestamp.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/expires_at",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/show_tour",
+                "op": "type",
+                "value": "boolean"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "inviter_name is omitempty; other fields are always present.",
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.accepted.r1",
+          "category": "error",
+          "description": "An accepted token is the same 404 as an unknown one.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token_accepted}/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "This invitation is invalid or has expired"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.expired.r1",
+          "category": "error",
+          "description": "An expired token is the same 404.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/fixture-invitation-token-expired/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "This invitation is invalid or has expired"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.unknown.r1",
+          "category": "error",
+          "description": "An unknown token is 404.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/no-such-token/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.trailing_slash.r1",
+          "category": "raw_protocol",
+          "description": "The route is registered as /invitations/{token}/ but chi also routes the slash-less form; both answer 200.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "notes": "The inventory path carries a trailing slash while clients may call either spelling. Flagged so the section PR picks one canonical form.",
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_lookup.rate_limited.r1",
+          "category": "status_headers",
+          "description": "The rate-limited registration variant answers 429 with Retry-After once the per-IP invitation burst (10) is spent.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/x/",
+            "repeat": 11
+          },
+          "expect": {
+            "status": 429,
+            "headers": [
+              {
+                "name": "Retry-After",
+                "op": "matches",
+                "value": "^[0-9]+$"
+              },
+              {
+                "name": "X-RateLimit-Remaining",
+                "op": "equals",
+                "value": "0"
+              },
+              {
+                "name": "X-RateLimit-Limit",
+                "op": "exists"
+              },
+              {
+                "name": "X-RateLimit-Reset",
+                "op": "matches",
+                "value": "^[0-9]+$"
+              },
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "rate_limit_exceeded"
+              },
+              {
+                "pointer": "/retry_after",
+                "op": "type",
+                "value": "integer"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message",
+                  "retry_after"
+                ]
+              }
+            ]
+          },
+          "requires": [
+            "rate_limiter"
+          ],
+          "fresh_state": true,
+          "notes": "The 429 body has a third key (retry_after) unlike every other error envelope; flagged for the section PR.",
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/invitations/{token}/accept",
+      "registration_index": 1,
+      "not_applicable": {
+        "authorization": "Public by design: the token is the credential.",
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "inv_accept.ok.r1",
+          "category": "status_headers",
+          "description": "Accepting with a strong password creates the account and answers 201 with the login shape; no Cache-Control is set on the credential response.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "access_token",
+                  "refresh_token",
+                  "expires_in",
+                  "user"
+                ]
+              },
+              {
+                "pointer": "/user",
+                "op": "keys_equal",
+                "value": [
+                  "id",
+                  "username",
+                  "email",
+                  "role",
+                  "permissions",
+                  "download_allowed"
+                ]
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.meaning.r1",
+          "category": "data_meaning",
+          "description": "The new account's username is the invited email and its role is the invited role.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/user/username",
+                "op": "equals",
+                "value": "fixture-invitee@silo.example.test"
+              },
+              {
+                "pointer": "/user/email",
+                "op": "equals",
+                "value": "fixture-invitee@silo.example.test"
+              },
+              {
+                "pointer": "/user/role",
+                "op": "equals",
+                "value": "user"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.single_use.r1",
+          "category": "data_meaning",
+          "description": "A second accept of the same token is 404: the token was consumed.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            },
+            "repeat": 2
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.weak_password.r1",
+          "category": "error",
+          "description": "A password under 8 characters is 400 weak_password before the token is checked.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/no-such-token/accept",
+            "body": {
+              "password": "short"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "weak_password"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Password must be at least 8 characters"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.malformed.r1",
+          "category": "error",
+          "description": "A non-JSON body is 400 bad_request.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "raw_body": "nope"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.unknown.r1",
+          "category": "error",
+          "description": "An unknown token with a strong password is 404.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/no-such-token/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.shape.r1",
+          "category": "field_presence_nullability",
+          "description": "The login shape has no impersonation block.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/${invitation_token}/accept",
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/user/impersonation",
+                "op": "absent"
+              },
+              {
+                "pointer": "/expires_in",
+                "op": "type",
+                "value": "integer"
+              }
+            ]
+          },
+          "requires": [
+            "database"
+          ],
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "inv_accept.rate_limited.r1",
+          "category": "status_headers",
+          "description": "The rate-limited registration variant answers 429 with Retry-After once the per-IP invitation burst (10) is spent.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/invitations/x/accept",
+            "repeat": 11,
+            "body": {
+              "password": "fixture-invitee-password"
+            }
+          },
+          "expect": {
+            "status": 429,
+            "headers": [
+              {
+                "name": "Retry-After",
+                "op": "matches",
+                "value": "^[0-9]+$"
+              },
+              {
+                "name": "X-RateLimit-Remaining",
+                "op": "equals",
+                "value": "0"
+              },
+              {
+                "name": "X-RateLimit-Limit",
+                "op": "exists"
+              },
+              {
+                "name": "X-RateLimit-Reset",
+                "op": "matches",
+                "value": "^[0-9]+$"
+              },
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "rate_limit_exceeded"
+              },
+              {
+                "pointer": "/retry_after",
+                "op": "type",
+                "value": "integer"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message",
+                  "retry_after"
+                ]
+              }
+            ]
+          },
+          "requires": [
+            "rate_limiter"
+          ],
+          "fresh_state": true,
+          "notes": "The 429 body has a third key (retry_after) unlike every other error envelope; flagged for the section PR.",
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1341 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/devices",
+  "wave": 1,
+  "description": "The viewer's own device registry: list, forget, and clear device-scoped settings.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/devices/",
+      "registration_index": 0,
+      "not_applicable": {
+        "pagination": "Unpaged per-profile device list.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "devices_list.ok",
+          "category": "status_headers",
+          "description": "The active profile's devices: 200 JSON.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "devices"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.own_only",
+          "category": "data_meaning",
+          "description": "By default only the declared profile's devices appear (two of the household's three).",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/devices",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/devices",
+                "op": "every",
+                "value": {
+                  "pointer": "/profile_id",
+                  "op": "equals",
+                  "value": "${profile_primary}"
+                }
+              },
+              {
+                "pointer": "/devices/0/profile_name",
+                "op": "equals",
+                "value": "Fixture Parent"
+              },
+              {
+                "pointer": "/devices/0/changed_count",
+                "op": "equals",
+                "value": 0
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.current_device",
+          "category": "data_meaning",
+          "description": "is_current_device marks the device named by X-Silo-Device-Id.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/",
+            "headers": {
+              "X-Silo-Device-Id": "${device_b}"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/devices/0/is_current_device",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/devices/0/device_id",
+                "op": "equals",
+                "value": "${device_b}"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.sorted",
+          "category": "sorting",
+          "description": "Newest last_seen first, then device_id ascending as the tie-breaker.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/devices",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/devices",
+                "op": "sorted",
+                "value": {
+                  "by": "/last_seen_at",
+                  "direction": "desc",
+                  "then_by": "/device_id",
+                  "then_direction": "asc"
+                }
+              },
+              {
+                "pointer": "/devices",
+                "op": "unique_by",
+                "value": "/device_id"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.household_scope",
+          "category": "filtering",
+          "description": "scope=household from the primary profile lists every profile's devices.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/",
+            "query": {
+              "scope": "household"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/devices",
+                "op": "length",
+                "value": 3
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.household_forbidden",
+          "category": "authorization",
+          "description": "scope=household from a non-primary profile is 403.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/",
+            "query": {
+              "scope": "household"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Viewing the household's devices requires the primary profile or admin access"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.scope_case",
+          "category": "filtering",
+          "description": "The scope match is case-insensitive: scope=HOUSEHOLD from a non-primary profile is the same 403 as the lowercase form.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/",
+            "query": {
+              "scope": "HOUSEHOLD"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Viewing the household's devices requires the primary profile or admin access"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.shape",
+          "category": "field_presence_nullability",
+          "description": "A profile with no registered devices (the child) gets an empty array, not null.",
+          "principal": {
+            "class": "child_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "devices"
+                ]
+              },
+              {
+                "pointer": "/devices",
+                "op": "type",
+                "value": "array"
+              },
+              {
+                "pointer": "/devices",
+                "op": "empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.shape_fields",
+          "category": "field_presence_nullability",
+          "description": "Every device row has exactly the eight fields.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/devices",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/devices",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "device_id",
+                    "device_name",
+                    "device_platform",
+                    "last_seen_at",
+                    "profile_id",
+                    "profile_name",
+                    "is_current_device",
+                    "changed_count"
+                  ]
+                }
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/devices/"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "devices_list.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/",
+            "query": {
+              "scope": "household"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/devices/{device_id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "device_forget.ok",
+          "category": "status_headers",
+          "description": "Forgetting an own device answers 204.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.gone",
+          "category": "data_meaning",
+          "description": "After forgetting, the device is 404 (it left the registry).",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Device not found"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.other_profile",
+          "category": "authorization",
+          "description": "A device registered by a sibling profile is 404 for this profile, not 403.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.named_profile",
+          "category": "filtering",
+          "description": "profile_id=<sibling> lets the primary profile forget a household member's device.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/fixture-device-c",
+            "query": {
+              "profile_id": "${profile_secondary}"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.named_profile_forbidden",
+          "category": "authorization",
+          "description": "A non-primary profile naming another profile is 403.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}",
+            "query": {
+              "profile_id": "${profile_primary}"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Managing another profile's devices requires the primary profile or admin access"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.named_profile_missing",
+          "category": "error",
+          "description": "Naming an unknown profile is 404 Profile not found.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}",
+            "query": {
+              "profile_id": "${profile_missing}"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_b}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "device_forget.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/devices/{device_id}/settings",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "device_clear.ok",
+          "category": "status_headers",
+          "description": "Clearing an own device's settings answers 204 and keeps the device registered.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}/settings"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.keeps_device",
+          "category": "data_meaning",
+          "description": "Unlike forget, a second clear is still 204 because the device remains.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}/settings",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.other_profile",
+          "category": "authorization",
+          "description": "A sibling's device is 404.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}/settings"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Device not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.unknown",
+          "category": "error",
+          "description": "An unknown device is 404.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/nope/settings"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.named_profile",
+          "category": "filtering",
+          "description": "profile_id=<sibling> from the primary clears a member's device.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/fixture-device-c/settings",
+            "query": {
+              "profile_id": "${profile_secondary}"
+            }
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}/settings"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.no_profile",
+          "category": "authorization",
+          "description": "Without X-Profile-Id the RequireProfile middleware answers 400 bad_request (not 401/403).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}/settings"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "X-Profile-Id header is required"
+              }
+            ]
+          },
+          "notes": "Missing profile header is a 400, the same status as a malformed body; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}/settings"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "device_clear.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/devices/${device_a}/settings"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

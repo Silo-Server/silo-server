@@ -239,9 +239,6 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 	return d.Config
 }
 
-// NewRouter creates a chi.Router with all middleware and routes mounted
-// under /api/v1/. ABS-compat routes (/abs/*, /login, /socket.io/*) are
-// mounted at the root level when deps.ABSHandler is non-nil.
 // invalidateNodeCapabilities drops every cached view of one node's hardware.
 //
 // There is more than one: protocol-v3 planning holds an inventory, and prepared
@@ -260,7 +257,41 @@ func (deps Dependencies) invalidateNodeCapabilities(playbackHandler *handlers.Pl
 	}
 }
 
-func NewRouter(deps Dependencies) chi.Router {
+// sealedHandler is what NewRouter hands out: the finished router behind an
+// unexported field and a ServeHTTP method, nothing else. Its dynamic type is
+// never a router, so no type assertion, alias, embedded interface, type switch
+// or generic instantiation recovers a registration surface from it, and the
+// route inventory refuses the reflect calls that could (MethodByName, Method,
+// NumMethod, NewAt, UnsafePointer, UnsafeAddr, Pointer) and any import of
+// unsafe in this package: short of unsafe, nothing gets the router back. That
+// is the route inventory's guarantee that every route the API listener serves
+// was registered inside newChiRouter, where the generator enumerates it. Do
+// not embed http.Handler here: embedding exports the field and promotes its
+// methods.
+type sealedHandler struct {
+	h http.Handler
+}
+
+func (s sealedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.h.ServeHTTP(w, r) }
+
+// NewRouter builds the API listener's handler: the base middleware stack, every
+// route under /api/v1/, and the version-neutral paths registered beside it.
+//
+// It returns a sealed http.Handler, never the chi surface. A caller holding the
+// router could register routes on it after the fact — outside the route
+// inventory's walk of newChiRouter and outside any gate — leaving the
+// inventory short by exactly those routes with nothing to notice. The
+// generator checks this shape: NewRouter must return sealedHandler wrapping the
+// unexported constructor, and nothing else may call newChiRouter. A test that
+// needs to walk the tree calls newChiRouter directly.
+func NewRouter(deps Dependencies) http.Handler {
+	return sealedHandler{h: newChiRouter(deps)}
+}
+
+// newChiRouter is the API listener's registration surface. The route
+// inventory generator walks this function; every registration must be
+// reachable from its body.
+func newChiRouter(deps Dependencies) chi.Router {
 	declareNativeMediaRoutes()
 	r := chi.NewRouter()
 

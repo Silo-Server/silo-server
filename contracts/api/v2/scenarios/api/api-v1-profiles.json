@@ -1,0 +1,3990 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/profiles",
+  "wave": 1,
+  "description": "Household profiles: list, create, update, delete, PIN verification, avatars, and household playback sessions.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/profiles/",
+      "registration_index": 0,
+      "not_applicable": {
+        "filtering": "No filter parameters; the whole household is returned.",
+        "pagination": "Unpaged; a household is small by policy (max_profiles).",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "profiles_list.ok",
+          "category": "status_headers",
+          "description": "Lists the account's profiles, 200 JSON.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "profiles",
+                  "avatar_upload_enabled"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.meaning",
+          "category": "data_meaning",
+          "description": "Every profile of the account is returned (four for the member), the first created is primary, the child flag and content rating carry through, and avatar_upload_enabled reports true today even without an object store (see notes).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/profiles",
+                "op": "length",
+                "value": 4
+              },
+              {
+                "pointer": "/profiles/0/is_primary",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/profiles/0/id",
+                "op": "equals",
+                "value": "${profile_primary}"
+              },
+              {
+                "pointer": "/profiles/2/is_child",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/profiles/2/max_content_rating",
+                "op": "equals",
+                "value": "PG"
+              },
+              {
+                "pointer": "/profiles/3/has_pin",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/avatar_upload_enabled",
+                "op": "equals",
+                "value": true
+              }
+            ]
+          },
+          "notes": "avatar_upload_enabled is true even though no object store is configured: the router assigns the nil *s3client.Client to the handler's interface field, which then compares non-nil. Flagged for the section PR (typed-nil).",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.shape",
+          "category": "field_presence_nullability",
+          "description": "Each profile carries the always-present fields; optional strings (avatar, max_content_rating, language...) are omitted when empty; allowed_library_ids is null (not []) when the profile has none.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/profiles",
+                "op": "length",
+                "value": 4
+              },
+              {
+                "pointer": "/profiles",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_include",
+                  "value": [
+                    "id",
+                    "name",
+                    "has_pin",
+                    "is_child",
+                    "is_primary",
+                    "auto_skip_intro",
+                    "auto_skip_credits",
+                    "auto_skip_recap",
+                    "auto_play_next_preview",
+                    "show_forced_subtitles",
+                    "library_restrictions_enabled",
+                    "allowed_library_ids",
+                    "max_playback_quality",
+                    "created_at",
+                    "updated_at"
+                  ]
+                }
+              },
+              {
+                "pointer": "/profiles/0/allowed_library_ids",
+                "op": "is_null"
+              },
+              {
+                "pointer": "/profiles/0/avatar",
+                "op": "absent"
+              },
+              {
+                "pointer": "/profiles/0/max_content_rating",
+                "op": "absent"
+              },
+              {
+                "pointer": "/profiles/0/created_at",
+                "op": "rfc3339"
+              },
+              {
+                "pointer": "/profiles/0/max_playback_quality",
+                "op": "equals",
+                "value": ""
+              }
+            ]
+          },
+          "notes": "allowed_library_ids serializes as null for an empty list while max_playback_quality is an empty string; inconsistent empty representations. Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.sorted",
+          "category": "sorting",
+          "description": "Profiles are ordered by creation time ascending (primary first).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/profiles",
+                "op": "length",
+                "value": 4
+              },
+              {
+                "pointer": "/profiles",
+                "op": "sorted",
+                "value": {
+                  "by": "/created_at",
+                  "direction": "asc"
+                }
+              },
+              {
+                "pointer": "/profiles",
+                "op": "unique_by",
+                "value": "/id"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.no_profile_needed",
+          "category": "authorization",
+          "description": "The list works without X-Profile-Id: it is what a client calls to pick one.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 200
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.other_account",
+          "category": "authorization",
+          "description": "The admin sees only its own three profiles, never another account's.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/profiles",
+                "op": "length",
+                "value": 3
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.api_key",
+          "category": "authorization",
+          "description": "An unscoped API key lists its owner's profiles (PIN verification is skipped for keys).",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/profiles",
+                "op": "length",
+                "value": 3
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_list.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/profiles/",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "profiles_create.ok",
+          "category": "status_headers",
+          "description": "The primary profile creates a household member: 201 with the profile.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_include",
+                "value": [
+                  "id",
+                  "name",
+                  "has_pin",
+                  "is_child",
+                  "is_primary",
+                  "auto_skip_intro",
+                  "auto_skip_credits",
+                  "auto_skip_recap",
+                  "auto_play_next_preview",
+                  "show_forced_subtitles",
+                  "library_restrictions_enabled",
+                  "allowed_library_ids",
+                  "max_playback_quality",
+                  "created_at",
+                  "updated_at"
+                ]
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.meaning",
+          "category": "data_meaning",
+          "description": "The new profile is not primary, reports has_pin because a PIN was supplied, gets forced subtitles on by default, the trimmed name, and the preset avatar.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "  Fixture New  ",
+              "pin": "1357",
+              "avatar": "avatar-2"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/name",
+                "op": "equals",
+                "value": "Fixture New"
+              },
+              {
+                "pointer": "/is_primary",
+                "op": "equals",
+                "value": false
+              },
+              {
+                "pointer": "/has_pin",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/show_forced_subtitles",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/avatar",
+                "op": "equals",
+                "value": "preset:avatar-2"
+              },
+              {
+                "pointer": "/avatar_source",
+                "op": "equals",
+                "value": "preset"
+              },
+              {
+                "pointer": "/avatar_url",
+                "op": "non_empty"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.admin_any_profile",
+          "category": "authorization",
+          "description": "A server admin may create profiles on its own account from any declared profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 201
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.secondary_forbidden",
+          "category": "authorization",
+          "description": "A non-primary profile may not create profiles: 403.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile management requires the primary profile or admin access"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.no_profile_forbidden",
+          "category": "authorization",
+          "description": "An authenticated call without a declared profile (and existing profiles) is 403.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.locked_primary_unverified",
+          "category": "authorization",
+          "description": "A PIN-locked primary must present its token; without it the request is 403 (viewer access refuses first).",
+          "principal": {
+            "class": "profile",
+            "profile": "locked"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "profile_unverified"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.name_conflict",
+          "category": "error",
+          "description": "A name already used on the account (case-insensitive, trimmed) is 409 name_conflict.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": " fixture teen "
+            }
+          },
+          "expect": {
+            "status": 409,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "name_conflict"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "A profile with this name already exists"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.limit",
+          "category": "error",
+          "description": "Reaching max_profiles (5 by default) is 409 profile_limit_reached.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            },
+            "repeat": 2
+          },
+          "expect": {
+            "status": 409,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "profile_limit_reached"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "This account has reached its profile limit (5)"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.missing_name",
+          "category": "error",
+          "description": "A blank name is 400 bad_request.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "   "
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile name is required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.bad_avatar",
+          "category": "error",
+          "description": "An unknown avatar preset is 400.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "X",
+              "avatar": "not-a-preset"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "unknown avatar preset"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.bad_quality",
+          "category": "error",
+          "description": "An unknown max_playback_quality is 400.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "X",
+              "max_playback_quality": "8K"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid max_playback_quality"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "raw_body": "{"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.shape",
+          "category": "field_presence_nullability",
+          "description": "The created profile has the standard shape; allowed_library_ids is null when none were given.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_include",
+                "value": [
+                  "id",
+                  "name",
+                  "has_pin",
+                  "is_child",
+                  "is_primary",
+                  "auto_skip_intro",
+                  "auto_skip_credits",
+                  "auto_skip_recap",
+                  "auto_play_next_preview",
+                  "show_forced_subtitles",
+                  "library_restrictions_enabled",
+                  "allowed_library_ids",
+                  "max_playback_quality",
+                  "created_at",
+                  "updated_at"
+                ]
+              },
+              {
+                "pointer": "/allowed_library_ids",
+                "op": "is_null"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.unknown_library_ids",
+          "category": "filtering",
+          "description": "allowed_library_ids naming libraries that do not exist fail the foreign key and surface as 500 internal_error, not a validation error.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture Restricted",
+              "library_restrictions_enabled": true,
+              "allowed_library_ids": [
+                7,
+                3
+              ]
+            }
+          },
+          "expect": {
+            "status": 500,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "internal_error"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Failed to store profile preferences"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "notes": "Unknown library ids are rejected by the database rather than validated (500 instead of 400/422). Flagged for the section PR; a fixture with real libraries lives in the catalog wave.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_create.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/",
+            "body": {
+              "name": "Fixture New"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "PUT",
+      "path": "/api/v1/profiles/{id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "profiles_update.ok",
+          "category": "status_headers",
+          "description": "The primary profile renames a member: 200 with the updated profile.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "name": "Fixture Teen Renamed"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/name",
+                "op": "equals",
+                "value": "Fixture Teen Renamed"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.partial",
+          "category": "data_meaning",
+          "description": "Only supplied fields change; unset pointer fields keep their values.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "auto_skip_intro": true
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/auto_skip_intro",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/name",
+                "op": "equals",
+                "value": "Fixture Teen"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.self_service",
+          "category": "authorization",
+          "description": "A non-primary profile may update only its own active profile and only playback preferences.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "auto_skip_credits": true
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/auto_skip_credits",
+                "op": "equals",
+                "value": true
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.self_service_access_field",
+          "category": "authorization",
+          "description": "A non-primary profile changing an access field (is_child, ratings, libraries, quality) is 403.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "max_content_rating": "R"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile access settings require the primary profile or admin access"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.other_profile",
+          "category": "authorization",
+          "description": "A non-primary profile updating a different profile is 403.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_child}",
+            "body": {
+              "name": "X"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "You can only update the active profile's playback preferences"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.not_found",
+          "category": "error",
+          "description": "An unknown profile id is 404.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_missing}",
+            "body": {
+              "name": "X"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.name_conflict",
+          "category": "error",
+          "description": "Renaming onto another profile's name is 409 name_conflict.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "name": "Fixture Kid"
+            }
+          },
+          "expect": {
+            "status": 409,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "name_conflict"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.blank_name",
+          "category": "error",
+          "description": "A blank name is 400.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "name": " "
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile name is required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.bad_quality",
+          "category": "error",
+          "description": "An unknown quality preset is 400.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "max_playback_quality": "potato"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid max_playback_quality"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.quality_normalized",
+          "category": "filtering",
+          "description": "Quality presets are normalized: 720P/1080P/STANDARD all store the 1080p tier; ANY stores empty.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "max_playback_quality": "STANDARD"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/max_playback_quality",
+                "op": "equals",
+                "value": "1080p"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.shape",
+          "category": "field_presence_nullability",
+          "description": "Response is the full profile shape, not a delta.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "auto_skip_recap": true
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_include",
+                "value": [
+                  "id",
+                  "name",
+                  "has_pin",
+                  "is_child",
+                  "is_primary",
+                  "auto_skip_intro",
+                  "auto_skip_credits",
+                  "auto_skip_recap",
+                  "auto_play_next_preview",
+                  "show_forced_subtitles",
+                  "library_restrictions_enabled",
+                  "allowed_library_ids",
+                  "max_playback_quality",
+                  "created_at",
+                  "updated_at"
+                ]
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "name": "X"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account PUT cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}",
+            "body": {
+              "name": "Hijacked"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_update.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "body": {
+              "name": "X"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/profiles/{id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "profiles_delete.ok",
+          "category": "status_headers",
+          "description": "The primary profile deletes a member: 204.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.meaning",
+          "category": "data_meaning",
+          "description": "After deletion the profile is gone: a second delete is 404.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.primary_protected",
+          "category": "error",
+          "description": "The primary profile cannot be deleted: 409 primary_profile_protected.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}"
+          },
+          "expect": {
+            "status": 409,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "primary_profile_protected"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.secondary_forbidden",
+          "category": "authorization",
+          "description": "A non-primary profile cannot delete: 403 (checked before existence).",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_missing}"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile management requires the primary profile or admin access"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.not_found",
+          "category": "error",
+          "description": "Unknown id is 404.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_missing}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_child}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account DELETE cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_secondary}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "profiles_delete.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/profiles/{id}/verify-pin",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "verify_pin.ok",
+          "category": "status_headers",
+          "description": "The right PIN answers 200 with a profile token; no Cache-Control is set on the credential response.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": "${locked_pin}"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              },
+              {
+                "name": "Cache-Control",
+                "op": "absent"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/valid",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/profile_token",
+                "op": "non_empty"
+              }
+            ]
+          },
+          "notes": "This response carries tokens or a profile token yet sets no Cache-Control (writeJSON only sets Content-Type), so a shared cache may store it. Pinned as the current behavior and flagged for the section PR as an accidental omission.",
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.wrong",
+          "category": "data_meaning",
+          "description": "A wrong PIN is still 200 with valid false and no token.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": "0000"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": {
+                  "valid": false
+                }
+              }
+            ]
+          },
+          "notes": "A failed PIN is a 200 {valid:false}, not an error status. Recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.shape",
+          "category": "field_presence_nullability",
+          "description": "On success profile_token is present and expires_at is omitted (tokens do not expire in this configuration).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": "${locked_pin}"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "valid",
+                  "profile_token"
+                ]
+              }
+            ]
+          },
+          "notes": "expires_at appears only when a profile-token TTL is configured; the router wires TTL 0.",
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.no_pin_profile",
+          "category": "error",
+          "description": "A profile without a PIN is 404 not_found.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/verify-pin",
+            "body": {
+              "pin": "1234"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found or has no PIN"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.other_account",
+          "category": "authorization",
+          "description": "Another account's profile is 404 (scoped lookup).",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": "${locked_pin}"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.missing",
+          "category": "error",
+          "description": "An empty pin is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": ""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "PIN is required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "raw_body": "x"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": "1"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned PIN-locked profile id in the path, with that profile's correct PIN, is 404 not_found: the per-account user store never sees the foreign row. The target has a PIN, so the same 404 cannot come from the no-PIN branch; a lookup that dropped the account scope would answer 200 valid.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_locked}/verify-pin",
+            "body": {
+              "pin": "${admin_locked_pin}"
+            }
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found or has no PIN"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "verify_pin.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_locked}/verify-pin",
+            "body": {
+              "pin": "1"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "PUT",
+      "path": "/api/v1/profiles/{id}/avatar",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read."
+      },
+      "scenarios": [
+        {
+          "id": "avatar_upload.typed_nil_panic",
+          "category": "status_headers",
+          "description": "With no object store configured a valid image upload crashes the handler: the recovered panic surfaces as an empty 500 with no JSON envelope.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar",
+            "multipart": {
+              "files": [
+                {
+                  "field": "avatar",
+                  "filename": "a.png",
+                  "content_type": "image/png",
+                  "content": "png:8x8"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 500,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "absent"
+              }
+            ],
+            "body_kind": "empty"
+          },
+          "notes": "Accidental: the router assigns deps.S3Private (a nil *s3client.Client) to the handler's AvatarStore interface field, so the nil guard that should answer 503 unavailable passes a typed nil and Bucket() dereferences it. The 503 path and the 200 path (10 MB cap, variants, presigned URL) need an object-store fixture in the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.meaning",
+          "category": "data_meaning",
+          "description": "The same typed-nil store makes the profile list advertise avatar_upload_enabled=true, so clients are told uploads work on a server where they crash.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar",
+            "multipart": {
+              "files": [
+                {
+                  "field": "avatar",
+                  "filename": "a.png",
+                  "content_type": "image/png",
+                  "content": "png:8x8"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 500,
+            "body_kind": "empty"
+          },
+          "notes": "Pairs with profiles_list.meaning (avatar_upload_enabled true). Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.raw",
+          "category": "raw_protocol",
+          "description": "Multipart parsing runs before the store is touched: a part whose Content-Type is not an image is 400 with the JSON envelope.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar",
+            "multipart": {
+              "files": [
+                {
+                  "field": "avatar",
+                  "filename": "a.txt",
+                  "content_type": "text/plain",
+                  "content": "text:hello"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Unsupported image type; use JPEG, PNG, or WebP"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.missing_file",
+          "category": "error",
+          "description": "A multipart body without an avatar part is 400 Missing avatar file.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar",
+            "multipart": {
+              "fields": {
+                "note": "x"
+              }
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing avatar file"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.not_multipart",
+          "category": "error",
+          "description": "A non-multipart body is 400 Invalid multipart form.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid multipart form"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.not_found",
+          "category": "error",
+          "description": "An unknown profile is 404 before the body is parsed.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_missing}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.shape",
+          "category": "field_presence_nullability",
+          "description": "Validation errors use the standard envelope.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 400,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.any_profile",
+          "category": "authorization",
+          "description": "Any profile of the account reaches the upload path for any sibling; there is no household gate (the request then fails on validation).",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_primary}/avatar"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid multipart form"
+              }
+            ]
+          },
+          "notes": "No primary/admin check on avatar upload, unlike profile update. Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account PUT cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_upload.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/profiles/{id}/avatar",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "avatar_delete.ok",
+          "category": "status_headers",
+          "description": "Deleting the avatar of a profile answers 200 with the profile.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_include",
+                "value": [
+                  "id",
+                  "name",
+                  "has_pin",
+                  "is_child",
+                  "is_primary",
+                  "auto_skip_intro",
+                  "auto_skip_credits",
+                  "auto_skip_recap",
+                  "auto_play_next_preview",
+                  "show_forced_subtitles",
+                  "library_restrictions_enabled",
+                  "allowed_library_ids",
+                  "max_playback_quality",
+                  "created_at",
+                  "updated_at"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.meaning",
+          "category": "data_meaning",
+          "description": "Only uploaded avatars are cleared; a preset (or none) is left as is and the call is a no-op.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/avatar_source",
+                "op": "equals",
+                "value": "none"
+              },
+              {
+                "pointer": "/avatar",
+                "op": "absent"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.any_profile",
+          "category": "authorization",
+          "description": "Any profile of the account may delete any sibling's avatar: no household check runs.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_primary}/avatar"
+          },
+          "expect": {
+            "status": 200
+          },
+          "notes": "Avatar delete has no primary/admin gate, unlike profile update. Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.not_found",
+          "category": "error",
+          "description": "Unknown profile is 404.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_missing}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.shape",
+          "category": "field_presence_nullability",
+          "description": "Response is the profile shape.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_include",
+                "value": [
+                  "id",
+                  "name",
+                  "has_pin",
+                  "is_child",
+                  "is_primary",
+                  "auto_skip_intro",
+                  "auto_skip_credits",
+                  "auto_skip_recap",
+                  "auto_play_next_preview",
+                  "show_forced_subtitles",
+                  "library_restrictions_enabled",
+                  "allowed_library_ids",
+                  "max_playback_quality",
+                  "created_at",
+                  "updated_at"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.other_account_path",
+          "category": "authorization",
+          "description": "A member's primary profile naming an admin-owned profile id in the path is 404 not_found: the per-account user store never sees the foreign row, so a cross-account DELETE cannot reach the mutation.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_admin_primary}/avatar"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Path-level cross-account probe (the header case is other_account_profile). 404 rather than 403 is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "avatar_delete.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/${profile_secondary}/avatar"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/profiles/household/sessions",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Session rows are unordered in the fixture (empty); ordering is asserted in the playback wave.",
+        "filtering": "Scoped to the caller's account only.",
+        "pagination": "Unpaged live-session list.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "household.ok",
+          "category": "status_headers",
+          "description": "The primary profile lists the household's playback sessions: 200 JSON array.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "household.empty",
+          "category": "data_meaning",
+          "description": "With no playback the list is an empty array, not null.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "household.shape",
+          "category": "field_presence_nullability",
+          "description": "The top level is a bare array (no wrapper object).",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "notes": "Bare-array top level unlike the wrapped {profiles:[]} sibling; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "household.secondary_forbidden",
+          "category": "authorization",
+          "description": "A non-primary profile is 403.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "household.admin",
+          "category": "authorization",
+          "description": "An admin sees its own household regardless of profile.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 200
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "household.other_account_profile",
+          "category": "authorization",
+          "description": "A member bearer declaring a profile owned by another account (the admin's primary) is 404 not_found from viewer access: the profile lookup is scoped to the bearer's account, so a foreign profile is indistinguishable from an unknown one.",
+          "principal": {
+            "class": "profile",
+            "profile": "admin_primary"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile not found"
+              }
+            ]
+          },
+          "notes": "Cross-account probe. The 404 (not 403) is the current scoped-lookup behavior; recorded as-is.",
+          "v2_expectation": null
+        },
+        {
+          "id": "household.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "household.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "profile"
+          },
+          "request": {
+            "path": "/api/v1/profiles/household/sessions"
+          },
+          "expect": {
+            "status": 403,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

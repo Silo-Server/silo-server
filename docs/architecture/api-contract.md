@@ -106,6 +106,122 @@ the website to regenerate them. `https://siloserver.org/docs/api/v2/` may provid
 but it is presentation over the raw JSON, not another source of truth. The hosting provider may
 change without changing these canonical project URLs.
 
+### Legacy native route inventory
+
+`contracts/api/v2/route-inventory.json` is the enumerated legacy native surface every later
+migration decision is measured against: one row per method+path variant (`GET` and `HEAD`, a
+WebSocket handshake, and each method of a wildcard `Handle` are separate rows) across four
+listeners: the root `http.ServeMux` (`cmd/silo.newRootHandler`), the API router
+(`internal/api.NewRouter`), the proxy node and the transcode node (each `(*Server).Handler`). Root
+`/api/` rows delegate to the API listener; `totals` and `route_count` are authoritative;
+`cmd/route-inventory` generates the file from registration source.
+
+The contract: each listener entry function returns a sealed `http.Handler` — an unexported struct
+holding the router in an unexported field, with `ServeHTTP` as its only method — built from an
+unexported constructor that the entry function alone calls. The generator checks that shape with
+type information, walks the constructor, and enumerates every chi and `http.ServeMux` registration
+reachable from it, or fails, as compiled for the linux production build; a build-constrained
+non-test file in an audited package is refused. A router-taking helper inside the audited packages
+(the four listener packages and `internal/api/handlers`) is followed; one outside them is refused,
+as is any router-typed value the walk did not model (closures, immediately invoked functions), any
+router produced outside a constructor or a recorded exclusion (Jellyfin and Audiobookshelf compat),
+any exported router-returning function in the audited packages, any type assertion, type switch or
+generic instantiation whose type is a router by its method set, the `reflect` calls that reach a
+method or the memory behind a value (`MethodByName`, `Method`, `NumMethod` on `reflect.Value` or
+`reflect.Type`; `reflect.NewAt`; `reflect.Value.UnsafePointer`, `UnsafeAddr`, `Pointer`), an import
+of `unsafe` in the audited packages, and `http.DefaultServeMux`. Short of `unsafe`, refused there,
+nothing recovers the router; `make lint-router-recovery` reports the same shapes tree-wide in CI.
+
+To add a route: register it inside the constructor or in a `chi.Router`-taking helper it calls in
+an audited package, with a literal path and method; run `make route-inventory` and commit the
+artifact, which `make verify-route-inventory` byte-compares in CI. As a backstop against a generator
+bug, each listener package reconciles a real router at test time through its unexported constructor
+(exact for root, proxy, transcode; one-way for API). `deferred_fields` are null; `heuristic_fields`
+are evidence, not facts.
+
+### Migration ledger
+
+`contracts/api/v2/migration.json` records the v2 disposition of every row in the route inventory.
+Its key is the inventory row's listener, method, exact path, and `registration_index`: the
+inventory registers twelve method+path pairs twice, under different middleware or conditions
+(for example a rate-limited and an unlimited variant of the same login route), and each
+registration is a separate operation with its own consumers and disposition, so the index
+disambiguates them in registration order. There is exactly one ledger entry per inventory row and
+one row per entry, and the entries follow inventory order.
+
+An entry has two kinds of fields. The first kind is copied from the inventory row — `listener`,
+`namespace`, `method`, `path`, `handler`, `handler_kind`, `source_file`, `route_group`,
+`middleware_chain`, `auth_class`, `auth_traits`, `conditional`, `conditions`, `delegates_to`
+(the inventory's empty string is the ledger's `null`), `request_kind`, `response_media_kind`,
+`streams`, and `upgrades_websocket` — plus `profile_required` and `admin_required`, which are
+projections of `auth_traits`. `make verify-migration-ledger` (the whole `internal/contractledger`
+test package, run in CI) validates the file against `contracts/api/v2/migration.schema.json`,
+reconciles every one of those fields against the inventory, reporting drift per field, and
+enforces the review rules below. The one permitted override is the ten `dynamic_plugin_proxy`
+rows, whose media kinds are recorded as `dynamic_proxy` because a plugin proxy has no static
+request or response shape; the override is anchored to the inventory side, so only a row whose
+inventory handler is one of the two plugin-proxy literals (`/api/v1/plugin-assets/{installation_id}/*`
+and `/api/v1/plugins/{installation_id}/*`) may claim the rule, and any other row that claims it
+fails with `dynamic_plugin_proxy rule on a non-proxy handler`. The gate also prints set problems
+(missing entry, orphan entry, drift) before the order check and reports only the first order
+mismatch, because later ones cascade from it.
+
+The second kind is curated by hand and is what the ledger exists to hold: `consumers` and
+`consumer_call_sites` (including `match: manual` and `match: follower` sites), `release_flow`, `tier`, `disposition`,
+`disposition_rule`, `disposition_rationale`, `owner`, `review_state`, `v2`, and `notes`. The
+schema ties them together: each `disposition_rule` names the document or decision that justifies
+it and is therefore allowed only with the disposition it justifies (`maintainer_decision` is the
+escape hatch for any); `removed` and `documented_exclusion` rows carry an all-null `v2`; a
+`ported`, `redesigned`, or `replaced` row can be `ratified` only with a complete `v2` target; and
+every `removed`, `redesigned`, or `replaced` row names an `owner`, which the gate refuses to
+ratify while it is a placeholder (anything starting with `pending`, or `tbd`, `todo`, `unknown`,
+`none`, compared case-insensitively). Tier is a rule, stated in the file's `description` and
+enforced by the gate: tier 1 is the plan's release-critical flows unless the row is `removed`,
+since a removed route has no v2 behavior to baseline, so a removed row in tier 1 fails.
+`release_flow` is derived from route intent, not path prefix: the acting-admin library
+management routes under `/api/v1/libraries/`, the admin scan triggers, and the theme catalog
+refresh are `core_admin`, while the viewer-facing `/api/v1/library/{id}/*` reads are
+`browse_search`. Proxy and transcode-node rows that are `ported` keep `v2` null by design: those
+listeners have no `/api/v2` namespace, so the route is retained at its version-neutral path and
+described through the manual registry, never aliased into v2. Because these fields are decisions
+rather than derivations, the ledger is gated, not regenerated: CI checks the committed file, and
+nothing rewrites it.
+
+Consumer evidence comes from `scripts/apiv2-ledger/`. `extract_consumers.py` scans `web/src`, a
+silo-apple tree, and a silo-android tree for HTTP and WebSocket calls, resolving path literals,
+helper functions that return a path template, templates rooted at the API base URL, Kotlin
+`buildString`/`const val` builders, and Swift `let`/`static let` path bindings;
+`match_consumers.py` maps those sites onto inventory rows by normalized path template and method;
+`sweep_uncredited.py` then greps the last two static segments of every inventory path across all
+three trees and lists every request-shaped hit not already credited, which a maintainer resolves
+by hand. Call-site files are repository-root-relative for their repo (web sites are relative to
+`web/`), and the schema enforces each repo's root so a mis-rooted site fails the gate. Sibling
+sites are pinned: the ledger's `source_trees` header records the silo-apple and silo-android
+commit the sites were extracted from (`build_ledger.py` takes both SHAs as arguments), so a
+site is re-resolved with `git show <sha>:<file>` against that exact tree rather than a moving
+branch. `sweep_uncredited.py`, given the sibling git checkouts, reports a credited file that no
+longer exists at the pin as `stale-against-pinned-tree`, separately from an uncredited hit.
+`TestSiblingCallSitesResolveAgainstPinnedTrees` goes further for every apple and android site:
+the file must exist at the pin, the line must be inside it, and the route's last static path
+segment must appear within four lines of the credited line, so a wrong pin whose files still
+exist is reported rather than passed. Two site annotations refine that check. A site whose
+path is a constant declared elsewhere in the file records `path_literal_line`, the line of the
+declaration, and the segment is looked for there instead of at the call line. A site marked
+`match: follower` is the validator or resolver that admits a server-supplied URL (the stream
+and transcode URLs a client fetches from the playback plan), so it never spells the path and is
+exempt from the segment check while its file and line are still verified. The test skips only
+when a sibling checkout is absent next to this repository, which is the CI case; a checkout
+that is present but has not fetched the pinned commit, or a site that no longer holds up at
+the pin, fails it, so `make verify-migration-ledger` cannot print ok over an unfetched pin.
+`build_ledger.py` merges a regenerated inventory and consumer map into the committed ledger by
+key: it refreshes the copied fields and mechanical call sites (carrying each mechanical site's
+`path_literal_line` over by location), preserves every curated field and every manual and
+follower site on an existing entry, and seeds defaults only for rows that have no entry yet.
+Running it on an unchanged inventory and consumer map rewrites the file byte for byte.
+Server-internal and compat consumers (Go URL builders in this repository) are recorded as
+manual sites. Absence of a first-party consumer is not proof of disuse; removal needs an
+affirmative product decision.
+
 ### Contract foundation
 
 The first implementation slice establishes and tests rules shared by every later operation:
@@ -789,6 +905,79 @@ throughput tests because they bypass Huma. A repeatable regression is investigat
 program-wide quantitative threshold and hot-path budgets are agreed before any v2 measurements
 are taken, so results cannot be rationalized after the fact, and sections may adopt stricter
 budgets.
+
+### Scenario catalogs
+
+Tier-1 rows carry their behavior scenarios in `contracts/api/v2/scenarios/`, one file per
+migration-ledger `route_group` under `<listener>/<group-slug>.json`, validated against
+`scenario-catalog.schema.json` (JSON Schema 2020-12, closed). A catalog names its ledger rows
+by listener, method, path, and registration index and records, per row, scenarios in the
+categories the tiering rule lists: `status_headers`, `data_meaning`,
+`field_presence_nullability`, `authorization`, `sorting`, `filtering`, `pagination`, `error`,
+`raw_protocol`. Each scenario states the product behavior in plain language, the principal
+class (public, authenticated, profile, child profile, primary profile, admin, acting admin,
+access group, demo, API key with scopes), a synthetic request, and the expected outcome as a
+status, header predicates, and JSON-pointer body predicates (`exists`, `absent`, `is_null`,
+`equals`, `type`, `keys_equal`, `sorted` with direction and tie-breaker, `unique_by`,
+`rfc3339`, and so on). `v2_expectation` stays `null` until the section PR records the intended
+v2 behavior or a reviewed intentional difference. Behavior that looks accidental is recorded
+faithfully and flagged in `notes`, never corrected in the catalog.
+
+The coverage rule: every tier-1 row in a wave has a catalog, with at least one scenario per
+category or a stated `not_applicable` reason, and at least one `status_headers` or
+`authorization` scenario so the row is executable, before that wave's first section PR. Later
+waves populate their own catalogs on the same schedule. Wave membership follows the ledger's
+`release_flow` (login, setup, profiles for wave 1), not the plan's prose list of route groups,
+which is why `/api/v1/onboarding` and `/api/v1/profile/sections` are wave-1 catalogs.
+`make verify-scenario-catalogs` (`internal/scenariocatalog`) checks the schema, reconciles every
+row against the ledger and its route group's catalog file, and fails on an uncovered or misfiled
+row; CI runs it beside the ledger gate.
+
+The executor (`internal/scenariocatalog/executor`) runs the scenarios through the real router
+and middleware in an in-process `httptest` server. Scenarios that only need the router — public
+discovery, readiness failure, validation, and auth refusals on routes that register without a
+user store — run in plain CI. Whether a public scenario's row exists on the offline router
+is read from `contracts/api/v2/offline-routes.txt`, not from the router: `api.NewRouter` returns
+a sealed handler (see the route inventory contract above), so `TestOfflineRouteSet` in
+`internal/api` builds the executor's offline wiring through the unexported constructor, walks
+it, and pins the result; `make verify-offline-routes` fails in CI when the file is stale and
+`make offline-routes` regenerates it. The file records the `api.Dependencies` fields it was
+generated with, and the executor refuses it if its own offline wiring sets a different field
+set. Anything that sends a credential, applies a server setting, or
+declares `requires: [database]` runs only when `SILO_SCENARIO_DATABASE_URL` points at an empty
+database the executor owns, and skips otherwise. The variable is deliberately not
+`SILO_TEST_DATABASE_URL`: the executor truncates accounts, access groups, invite codes, and
+invitations on every reseed, which would break the other DB-gated packages sharing the test
+database. Before migrating or reseeding, the executor inspects the database and refuses one
+that holds any media item, media file, or library folder; any account whose email is missing or
+not a fixture address; any secret-bearing `server_settings` value (keys matching secret,
+password, api_key, access_key, token_secret, or jwt with a non-empty value); or a
+`branding.server_name` other than the fixture's. Other settings rows are not a refusal signal.
+Scenarios on a row the ledger registers only behind the rate-limit middleware (the `#1`
+registration variants) run on the rate-limited router variant, so the registration they name is
+the one exercised. Every profile-scoped wave-1 row pins the cross-account case: a member bearer
+declaring a profile owned by another account is 404 `not_found` from viewer access, and the
+profile mutation rows (update, delete, verify-pin, avatar upload and delete) also pin the
+path-level case, a member's own profile header with an admin-owned profile id in the path, so a
+v2 rewrite that resolves the profile before the account fails the catalog rather than passing
+silently.
+
+A scenario may carry a `then` list: ordered follow-up exchanges (method, request, expected
+outcome, optional principal) executed after the primary request in the same fixture state, so a
+cross-request effect (the device poll after an approval, the GET after a PUT) is asserted rather
+than described. The collection predicates `every`, `none`, `sorted`, and `unique_by` fail on an
+array too short to test (empty for `every`/`none`, fewer than two elements for the others)
+unless the same scenario pins that array's size on the same pointer: `empty`, `length`, or
+`min_length` satisfy all four, `non_empty` only `every`/`none`; the default `json` body kind
+fails on a body that does not decode, and `text` compares the raw bytes.
+
+Fixture privacy follows the contract-fixture rule above: identities, profiles, codes, and
+tokens are deterministic synthetic values under reserved origins; credentials are minted at run
+time and referenced through `${...}` placeholders, so no committed catalog carries a secret.
+`make verify-local-paths` scans the catalog bodies and the committed generators under
+`contracts/api/v2/scenarios/tools/` for non-reserved hosts (URL, protocol-relative, mail
+domain, bracketed IPv6, and bare dotted names whose last label is a public TLD), non-loopback
+IP literals, and credential-looking literals, and the whole scenario tree for machine paths.
 
 ## Evolution policy
 

@@ -1,0 +1,1386 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/api-keys",
+  "wave": 1,
+  "description": "Self-service API key management and the scope catalog.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/api-keys/",
+      "registration_index": 0,
+      "not_applicable": {
+        "filtering": "No filter parameters; scoped to the caller.",
+        "pagination": "Unpaged per-account list.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "keys_list.ok",
+          "category": "status_headers",
+          "description": "Lists the caller's keys: 200 JSON array.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.meaning",
+          "category": "data_meaning",
+          "description": "Only the caller's keys (two for the admin), with the full key value visible and scopes as an array.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/key",
+                  "op": "matches",
+                  "value": "^sa_[0-9a-f]{64}$"
+                }
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/user_id",
+                  "op": "equals",
+                  "value": "${admin_user_id:int}"
+                }
+              }
+            ]
+          },
+          "notes": "The full secret is returned on every list, not just at creation. Flagged for the section PR (security review).",
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.shape",
+          "category": "field_presence_nullability",
+          "description": "scopes is [] for an unscoped key (never null); last_used_at is omitted until first use.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "id",
+                    "user_id",
+                    "label",
+                    "key",
+                    "rate_tier",
+                    "scopes",
+                    "created_at"
+                  ]
+                }
+              },
+              {
+                "pointer": "/1/scopes",
+                "op": "equals",
+                "value": []
+              },
+              {
+                "pointer": "/0/scopes",
+                "op": "equals",
+                "value": [
+                  "admin:users"
+                ]
+              },
+              {
+                "pointer": "/0/rate_tier",
+                "op": "equals",
+                "value": "standard"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.sorted",
+          "category": "sorting",
+          "description": "Newest first by created_at.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "sorted",
+                "value": {
+                  "by": "/created_at",
+                  "direction": "desc"
+                }
+              },
+              {
+                "pointer": "",
+                "op": "unique_by",
+                "value": "/id"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.api_key_forbidden",
+          "category": "authorization",
+          "description": "An API key may not manage API keys: 403.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "API key management is not accessible via API key authentication"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.empty",
+          "category": "data_meaning",
+          "description": "An account with no keys gets [] not null.",
+          "principal": {
+            "class": "authenticated",
+            "user": "grouped"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "empty"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/api-keys/",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "keys_create.ok",
+          "category": "status_headers",
+          "description": "Creating a labelled key answers 201 with the key.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "fixture-created"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "id",
+                  "user_id",
+                  "label",
+                  "key",
+                  "rate_tier",
+                  "scopes",
+                  "created_at"
+                ]
+              },
+              {
+                "pointer": "/key",
+                "op": "matches",
+                "value": "^sa_[0-9a-f]{64}$"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.meaning",
+          "category": "data_meaning",
+          "description": "The key belongs to the caller, starts on the standard tier, unscoped.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "fixture-created"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/user_id",
+                "op": "equals",
+                "value": "${member_user_id:int}"
+              },
+              {
+                "pointer": "/rate_tier",
+                "op": "equals",
+                "value": "standard"
+              },
+              {
+                "pointer": "/scopes",
+                "op": "equals",
+                "value": []
+              },
+              {
+                "pointer": "/label",
+                "op": "equals",
+                "value": "fixture-created"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.scoped",
+          "category": "filtering",
+          "description": "Valid scopes are normalized and stored.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "scoped",
+              "scopes": [
+                "admin:users",
+                "admin:users"
+              ]
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "equals",
+                "value": [
+                  "admin:users"
+                ]
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.bad_scope",
+          "category": "error",
+          "description": "An unknown scope is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x",
+              "scopes": [
+                "admin:everything"
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.missing_label",
+          "category": "error",
+          "description": "An empty label is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": ""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Label is required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "raw_body": "x"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.api_key_forbidden",
+          "category": "authorization",
+          "description": "An API key cannot mint keys: 403.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.demo",
+          "category": "authorization",
+          "description": "In demo mode a non-admin mutation on this path is 403 demo_restricted.",
+          "principal": {
+            "class": "demo"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": {
+                  "error": "demo_restricted",
+                  "message": "This action is not available in demo mode."
+                }
+              }
+            ]
+          },
+          "settings": {
+            "demo.enabled": "true"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.shape",
+          "category": "field_presence_nullability",
+          "description": "last_used_at is absent on a new key.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "fixture-created"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/last_used_at",
+                "op": "absent"
+              },
+              {
+                "pointer": "/created_at",
+                "op": "rfc3339"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_create.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/api-keys/scopes",
+      "registration_index": 0,
+      "not_applicable": {
+        "filtering": "Static catalog.",
+        "pagination": "Static catalog.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "scopes.ok",
+          "category": "status_headers",
+          "description": "The scope catalog for feature detection: 200 JSON.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "scopes"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "scopes.meaning",
+          "category": "data_meaning",
+          "description": "Both known scopes are listed with descriptions, in a stable order.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/scopes/0/name",
+                "op": "equals",
+                "value": "admin:users"
+              },
+              {
+                "pointer": "/scopes/1/name",
+                "op": "equals",
+                "value": "admin:access-groups:read"
+              },
+              {
+                "pointer": "/scopes",
+                "op": "every",
+                "value": {
+                  "pointer": "/description",
+                  "op": "non_empty"
+                }
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "scopes.api_key_allowed",
+          "category": "authorization",
+          "description": "Unlike the management routes, an API key may read the catalog.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "scopes.shape",
+          "category": "field_presence_nullability",
+          "description": "Each scope has exactly name and description.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/scopes",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "name",
+                    "description"
+                  ]
+                }
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "scopes.sorted",
+          "category": "sorting",
+          "description": "Catalog order is fixed (not alphabetical).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "scopes.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "scopes.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/api-keys/{id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "keys_delete.ok",
+          "category": "status_headers",
+          "description": "Deleting an own key answers 204.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_delete.gone",
+          "category": "data_meaning",
+          "description": "A second delete is 404: the key no longer exists.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "API key not found"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_delete.other_user",
+          "category": "authorization",
+          "description": "Another account's key id is 404, indistinguishable from unknown.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${admin_api_key_id}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_delete.bad_id",
+          "category": "error",
+          "description": "A non-integer id is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/abc"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid API key ID"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_delete.api_key_forbidden",
+          "category": "authorization",
+          "description": "An API key cannot delete keys: 403.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/1"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_delete.demo",
+          "category": "authorization",
+          "description": "In demo mode a non-admin mutation on this path is 403 demo_restricted.",
+          "principal": {
+            "class": "demo"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": {
+                  "error": "demo_restricted",
+                  "message": "This action is not available in demo mode."
+                }
+              }
+            ]
+          },
+          "settings": {
+            "demo.enabled": "true"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_delete.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_delete.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/1"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

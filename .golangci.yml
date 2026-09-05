@@ -1,7 +1,8 @@
 version: "2"
 
 run:
-  timeout: 5m
+  # Diff-scoped CI runs over large PRs exceed 5m on the shared runner (exit 4).
+  timeout: 15m
 
 formatters:
   enable:
@@ -18,6 +19,7 @@ linters:
     - bodyclose
     - errcheck
     - errorlint
+    - gocritic
     - goconst
     - govet
     - ineffassign
@@ -30,6 +32,29 @@ linters:
     - wastedassign
 
   settings:
+    # gocritic is enabled for exactly one check: the ruleguard rules under
+    # internal/routeinventory/lintrules/, defense in depth for the legacy
+    # native route inventory (docs/architecture/api-contract.md, "Legacy
+    # native route inventory"). The guarantee itself is structural — every
+    # listener entry function returns a sealed handler the generator checks —
+    # and these rules report the attempt early: a type assertion, type switch
+    # or generic instantiation whose type registers routes by its method set
+    # (alias, defined type, embedding or structural interface included), and
+    # reflect.Value.MethodByName, outside tests. CI runs the check full-tree
+    # (make lint-router-recovery) as well as on changed lines. ruleguard was
+    # chosen over forbidigo because forbidigo visits only identifier and
+    # selector nodes and cannot tell an assertion from a parameter type. Keep
+    # the check list to ruleguard: widening it enrolls the whole tree in
+    # gocritic's style set.
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - ruleguard
+      settings:
+        ruleguard:
+          rules: '${base-path}/internal/routeinventory/lintrules/*.go'
+          failOn: all
+
     sloglint:
       # Require the context-carrying slog variants (InfoContext, …) wherever a
       # context.Context is in scope, so log records correlate with the active
@@ -74,6 +99,13 @@ linters:
       - path: _test\.go
         linters:
           - goconst
+
+      # Tests may recover a router from a handler to walk it (the route
+      # inventory backstops do); they register nothing that ships.
+      - path: _test\.go
+        linters:
+          - gocritic
+        text: "^ruleguard: route inventory:"
 
       # Allow unchecked errors in test cleanup/defer
       - path: _test\.go

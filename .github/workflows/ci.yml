@@ -110,6 +110,43 @@ jobs:
       - name: Verify playback protocol fixtures are current
         run: make verify-playback-fixtures
 
+      # The API v2 migration needs every legacy native route accounted for
+      # before anything is ported. The generator reads registration source, so
+      # a route hidden behind optional dependency wiring still has to appear,
+      # and a registration it cannot follow fails here rather than shrinking
+      # the inventory in silence.
+      - name: Verify the legacy native route inventory is current
+        run: make verify-route-inventory
+
+      # Every inventoried route needs a migration decision before v2 work
+      # ports it. The ledger is schema-checked and reconciled against the
+      # inventory one-to-one, so a new route without a ledger entry, or a
+      # stale entry for a removed route, fails here.
+      - name: Verify the v2 migration ledger covers the route inventory
+        run: make verify-migration-ledger
+      # The inventory's lint rule (recovering a router from a handler) has to
+      # hold over the whole tree, not only the lines a branch touched: an old
+      # line folded in by a rebase is as much of a hole as a new one.
+      - name: Lint router recovery full-tree
+        run: make lint-router-recovery
+
+      # Every tier-1 row in a migration wave needs an executable scenario
+      # catalog before that wave's first section PR. The catalogs are
+      # schema-checked and reconciled against the ledger here; the executor
+      # runs their public subset under make test-go and the rest locally
+      # against an empty database named by SILO_SCENARIO_DATABASE_URL (a
+      # dedicated variable: the executor truncates, so it never shares
+      # SILO_TEST_DATABASE_URL with the other DB-gated packages).
+      - name: Verify the tier-1 scenario catalogs cover their waves
+        run: make verify-scenario-catalogs
+
+      # The executor's offline run-vs-skip decision reads a committed list of
+      # the routes the no-database API router registers, because the sealed
+      # router cannot be walked from outside internal/api. This regenerates
+      # that list from the real router and fails if the committed file drifted.
+      - name: Verify the offline route set matches the API router
+        run: make verify-offline-routes
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and

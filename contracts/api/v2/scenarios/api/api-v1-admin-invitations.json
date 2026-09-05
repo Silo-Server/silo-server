@@ -1,0 +1,1872 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/admin/invitations",
+  "wave": 1,
+  "description": "Admin-side emailed invitations: list, send, resend, revoke.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/admin/invitations/",
+      "registration_index": 0,
+      "not_applicable": {
+        "filtering": "No filter parameters; every invitation is listed.",
+        "pagination": "Unpaged admin list.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "adm_inv_list.ok",
+          "category": "status_headers",
+          "description": "Lists every invitation: 200 JSON array.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.meaning",
+          "category": "data_meaning",
+          "description": "Status is derived per row: pending, accepted, expired; the inviter's name is joined.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 3
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/status",
+                  "op": "one_of",
+                  "value": [
+                    "pending",
+                    "accepted",
+                    "expired",
+                    "revoked"
+                  ]
+                }
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/invited_by_name",
+                  "op": "equals",
+                  "value": "${admin_username}"
+                }
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.shape",
+          "category": "field_presence_nullability",
+          "description": "Optional fields (access_group_id, library_ids, note, accepted_at, accepted_user_id, invited_by_name) are omitted when empty; accepted_at is an RFC3339 string when present.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 3
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_include",
+                  "value": [
+                    "id",
+                    "email",
+                    "role",
+                    "create_profile",
+                    "show_tour",
+                    "invited_by",
+                    "status",
+                    "expires_at",
+                    "created_at"
+                  ]
+                }
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/expires_at",
+                  "op": "rfc3339"
+                }
+              }
+            ]
+          },
+          "notes": "expires_at/created_at are time.Time while accepted_at is a pre-formatted string pointer; mixed timestamp encodings on one object. Flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.sorted",
+          "category": "sorting",
+          "description": "Newest first by created_at.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 3
+              },
+              {
+                "pointer": "",
+                "op": "sorted",
+                "value": {
+                  "by": "/created_at",
+                  "direction": "desc"
+                }
+              },
+              {
+                "pointer": "",
+                "op": "unique_by",
+                "value": "/id"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.admin_no_profile",
+          "category": "authorization",
+          "description": "An admin without a declared profile passes the acting-admin gate.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 200
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.scoped_key",
+          "category": "authorization",
+          "description": "A scoped API key (admin:users) is refused: the scope does not cover invitations.",
+          "principal": {
+            "class": "api_key",
+            "scopes": [
+              "admin:users"
+            ]
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "API key scopes do not permit this route"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_list.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/"
+          },
+          "expect": {
+            "status": 403,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/admin/invitations/",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "adm_inv_create.ok",
+          "category": "status_headers",
+          "description": "Sending an invitation answers 201 with the invitation, email_sent, and the claim URL.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "user",
+              "note": "welcome"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "invitation",
+                  "email_sent",
+                  "claim_url"
+                ]
+              }
+            ]
+          },
+          "settings": {
+            "notifications.email.external_url": "${public_url}"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.meaning",
+          "category": "data_meaning",
+          "description": "Without SMTP the invitation is still created (email_sent false) and the claim URL embeds a fresh token under the configured link base; defaults are role user, create_profile true, show_tour true.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "user",
+              "note": "welcome"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/email_sent",
+                "op": "equals",
+                "value": false
+              },
+              {
+                "pointer": "/claim_url",
+                "op": "matches",
+                "value": "^https://silo\\.example\\.test/invite/[A-Za-z0-9_-]{43}$"
+              },
+              {
+                "pointer": "/invitation/status",
+                "op": "equals",
+                "value": "pending"
+              },
+              {
+                "pointer": "/invitation/create_profile",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/invitation/show_tour",
+                "op": "equals",
+                "value": true
+              },
+              {
+                "pointer": "/invitation/invited_by",
+                "op": "equals",
+                "value": "${admin_user_id:int}"
+              },
+              {
+                "pointer": "/invitation/note",
+                "op": "equals",
+                "value": "welcome"
+              }
+            ]
+          },
+          "settings": {
+            "notifications.email.external_url": "${public_url}"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.public_url_fallback",
+          "category": "data_meaning",
+          "description": "With no external_url setting the server PublicURL is the link base.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "user",
+              "note": "welcome"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/claim_url",
+                "op": "matches",
+                "value": "^https://silo\\.example\\.test/invite/"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.supersedes",
+          "category": "filtering",
+          "description": "Re-inviting a pending address revokes the earlier invitation and issues a new one.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-invitee@silo.example.test"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/invitation/status",
+                "op": "equals",
+                "value": "pending"
+              },
+              {
+                "pointer": "/invitation/id",
+                "op": "not_equals",
+                "value": "${invitation_pending_id:int}"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.invalid_email",
+          "category": "error",
+          "description": "A malformed address is 400 invalid_email.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "not-an-address"
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "invalid_email"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid email address"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.email_taken",
+          "category": "error",
+          "description": "An address with an account is 409 email_taken.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "${member_email}"
+            }
+          },
+          "expect": {
+            "status": 409,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "email_taken"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "An account with this email already exists"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.bad_role",
+          "category": "error",
+          "description": "An unknown role is 403 role_not_allowed.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "owner"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "role_not_allowed"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "You may not grant this role"
+              }
+            ]
+          },
+          "notes": "An invalid enum value is 403 rather than 400; flagged for the section PR.",
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.admin_grouped",
+          "category": "error",
+          "description": "An admin invitation with an access group is 422 unprocessable_entity.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "admin",
+              "access_group_id": 1
+            }
+          },
+          "expect": {
+            "status": 422,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unprocessable_entity"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin accounts cannot belong to an access group"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "raw_body": "x"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.shape",
+          "category": "field_presence_nullability",
+          "description": "The nested invitation has the standard shape; access_group_id/library_ids/accepted_at are absent.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "user",
+              "note": "welcome"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/invitation",
+                "op": "keys_include",
+                "value": [
+                  "id",
+                  "email",
+                  "role",
+                  "create_profile",
+                  "show_tour",
+                  "invited_by",
+                  "status",
+                  "expires_at",
+                  "created_at"
+                ]
+              },
+              {
+                "pointer": "/invitation/access_group_id",
+                "op": "absent"
+              },
+              {
+                "pointer": "/invitation/accepted_at",
+                "op": "absent"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "user",
+              "note": "welcome"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "user",
+              "note": "welcome"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_create.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/",
+            "body": {
+              "email": "fixture-guest@silo.example.test",
+              "role": "user",
+              "note": "welcome"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/admin/invitations/{id}/resend",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "adm_inv_resend.ok",
+          "category": "status_headers",
+          "description": "Resending a pending invitation answers 200 with a fresh claim URL.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_pending_id}/resend"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "invitation",
+                  "email_sent",
+                  "claim_url"
+                ]
+              },
+              {
+                "pointer": "/claim_url",
+                "op": "non_empty"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.meaning",
+          "category": "data_meaning",
+          "description": "The resend supersedes: a new invitation id with the same email and access choices.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_pending_id}/resend"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/invitation/email",
+                "op": "equals",
+                "value": "fixture-invitee@silo.example.test"
+              },
+              {
+                "pointer": "/invitation/id",
+                "op": "not_equals",
+                "value": "${invitation_pending_id:int}"
+              },
+              {
+                "pointer": "/invitation/status",
+                "op": "equals",
+                "value": "pending"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.accepted",
+          "category": "error",
+          "description": "Resending an accepted invitation is 409 email_taken (the address now has an account).",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_accepted_id}/resend"
+          },
+          "expect": {
+            "status": 409,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "email_taken"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.not_found",
+          "category": "error",
+          "description": "An unknown id is 404.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/999999/resend"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invitation not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.bad_id",
+          "category": "error",
+          "description": "A non-integer id is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/abc/resend"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid invitation ID"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.shape",
+          "category": "field_presence_nullability",
+          "description": "Same send-response shape as create.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_pending_id}/resend"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/email_sent",
+                "op": "type",
+                "value": "boolean"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/1/resend"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/1/resend"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_resend.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/1/resend"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/admin/invitations/{id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "adm_inv_revoke.ok",
+          "category": "status_headers",
+          "description": "Revoking a pending invitation answers 204.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_pending_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.idempotent",
+          "category": "data_meaning",
+          "description": "Revoking again is still 204: the row exists, so it is not a 404.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_pending_id}",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.accepted",
+          "category": "data_meaning",
+          "description": "Revoking an accepted invitation is a 204 no-op.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_accepted_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.not_found",
+          "category": "error",
+          "description": "Unknown id is 404.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/999999"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invitation not found"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.bad_id",
+          "category": "error",
+          "description": "Non-integer id is 400.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/abc"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid invitation ID"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "acting_admin"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/${invitation_pending_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.admin_secondary_profile",
+          "category": "authorization",
+          "description": "An admin acting through a non-primary profile is refused: admin powers need the primary profile.",
+          "principal": {
+            "class": "acting_admin",
+            "profile": "admin_secondary"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/1"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.non_admin",
+          "category": "authorization",
+          "description": "A non-admin account is 403 forbidden.",
+          "principal": {
+            "class": "primary_profile"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/1"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access required"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "adm_inv_revoke.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/admin/invitations/1"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": null
+        }
+      ]
+    }
+  ]
+}

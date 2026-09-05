@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -175,6 +175,66 @@ verify-playback-fixtures:
 			|| { echo "::error::$(PLAYBACK_SCHEMA_FIXTURE_DIR)/$$fixture is stale; run make playback-fixtures"; exit 1; }; \
 	done
 	@echo "playback fixtures are current"
+
+ROUTE_INVENTORY := contracts/api/v2/route-inventory.json
+
+# Rebuild the legacy native route inventory from registration source.
+route-inventory:
+	go run ./cmd/route-inventory -out $(ROUTE_INVENTORY)
+
+# Fail when the committed inventory disagrees with the registration source, or
+# when the source contains a registration the generator cannot account for. The
+# generator refuses to emit a partial inventory, so both failures land here
+# rather than as a quietly shorter artifact.
+verify-route-inventory:
+	@go run ./cmd/route-inventory -check $(ROUTE_INVENTORY) \
+		|| { echo "::error::$(ROUTE_INVENTORY) is stale or a route is unaccounted for; run make route-inventory"; exit 1; }
+
+# Run the route inventory's router-recovery lint rule over the whole tree, not
+# only changed lines. It is the one gocritic check the repo enables (see
+# .golangci.yml), and the tree passes it today, so this can gate CI while the
+# rest of `make lint` cannot.
+lint-router-recovery:
+	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
+MIGRATION_LEDGER := contracts/api/v2/migration.json
+
+# Fail when the v2 migration ledger violates its JSON Schema, no longer covers
+# the route inventory one-to-one, or breaks a review rule (removed rows are
+# tier 2, ratified rows name an owner, only plugin-proxy handlers claim the
+# dynamic_plugin_proxy override). Runs the whole internal/contractledger
+# package so this named step enforces everything the docs attribute to it.
+verify-migration-ledger:
+	@go test -count=1 ./internal/contractledger/ \
+		|| { echo "::error::$(MIGRATION_LEDGER) violates contracts/api/v2/migration.schema.json or disagrees with $(ROUTE_INVENTORY); see docs/architecture/api-contract.md (Migration ledger)"; exit 1; }
+
+SCENARIO_CATALOG_DIR := contracts/api/v2/scenarios
+
+# Fail when a tier-1 scenario catalog violates its JSON Schema, names a row
+# the migration ledger does not carry at tier 1, files a row outside its route
+# group's catalog, or leaves a tier-1 row of a declared wave without a scenario
+# per applicable category. The executor that runs the scenarios against the
+# router is a separate go test (./internal/scenariocatalog/executor); only its
+# public subset runs in CI. The rest runs when SILO_SCENARIO_DATABASE_URL names
+# an empty database the executor owns (not SILO_TEST_DATABASE_URL: it
+# truncates).
+verify-scenario-catalogs:
+	@go test -count=1 -run '^TestCatalogsPassGate$$' ./internal/scenariocatalog/ \
+		|| { echo "::error::$(SCENARIO_CATALOG_DIR) violates scenario-catalog.schema.json or leaves a tier-1 row uncovered"; exit 1; }
+
+OFFLINE_ROUTES := contracts/api/v2/offline-routes.txt
+
+# The scenario executor decides run-vs-skip for a public scenario by whether
+# the offline (no-database) API router registers its row. api.NewRouter returns
+# a sealed handler nothing outside internal/api's tests can walk, so the answer
+# is pinned in $(OFFLINE_ROUTES) by an in-package test that builds the same
+# wiring through the unexported constructor. offline-routes regenerates the
+# file; verify-offline-routes fails when it is stale.
+offline-routes:
+	go test -count=1 -run '^TestOfflineRouteSet$$' ./internal/api/ -update-offline-routes
+
+verify-offline-routes:
+	@go test -count=1 -run '^TestOfflineRouteSet$$' ./internal/api/ \
+		|| { echo "::error::$(OFFLINE_ROUTES) disagrees with the offline API router; run make offline-routes"; exit 1; }
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

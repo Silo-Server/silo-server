@@ -25,12 +25,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -43,7 +40,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
-	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
@@ -61,7 +57,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
-	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
@@ -2838,16 +2833,9 @@ func main() {
 
 	router := api.NewRouter(deps)
 
-	// Step 8: Expose Prometheus metrics endpoint (not behind auth).
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.Handler())
-	metricsMux.Handle("/api/", router)
-	// ABS-compat is NOT mounted on the main listener — see the "ABS compat
-	// listener" block below. It binds its own port so the discovery probes
-	// (/ping, /healthcheck, /status, /init, /login, /socket.io) own the URL
-	// space without collision with silo's SPA fallback. Mirrors how the
-	// Jellyfin compat server is set up at :8096.
-	metricsMux.Handle("/", server.FrontendHandler())
+	// Step 8: Build the handler the primary port serves — /metrics, the API
+	// router, and the frontend. See newRootHandler.
+	rootHandler := newRootHandler(router)
 
 	// Step 9: Start background workers (if needed).
 	var sessionCleaner *worker.SessionCleaner
@@ -2937,7 +2925,7 @@ func main() {
 	// Step 10: Create and start the HTTP server.
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,
-		Handler:      metricsMux,
+		Handler:      rootHandler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -3090,27 +3078,10 @@ func main() {
 
 	// ABS-compat listener — dedicated http.Server bound to its own port
 	// (default :13378) that hosts the Audiobookshelf-compatible API.
-	// Mirrors the Jellyfin compat layout above. The ABS handler mounts
-	// onto a fresh chi router here so /ping, /healthcheck, /status, /login,
-	// /socket.io, etc. own the URL space at the root — no SPA fallback,
-	// no collision with silo's /api/v1.
+	// Mirrors the Jellyfin compat layout above. See newAudiobookshelfListener.
 	var absSrv *http.Server
 	if (mode == "integrated" || mode == "api") && deps.ABSHandler != nil && cfg.AudiobookshelfCompat.Listen != "" {
-		absRouter := chi.NewRouter()
-		if ipResolver != nil {
-			absRouter.Use(clientip.Middleware(ipResolver))
-		}
-		absRouter.Use(chimiddleware.Recoverer)
-		absRouter.Use(httpstream.CompressExcept(5, abs.SkipMediaCompression))
-		deps.ABSHandler.Mount(absRouter)
-		absSrv = &http.Server{
-			Addr:              cfg.AudiobookshelfCompat.Listen,
-			Handler:           absRouter,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       60 * time.Second,
-			WriteTimeout:      0,
-			IdleTimeout:       120 * time.Second,
-		}
+		absSrv = newAudiobookshelfListener(cfg.AudiobookshelfCompat.Listen, deps.ABSHandler, ipResolver)
 	}
 
 	// Run non-critical startup work in the background so it doesn't delay the
