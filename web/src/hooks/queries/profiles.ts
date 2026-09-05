@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import type { AdminSession, Profile, CreateProfileRequest, ProfileListResponse } from "@/api/types";
+import type { AdminSession, Profile } from "@/api/types";
+import type { components } from "@/api/v2/schema";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 import { profileKeys } from "./keys";
 import { toast } from "sonner";
@@ -26,12 +26,23 @@ function replaceProfileInList(profiles: Profile[] | undefined, updatedProfile: P
 /** The PATCH body of the v2 updateProfile operation: omitted leaves a member unchanged, null clears it. */
 export type ProfileUpdate = V2Body<"PATCH /api/v2/profiles/{id}">;
 
+/** The POST body of the v2 createProfile operation. */
+export type ProfileCreate = V2Body<"POST /api/v2/profiles">;
+
+/** The answer of the v2 verifyProfilePIN operation. */
+export type ProfileVerification = V2Result<"POST /api/v2/profiles/{id}/verify-pin">;
+
+/** The profile list as the app models it: the profiles plus the avatar-upload capability. */
+export interface ProfileList {
+  profiles: Profile[];
+  avatar_upload_enabled: boolean;
+}
+
 /**
  * Projects a v2 profile onto the `Profile` shape the profile list, the
- * session, and the editor still read from v1 (list, create, avatar, and
- * delete stay on v1 in the pilot). Library ids are the same ids as strings.
+ * session, and the editor read. Library ids are the same ids as strings.
  */
-export function profileFromV2(profile: V2Result<"PATCH /api/v2/profiles/{id}">): Profile {
+export function profileFromV2(profile: components["schemas"]["Profile"]): Profile {
   return {
     id: profile.id,
     name: profile.name,
@@ -60,15 +71,61 @@ export function profileFromV2(profile: V2Result<"PATCH /api/v2/profiles/{id}">):
   };
 }
 
+function optionalNumber(value: string | null): number | undefined {
+  return value === null ? undefined : Number(value);
+}
+
+/**
+ * Projects a v2 playback session onto the `AdminSession` shape the session
+ * panels share with the admin activity views. Numeric v1 identifiers are the
+ * same ids rendered as strings on v2.
+ */
+export function sessionFromV2(session: components["schemas"]["PlaybackSession"]): AdminSession {
+  const { id, user_id, media_file_id, requested_media_file_id, ...rest } = session;
+  return {
+    ...rest,
+    session_id: id,
+    user_id: Number(user_id),
+    media_file_id: Number(media_file_id),
+    requested_media_file_id: Number(requested_media_file_id),
+    routing_execution_node_id: optionalNumber(session.routing_execution_node_id),
+    routing_egress_node_id: optionalNumber(session.routing_egress_node_id),
+  };
+}
+
+export async function listProfiles(): Promise<ProfileList> {
+  const list = await v2("GET /api/v2/profiles");
+  return {
+    profiles: list.items.map(profileFromV2),
+    avatar_upload_enabled: list.avatar_upload_enabled,
+  };
+}
+
+export function createProfile(body: ProfileCreate): Promise<Profile> {
+  return v2("POST /api/v2/profiles", { body }).then(profileFromV2);
+}
+
+export function verifyProfilePIN(profileId: string, pin: string): Promise<ProfileVerification> {
+  return v2("POST /api/v2/profiles/{id}/verify-pin", { path: { id: profileId }, body: { pin } });
+}
+
+export function uploadProfileAvatar(id: string, file: File): Promise<Profile> {
+  return v2("PUT /api/v2/profiles/{id}/avatar", { path: { id }, form: { avatar: file } }).then(
+    profileFromV2,
+  );
+}
+
+export async function listHouseholdSessions(): Promise<AdminSession[]> {
+  const sessions = await v2("GET /api/v2/profiles/household/sessions");
+  return sessions.items.map(sessionFromV2);
+}
+
 const HOUSEHOLD_SESSIONS_POLL_MS = 10_000;
 
 export function useHouseholdSessions(enabled = true) {
   return useQuery({
     queryKey: profileKeys.householdSessions(),
-    queryFn: async (): Promise<AdminSession[]> => {
-      const sessions: AdminSession[] | null = await api("/profiles/household/sessions");
-      return sessions ?? [];
-    },
+    queryFn: listHouseholdSessions,
     enabled,
     staleTime: HOUSEHOLD_SESSIONS_POLL_MS,
     refetchInterval: HOUSEHOLD_SESSIONS_POLL_MS,
@@ -78,7 +135,7 @@ export function useHouseholdSessions(enabled = true) {
 export function useProfiles() {
   const query = useQuery({
     queryKey: profileKeys.list(),
-    queryFn: (): Promise<ProfileListResponse> => api("/profiles"),
+    queryFn: listProfiles,
   });
 
   return {
@@ -91,11 +148,7 @@ export function useProfiles() {
 export function useCreateProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateProfileRequest): Promise<Profile> =>
-      api("/profiles", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    mutationFn: createProfile,
     onSuccess: () => {
       toast.success("Profile created");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
@@ -112,7 +165,7 @@ export function useUpdateProfile() {
     mutationFn: ({ id, body }: { id: string; body: ProfileUpdate }) =>
       v2("PATCH /api/v2/profiles/{id}", { path: { id }, body }).then(profileFromV2),
     onSuccess: (updatedProfile) => {
-      queryClient.setQueryData<ProfileListResponse | undefined>(profileKeys.list(), (current) => {
+      queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), (current) => {
         const profiles = replaceProfileInList(current?.profiles, updatedProfile);
         return {
           profiles,
@@ -131,16 +184,9 @@ export function useUpdateProfile() {
 export function useUploadProfileAvatar() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, file }: { id: string; file: File }): Promise<Profile> => {
-      const body = new FormData();
-      body.set("avatar", file);
-      return api(`/profiles/${id}/avatar`, {
-        method: "PUT",
-        body,
-      });
-    },
+    mutationFn: ({ id, file }: { id: string; file: File }) => uploadProfileAvatar(id, file),
     onSuccess: (updatedProfile) => {
-      queryClient.setQueryData<ProfileListResponse | undefined>(profileKeys.list(), (current) => ({
+      queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), (current) => ({
         profiles: replaceProfileInList(current?.profiles, updatedProfile),
         avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
       }));
@@ -156,15 +202,19 @@ export function useUploadProfileAvatar() {
 export function useDeleteProfileAvatar() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string): Promise<Profile> =>
-      api(`/profiles/${id}/avatar`, {
-        method: "DELETE",
-      }),
-    onSuccess: (updatedProfile) => {
-      queryClient.setQueryData<ProfileListResponse | undefined>(profileKeys.list(), (current) => ({
-        profiles: replaceProfileInList(current?.profiles, updatedProfile),
-        avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
-      }));
+    // deleteProfileAvatar answers 204; the editor wants the profile back, so
+    // the list is re-read and the whole cache refreshed from that read.
+    mutationFn: async (id: string): Promise<Profile> => {
+      await v2("DELETE /api/v2/profiles/{id}/avatar", { path: { id } });
+      const list = await listProfiles();
+      const updatedProfile = list.profiles.find((profile) => profile.id === id);
+      if (!updatedProfile) {
+        throw new Error("Profile not found after removing its avatar");
+      }
+      queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), list);
+      return updatedProfile;
+    },
+    onSuccess: () => {
       toast.success("Avatar removed");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
@@ -177,7 +227,7 @@ export function useDeleteProfileAvatar() {
 export function useDeleteProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api(`/profiles/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => v2("DELETE /api/v2/profiles/{id}", { path: { id } }),
     onSuccess: () => {
       toast.success("Profile deleted");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });

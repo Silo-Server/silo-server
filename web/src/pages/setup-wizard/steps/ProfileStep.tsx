@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { api } from "@/api/client";
-import type { CreateProfileRequest, Profile } from "@/api/types";
+import { createProfile } from "@/hooks/queries/profiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,11 +16,7 @@ export function ProfileStep() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const body: CreateProfileRequest = { name: profileName };
-      const created = await api<Profile>("/profiles", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const created = await createProfile({ name: profileName });
       selectProfile(created);
       refetchProfiles();
       toast.success("Profile created");
