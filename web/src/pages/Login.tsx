@@ -3,7 +3,8 @@ import type { FormEvent } from "react";
 import QRCode from "react-qr-code";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { api } from "@/api/client";
-import type { DeviceLoginPollResponse, DeviceLoginStartResponse, Profile } from "@/api/types";
+import { listProfiles } from "@/hooks/queries/profiles";
+import type { DeviceLoginPollResponse, DeviceLoginStartResponse } from "@/api/types";
 import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -118,7 +119,7 @@ export default function Login() {
     }
 
     try {
-      const profileList = await api<{ profiles: Profile[] }>("/profiles");
+      const profileList = await listProfiles();
       const soleProfile = getBootstrapProfile(profileList.profiles ?? []);
       if (soleProfile) {
         selectProfile(soleProfile);

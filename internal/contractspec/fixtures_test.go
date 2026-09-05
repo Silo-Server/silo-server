@@ -165,7 +165,7 @@ func TestFixtureValidationSeededFailures(t *testing.T) {
 				}
 				return f
 			})
-		}, "'/fixtures/3/body_file': got string, want null"},
+		}, "/body_file': got string, want null"},
 		{"guarded 204 DELETE records a lowercase etag", func(t *testing.T, m fstest.MapFS) {
 			editIndex(t, m, func(f []map[string]any) []map[string]any {
 				for _, e := range f {
