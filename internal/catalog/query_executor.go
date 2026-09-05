@@ -104,9 +104,16 @@ func (e *QueryExecutor) executePreviewPagePlan(ctx context.Context, build previe
 	}
 
 	if includeTotal {
-		countSQL, countArgs := build.countSQL()
-		if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			return nil, 0, false, fmt.Errorf("counting preview items: %w", err)
+		// No extra row means this page exhausted the matches (or reached the
+		// configured cap). An empty offset may have overshot the actual end,
+		// and a zero limit fetches nothing, so neither proves an exact total.
+		if !hasMore && build.limit > 0 && (len(items) > 0 || build.offset == 0) {
+			total = build.offset + len(items)
+		} else {
+			countSQL, countArgs := build.countSQL()
+			if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+				return nil, 0, false, fmt.Errorf("counting preview items: %w", err)
+			}
 		}
 		hasMore = total > build.offset+len(items)
 		return items, total, hasMore, nil
