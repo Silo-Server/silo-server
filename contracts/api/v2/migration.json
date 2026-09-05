@@ -28995,8 +28995,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authHandler != nil; invitationService != nil; !(deps.RateLimitMW != nil). v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
-      "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by the invitation token hash; the claim is a state-gated update and a duplicate gets 409 already_used. If the login-bearing response is lost the user logs in with the password they set."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "The claim is a state-gated update keyed by the token hash, but the tokens travel only in the 201 response: a retry after it is lost finds the invitation accepted and answers 404, so the user logs in again and the first session is orphaned. The v2 port must keep a replayable result per invitation."
     },
     {
       "listener": "api",
@@ -29065,8 +29065,8 @@
         "operation_id": null
       },
       "notes": "Conditionally registered: authHandler != nil; invitationService != nil; deps.RateLimitMW != nil. v2 registers the operation unconditionally and reports capability state instead. One of several registrations of this method+path with different middleware/conditions; see registration_index and conditions.",
-      "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by the invitation token hash; the claim is a state-gated update and a duplicate gets 409 already_used. If the login-bearing response is lost the user logs in with the password they set."
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "The claim is a state-gated update keyed by the token hash, but the tokens travel only in the 201 response: a retry after it is lost finds the invitation accepted and answers 404, so the user logs in again and the first session is orphaned. The v2 port must keep a replayable result per invitation."
     },
     {
       "listener": "api",
