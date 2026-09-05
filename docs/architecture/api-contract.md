@@ -955,7 +955,7 @@ types or an undecodable image is `422` at `body.avatar`, an oversized avatar is 
 server without an upload store answers `503`; section overrides drop the `/reset` suffix
 (`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
 method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
-casing mismatch).
+casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
 ## v1 lifecycle and release sequence
 

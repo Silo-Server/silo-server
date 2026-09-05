@@ -200,8 +200,10 @@ func registerProfiles(reg *Registry) {
 		// the verified primary profile manages the household.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
-		DemoRestricted:  true,
-		ServiceBacked:   true,
+		// Demo restriction is a v2 addition: v1's demo guard does not list
+		// profile mutations (recorded in the ledger row).
+		DemoRestricted: true,
+		ServiceBacked:  true,
 	}, reg.createProfile)
 
 	update := humaOp(http.MethodPatch, Prefix+"/profiles/{id}", "updateProfile", "profiles",
@@ -219,8 +221,10 @@ func registerProfiles(reg *Registry) {
 		// the same PATCH converges on the same state.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
-		DemoRestricted:  true,
-		ServiceBacked:   true,
+		// Demo restriction is a v2 addition: v1's demo guard does not list
+		// profile mutations (recorded in the ledger row).
+		DemoRestricted: true,
+		ServiceBacked:  true,
 	}, reg.updateProfile)
 
 	del := humaOp(http.MethodDelete, Prefix+"/profiles/{id}", "deleteProfile", "profiles",
@@ -236,8 +240,10 @@ func registerProfiles(reg *Registry) {
 		// answers 404 (already gone).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
-		DemoRestricted:  true,
-		ServiceBacked:   true,
+		// Demo restriction is a v2 addition: v1's demo guard does not list
+		// profile mutations (recorded in the ledger row).
+		DemoRestricted: true,
+		ServiceBacked:  true,
 	}, reg.deleteProfile)
 
 	Register(reg, Operation{
@@ -274,9 +280,11 @@ func registerProfiles(reg *Registry) {
 		// limit rather than the JSON default.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
-		DemoRestricted:  true,
-		ServiceBacked:   true,
-		MaxBodyBytes:    maxAvatarFormBytes,
+		// Demo restriction is a v2 addition: v1's demo guard does not list
+		// profile mutations (recorded in the ledger row).
+		DemoRestricted: true,
+		ServiceBacked:  true,
+		MaxBodyBytes:   maxAvatarFormBytes,
 	}, reg.uploadProfileAvatar)
 
 	Register(reg, Operation{
@@ -286,8 +294,10 @@ func registerProfiles(reg *Registry) {
 		// account; idempotent, a profile with no upload is left unchanged.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
-		DemoRestricted:  true,
-		ServiceBacked:   true,
+		// Demo restriction is a v2 addition: v1's demo guard does not list
+		// profile mutations (recorded in the ledger row).
+		DemoRestricted: true,
+		ServiceBacked:  true,
 	}, reg.deleteProfileAvatar)
 }
 

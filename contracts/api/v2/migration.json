@@ -35980,7 +35980,7 @@
         "path": "/api/v2/profile/sections",
         "operation_id": "replaceProfileSectionOverrides"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Full replacement of one page's override set stays PUT; scope and library_id move from the body to the query so GET, PUT and DELETE address the set the same way. Recipe gate failures (unknown_recipe, invalid_config) are 422 at body.overrides; custom_disabled stays 403."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Full replacement of one page's override set stays PUT; scope and library_id move from the body to the query so GET, PUT and DELETE address the set the same way. Recipe gate failures (unknown_recipe, invalid_config) are 422 at body.overrides; custom_disabled stays 403. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",
@@ -36110,7 +36110,7 @@
         "path": "/api/v2/profile/sections",
         "operation_id": "resetProfileSectionOverrides"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The /reset suffix is dropped: DELETE on the set addressed by scope and library_id."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The /reset suffix is dropped: DELETE on the set addressed by scope and library_id. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",
@@ -36385,7 +36385,7 @@
         "path": "/api/v2/profiles",
         "operation_id": "createProfile"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. 201 with Location. Reuses the updateProfile member rules: name required, max_playback_quality strict enum, quality_preference and subtitle_mode free-form (#135), pin 1 to 72 bytes, allowlist validated against existing libraries (422, not a foreign-key 500); no member admits null. name_conflict and profile_limit_reached stay 409."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. 201 with Location. Reuses the updateProfile member rules: name required, max_playback_quality strict enum, quality_preference and subtitle_mode free-form (#135), pin 1 to 72 bytes, allowlist validated against existing libraries (422, not a foreign-key 500); no member admits null. name_conflict and profile_limit_reached stay 409. Demo-restricted in v2 (403 permission_denied in demo mode); v1's demo guard does not block profile mutations, consistent with the pilot updateProfile. Location names /api/v2/profiles/{id}, which accepts PATCH and DELETE; read the created profile through listProfiles (no getProfile in this section)."
     },
     {
       "listener": "api",
@@ -36445,7 +36445,7 @@
         "path": "/api/v2/profiles/household/sessions",
         "operation_id": "listHouseholdSessions"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Plain items collection (v1 does not page); page is absent. Ids are strings, instants are UTC milliseconds, unknown members are null rather than omitted; the v1 compat-origin flag is not carried."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Plain items collection (v1 does not page); page is absent. Ids are strings, instants are UTC milliseconds, unknown members are null rather than omitted; the v1 compat-origin flag is not carried. v1 session_id is id."
     },
     {
       "listener": "api",
@@ -36513,7 +36513,7 @@
         "path": "/api/v2/profiles/{id}",
         "operation_id": "deleteProfile"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Same 204 and the same 409 primary_profile_protected as v1, rendered as the conflict problem."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Same 204 and the same 409 primary_profile_protected as v1, rendered as the conflict problem. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",
@@ -36651,7 +36651,7 @@
         "path": "/api/v2/profiles/{id}/avatar",
         "operation_id": "deleteProfileAvatar"
       },
-      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Answers 204 rather than the updated profile; read the profile afterwards if it is needed."
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR. Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Answers 204 rather than the updated profile; read the profile afterwards if it is needed. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",
@@ -36711,7 +36711,7 @@
         "path": "/api/v2/profiles/{id}/avatar",
         "operation_id": "uploadProfileAvatar"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Huma multipart operation (form part avatar, image/jpeg, image/png or image/webp). A JSON body is 415; a part outside the declared types or an undecodable image is 422 at body.avatar (v1: 400); an avatar over 10 MiB is 413 payload_too_large; a missing upload store is 503 dependency_unavailable."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Huma multipart operation (form part avatar, image/jpeg, image/png or image/webp). A JSON body is 415; a part outside the declared types or an undecodable image is 422 at body.avatar (v1: 400); an avatar over 10 MiB is 413 payload_too_large; a missing upload store is 503 dependency_unavailable. Demo-restricted in v2; v1's demo guard does not block it."
     },
     {
       "listener": "api",
