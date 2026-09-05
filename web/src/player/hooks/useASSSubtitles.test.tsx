@@ -7,12 +7,13 @@ import type { PlayerSubtitleInfo } from "../types";
 // Capture the options every JASSUB instance is constructed with, plus the
 // instances themselves so tests can observe later timeOffset updates.
 const constructorOpts: Array<Record<string, unknown>> = [];
-const instances: Array<{ timeOffset: number }> = [];
+const instances: Array<{ timeOffset: number; resize: ReturnType<typeof vi.fn> }> = [];
+let rendererReady: Promise<void> = Promise.resolve();
 
 vi.mock("jassub", () => {
   class MockJASSUB {
     timeOffset = 0;
-    ready = Promise.resolve();
+    ready = rendererReady;
     renderer = { setTrackByUrl: vi.fn().mockResolvedValue(undefined) };
     constructor(opts: Record<string, unknown>) {
       constructorOpts.push(opts);
@@ -85,6 +86,7 @@ function mockFontBundleResponse(bytes: string): Response {
 beforeEach(() => {
   constructorOpts.length = 0;
   instances.length = 0;
+  rendererReady = Promise.resolve();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse("")));
 });
 
@@ -209,6 +211,45 @@ describe("useASSSubtitles time offset", () => {
     await waitFor(() => expect(constructorOpts).toHaveLength(1));
 
     expect(constructorOpts[0]!.timeOffset).toBe(32);
+  });
+
+  it("waits for the renderer before repainting a changed subtitle offset", async () => {
+    let ready!: () => void;
+    rendererReady = new Promise((resolve) => {
+      ready = resolve;
+    });
+    const videoRef = makeVideoRef();
+    const { rerender } = renderHook(
+      ({ delay }) => useASSSubtitles(videoRef, [germanTrack], 6, false, 30, delay),
+      { initialProps: { delay: 0 } },
+    );
+    await waitFor(() => expect(instances).toHaveLength(1));
+    rerender({ delay: 2000 });
+    expect(instances[0]!.timeOffset).toBe(28);
+    expect(instances[0]!.resize).not.toHaveBeenCalled();
+    await act(async () => {
+      ready();
+    });
+    expect(instances[0]!.resize).toHaveBeenCalledWith(true);
+  });
+
+  it("does not repaint a destroyed instance when its renderer finishes loading", async () => {
+    let ready!: () => void;
+    rendererReady = new Promise((resolve) => {
+      ready = resolve;
+    });
+    const videoRef = makeVideoRef();
+    const { rerender, unmount } = renderHook(
+      ({ delay }) => useASSSubtitles(videoRef, [germanTrack], 6, false, 30, delay),
+      { initialProps: { delay: 0 } },
+    );
+    await waitFor(() => expect(instances).toHaveLength(1));
+    rerender({ delay: 2000 });
+    unmount();
+    await act(async () => {
+      ready();
+    });
+    expect(instances[0]!.resize).not.toHaveBeenCalled();
   });
 
   it("updates the live instance's timeOffset when the delay changes", async () => {

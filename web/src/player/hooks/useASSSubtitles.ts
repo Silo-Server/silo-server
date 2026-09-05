@@ -258,7 +258,15 @@ export function useASSSubtitles(
     if (!instance || !activeUrl) return;
 
     instance.timeOffset = effectiveOffset;
-    void instance.resize(true);
+    void instance.ready
+      .then(() => {
+        if (jassubRef.current === instance) return instance.resize(true);
+      })
+      .catch((err) => {
+        if (jassubRef.current === instance) {
+          console.error("[useASSSubtitles] Unable to repaint subtitles:", err);
+        }
+      });
   }, [effectiveOffset, activeUrl]);
 
   // Cleanup on unmount.
