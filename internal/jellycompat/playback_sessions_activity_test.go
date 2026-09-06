@@ -16,7 +16,7 @@ func TestSharedPingPreservesOwnerAndArbitratesExpiry(t *testing.T) {
 	pool := newCompatTestPool(t)
 	ownerStore := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	peerStore := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	owner := playback.NewSessionManager(0, 0)
+	owner := playback.NewSessionManager(1, 1)
 	peer := playback.NewSessionManager(0, 0)
 	owner.SetCompatActivityReader(ownerStore.NativeSessionActivity)
 	owner.SetCompatExpiryClaimer(ownerStore.ClaimNativeSessionExpiry)
@@ -45,6 +45,9 @@ func TestSharedPingPreservesOwnerAndArbitratesExpiry(t *testing.T) {
 	}
 	if status := ping(); status != 204 {
 		t.Fatalf("peer ping=%d", status)
+	}
+	if _, err := owner.StartSession(42, "profile-ping", 2, playback.PlayDirect, false); !errors.Is(err, playback.ErrTooManyStreams) {
+		t.Fatalf("stale owner admitted beyond the live shared session limit: %v", err)
 	}
 	if expired := owner.CleanInactive(time.Minute, time.Minute); len(expired) != 0 {
 		t.Fatal("owner expired successfully pinged paused session")
@@ -83,6 +86,9 @@ func TestSharedPingPreservesOwnerAndArbitratesExpiry(t *testing.T) {
 	}
 	if status := ping(); status != 404 {
 		t.Fatalf("post-retirement ping=%d", status)
+	}
+	if _, err := owner.StartSession(42, "profile-ping", 2, playback.PlayDirect, false); err != nil {
+		t.Fatalf("durable retirement did not release admission slot: %v", err)
 	}
 	if _, ok := peerStore.GetFinalizable(id, token); !ok {
 		t.Fatal("retirement lost final Stopped report mapping")

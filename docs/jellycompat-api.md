@@ -163,6 +163,8 @@ activity before idle cleanup, so pings remain effective across API replicas.
 Shared expiry and pings are serialized: a successful ping prevents stale cleanup,
 while an already-retired session rejects the ping. A shared-store failure defers
 compat session cleanup instead of treating unknown activity as inactivity.
+Retained compatibility sessions count toward stream and transcode limits until
+removal; shared-store failures conservatively retain that capacity.
 Pings do not extend the absolute playback-grant lifetime; expiry requires fresh
 playback negotiation. `/socket` uses the Jellyfin keepalive
 exchange: `ForceKeepAlive` with a 60-second timeout and `KeepAlive`

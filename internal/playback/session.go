@@ -1703,6 +1703,12 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 	if s == nil {
 		return false
 	}
+	// Shared compatibility activity may be newer than this replica's snapshot.
+	// Its retained slot is released by removal; admission must not infer that
+	// release from a stale local timestamp before cleanup or an explicit stop.
+	if s.IsJellyfinCompat && m.compatExpiryClaimer != nil {
+		return true
+	}
 	if s.activeTransportCount > 0 {
 		return true
 	}
