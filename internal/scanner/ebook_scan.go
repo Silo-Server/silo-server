@@ -135,6 +135,10 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	if s == nil || folder == nil {
 		return fmt.Errorf("scanEbookPaths: nil scanner or folder")
 	}
+	reconcileSnapshot, err := s.snapshotScanStateForRoots(ctx, folder.ID, roots)
+	if err != nil {
+		return err
+	}
 	scans, err := collectEbookRootScans(ctx, folder.ID, roots)
 	if err != nil {
 		return err
@@ -148,7 +152,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	if len(candidates) == 0 {
-		return s.reconcileEbookScan(ctx, folder, scans, nil, fullScan)
+		return s.reconcileEbookScan(ctx, folder, scans, nil, reconcileSnapshot, fullScan)
 	}
 
 	workers := ebookScanWorkers()
@@ -251,7 +255,10 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	for _, p := range candidates {
 		seenPaths[p] = true
 	}
-	return s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan)
+	if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, presentScanPaths(seenPaths)); err != nil {
+		return fmt.Errorf("refreshing present ebook paths: %w", err)
+	}
+	return s.reconcileEbookScan(ctx, folder, scans, seenPaths, reconcileSnapshot, fullScan)
 }
 
 // ebookCleanupGuardRepo is the slice of catalog.FolderRepository the
@@ -367,7 +374,7 @@ func (s *Scanner) emptyCleanupDecision(
 
 // reconcileEbookScan applies the post-walk safety policy and then performs
 // missing-file reconciliation for the roots that walked cleanly.
-func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool) error {
+func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, existingFiles []*scanStateFile, fullScan bool) error {
 	if folder != nil {
 		defer s.reconcileMissingEbookEnrichment(ctx, folder.ID)
 	}
@@ -400,8 +407,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 	if blockAll {
 		return nil
 	}
-
-	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths, confirmedCleanup); err != nil {
+	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths, existingFiles, confirmedCleanup); err != nil {
 		return err
 	}
 	if fullScan && s.folderRepo != nil {
@@ -419,34 +425,32 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 // folder trash is optionally emptied, and library memberships are reconciled
 // so items with no remaining files are removed (renames therefore converge on
 // the newly indexed path instead of leaving a stale duplicate item).
-func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, confirmedCleanup bool) error {
+func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, existingFiles []*scanStateFile, confirmedCleanup bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
 
 	now := time.Now().UTC()
 	missing := 0
-	for _, root := range roots {
-		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
-		if err != nil {
-			return fmt.Errorf("listing existing ebook files for %q: %w", root, err)
+	for _, mf := range existingFiles {
+		if mf == nil || seenPaths[mf.FilePath] || !pathWithinAnyRoot(mf.FilePath, roots) {
+			continue
 		}
-		for _, mf := range existing {
-			if mf == nil || seenPaths[mf.FilePath] {
+		if mf.MissingSince == nil {
+			marked, err := s.fileRepo.MarkMissingIfUnchanged(ctx, mf.ID, mf.ScanGeneration, now)
+			if err != nil {
+				slog.ErrorContext(ctx, "ebook scan: failed to mark file missing", "component", "scanner",
+					"folder_id", folder.ID,
+					"path", mf.FilePath,
+					"error", err,
+				)
 				continue
 			}
-			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
-					slog.ErrorContext(ctx, "ebook scan: failed to mark file missing", "component", "scanner",
-						"folder_id", folder.ID,
-						"path", mf.FilePath,
-						"error", err,
-					)
-					continue
-				}
+			if !marked {
+				continue
 			}
-			missing++
 		}
+		missing++
 	}
 
 	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)

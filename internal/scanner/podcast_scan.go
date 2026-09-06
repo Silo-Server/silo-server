@@ -30,6 +30,11 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		return fmt.Errorf("ScanPodcastFolder: nil scanner or folder")
 	}
 
+	reconcileSnapshot, err := s.snapshotScanStateForRoots(ctx, folder.ID, folder.Paths)
+	if err != nil {
+		return err
+	}
+
 	var attempted int
 	var succeeded int
 	var failures scanFailures
@@ -84,7 +89,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 	if attempted > 0 && succeeded == 0 && failures.len() > 0 {
 		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, failures.join())
 	}
-	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths); err != nil {
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, reconcileSnapshot); err != nil {
 		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	return nil
@@ -217,7 +222,7 @@ func applyPodcastShowMetadata(item *models.MediaItem, show *parsedPodcastShow) b
 	return changed
 }
 
-func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool) error {
+func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, existingFiles []*scanStateFile) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -231,27 +236,28 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 	if blockAll {
 		return nil
 	}
+	if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, presentScanPaths(seenPaths)); err != nil {
+		return fmt.Errorf("refreshing present podcast paths: %w", err)
+	}
 
 	now := time.Now().UTC()
 	missing := 0
-	for _, root := range roots {
-		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
-		if err != nil {
-			return fmt.Errorf("listing existing podcast files for %q: %w", root, err)
+	for _, mf := range existingFiles {
+		if mf == nil || seenPaths[mf.FilePath] || !pathWithinAnyRoot(mf.FilePath, roots) {
+			continue
 		}
-		for _, mf := range existing {
-			if mf == nil || seenPaths[mf.FilePath] {
+		if mf.MissingSince == nil {
+			marked, err := s.fileRepo.MarkMissingIfUnchanged(ctx, mf.ID, mf.ScanGeneration, now)
+			if err != nil {
+				slog.ErrorContext(ctx, "podcast scan: failed to mark file missing", "component", "scanner",
+					"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 				continue
 			}
-			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
-					slog.ErrorContext(ctx, "podcast scan: failed to mark file missing", "component", "scanner",
-						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
-					continue
-				}
+			if !marked {
+				continue
 			}
-			missing++
 		}
+		missing++
 	}
 
 	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)

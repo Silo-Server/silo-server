@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -930,6 +932,9 @@ func (s *Scanner) scanPaths(
 	result.Updated += extraStats.Updated
 	result.Unchanged += extraStats.Unchanged
 	result.Errors += extraStats.Errors
+	if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, presentScanPaths(seenPaths)); err != nil {
+		return nil, err
+	}
 
 	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
@@ -965,14 +970,14 @@ func (s *Scanner) scanPaths(
 		result.FilesDeleted += trashed
 	}
 
-	staleFileIDs := collectStaleRemovedPathFileIDs(existingFiles, seenPaths, reconcileRoots)
+	staleFiles := collectStaleRemovedPathFiles(existingFiles, seenPaths, reconcileRoots)
 	if len(filePaths) == 0 && allowEmptyCleanup {
-		staleFileIDs = make([]int, 0, len(existingFiles))
+		staleFiles = make([]fileScanFence, 0, len(existingFiles))
 		for _, existing := range existingFiles {
-			staleFileIDs = append(staleFileIDs, existing.ID)
+			staleFiles = append(staleFiles, fileScanFence{ID: existing.ID, ScanGeneration: existing.ScanGeneration})
 		}
 	}
-	deletedFiles, err := s.fileRepo.DeleteByIDs(ctx, staleFileIDs)
+	deletedFiles, err := s.fileRepo.DeleteIfUnchanged(ctx, staleFiles)
 	if err != nil {
 		return nil, fmt.Errorf("deleting stale files for folder %d: %w", folder.ID, err)
 	}
@@ -1067,6 +1072,10 @@ func (s *Scanner) scanFolderByRoots(
 		configuredRoots = cleanScanRoots(walkRoots)
 	}
 	roots := compactScanRoots(configuredRoots)
+	outsideRootFences, err := s.fileRepo.ListFencesOutsideRoots(ctx, folder.ID, roots)
+	if err != nil {
+		return nil, fmt.Errorf("snapshotting stale files outside configured roots for folder %d: %w", folder.ID, err)
+	}
 
 	// An unreachable root (dead drive, lost mount) is temporarily offline, not
 	// removed from the library: its files are left untouched below — not
@@ -1378,11 +1387,7 @@ func (s *Scanner) scanFolderByRoots(
 		result.FilesDeleted += trashed
 	}
 
-	staleOutsideRoots, err := s.fileRepo.ListIDsOutsideRoots(ctx, folder.ID, roots)
-	if err != nil {
-		return nil, fmt.Errorf("listing stale files outside configured roots for folder %d: %w", folder.ID, err)
-	}
-	deletedOutsideRoots, err := s.fileRepo.DeleteByIDs(ctx, staleOutsideRoots)
+	deletedOutsideRoots, err := s.fileRepo.DeleteIfUnchanged(ctx, outsideRootFences)
 	if err != nil {
 		return nil, fmt.Errorf("deleting stale files outside configured roots for folder %d: %w", folder.ID, err)
 	}
@@ -1769,6 +1774,9 @@ func (s *Scanner) scanScope(
 		result.Updated += extraStats.Updated
 		result.Unchanged += extraStats.Unchanged
 		result.Errors += extraStats.Errors
+		if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, presentScanPaths(seenPaths)); err != nil {
+			return nil, err
+		}
 	}
 
 	return &scopedScan{
@@ -1845,17 +1853,17 @@ func (s *Scanner) applyScopedScan(
 	}
 	s.markMissingExcludingProtected(ctx, folder.ID, scope.existingFiles, scope.seenPaths, protectedRoots, scope.result)
 
-	staleFileIDs := collectStaleRemovedPathFileIDs(scope.existingFiles, scope.seenPaths, scope.reconcileRoots)
+	staleFiles := collectStaleRemovedPathFiles(scope.existingFiles, scope.seenPaths, scope.reconcileRoots)
 	if forceDeleteAll && len(scope.filePaths) == 0 {
-		staleFileIDs = make([]int, 0, len(scope.existingFiles))
+		staleFiles = make([]fileScanFence, 0, len(scope.existingFiles))
 		for _, existing := range scope.existingFiles {
 			if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
 				continue
 			}
-			staleFileIDs = append(staleFileIDs, existing.ID)
+			staleFiles = append(staleFiles, fileScanFence{ID: existing.ID, ScanGeneration: existing.ScanGeneration})
 		}
 	}
-	deletedFiles, err := s.fileRepo.DeleteByIDs(ctx, staleFileIDs)
+	deletedFiles, err := s.fileRepo.DeleteIfUnchanged(ctx, staleFiles)
 	if err != nil {
 		return fmt.Errorf("deleting stale files for scope %q: %w", scope.reconcileRoots[0], err)
 	}
@@ -1906,12 +1914,16 @@ func (s *Scanner) markMissingExcludingProtected(
 		}
 		// Only mark as missing if not already marked.
 		if existing.MissingSince == nil {
-			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
+			marked, err := s.fileRepo.MarkMissingIfUnchanged(ctx, existing.ID, existing.ScanGeneration, now)
+			if err != nil {
 				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
 					"path", existing.FilePath,
 					"error", err,
 				)
 				result.Errors++
+				continue
+			}
+			if !marked {
 				continue
 			}
 		}
@@ -2361,8 +2373,8 @@ func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.M
 	return trashed, removedMemberships, deletedItems, nil
 }
 
-func collectStaleRemovedPathFileIDs(existingFiles []*scanStateFile, seenPaths map[string]bool, roots []string) []int {
-	ids := make([]int, 0)
+func collectStaleRemovedPathFiles(existingFiles []*scanStateFile, seenPaths map[string]bool, roots []string) []fileScanFence {
+	fences := make([]fileScanFence, 0)
 	for _, existing := range existingFiles {
 		if seenPaths[existing.FilePath] {
 			continue
@@ -2370,9 +2382,43 @@ func collectStaleRemovedPathFileIDs(existingFiles []*scanStateFile, seenPaths ma
 		if pathWithinAnyRoot(existing.FilePath, roots) {
 			continue
 		}
-		ids = append(ids, existing.ID)
+		fences = append(fences, fileScanFence{ID: existing.ID, ScanGeneration: existing.ScanGeneration})
 	}
-	return ids
+	return fences
+}
+
+func presentScanPaths(seenPaths map[string]bool) []string {
+	return slices.Collect(maps.Keys(seenPaths))
+}
+
+// snapshotScanStateForRoots captures the row generations before a filesystem
+// walk starts. Reconciliation must use this snapshot rather than re-reading
+// after the walk, otherwise a concurrent scan that finishes during the walk
+// can look old to the late snapshot and be overwritten.
+func (s *Scanner) snapshotScanStateForRoots(ctx context.Context, folderID int, roots []string) ([]*scanStateFile, error) {
+	if s == nil || s.fileRepo == nil {
+		return nil, nil
+	}
+
+	files := make([]*scanStateFile, 0)
+	seenIDs := make(map[int]struct{})
+	for _, root := range cleanScanRoots(roots) {
+		rootFiles, err := s.fileRepo.GetScanStateByFolderAndPathPrefix(ctx, folderID, root)
+		if err != nil {
+			return nil, fmt.Errorf("snapshotting scan state for folder %d root %q: %w", folderID, root, err)
+		}
+		for _, file := range rootFiles {
+			if file == nil {
+				continue
+			}
+			if _, exists := seenIDs[file.ID]; exists {
+				continue
+			}
+			seenIDs[file.ID] = struct{}{}
+			files = append(files, file)
+		}
+	}
+	return files, nil
 }
 
 func collectScanStateContentIDs(files []*scanStateFile) []string {
@@ -2490,6 +2536,9 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if stats.Errors > 0 {
 			return fmt.Errorf("processing extra file %s failed", cleanFile)
 		}
+		if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, []string{cleanFile}); err != nil {
+			return err
+		}
 		// The Upsert above already nulled this row's content/episode links as
 		// part of converting it into an extra. What still needs repair is the
 		// library membership: if this was the last primary file behind an
@@ -2546,6 +2595,9 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err != nil {
 		return err
 	}
+	if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, []string{cleanFile}); err != nil {
+		return err
+	}
 	if err := s.reconcileScannedRoots(
 		ctx,
 		folder.ID,
@@ -2594,18 +2646,15 @@ func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *mod
 		return true, fmt.Errorf("reconcile vanished file: scanner repositories not configured")
 	}
 
-	file, err := s.fileRepo.GetByPath(ctx, filePath)
+	file, err := s.fileRepo.GetScanStateByFolderAndPath(ctx, folder.ID, filePath)
 	if errors.Is(err, ErrFileNotFound) {
 		return true, nil
 	}
 	if err != nil {
 		return true, fmt.Errorf("loading vanished media file %s: %w", filePath, err)
 	}
-	if file.MediaFolderID != folder.ID {
-		return true, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
-	}
 	if file.MissingSince == nil {
-		if err := s.fileRepo.MarkMissing(ctx, file.ID, time.Now().UTC()); err != nil {
+		if _, err := s.fileRepo.MarkMissingIfUnchanged(ctx, file.ID, file.ScanGeneration, time.Now().UTC()); err != nil {
 			return true, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
 		}
 	}
