@@ -33,8 +33,9 @@ series or season's favorite status; a storage failure rolls back the entire
 update. Marking played or unplayed clears the resume position unless the request
 supplies an explicit position. Read-only
 echoed fields such as `UnplayedItemCount`, `Key`, and `ItemId` are ignored.
-Ratings, likes, and play counts above 1 return 400. Inaccessible items and another
-profile's user ID are rejected before mutation.
+Non-null `Rating` or `Likes` values return 400. `PlayCount` accepts only 0 or 1;
+other values return 400. Inaccessible items and another profile's user ID are
+rejected before mutation.
 
 Configuration maps audio language, subtitle language, autoplay, and subtitle
 mode into Silo's canonical profile settings. `Default` and `Smart` map to
@@ -81,6 +82,8 @@ tag/language facets remain outside this subset.
 capabilities, including client bitrate ceilings, audio-channel limits, container
 conditions, and subtitle delivery profiles. The negotiated source records the
 selected output constraints so local and remote encoders use the same decision.
+Progressive remux evaluates container constraints against its MP4 output;
+direct play evaluates them against the original source container.
 Unknown or excessive source bitrate prevents copying under a client ceiling.
 An automatic VideoToolbox bitrate must not override an explicit client cap.
 Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.

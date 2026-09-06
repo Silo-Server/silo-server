@@ -221,8 +221,9 @@ func (p DeviceProfile) SupportsDirectPlayForAudioStream(version catalog.FileVers
 // SupportsDirectStream reports whether a version can be remuxed without a full
 // video transcode.
 func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
+	version.Container = compatContainerMP4
 	if len(p.DirectPlayProfiles) == 0 {
-		return true
+		return p.codecProfileCompatibility(version, nil).supportsDirectPlay()
 	}
 	for _, profile := range p.DirectPlayProfiles {
 		if !matchesVideoType(profile.Type) {
@@ -230,7 +231,7 @@ func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
 		}
 		if matchesCSV(profile.VideoCodec, version.CodecVideo) &&
 			matchesCSV(profile.AudioCodec, version.CodecAudio) {
-			return true
+			return p.codecProfileCompatibility(version, nil).supportsDirectPlay()
 		}
 	}
 	return false
@@ -337,6 +338,16 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 	if len(p.TranscodingProfiles) == 0 {
 		// Omitted profiles retain the permissive legacy audio-remux fallback,
 		// while explicit profiles below must authorize the actual container.
+		videoSupported := len(p.DirectPlayProfiles) == 0
+		for _, profile := range p.DirectPlayProfiles {
+			if matchesVideoType(profile.Type) && matchesCSV(profile.VideoCodec, version.CodecVideo) {
+				videoSupported = true
+				break
+			}
+		}
+		if !videoSupported {
+			return false
+		}
 		return p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
 	}
 	for _, profile := range p.TranscodingProfiles {
@@ -384,6 +395,8 @@ func (p DeviceProfile) SupportsVideoCodecForDirectStream(version catalog.FileVer
 }
 
 func (p DeviceProfile) SupportsVideoCodecForDirectStreamForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+	// Progressive remux writes MP4 even when the original is Matroska.
+	version.Container = compatContainerMP4
 	if len(p.DirectPlayProfiles) == 0 {
 		return p.codecProfileCompatibility(version, audioStreamIndex).VideoSupported
 	}
@@ -399,12 +412,13 @@ func (p DeviceProfile) SupportsVideoCodecForDirectStreamForAudioStream(version c
 }
 
 // SupportsAudioCodecForDirectStream reports whether the client can accept the
-// source audio codec in a remux-style stream, regardless of container.
+// source audio codec in a progressive MP4 remux stream.
 func (p DeviceProfile) SupportsAudioCodecForDirectStream(version catalog.FileVersion) bool {
 	return p.SupportsAudioCodecForDirectStreamForAudioStream(version, nil)
 }
 
 func (p DeviceProfile) SupportsAudioCodecForDirectStreamForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+	version.Container = compatContainerMP4
 	if len(p.DirectPlayProfiles) == 0 {
 		return p.codecProfileCompatibility(version, audioStreamIndex).AudioSupported
 	}

@@ -298,3 +298,71 @@ func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestProgressiveRemuxChecksMP4OutputContainer(t *testing.T) {
+	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 8000,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500000}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
+	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, tc := range []struct{ property, value string }{
+		{"Width", "1280"}, {"VideoBitrate", "4000000"}, {"AudioChannels", "2"},
+	} {
+		t.Run(tc.property, func(t *testing.T) {
+			profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "h264", AudioCodec: "aac"}}, ContainerProfiles: []ContainerProfile{{Type: "Video", Container: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: tc.property, Value: tc.value, IsRequired: true}}}}}
+			// Original MKV remains supported; restrictions apply to the delivered MP4.
+			if !profile.SupportsDirectPlay(version) {
+				t.Fatal("MP4 condition rejected original MKV")
+			}
+			if profile.SupportsDirectStream(version) || profile.SupportsVideoCodecForDirectStream(version) || profile.SupportsAudioCodecForDirectStream(version) {
+				t.Fatal("progressive MP4 ignored output restriction")
+			}
+			source := handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{EnableDirectPlay: new(false), EnableTranscoding: new(false)}, true)
+			if source.SupportsDirectStream || source.SupportsTranscoding {
+				t.Fatalf("advertised unsupported remux: %+v", source)
+			}
+			profile.ContainerProfiles[0].Container = "mkv"
+			if profile.SupportsDirectPlay(version) {
+				t.Fatal("original MKV ignored source restriction")
+			}
+			source = handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{EnableDirectPlay: new(false), EnableTranscoding: new(false)}, true)
+			if !source.SupportsDirectStream || source.HLSRemux {
+				t.Fatalf("MKV restriction leaked into progressive MP4: %+v", source)
+			}
+		})
+	}
+}
+
+func TestHLSAudioTranscodeChecksAdaptedOutputContainer(t *testing.T) {
+	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "eac3",
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6}}}
+	profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}},
+		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}},
+		ContainerProfiles:   []ContainerProfile{{Type: "Video", Container: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "AudioChannels", Value: "2", IsRequired: true}}}}}
+	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
+	source := handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, true)
+	if !source.SupportsTranscoding || !source.HLSRemux || !source.TranscodeAudio || source.TargetAudioChannels != 2 {
+		t.Fatalf("AAC stereo HLS rejected by source surround channels: %+v", source)
+	}
+	profile.ContainerProfiles[0].Conditions = append(profile.ContainerProfiles[0].Conditions, ProfileCondition{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true})
+	source = handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, true)
+	if source.SupportsTranscoding || source.HLSRemux {
+		t.Fatal("audio adaptation bypassed MP4 video dimension restriction")
+	}
+}
+
+func TestProgressiveAndHLSCodecContainerScopes(t *testing.T) {
+	version := catalog.FileVersion{Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}}
+	for _, container := range []string{"hls", "mp4"} {
+		t.Run(container, func(t *testing.T) {
+			profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}}, CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Container: container, SubContainer: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}}}}}
+			if got := profile.SupportsVideoCodecForDirectStream(version); got != (container == "hls") {
+				t.Fatalf("progressive support=%v for codec container=%s", got, container)
+			}
+			if profile.SupportsHLSRemuxForAudioStream(version, nil) {
+				t.Fatal("HLS bypassed applicable output codec condition")
+			}
+			if !profile.SupportsDirectPlay(version) {
+				t.Fatal("output codec condition rejected original MKV")
+			}
+		})
+	}
+}
