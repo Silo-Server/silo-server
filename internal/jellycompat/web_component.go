@@ -28,11 +28,14 @@ import (
 const (
 	DefaultWebSourceURL = "https://github.com/jellyfin/jellyfin-web.git"
 
-	webMetadataFile = "SILO-JELLYFIN-WEB.json"
-	webSourceFile   = "SILO-JELLYFIN-WEB-SOURCE.txt"
-	webInstallLock  = ".installing"
-	webLastError    = ".last-error"
-	webTempMarker   = ".silo-jellyfin-web-temp"
+	webMetadataFile          = "SILO-JELLYFIN-WEB.json"
+	webSourceFile            = "SILO-JELLYFIN-WEB-SOURCE.txt"
+	webInstallLock           = ".installing"
+	webLastError             = ".last-error"
+	webTempMarker            = ".silo-jellyfin-web-temp"
+	webSeekReanchorPatch     = "silo-seek-reanchor-v1"
+	webPlaybackManagerSource = "src/components/playback/playbackmanager.js"
+	webHTMLVideoPlayerSource = "src/plugins/htmlVideoPlayer/plugin.js"
 
 	webMalformedLockGrace = 2 * time.Minute
 	webOperationStaleAge  = 90 * time.Minute
@@ -87,16 +90,17 @@ const (
 )
 
 type WebComponentMetadata struct {
-	Component    string `json:"component"`
-	SourceURL    string `json:"source_url"`
-	Version      string `json:"version"`
-	Tag          string `json:"tag"`
-	CommitSHA    string `json:"commit_sha"`
-	Checksum     string `json:"checksum"`
-	BuildCommand string `json:"build_command"`
-	InstalledAt  string `json:"installed_at"`
-	Modified     bool   `json:"modified"`
-	License      string `json:"license"`
+	Component    string   `json:"component"`
+	SourceURL    string   `json:"source_url"`
+	Version      string   `json:"version"`
+	Tag          string   `json:"tag"`
+	CommitSHA    string   `json:"commit_sha"`
+	Checksum     string   `json:"checksum"`
+	BuildCommand string   `json:"build_command"`
+	InstalledAt  string   `json:"installed_at"`
+	Modified     bool     `json:"modified"`
+	Patches      []string `json:"patches,omitempty"`
+	License      string   `json:"license"`
 }
 
 type WebInstallerPrerequisite struct {
@@ -551,6 +555,10 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	if err := patchManagedWebSources(srcDir); err != nil {
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
 	reportProgress(WebComponentOperationInstalling, 35, "Installing Jellyfin Web dependencies")
 	if err := run(ctx, srcDir, []string{"npm", "ci"}, ""); err != nil {
 		err = fmt.Errorf("install jellyfin-web dependencies: %w", err)
@@ -591,7 +599,8 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		Checksum:     "sha256:" + checksum,
 		BuildCommand: "npm ci && npm run build:production",
 		InstalledAt:  now().UTC().Format(time.RFC3339),
-		Modified:     false,
+		Modified:     true,
+		Patches:      []string{webSeekReanchorPatch},
 		License:      "GPL-2.0",
 	}
 	if err := writeWebMetadata(stagedDir, metadata); err != nil {
@@ -1478,6 +1487,67 @@ func writeWebMetadata(dir string, metadata WebComponentMetadata) error {
 	return os.WriteFile(filepath.Join(dir, webMetadataFile), data, 0o644)
 }
 
+// patchManagedWebSources changes upstream source before webpack builds it. Exact,
+// unique anchors fail closed on incompatible revisions rather than installing a
+// bundle that advertises the extension without implementing the seek decision.
+func patchManagedWebSources(root string) error {
+	patches := []struct{ path, before, after string }{
+		{
+			webPlaybackManagerSource,
+			"    const query = {\n        UserId: apiClient.getCurrentUserId(),\n        StartTimeTicks: options.startPosition || 0\n    };",
+			"    const query = {\n        SiloSeekReanchor: true,\n        UserId: apiClient.getCurrentUserId(),\n        StartTimeTicks: options.startPosition || 0\n    };",
+		},
+		{
+			webPlaybackManagerSource,
+			"        function changeStream(player, ticks, params) {\n            if (canPlayerSeek(player) && params == null) {",
+			"        function changeStream(player, ticks, params) {\n            if (canPlayerSeek(player) && params == null\n                && (!self.currentMediaSource(player)?.SiloSeekReanchor\n                    || (ticks >= (getPlayerData(player).streamInfo.playerStartPositionTicks || 0)\n                        && typeof player.canSeekTo === 'function' && player.canSeekTo(ticks / 10000)))) {",
+		},
+		{
+			webHTMLVideoPlayerSource,
+			"    seekable() {\n        const mediaElement = this.#mediaElement;",
+			`    canSeekTo(milliseconds) {
+        if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+            return false;
+        }
+        const ranges = this.#mediaElement?.seekable;
+        const seconds = milliseconds / 1000;
+        for (let i = 0; ranges && i < ranges.length; i++) {
+            if (seconds >= ranges.start(i) && seconds <= ranges.end(i)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    seekable() {
+        const mediaElement = this.#mediaElement;`,
+		},
+	}
+	// Validate every replacement before touching either source file.
+	updated := map[string]string{}
+	for _, patch := range patches {
+		path := filepath.Join(root, filepath.FromSlash(patch.path))
+		source, loaded := updated[path]
+		if !loaded {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("apply Jellyfin Web %s to %s: %w", webSeekReanchorPatch, patch.path, err)
+			}
+			source = string(data)
+		}
+		if strings.Count(source, patch.before) != 1 {
+			return fmt.Errorf("apply Jellyfin Web %s: incompatible upstream source %s (expected one matching anchor)", webSeekReanchorPatch, patch.path)
+		}
+		updated[path] = strings.Replace(source, patch.before, patch.after, 1)
+	}
+	for path, source := range updated {
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			return fmt.Errorf("write patched Jellyfin Web source: %w", err)
+		}
+	}
+	return nil
+}
+
 func readWebMetadata(dir string) (WebComponentMetadata, error) {
 	var metadata WebComponentMetadata
 	data, err := os.ReadFile(filepath.Join(dir, webMetadataFile))
@@ -1499,11 +1569,12 @@ Commit: %s
 License: %s
 Build: %s
 Modified: %t
+Patches: %s
 Checksum: %s
 
 This component is separate from Silo's AGPL-licensed server code. It is installed only
 when an administrator explicitly requests Jellyfin-compatible web UI assets.
-`, metadata.SourceURL, metadata.Tag, metadata.CommitSHA, metadata.License, metadata.BuildCommand, metadata.Modified, metadata.Checksum)
+`, metadata.SourceURL, metadata.Tag, metadata.CommitSHA, metadata.License, metadata.BuildCommand, metadata.Modified, strings.Join(metadata.Patches, ", "), metadata.Checksum)
 	return os.WriteFile(filepath.Join(dir, webSourceFile), []byte(body), 0o644)
 }
 

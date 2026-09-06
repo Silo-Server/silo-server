@@ -8,15 +8,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestHandleFilters2Stub verifies /Items/Filters2 returns 200 with Jellyfin's
 // v2 QueryFilters shape (every field an array, never null).
 func TestHandleFilters2Stub(t *testing.T) {
-	h := &ItemsHandler{}
+	h := &ItemsHandler{codec: NewResourceIDCodec(), content: &genresContentService{}}
 	req := httptest.NewRequest(http.MethodGet, "/Items/Filters2?IncludeItemTypes=Movie&Recursive=true", nil)
 	rec := httptest.NewRecorder()
 
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
 	h.HandleFilters2Stub(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -113,7 +115,8 @@ func TestHandleSessions(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/Sessions?deviceId=abc123", nil)
 	rec := httptest.NewRecorder()
 
-	HandleSessions(rec, req)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "caller"}))
+	(&PlaybackHandler{playbackStore: NewPlaybackSessionStore(time.Hour, nil)}).HandleSessions(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

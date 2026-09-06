@@ -23,6 +23,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
+const sqliteUserStoreBackend = "sqlite"
+
 // NewRouter builds the Jellyfin-compatibility router.
 func NewRouter(deps Dependencies) chi.Router {
 	declareJellycompatMediaRoutes()
@@ -67,7 +69,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(middleware.Recoverer)
 
 	systemHandler := NewSystemHandler(deps.CurrentConfig)
-	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator)
+	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator).WithUserStore(deps.UserStoreProvider)
 	nextUpRepo := catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
 	var subtitleRepo subtitles.Repository
 	if deps.SubtitleRepo != nil {
@@ -76,6 +78,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
+	itemsHandler.catalogUserState = deps.Config != nil && deps.Config.UserDB.Backend != sqliteUserStoreBackend
 	itemsHandler.recommender = deps.Recommender
 	if deps.DB != nil {
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
@@ -105,6 +108,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		autoscanVirtualFoldersRegistered = true
 	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)
+	if store, ok := deps.PlaybackStore.(*DurableCompatPlaybackStore); ok && store.pool != nil {
+		if manager, ok := deps.SessionMgr.(interface {
+			SetCompatActivityReader(playback.SessionActivityReader)
+			SetCompatExpiryClaimer(playback.SessionExpiryClaimer)
+		}); ok {
+			manager.SetCompatActivityReader(store.NativeSessionActivity)
+			manager.SetCompatExpiryClaimer(store.ClaimNativeSessionExpiry)
+		}
+	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {
@@ -149,6 +161,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
+	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.DetailSvc, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
@@ -203,12 +216,15 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/{id}/Similar", itemsHandler.HandleSimilar)
 			r.Get("/Movies/{id}/Similar", itemsHandler.HandleSimilar)
 			r.Get("/Shows/{id}/Similar", itemsHandler.HandleSimilar)
-			r.Get("/Items/{id}/ThemeMedia", itemsHandler.HandleItemStub)
+			r.Get("/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
+			r.Get("/Items/{id}/Ancestors", itemsHandler.HandleAncestors)
+			r.Get("/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
-			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleItemStub)
+			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
+			r.Get("/Users/{userId}/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Users/{userId}/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
@@ -216,6 +232,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
+			r.Get("/Studios", itemsHandler.HandleStudios)
 			r.Get("/Genres", itemsHandler.HandleGenres)
 			r.Get("/Genres/{name}", itemsHandler.HandleGenreByName)
 			r.Get("/Shows/{id}/Seasons", itemsHandler.HandleSeasons)
@@ -228,6 +245,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/UserItems/Resume", itemsHandler.HandleResume)
 			r.Get("/Search/Hints", itemsHandler.HandleSearchHints)
 			r.Get("/UserItems/{itemId}/UserData", userDataHandler.HandleGetUserData)
+			r.Post("/UserItems/{itemId}/UserData", userDataHandler.HandleUpdateUserData)
+			r.Post("/Users/Configuration", authHandler.HandleUpdateConfiguration)
+			r.Post("/Users/{userId}/Configuration", authHandler.HandleUpdateConfiguration)
+			r.Get("/Localization/Cultures", authHandler.HandleCultures)
 			r.Post("/UserFavoriteItems/{itemId}", userDataHandler.HandleAddFavorite)
 			r.Delete("/UserFavoriteItems/{itemId}", userDataHandler.HandleRemoveFavorite)
 			r.Post("/UserPlayedItems/{itemId}", userDataHandler.HandleMarkPlayed)
@@ -247,10 +268,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			} else {
 				r.Get("/Persons", itemsHandler.HandleItemStub)
 			}
-			r.Get("/Studios", itemsHandler.HandleItemStub)
 			r.Get("/Artists", itemsHandler.HandleItemStub)
 			r.Get("/Movies/Recommendations", recsHandler.HandleRecommendations)
-			r.Get("/Sessions", HandleSessions)
+			r.Get("/Sessions", playbackHandler.HandleSessions)
+			r.Post("/Sessions/Playing/Ping", playbackHandler.HandleSessionPlayingPing)
 			r.Post("/Sessions/Capabilities", playbackHandler.HandleCapabilitiesFull)
 			r.Post("/Sessions/Capabilities/Full", playbackHandler.HandleCapabilitiesFull)
 			r.Get("/Playback/BitrateTest", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Playback/BitrateTest", playbackHandler.HandleBitrateTest))
@@ -264,12 +285,11 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Delete("/Videos/ActiveEncodings", playbackHandler.HandleDeleteActiveEncodings)
 			r.Post("/Sessions/Logout", authHandler.HandleLogout)
 			r.Post("/ClientLog/Document", HandleClientLogDocument)
-			r.Get("/socket", HandleSocket)
+			r.Get("/socket", NewSocketHandler(deps.SessionStore, adminAPIKeyAuth))
 		})
 	}
 
-	// Stream routes: use playback-session auth fallback for media players
-	// (e.g. libmpv) that don't forward auth headers or query parameters.
+	// Media requests require a token or a PlaySessionId scoped to the negotiated source.
 	r.Group(func(r chi.Router) {
 		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
 		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
@@ -295,8 +315,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxTSV1HLSManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxTSV1HLSSegment))
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
-		// Infuse probes external subtitles with an extra numeric path component before stream.{format}.
-		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
+		r.Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", playbackHandler.HandleAttachment))
+		// Jellyfin subtitle routes encode the start position in ticks in this component.
+		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
 	})
 
 	r.Method(http.MethodHead, "/System/Info/Public", http.HandlerFunc(systemHandler.HandlePublicInfo))
@@ -379,7 +400,7 @@ func withDefaults(deps Dependencies) Dependencies {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL
 	}
 	if deps.DeviceProfiles == nil {
-		deps.DeviceProfiles = NewDeviceProfileStore(playbackTTL, deps.Now)
+		deps.DeviceProfiles = NewDeviceProfileStore(playbackTTL, deps.Now).WithDB(deps.DB)
 	}
 	if deps.PlaybackStore == nil {
 		// Back the compat playback store with Postgres when a pool is available so
@@ -408,6 +429,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.AccessFilterFn,
 			deps.CatalogSearchProvider,
 		)
+		svc.catalogUserState = deps.Config != nil && deps.Config.UserDB.Backend != sqliteUserStoreBackend
 		if deps.PosterPresigner != nil {
 			svc.posterPresigner = deps.PosterPresigner
 			svc.presignTTL = deps.PresignTTL

@@ -91,6 +91,8 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 			Container:  "ts",
 			VideoCodec: "h264",
 			AudioCodec: "aac",
+		}, {
+			Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc", AudioCodec: "aac",
 		}},
 	}
 
@@ -396,8 +398,10 @@ func TestCodecProfileAVCRefFramesConstraint(t *testing.T) {
 	if source.SupportsDirectPlay || source.SupportsDirectStream {
 		t.Fatalf("video copy was allowed unexpectedly: direct=%v stream=%v", source.SupportsDirectPlay, source.SupportsDirectStream)
 	}
-	if !source.SupportsTranscoding {
-		t.Fatal("SupportsTranscoding = false, want true")
+	// The encoder does not freeze a reference-frame target across executors.
+	// Reject rather than promise that an unspecified output meets this ceiling.
+	if source.SupportsTranscoding {
+		t.Fatal("SupportsTranscoding = true for an unenforced reference-frame ceiling")
 	}
 }
 
@@ -874,5 +878,24 @@ func unsupportedRangeProfile(codec, ranges string) CodecProfile {
 			Property:  "VideoRangeType",
 			Value:     ranges,
 		}},
+	}
+}
+
+func TestAudioTranscodeRemuxTriesLaterProfileConditions(t *testing.T) {
+	version := catalog.FileVersion{CodecVideo: "h264", CodecAudio: "dts", VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "dts", Channels: 6}}}
+	rejected := TranscodingProfile{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac", Conditions: []ProfileCondition{{Condition: "Equals", Property: "AudioChannels", Value: "6", IsRequired: true}}}
+	accepted := rejected
+	accepted.Conditions = []ProfileCondition{{Condition: "Equals", Property: "AudioChannels", Value: "2", IsRequired: true}}
+	for _, tc := range []struct {
+		name     string
+		profiles []TranscodingProfile
+		want     bool
+	}{{"later stereo output matches", []TranscodingProfile{rejected, accepted}, true}, {"only incompatible output", []TranscodingProfile{rejected}, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := DeviceProfile{TranscodingProfiles: tc.profiles}
+			if got := profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, nil, 2); got != tc.want {
+				t.Fatalf("supports remux=%v want %v", got, tc.want)
+			}
+		})
 	}
 }

@@ -329,6 +329,16 @@ func (s *interestTrackingStore) SetProgressAt(ctx context.Context, profileID, me
 	return err
 }
 
+func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context, profileID string, ids []string) (map[string]string, error) {
+	reader, ok := s.UserStore.(interface {
+		ListJellycompatProgressDates(context.Context, string, []string) (map[string]string, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return reader.ListJellycompatProgressDates(ctx, profileID, ids)
+}
+
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
@@ -506,4 +516,33 @@ func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) er
 		}
 	}
 	return err
+}
+
+// ApplyJellycompatProgress preserves the atomic leaf edit through the production
+// decorator and queues derived state only after its transaction commits.
+func (s *interestTrackingStore) ApplyJellycompatProgress(ctx context.Context, profileID string, edit userstore.JellycompatProgressEdit) error {
+	writer, ok := s.UserStore.(userstore.JellycompatProgressEditor)
+	if !ok {
+		return fmt.Errorf("atomic user progress updates unavailable")
+	}
+	if err := writer.ApplyJellycompatProgress(ctx, profileID, edit); err != nil {
+		return err
+	}
+	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
+	return nil
+}
+
+// ApplyJellycompatParent queues parent and child interest changes only after
+// their shared transaction commits.
+func (s *interestTrackingStore) ApplyJellycompatParent(ctx context.Context, profileID string, edit userstore.JellycompatParentEdit) error {
+	writer, ok := s.UserStore.(userstore.JellycompatParentEditor)
+	if !ok {
+		return fmt.Errorf("atomic parent user data updates unavailable")
+	}
+	if err := writer.ApplyJellycompatParent(ctx, profileID, edit); err != nil {
+		return err
+	}
+	s.queueTargetMutations(profileID, edit.Targets)
+	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
+	return nil
 }

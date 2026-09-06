@@ -2,7 +2,7 @@ package jellycompat
 
 import (
 	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -17,6 +17,8 @@ import (
 // displayPreferencesDTO mirrors Jellyfin's DisplayPreferences response.
 type displayPreferencesDTO struct {
 	ID                 string            `json:"Id"`
+	ViewType           string            `json:"ViewType"`
+	IndexBy            string            `json:"IndexBy"`
 	SortBy             string            `json:"SortBy"`
 	SortOrder          string            `json:"SortOrder"`
 	RememberIndexing   bool              `json:"RememberIndexing"`
@@ -53,25 +55,35 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 	id := chi.URLParam(r, "displayPreferencesId")
 	client := r.URL.Query().Get("client")
 
-	// Try to load persisted preferences.
-	if h.storeProvider != nil {
-		store, err := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID)
-		if err == nil {
-			val, err := store.GetJellycompatDisplayPrefs(r.Context(), id, client)
-			if err == nil && val != "" {
-				var dto displayPreferencesDTO
-				if json.Unmarshal([]byte(val), &dto) == nil {
-					writeJSON(w, http.StatusOK, dto)
-					return
-				}
-			}
-		}
+	if !validateOptionalUser(w, r, session) {
+		return
 	}
-
-	// No persisted prefs — build defaults, seeding from profile settings.
+	if h.storeProvider == nil {
+		writeCompatUpstreamError(w, fmt.Errorf("user store unavailable"))
+		return
+	}
+	store, err := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	val, err := store.GetJellycompatDisplayPrefs(r.Context(), profilePreferencesID(session.ProfileID, id), client)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
 	dto := defaultDisplayPreferences(id, client)
-	if h.storeProvider != nil {
-		h.seedFromProfile(r, session, &dto)
+	if val != "" {
+		if err := json.Unmarshal([]byte(val), &dto); err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+	} else if err := h.seedFromProfile(r, session, &dto); err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if dto.CustomPrefs == nil {
+		dto.CustomPrefs = map[string]string{}
 	}
 	writeJSON(w, http.StatusOK, dto)
 }
@@ -87,27 +99,35 @@ func (h *DisplayPreferencesHandler) HandleUpdateDisplayPreferences(w http.Respon
 	id := chi.URLParam(r, "displayPreferencesId")
 	client := r.URL.Query().Get("client")
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "BadRequest", "Failed to read request body")
+	if !validateOptionalUser(w, r, session) {
 		return
 	}
-
-	// Validate it's valid JSON and normalize.
 	var dto displayPreferencesDTO
-	if json.Unmarshal(body, &dto) != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&dto); err != nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid JSON")
 		return
 	}
-	dto.ID = id
-	dto.Client = client
-
-	if h.storeProvider != nil {
-		store, err := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID)
-		if err == nil {
-			encoded, _ := json.Marshal(dto)
-			_ = store.SetJellycompatDisplayPrefs(r.Context(), id, client, string(encoded))
-		}
+	dto.ID, dto.Client = id, client
+	if dto.CustomPrefs == nil {
+		dto.CustomPrefs = map[string]string{}
+	}
+	if h.storeProvider == nil {
+		writeCompatUpstreamError(w, fmt.Errorf("user store unavailable"))
+		return
+	}
+	store, err := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	encoded, err := json.Marshal(dto)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if err := store.SetJellycompatDisplayPrefs(r.Context(), profilePreferencesID(session.ProfileID, id), client, string(encoded)); err != nil {
+		writeCompatUpstreamError(w, err)
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -133,15 +153,15 @@ func defaultDisplayPreferences(id, client string) displayPreferencesDTO {
 // sees, and those clients do not carry Silo's device identity. A device
 // override leaking in here would hand one device's settings to every Jellyfin
 // client on the account.
-func (h *DisplayPreferencesHandler) seedFromProfile(r *http.Request, session *Session, dto *displayPreferencesDTO) {
+func (h *DisplayPreferencesHandler) seedFromProfile(r *http.Request, session *Session, dto *displayPreferencesDTO) error {
 	store, err := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID)
 	if err != nil {
-		return
+		return err
 	}
 
 	contract, err := settingscontract.Load()
 	if err != nil {
-		return
+		return err
 	}
 	resolved, err := settingsresolve.New(contract).Resolve(r.Context(), store,
 		settingsresolve.Context{ProfileID: session.ProfileID},
@@ -151,7 +171,7 @@ func (h *DisplayPreferencesHandler) seedFromProfile(r *http.Request, session *Se
 			settingskeys.PlaybackAutoSkipCredits,
 		}, nil)
 	if err != nil {
-		return
+		return err
 	}
 
 	for _, eff := range resolved {
@@ -175,4 +195,16 @@ func (h *DisplayPreferencesHandler) seedFromProfile(r *http.Request, session *Se
 			}
 		}
 	}
+	return nil
+}
+
+func profilePreferencesID(profileID, id string) string {
+	return fmt.Sprintf("profile:%d:%s:%s", len(profileID), profileID, id)
+}
+
+func validateOptionalUser(w http.ResponseWriter, r *http.Request, session *Session) bool {
+	if id := newCaseInsensitiveQuery(r.URL.Query()).Get("userId"); id != "" {
+		return validatePseudoUser(w, id, session)
+	}
+	return true
 }
