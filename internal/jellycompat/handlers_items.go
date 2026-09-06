@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2632,6 +2633,14 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		h.handleBrowseItems(w, r, session, query)
 		return
 	}
+	if len(query.specificCollectionIDs) > 0 || idsRequestCollectionsView(r) {
+		ids, err := h.filteredSpecificMediaIDs(r.Context(), session, query)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		query.specificIDs = ids
+	}
 	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, query.specificIDs)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -2650,6 +2659,9 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		}
 		h.rememberDetailImages(*detail)
 		dto := h.mapper.itemFromDetailWithFields(*detail, favorites[detail.ContentID], progress[detail.ContentID], query.requestedFields)
+		if query.mediaTypesExplicit && !query.mediaTypesSet[strings.ToLower(dto.MediaType)] {
+			continue
+		}
 		h.appendDownloadedSubtitlesToDetailDTO(r.Context(), detail.ContentID, detail.Versions, &dto)
 		items = append(items, dto)
 	}
@@ -2661,15 +2673,39 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	items = append(items, boxSets...)
+	for _, boxSet := range boxSets {
+		if matchesSpecificCollection(boxSet, query) {
+			items = append(items, boxSet)
+		}
+	}
 
 	// Ids= may also reference the synthetic Collections view; prepend its DTO so
 	// clients re-hydrate the CollectionFolder the same way as a real library.
-	if idsRequestCollectionsView(r) {
-		items = append([]baseItemDTO{h.collectionsView()}, items...)
+	if idsRequestCollectionsView(r) && matchesSpecificCollection(h.collectionsView(), query) {
+		libraries, err := h.content.ListUserLibraries(r.Context(), session)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		if h.collectionsViewVisible(r.Context(), libraries) {
+			items = append([]baseItemDTO{h.collectionsView()}, items...)
+		}
 	}
 
+	if query.sortExplicit && query.sort == catalog.BrowseSortTitle {
+		sort.SliceStable(items, func(i, j int) bool {
+			left := strings.ToLower(cmp.Or(items[i].SortName, items[i].Name))
+			right := strings.ToLower(cmp.Or(items[j].SortName, items[j].Name))
+			if query.order == catalog.BrowseOrderDescending {
+				return left > right
+			}
+			return left < right
+		})
+	}
 	total := len(items)
+	if !query.enableTotalRecordCount {
+		total = 0
+	}
 	items = slicePage(items, query.startIndex, query.limit)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
@@ -3735,4 +3771,70 @@ func (h *ItemsHandler) validateThemeOwner(w http.ResponseWriter, r *http.Request
 		return false
 	}
 	return true
+}
+
+// Mixed Ids requests retain the catalog's composed predicates for ordinary
+// media. Read only the selected-ID set before merging collection rows and paging.
+func (h *ItemsHandler) filteredSpecificMediaIDs(ctx context.Context, session *Session, query itemsQuery) ([]string, error) {
+	if len(query.specificIDs) == 0 || query.hasItemTypeFilter && len(query.itemTypes) == 0 {
+		return nil, nil
+	}
+	if !query.hasIntersectingFilters() && !query.hasItemTypeFilter && !query.isFavorite && query.isPlayed == nil && !query.isResumable && query.searchTerm == "" {
+		return query.specificIDs, nil
+	}
+	selected := query.specificIDs
+	query.limit = min(len(selected), 1000)
+	query.startIndex = 0
+	query.enableTotalRecordCount = false
+	// This query determines membership. Stable catalog ordering prevents repeat
+	// or omitted IDs across pages even when the response asks for random order.
+	query.sort, query.order = catalog.BrowseSortTitle, "asc"
+	allowed := make(map[string]bool, len(selected))
+	for query.startIndex < len(selected) {
+		result, err := h.content.BrowseItems(ctx, session, buildBrowseParams(query))
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return nil, fmt.Errorf("selected item browse returned no response")
+		}
+		for _, item := range result.Items {
+			allowed[item.ContentID] = true
+		}
+		if !result.HasMore || len(result.Items) == 0 {
+			break
+		}
+		query.startIndex += len(result.Items)
+	}
+	result := make([]string, 0, len(allowed))
+	for _, id := range selected {
+		if allowed[id] {
+			result = append(result, id)
+		}
+	}
+	return result, nil
+}
+
+const (
+	itemTypeBoxSet           = "BoxSet"
+	itemTypeCollectionFolder = "CollectionFolder"
+)
+
+// Collections expose no per-viewer played, favorite, resume, genre, year, or
+// person metadata. Match their actual DTO facts instead of bypassing the query.
+func matchesSpecificCollection(item baseItemDTO, query itemsQuery) bool {
+	if query.hasItemTypeFilter && (item.Type == itemTypeBoxSet && !query.wantsBoxSets || item.Type == itemTypeCollectionFolder && !query.wantsViews) {
+		return false
+	}
+	if query.mediaTypesExplicit && !query.mediaTypesSet[strings.ToLower(item.MediaType)] {
+		return false
+	}
+	if query.isFavorite || query.isResumable || query.isPlayed != nil && *query.isPlayed || len(query.genres) > 0 || query.genreName != "" || len(query.years) > 0 || query.personID > 0 {
+		return false
+	}
+	if query.requireBackdrop && len(item.BackdropImageTags) == 0 {
+		return false
+	}
+	title := strings.ToLower(item.Name)
+	return (query.searchTerm == "" || strings.Contains(title, strings.ToLower(query.searchTerm))) && (query.namePrefix == "" || strings.HasPrefix(title, strings.ToLower(query.namePrefix)))
 }
