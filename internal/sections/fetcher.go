@@ -423,11 +423,17 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	orderedItems := make([]*models.MediaItem, 0, limit)
 	itemMeta := make(map[string]SectionItemMeta)
 
+	// One completed-history walk shared by every in-progress page below. The
+	// pages ask for progressively older cutoffs, so the walks nest; the cache
+	// reads each completed row once for the whole request instead of once per
+	// page.
+	completedCache := catalog.NewCompletedProgressCache()
+
 	// Ebook resume points live in ebook_reader_progress rather than the
 	// watch-progress store, so reading sections pull from that table and skip
 	// the next-up handling below.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -454,7 +460,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		}, nil
 	}
 
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta,
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -523,6 +529,7 @@ func (f *Fetcher) collectContinueProgressItems(
 	limit int,
 	orderedItems []*models.MediaItem,
 	itemMeta map[string]SectionItemMeta,
+	completedCache *catalog.CompletedProgressCache,
 	listPage func(pageLimit, offset int) ([]userstore.WatchProgress, error),
 ) ([]*models.MediaItem, error) {
 	// LIMIT/OFFSET pages over a live, updated_at-ordered source: a progress
@@ -548,7 +555,7 @@ func (f *Fetcher) collectContinueProgressItems(
 		rawProgressCount := len(progressEntries)
 		progressEntries = dismissals.FilterProgress(progressEntries)
 
-		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, libraryID, libraryIDs, filter)
+		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, libraryID, libraryIDs, filter, completedCache)
 		if err != nil {
 			return nil, err
 		}
@@ -640,7 +647,7 @@ const (
 	continueProgressMaxScanned = 1000
 )
 
-func (f *Fetcher) fetchContinueProgressItems(ctx context.Context, store userstore.UserStore, profileID string, entries []userstore.WatchProgress, continueType ContinueType, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
+func (f *Fetcher) fetchContinueProgressItems(ctx context.Context, store userstore.UserStore, profileID string, entries []userstore.WatchProgress, continueType ContinueType, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, completedCache *catalog.CompletedProgressCache) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if len(entries) == 0 {
 		return nil, map[string]SectionItemMeta{}, nil
 	}
@@ -681,7 +688,7 @@ func (f *Fetcher) fetchContinueProgressItems(ctx context.Context, store userstor
 		matchingEntries = append(matchingEntries, entry)
 	}
 	if ContinueTypeAllowsNextUp(continueType) && hasEpisodeEntries {
-		supersededEpisodeProgress, err := f.progressFilter.SupersededEpisodeProgressIDs(ctx, store, profileID, matchingEntries)
+		supersededEpisodeProgress, err := f.progressFilter.SupersededEpisodeProgressIDsCached(ctx, store, profileID, matchingEntries, completedCache)
 		if err != nil {
 			return nil, nil, err
 		}

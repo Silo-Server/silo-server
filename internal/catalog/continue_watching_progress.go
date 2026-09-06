@@ -58,6 +58,16 @@ const supersededProgressMaxPages = 5
 // own progress. Those entries are stale — the viewer already moved past them.
 // Non-episode entries never match.
 func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDs(ctx context.Context, store ProgressLister, profileID string, entries []userstore.WatchProgress) (map[string]struct{}, error) {
+	return f.SupersededEpisodeProgressIDsCached(ctx, store, profileID, entries, nil)
+}
+
+// SupersededEpisodeProgressIDsCached is SupersededEpisodeProgressIDs with a
+// caller-supplied completed-history cache. Callers that ask more than once
+// within a single request — Continue Watching walks its in-progress rows a page
+// at a time — pass one cache across all the calls so the completed side is read
+// once instead of once per page. A nil cache reads it fresh, which is what a
+// one-shot caller wants.
+func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx context.Context, store ProgressLister, profileID string, entries []userstore.WatchProgress, cache *CompletedProgressCache) (map[string]struct{}, error) {
 	if f == nil || f.pool == nil {
 		return map[string]struct{}{}, nil
 	}
@@ -82,7 +92,7 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDs(ctx contex
 		}
 	}
 
-	completed, err := CompletedProgressSnapshots(ctx, store, profileID, oldestInProgress)
+	completed, err := cache.snapshots(ctx, store, profileID, oldestInProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +123,104 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDs(ctx contex
 	return superseded, nil
 }
 
+// CompletedProgressCache holds one request's walk of a profile's completed
+// progress rows so repeated superseded-episode checks share it.
+//
+// Continue Watching pages its in-progress rows (up to continueProgressMaxScanned
+// / continueProgressPageSize pages) and asks for the superseded set once per
+// page. Each ask needs the completed rows newer than that page's oldest
+// in-progress entry. Because in-progress pages come back updated_at DESC, later
+// pages ask for older cutoffs, so the walks are nested rather than disjoint:
+// without a cache every page re-reads everything the previous page already read,
+// which on a full run is supersededProgressMaxPages reads repeated for each
+// in-progress page.
+//
+// The cache reads strictly forward. It keeps the rows it has seen plus the
+// updated_at it has scanned down to, and only reads more pages when a caller
+// asks for a cutoff older than that. A row is never read twice, and the answer
+// for any cutoff is identical to a fresh walk.
+//
+// Not safe for concurrent use: scope one to a single request.
+type CompletedProgressCache struct {
+	profileID string
+	snaps     []ProgressSnapshot
+	seen      map[string]struct{}
+	pagesRead int
+	// scannedTo is the updated_at of the last row read. Every unread row is at
+	// or before it. Meaningful only once pagesRead > 0.
+	scannedTo time.Time
+	// done means the source is exhausted or the page cap stopped the walk;
+	// either way there is nothing further to read.
+	done   bool
+	capped bool
+}
+
+// NewCompletedProgressCache returns a cache for one request.
+func NewCompletedProgressCache() *CompletedProgressCache {
+	return &CompletedProgressCache{seen: make(map[string]struct{})}
+}
+
+// snapshots returns the deduplicated completed snapshots updated after
+// notBefore, reading only the pages the cache has not already read. A nil
+// receiver, or a cache already bound to a different profile, falls back to a
+// fresh uncached walk.
+func (c *CompletedProgressCache) snapshots(ctx context.Context, store ProgressLister, profileID string, notBefore time.Time) ([]ProgressSnapshot, error) {
+	if c == nil || (c.profileID != "" && c.profileID != profileID) {
+		return CompletedProgressSnapshots(ctx, store, profileID, notBefore)
+	}
+	if c.seen == nil {
+		c.seen = make(map[string]struct{})
+	}
+	c.profileID = profileID
+
+	// Read forward until the unread remainder is entirely at or before the
+	// cutoff, at which point it cannot contain anything this caller wants.
+	for !c.done && (c.pagesRead == 0 || c.scannedTo.After(notBefore)) {
+		if c.pagesRead >= supersededProgressMaxPages {
+			c.done = true
+			c.capped = true
+			// Fell out with a full final page: the cap halted the walk before
+			// the cutoff, so completed rows past the scanned window were
+			// skipped. Log it so a real profile that trips this backstop is
+			// visible rather than silently mis-filtered.
+			slog.WarnContext(ctx, "continue-watching: superseded-episode walk hit page cap; completed-history tail left unscanned",
+				"profile_id", profileID,
+				"pages_scanned", supersededProgressMaxPages,
+				"rows_scanned", len(c.snaps))
+			break
+		}
+		offset := c.pagesRead * supersededProgressPageSize
+		entries, err := store.ListProgress(ctx, profileID, "completed", supersededProgressPageSize, offset)
+		if err != nil {
+			return nil, fmt.Errorf("listing completed progress for superseded episodes: %w", err)
+		}
+		c.pagesRead++
+
+		for _, snapshot := range ProgressSnapshots(entries) {
+			c.scannedTo = snapshot.UpdatedAt
+			if _, ok := c.seen[snapshot.ContentID]; ok {
+				continue
+			}
+			c.seen[snapshot.ContentID] = struct{}{}
+			c.snaps = append(c.snaps, snapshot)
+		}
+
+		if len(entries) < supersededProgressPageSize {
+			c.done = true
+		}
+	}
+
+	// c.snaps is updated_at DESC, so the wanted rows are a prefix of it.
+	result := make([]ProgressSnapshot, 0, len(c.snaps))
+	for _, snapshot := range c.snaps {
+		if !snapshot.UpdatedAt.After(notBefore) {
+			break
+		}
+		result = append(result, snapshot)
+	}
+	return result, nil
+}
+
 // CompletedProgressSnapshots pages through the profile's completed progress
 // rows and returns deduplicated snapshots updated after notBefore. The
 // completed listing is ordered updated_at DESC (newest first), so once a row at
@@ -120,45 +228,13 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDs(ctx contex
 // stops — callers only care about completed episodes finished more recently
 // than an in-progress entry, so older rows are irrelevant. Pass a zero
 // notBefore to walk the whole history.
+//
+// This is the one-shot form. A caller that asks repeatedly within one request
+// should hold a CompletedProgressCache instead and pass it to
+// SupersededEpisodeProgressIDsCached.
 func CompletedProgressSnapshots(ctx context.Context, store ProgressLister, profileID string, notBefore time.Time) ([]ProgressSnapshot, error) {
-	seen := make(map[string]struct{})
-	snapshots := make([]ProgressSnapshot, 0)
-
-	for page := 0; page < supersededProgressMaxPages; page++ {
-		offset := page * supersededProgressPageSize
-		entries, err := store.ListProgress(ctx, profileID, "completed", supersededProgressPageSize, offset)
-		if err != nil {
-			return nil, fmt.Errorf("listing completed progress for superseded episodes: %w", err)
-		}
-
-		reachedCutoff := false
-		for _, snapshot := range ProgressSnapshots(entries) {
-			if !snapshot.UpdatedAt.After(notBefore) {
-				reachedCutoff = true
-				break
-			}
-			contentID := snapshot.ContentID
-			if _, ok := seen[contentID]; ok {
-				continue
-			}
-			seen[contentID] = struct{}{}
-			snapshots = append(snapshots, snapshot)
-		}
-
-		if reachedCutoff || len(entries) < supersededProgressPageSize {
-			return snapshots, nil
-		}
-	}
-
-	// Fell out of the loop with a full final page: the page cap halted the walk
-	// before the cutoff, so completed rows past the scanned window were skipped.
-	// Log it so a real profile that trips this backstop is visible rather than
-	// silently under-filtered.
-	slog.Warn("continue-watching: superseded-episode walk hit page cap; completed-history tail left unscanned",
-		"profile_id", profileID,
-		"pages_scanned", supersededProgressMaxPages,
-		"rows_scanned", len(snapshots))
-	return snapshots, nil
+	fresh := &CompletedProgressCache{seen: make(map[string]struct{}), profileID: profileID}
+	return fresh.snapshots(ctx, store, profileID, notBefore)
 }
 
 // ProgressSnapshots converts progress rows to snapshots, dropping rows with a
