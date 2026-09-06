@@ -43,7 +43,45 @@ marks.** This reservation is expressly permitted by AGPL-3.0 §7(e).
   identity.
 - Using the marks in a **company, product, domain, or app name**, or in any way
   that implies Silo Media operates or endorses your offering.
-- **Merchandise** or other commercial use of the logo or wordmark.
+- **Merchandise**, or using the logo or wordmark to sell your own product
+  beyond a referential "works with Silo" placement.
+
+Never use the marks to promote piracy or to impersonate the project.
+
+## Naming your project
+
+Give your client, plugin, or fork its own name, then mention Silo in the
+tagline or description: "Bramble — a Silo client for Android TV," "Trakt sync
+plugin for Silo." That is referential use and needs no permission.
+
+Official products use "Silo" alone, **Silo Server**, or "Silo" joined to a
+product word (**SiloRemote**, **SiloMac**). Those patterns are reserved and
+need written permission:
+
+- "Silo" on its own, or as the first word of a product name
+- "Silo[word]" names such as SiloTV or SiloPlay, which read as official apps
+- "[word]Silo" names such as OpenSilo or MySilo, which read as the project
+- misspellings and look-alikes such as Sylo or Si1o
+
+Repository and package names such as `silo-plugin-trakt` are fine when "silo"
+only describes what the code plugs into.
+
+## Writing the name
+
+- Prose and UI text: **Silo**, capital S, one word. The server product is
+  **Silo Server**.
+- Repositories, packages, and command-line binaries: lowercase `silo`
+  (`silo-server`). App bundles and product names keep the display form
+  (`Silo`, `SiloTV`).
+- Paths and config directories: follow the platform convention
+  (`/var/lib/silo`, `~/Library/Application Support/Silo`).
+- Never SILO, SiLo, or a typeset "Silo" in place of the supplied wordmark.
+
+## Colors and motif
+
+You may use the Silo colors, and the three-bar motif from the website, in your
+own interface. The logo, wordmark, and icons are what we reserve, so keep your
+own logo a different shape and do not build the Silo mark into it.
 
 ## Forks must rebrand
 
@@ -74,9 +112,16 @@ above is **not** official and is **not** authorized to use the Silo marks.
 
 ## Requesting permission / reporting misuse
 
-Email **trademark@siloserver.org** with the details. We're generally glad to
-grant reasonable requests — the goal of this policy is only to prevent user
-confusion and unauthorized "official-looking" releases.
+Not sure whether your use is fine? Ask in Discord (<https://discord.gg/siloserver>)
+or email **trademark@siloserver.org**. We answer quickly and usually say yes.
+The goal of this policy is only to prevent user confusion and unauthorized
+"official-looking" releases.
+
+The canonical copy of this policy is the one in the siloserver.org repository:
+<https://github.com/Silo-Server/siloserver.org/blob/main/TRADEMARK.md>. Other
+Silo repositories carry synchronized copies. The brand page at
+<https://siloserver.org/brand> is the practical guide and asset library, and
+follows the canonical file.
 
 ---
 
