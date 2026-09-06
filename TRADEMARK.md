@@ -70,7 +70,9 @@ only describes what the code plugs into.
 
 - Prose and UI text: **Silo**, capital S, one word. The server product is
   **Silo Server**.
-- Repositories, packages, and binaries: lowercase `silo` (`silo-server`).
+- Repositories, packages, and command-line binaries: lowercase `silo`
+  (`silo-server`). App bundles and product names keep the display form
+  (`Silo`, `SiloTV`).
 - Paths and config directories: follow the platform convention
   (`/var/lib/silo`, `~/Library/Application Support/Silo`).
 - Never SILO, SiLo, or a typeset "Silo" in place of the supplied wordmark.
