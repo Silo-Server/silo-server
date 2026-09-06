@@ -199,6 +199,7 @@ func TestPersistSeasonsAndEpisodes_ScheduledRefreshPreservesExistingAndBackfills
 			ProviderIDs:   map[string]string{"tmdb": "tmdb-ep-1"},
 		}},
 		MergeFillEmpty,
+		false,
 	)
 
 	season := seasonRepo.seasons[seasonKey(seriesID, 1)]
@@ -273,6 +274,7 @@ func TestPersistSeasonsAndEpisodes_ManualRefreshReplacesNonEmptyButPreservesBlan
 			StillPath:     "",
 		}},
 		MergeReplaceUnlocked,
+		false,
 	)
 
 	season := seasonRepo.seasons[seasonKey(seriesID, 1)]
@@ -301,6 +303,57 @@ func TestPersistSeasonsAndEpisodes_ManualRefreshReplacesNonEmptyButPreservesBlan
 	}
 }
 
+func TestPersistSeasonsAndEpisodes_ImageLockPreservesSelectedSeasonPoster(t *testing.T) {
+	const seriesID = "series-locked-season-artwork"
+
+	service, _, seasonRepo, _ := newSeasonEpisodeServiceForTest(seriesID)
+	ctx := context.Background()
+	seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
+		ContentID:        "season-1",
+		SeriesID:         seriesID,
+		SeasonNumber:     1,
+		Title:            "Old Season 1",
+		PosterPath:       "artwork/series/manual-season-1/revision/original.jpg",
+		PosterSourcePath: "tmdb://manual-season-1.jpg",
+		PosterThumbhash:  "manual-thumb",
+	}
+	seasonRepo.seasons[seasonKey(seriesID, 2)] = &models.Season{
+		ContentID:    "season-2",
+		SeriesID:     seriesID,
+		SeasonNumber: 2,
+		Title:        "Old Season 2",
+	}
+
+	service.persistSeasonsAndEpisodes(
+		ctx,
+		&models.MediaItem{ContentID: seriesID, Type: "series"},
+		map[string]string{"tmdb": "123"},
+		"en",
+		"en",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "New Season 1", PosterPath: "tmdb://automatic-season-1.jpg"},
+			{SeasonNumber: 2, Title: "New Season 2", PosterPath: "tmdb://automatic-season-2.jpg"},
+		},
+		nil,
+		MergeReplaceUnlocked,
+		true,
+	)
+
+	selected := seasonRepo.seasons[seasonKey(seriesID, 1)]
+	if selected.PosterPath != "artwork/series/manual-season-1/revision/original.jpg" ||
+		selected.PosterSourcePath != "tmdb://manual-season-1.jpg" || selected.PosterThumbhash != "manual-thumb" {
+		t.Fatalf("selected poster was overwritten: %#v", selected)
+	}
+	if selected.Title != "New Season 1" {
+		t.Fatalf("season title = %q, want metadata refresh to update non-image fields", selected.Title)
+	}
+
+	missing := seasonRepo.seasons[seasonKey(seriesID, 2)]
+	if missing.PosterPath != "tmdb://automatic-season-2.jpg" || missing.PosterSourcePath != "tmdb://automatic-season-2.jpg" {
+		t.Fatalf("missing poster was not backfilled while images were locked: %#v", missing)
+	}
+}
+
 func TestPersistSeasonsAndEpisodes_UsesBoundedBulkCalls(t *testing.T) {
 	const seriesID = "series-bulk-persist"
 
@@ -326,6 +379,7 @@ func TestPersistSeasonsAndEpisodes_UsesBoundedBulkCalls(t *testing.T) {
 		},
 		episodes,
 		MergeFillEmpty,
+		false,
 	)
 
 	if got := seasonRepo.ListCalls(); got != 1 {
@@ -395,6 +449,7 @@ func TestPersistSeasonsAndEpisodes_LocalizedRefreshUsesBoundedBulkCalls(t *testi
 		},
 		episodes,
 		MergeFillEmpty,
+		false,
 	)
 
 	if seasonLocalizations.bulkGetCalls != 1 || seasonLocalizations.bulkUpsertCalls != 1 {
@@ -449,6 +504,7 @@ func TestPersistSeasonsAndEpisodes_LocalizationBatchFailuresUsePointFallbacks(t 
 			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Episode 2"},
 		},
 		MergeFillEmpty,
+		false,
 	)
 
 	if seasonLocalizations.getCalls != 2 || seasonLocalizations.upsertCalls != 2 {
@@ -495,6 +551,7 @@ func TestPersistSeasonsAndEpisodes_BulkFailurePreservesPartialProgress(t *testin
 			{SeasonNumber: 2, EpisodeNumber: 2, Title: "Episode 2", StillPath: "tvdb://episode-2.jpg"},
 		},
 		MergeFillEmpty,
+		false,
 	)
 
 	if got := seasonRepo.BulkUpsertCalls(); got != 1 {
@@ -576,6 +633,7 @@ func TestPersistSeasonsAndEpisodes_PrefetchFailureUsesPointReadFallback(t *testi
 		[]SeasonResult{{SeasonNumber: 1, Title: "Provider Season"}},
 		[]EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, Title: "Provider Episode"}},
 		MergeFillEmpty,
+		false,
 	)
 
 	if got := seasonRepo.GetByNumberCalls(); got != 1 {
@@ -610,6 +668,7 @@ func TestPersistSeasonsAndEpisodes_OutOfRangeKeysAvoidBatchPrefetch(t *testing.T
 		[]SeasonResult{{SeasonNumber: overflow, Title: "Invalid season"}},
 		[]EpisodeResult{{SeasonNumber: 1, EpisodeNumber: overflow, Title: "Invalid episode"}},
 		MergeFillEmpty,
+		false,
 	)
 
 	if got := seasonRepo.ListCalls(); got != 0 {
@@ -645,6 +704,7 @@ func TestPersistSeasonsAndEpisodes_DuplicateNaturalKeysKeepSequentialSemantics(t
 			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Second episode title"},
 		},
 		MergeReplaceUnlocked,
+		false,
 	)
 
 	if got := seasonRepo.BulkUpsertCalls(); got != 0 {

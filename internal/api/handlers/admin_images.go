@@ -21,6 +21,7 @@ import (
 // needed by the admin image handler.
 type ImageService interface {
 	FetchItemImages(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int) ([]metadata.RemoteImage, map[string]string, error)
+	FetchSeasonImages(ctx context.Context, providerIDs map[string]string, language string, folderID int, seasonNumber int) ([]metadata.RemoteImage, map[string]string, error)
 	ApplyItemImage(ctx context.Context, req metadata.ApplyItemImageRequest) (*metadata.ApplyItemImageResult, error)
 }
 
@@ -221,10 +222,20 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 		language = "en"
 	}
 
-	// Use the parent item's type for the plugin call (always "movie" or "series").
-	images, providerErrors, err := h.imageSvc.FetchItemImages(
-		r.Context(), providerIDs, resolved.parentItem.Type, language, folderID,
-	)
+	var images []metadata.RemoteImage
+	var providerErrors map[string]string
+	if resolved.season != nil {
+		images, providerErrors, err = h.imageSvc.FetchSeasonImages(
+			r.Context(), providerIDs, language, folderID, resolved.season.SeasonNumber,
+		)
+	} else {
+		// Movies, series, and episodes use the parent item's type for the plugin
+		// image call. Season browsing is handled above so a season can never
+		// fall back to the parent series' posters.
+		images, providerErrors, err = h.imageSvc.FetchItemImages(
+			r.Context(), providerIDs, resolved.parentItem.Type, language, folderID,
+		)
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin images: fetch failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch images")
@@ -266,8 +277,9 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 		BackdropURL: resolved.parentItem.BackdropPath,
 		LogoURL:     resolved.parentItem.LogoPath,
 	}
-	// For seasons, use the season's poster if it has one.
-	if resolved.season != nil && resolved.season.PosterPath != "" {
+	// A season owns its poster independently of the parent series. Preserve an
+	// empty value too so the UI cannot label the series poster as current.
+	if resolved.season != nil {
 		current.PosterURL = resolved.season.PosterPath
 	}
 
