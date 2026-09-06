@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/text/language"
@@ -107,6 +108,19 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 		writeError(w, 400, "BadRequest", "Invalid configuration")
 		return
 	}
+	// The DTO decoder accepts case-insensitive JSON keys. Normalize the patch
+	// too so null validation and canonical settings apply the same fields.
+	// Reject case variants of one key rather than selecting a random map entry.
+	normalized := make(map[string]json.RawMessage, len(patch))
+	for field, value := range patch {
+		field = strings.ToLower(field)
+		if _, exists := normalized[field]; exists {
+			writeError(w, 400, "BadRequest", "Duplicate configuration field")
+			return
+		}
+		normalized[field] = value
+	}
+	patch = normalized
 	dto, err := h.resolvedUserDTO(r.Context(), session)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -115,7 +129,7 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 	for field, value := range patch {
 		if string(value) == "null" {
 			switch field {
-			case "AudioLanguagePreference", "SubtitleLanguagePreference", "CastReceiverId":
+			case "audiolanguagepreference", "subtitlelanguagepreference", "castreceiverid":
 				// Unmarshalling null into an existing string leaves it unchanged.
 				patch[field] = json.RawMessage(`""`)
 			default:
@@ -130,12 +144,12 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 		return
 	}
 	values := map[string]json.RawMessage{}
-	for field, key := range map[string]string{"AudioLanguagePreference": settingskeys.PlaybackAudioLanguage, "SubtitleLanguagePreference": settingskeys.PlaybackSubtitleLanguage, "EnableNextEpisodeAutoPlay": settingskeys.PlaybackAutoPlayNext, "SubtitleMode": settingskeys.PlaybackSubtitleMode} {
+	for field, key := range map[string]string{"audiolanguagepreference": settingskeys.PlaybackAudioLanguage, "subtitlelanguagepreference": settingskeys.PlaybackSubtitleLanguage, "enablenextepisodeautoplay": settingskeys.PlaybackAutoPlayNext, "subtitlemode": settingskeys.PlaybackSubtitleMode} {
 		value, ok := patch[field]
 		if !ok {
 			continue
 		}
-		if field == "SubtitleMode" {
+		if field == "subtitlemode" {
 			modes := map[string]string{compatSubtitleDefault: profileSubtitleAuto, compatSubtitleSmart: profileSubtitleAuto, compatSubtitleAlways: "always", compatSubtitleNone: "off"}
 			mode, ok := modes[dto.Configuration.SubtitleMode]
 			if !ok {
@@ -143,7 +157,7 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 				return
 			}
 			value, _ = json.Marshal(mode)
-		} else if field != "EnableNextEpisodeAutoPlay" {
+		} else if field != "enablenextepisodeautoplay" {
 			var tag string
 			if err := json.Unmarshal(value, &tag); err != nil {
 				writeError(w, 400, "BadRequest", "Invalid language")

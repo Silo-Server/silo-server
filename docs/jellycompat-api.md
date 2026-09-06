@@ -38,7 +38,8 @@ other values return 400. Inaccessible items and another profile's user ID are
 rejected before mutation.
 
 Configuration maps audio language, subtitle language, autoplay, and subtitle
-mode into Silo's canonical profile settings. `Default` and `Smart` map to
+mode into Silo's canonical profile settings. Field names are case-insensitive;
+duplicate casing variants of the same field return 400. `Default` and `Smart` map to
 `auto`, `Always` to `always`, and `None` to `off`. `OnlyForced` is not currently
 supported and returns 400. Other declared presentation preferences round-trip
 for clients. Storage failures produce errors instead of success responses.
