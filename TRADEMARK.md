@@ -119,7 +119,9 @@ The only official Silo software comes from:
 - official app-store listings published by **Silo Media L.L.C.**
 
 Any app-store listing, download, or "Silo" app that does not originate from the
-above is **not** official and is **not** authorized to use the Silo marks.
+above is **not** official and is **not** authorized to present itself as Silo.
+Third-party projects that follow *Naming your project*, including wordplay
+names, are unaffected.
 
 ## Requesting permission / reporting misuse
 
