@@ -66,6 +66,12 @@ need written permission:
 Repository and package names such as `silo-plugin-trakt` are fine when "silo"
 only describes what the code plugs into.
 
+**Wordplay is fine.** A name such as "Siloette" or "Silodeon" contains the mark
+but reads as its own word, not as an official product, so it needs no
+permission. The test is whether a reasonable user would think the Silo team
+made it. Keep a tagline that says what the project is ("Siloette, a Silo
+client"), use your own logo, and do not describe the project as official.
+
 ## Writing the name
 
 - Prose and UI text: **Silo**, capital S, one word. The server product is
