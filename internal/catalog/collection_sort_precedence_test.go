@@ -192,6 +192,37 @@ func TestEffectiveCollectionSortAllowsPersonalizedOnUserCollections(t *testing.T
 	}
 }
 
+func TestCollectionRandomizeSkipsSavedSort(t *testing.T) {
+	store := &sortPrefStore{pref: &userstore.CollectionSortPreference{SortField: "title", SortOrder: "asc"}}
+	resolver := &CatalogResolver{storeProvider: &sortPrefProvider{store: store}}
+	var resolved CatalogRequest
+
+	result, err := resolver.resolveCollectionWithEffectiveSort(
+		context.Background(),
+		CatalogRequest{Source: CatalogSourceUserCollection, UseSourceOrder: true, Randomize: true},
+		AccessFilter{UserID: 7, ProfileID: "profile-1"},
+		userstore.CollectionKindUser,
+		"collection-1",
+		[]byte(`{"field":"release_date","order":"desc"}`),
+		func(req CatalogRequest) (*CatalogResult, error) {
+			resolved = req
+			return &CatalogResult{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolve random collection sort: %v", err)
+	}
+	if !resolved.Randomize || !resolved.UseSourceOrder || resolved.Query.Sort != (QuerySort{}) {
+		t.Fatalf("resolved request = %+v, want random source path", resolved)
+	}
+	if store.calls != 0 {
+		t.Fatalf("random request performed %d saved-sort lookups, want 0", store.calls)
+	}
+	if result.EffectiveSort != (QuerySort{}) {
+		t.Fatalf("effective sort = %+v, want no metadata sort", result.EffectiveSort)
+	}
+}
+
 func TestPersonalSourceSortPreferencePrecedence(t *testing.T) {
 	access := AccessFilter{UserID: 7, ProfileID: "profile-1"}
 	for _, source := range []CatalogSource{CatalogSourceWatchlist, CatalogSourceFavorites} {

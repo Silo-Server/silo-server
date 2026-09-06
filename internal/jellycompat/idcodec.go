@@ -1,7 +1,9 @@
 package jellycompat
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"sync"
@@ -15,16 +17,17 @@ import (
 type EncodedIDType byte
 
 const (
-	EncodedIDLibrary     EncodedIDType = 1
-	EncodedIDItem        EncodedIDType = 2
-	EncodedIDMediaSource EncodedIDType = 3
-	EncodedIDSeason      EncodedIDType = 4
-	EncodedIDPlaySession EncodedIDType = 5
-	EncodedIDGenre       EncodedIDType = 6
-	EncodedIDStudio      EncodedIDType = 7
-	EncodedIDPerson      EncodedIDType = 8
-	EncodedIDImageProxy  EncodedIDType = 9
-	EncodedIDCollection  EncodedIDType = 10
+	EncodedIDLibrary        EncodedIDType = 1
+	EncodedIDItem           EncodedIDType = 2
+	EncodedIDMediaSource    EncodedIDType = 3
+	EncodedIDSeason         EncodedIDType = 4
+	EncodedIDPlaySession    EncodedIDType = 5
+	EncodedIDGenre          EncodedIDType = 6
+	EncodedIDStudio         EncodedIDType = 7
+	EncodedIDPerson         EncodedIDType = 8
+	EncodedIDImageProxy     EncodedIDType = 9
+	EncodedIDCollection     EncodedIDType = 10
+	EncodedIDUserCollection EncodedIDType = 11
 )
 
 var (
@@ -89,6 +92,18 @@ func EncodeNumericID(kind EncodedIDType, value uint64) uuid.UUID {
 // genres and studios, and the rare content_id too large to pack — falls back to
 // a hashed UUID recorded in the reverse map.
 func (c *ResourceIDCodec) EncodeStringID(kind EncodedIDType, value string) string {
+	if kind == EncodedIDUserCollection {
+		// A typed 112-bit lookup key, like local content IDs. The store resolves
+		// it through an index, including ULIDs/legacy IDs, without a reverse map.
+		// Keep this hash in sync with jellycompat_user_collection_key in SQL.
+		sum := sha256.Sum256([]byte(value))
+		var id uuid.UUID
+		// The marker occupies the variant byte, outside RFC 4122 hashes.
+		id[0], id[8] = byte(kind), 1
+		copy(id[1:8], sum[:7])
+		copy(id[9:], sum[7:14])
+		return id.String()
+	}
 	if numeric, err := strconv.ParseUint(value, 10, 64); err == nil {
 		return EncodeNumericID(kind, numeric).String()
 	}
@@ -126,13 +141,20 @@ func (c *ResourceIDCodec) EncodeIntID(kind EncodedIDType, value int64) string {
 	return EncodeNumericID(kind, uint64(value)).String()
 }
 
-// DecodeStringID decodes a compat UUID back to the original native string ID.
+// DecodeStringID decodes a compat UUID to its native ID, or an indexed lookup
+// key for personal collections (whose native IDs may be arbitrary strings).
 //
 // A reversibly packed content_id is decoded first (and re-packed to confirm the
 // UUID genuinely came from the packer, so an opaque id whose bytes merely happen
 // to parse is rejected), then the stateless numeric encoding, then the reverse
 // map for hashed ids.
 func (c *ResourceIDCodec) DecodeStringID(kind EncodedIDType, raw string) (string, error) {
+	if kind == EncodedIDUserCollection {
+		if id, err := uuid.Parse(raw); err == nil && id[0] == byte(kind) && id[8] == 1 {
+			return hex.EncodeToString(id[1:8]) + hex.EncodeToString(id[9:]), nil
+		}
+		return "", fmt.Errorf("unknown personal collection id %q", raw)
+	}
 	if isContentIDKind(kind) {
 		if id, ok := unpackContentIDUUID(kind, raw); ok {
 			return id, nil
@@ -241,6 +263,11 @@ func DecodeID(raw string) (DecodedID, error) {
 	parsed, err := uuid.Parse(raw)
 	if err != nil {
 		return DecodedID{}, fmt.Errorf("parse uuid: %w", err)
+	}
+	for _, b := range parsed[1:8] {
+		if b != 0 {
+			return DecodedID{}, fmt.Errorf("uuid is not a numeric compat id")
+		}
 	}
 
 	return DecodedID{
