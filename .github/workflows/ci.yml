@@ -30,6 +30,20 @@ jobs:
   go:
     name: Go
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: silo_test
+          POSTGRES_PASSWORD: silo_test
+          POSTGRES_DB: silo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U silo_test -d silo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -114,6 +128,14 @@ jobs:
       - name: Test
         run: make test-go
 
+      - name: Test output-format migration and session synchronization
+        env:
+          SILO_TEST_DATABASE_URL: postgres://silo_test:silo_test@localhost:5432/silo_test?sslmode=disable
+        run: go test ./internal/worker -run '^TestReconcilerOutputFormatPostgres$' -count=1 -v
+
+      - name: Benchmark activity enrichment
+        run: go test ./internal/api/handlers -run '^$' -bench '^BenchmarkActivitySessionEnrichment$' -benchmem -benchtime=250ms -count=5
+
   web:
     name: Web
     runs-on: ubuntu-latest
@@ -124,6 +146,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       # The pnpm version comes from web/package.json's packageManager field —
@@ -171,6 +194,33 @@ jobs:
       - name: Verify the generated web settings binding is current
         working-directory: .
         run: make verify-settings-bindings-web
+
+      - name: Capture synthetic Activity UI evidence
+        working-directory: .
+        env:
+          SILO_ACTIVITY_EVIDENCE_DIR: ${{ runner.temp }}/activity-evidence
+          SILO_ACTIVITY_BROWSER_DIR: ${{ runner.temp }}/activity-browser
+        run: |
+          mkdir -p "$SILO_ACTIVITY_EVIDENCE_DIR"
+          git fetch --no-tags https://github.com/Silo-Server/silo-server.git refs/heads/main
+          baseline=$(git merge-base HEAD FETCH_HEAD)
+          git rev-parse HEAD "$baseline" > "$SILO_ACTIVITY_EVIDENCE_DIR/commits.txt"
+          SILO_ACTIVITY_EVIDENCE_DIR="$SILO_ACTIVITY_EVIDENCE_DIR/after" pnpm --dir web exec vitest run src/pages/AdminActivity.test.tsx -t 'exports synthetic activity screenshot fixtures'
+          restore_sources() { git restore --source=HEAD -- web/src/pages/AdminActivity.tsx web/src/pages/adminActivityPresentation.ts; }
+          trap restore_sources EXIT
+          git restore --source="$baseline" -- web/src/pages/AdminActivity.tsx web/src/pages/adminActivityPresentation.ts
+          SILO_ACTIVITY_EVIDENCE_BASELINE=1 SILO_ACTIVITY_EVIDENCE_DIR="$SILO_ACTIVITY_EVIDENCE_DIR/before" pnpm --dir web exec vitest run src/pages/AdminActivity.test.tsx -t 'exports synthetic activity screenshot fixtures'
+          restore_sources
+          npm install --prefix "$SILO_ACTIVITY_BROWSER_DIR" --no-save --ignore-scripts playwright@1.62.1
+          node "$SILO_ACTIVITY_BROWSER_DIR/node_modules/playwright/cli.js" install --with-deps chromium
+          node scripts/capture-activity-evidence.mjs
+
+      - name: Upload Activity UI evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: activity-ui-evidence
+          path: ${{ runner.temp }}/activity-evidence
+          retention-days: 14
 
   docs:
     name: Docs hygiene

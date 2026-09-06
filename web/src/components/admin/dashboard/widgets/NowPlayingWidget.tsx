@@ -103,7 +103,7 @@ function StreamCard({ session }: { session: AdminSession }) {
   });
   const clientLabel = getSessionClientLabel(session);
   const method = classifyActivityMethod(session);
-  const methodColor = activityMethodMeta(method).badgeClass;
+  const methodMeta = activityMethodMeta(method);
 
   return (
     <div className="surface-panel flex gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
@@ -173,9 +173,9 @@ function StreamCard({ session }: { session: AdminSession }) {
         {/* Tags */}
         <div className="mb-1.5 flex flex-wrap gap-1">
           <span
-            className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodColor}`}
+            className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodMeta.badgeClass}`}
           >
-            {method}
+            {methodMeta.label}
           </span>
           <JellyfinSessionPill session={session} />
           {clientLabel ? (

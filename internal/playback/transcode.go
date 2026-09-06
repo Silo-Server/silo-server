@@ -779,10 +779,9 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// Actual transcoding uses MPEG-TS segments to avoid the hls.js endOfStream()
 	// race with fMP4 (hls.js #6337).
 	var segmentPattern string
-	segmentType := "mpegts"
+	segmentType := HLSOutputContainer(opts)
 	copyVideoUsesFMP4 := copyVideoUsesFMP4(opts)
 	if copyVideoUsesFMP4 {
-		segmentType = "fmp4"
 		segmentPattern = filepath.Join(opts.OutputDir, "seg_%05d.m4s")
 	} else {
 		segmentPattern = filepath.Join(opts.OutputDir, "seg_%05d.ts")
@@ -898,6 +897,15 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 	args = append(args, "-sn")
 	args = append(args, "-dn")
 	return args
+}
+
+// HLSOutputContainer is shared by FFmpeg argument construction and activity
+// reporting so copied MPEG-2/forced-TS streams cannot be mislabeled as fMP4.
+func HLSOutputContainer(opts TranscodeOpts) string {
+	if copyVideoUsesFMP4(opts) {
+		return OutputContainerFMP4
+	}
+	return OutputContainerMPEGTS
 }
 
 // copyVideoUsesFMP4 reports whether copied video is packaged as fragmented MP4

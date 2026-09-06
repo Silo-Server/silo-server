@@ -38,7 +38,6 @@ import {
   normalizeContainerDecision,
   normalizeStreamDecision,
   type ActivityRouteNode,
-  type ToneMapSummary,
 } from "@/pages/adminActivityPresentation";
 import {
   Table,
@@ -361,14 +360,19 @@ export default function AdminActivity() {
           {/* Method distribution bar */}
           <div className="mb-3">
             <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-              Play Method
+              Playback Method
             </div>
-            <div className="flex h-1.5 overflow-hidden rounded-full">
+            <div
+              role="img"
+              aria-label="Playback method distribution"
+              className="flex h-1.5 overflow-hidden rounded-full"
+            >
               {Object.entries(methods)
                 .sort(([a], [b]) => compareActivityMethods(a, b))
                 .map(([method, count]) => (
                   <div
                     key={method}
+                    title={`${activityMethodMeta(method).label}: ${count}`}
                     className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
                     style={{ width: `${(count / sessions.length) * 100}%` }}
                   />
@@ -380,6 +384,10 @@ export default function AdminActivity() {
                 .map(([method, count]) => (
                   <button
                     key={method}
+                    type="button"
+                    title={activityMethodMeta(method).description}
+                    aria-label={`${activityMethodMeta(method).label} ${count}`}
+                    aria-pressed={methodFilter === method}
                     onClick={() => setMethodFilter(methodFilter === method ? null : method)}
                     className={`flex items-center gap-1.5 text-[11px] transition-opacity ${
                       methodFilter && methodFilter !== method ? "opacity-30" : ""
@@ -388,7 +396,7 @@ export default function AdminActivity() {
                     <span
                       className={`inline-block h-2 w-2 rounded-full ${activityMethodMeta(method).swatchClass}`}
                     />
-                    <span className="font-medium capitalize">{method}</span>
+                    <span className="font-medium">{activityMethodMeta(method).label}</span>
                     <span className="text-muted-foreground tabular-nums">{count}</span>
                   </button>
                 ))}
@@ -693,8 +701,7 @@ function StreamRow({
         {/* Playback */}
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            {transcodeMode ? <TranscodeModeBadge label={transcodeMode} /> : null}
-            {toneMap ? <ToneMapModeBadge summary={toneMap} /> : null}
+            <ActivityMethodBadge method={activityMethod} />
             <button
               type="button"
               onClick={toggleDetails}
@@ -818,11 +825,6 @@ function StreamRow({
                 </span>
               ) : null}
             </Link>
-            <span
-              className={`inline-flex flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold capitalize ${activityMethodMeta(activityMethod).badgeClass}`}
-            >
-              {activityMethod}
-            </span>
             <JellyfinSessionPill session={session} />
           </div>
           <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[11px]">
@@ -887,8 +889,7 @@ function StreamRow({
           </div>
           <div className="mt-2 rounded-md border border-white/6 bg-white/[0.03] px-2 py-1.5">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              {transcodeMode ? <TranscodeModeBadge label={transcodeMode} /> : null}
-              {toneMap ? <ToneMapModeBadge summary={toneMap} /> : null}
+              <ActivityMethodBadge method={activityMethod} />
               <button
                 type="button"
                 onClick={toggleDetails}
@@ -1003,40 +1004,17 @@ function PlaybackSummaryLine({
   );
 }
 
-function TranscodeModeBadge({ label }: { label: string }) {
+function ActivityMethodBadge({ method }: { method: string }) {
+  const meta = activityMethodMeta(method);
   return (
     <span
-      className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${transcodeModeBadgeColor(label)}`}
+      aria-label={`Playback method: ${meta.label}`}
+      title={meta.description}
+      className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${meta.badgeClass}`}
     >
-      {label}
+      {meta.label}
     </span>
   );
-}
-
-function transcodeModeBadgeColor(label: string): string {
-  const normalized = label.trim().toLowerCase();
-  if (normalized === "sw" || normalized === "audio sw") {
-    return "border-destructive/30 bg-destructive/10 text-destructive";
-  }
-  return "border-cyan-400/20 bg-cyan-400/10 text-cyan-200";
-}
-
-/** Render the compact indicator for the confirmed tone-mapping executor. */
-function ToneMapModeBadge({ summary }: { summary: ToneMapSummary }) {
-  return (
-    <span
-      className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${toneMapModeBadgeColor(summary.mode)}`}
-    >
-      {summary.badge}
-    </span>
-  );
-}
-
-function toneMapModeBadgeColor(mode: ToneMapSummary["mode"]): string {
-  if (mode === "software") {
-    return "border-destructive/30 bg-destructive/10 text-destructive";
-  }
-  return "border-violet-400/25 bg-violet-400/10 text-violet-200";
 }
 
 function PlaybackExpandedPanel({

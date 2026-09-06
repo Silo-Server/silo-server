@@ -34,6 +34,8 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		TranscodeNodeURL:        s.TranscodeNodeURL,
 		TargetResolution:        s.TargetResolution,
 		TargetVideoCodec:        s.TargetVideoCodec,
+		OutputContainer:         s.OutputContainer,
+		OutputProtocol:          s.OutputProtocol,
 		TargetAudioCodec:        s.TargetAudioCodec,
 		TargetAudioChannels:     s.TargetAudioChannels,
 		TargetBitrateKbps:       s.TargetBitrateKbps,
