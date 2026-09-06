@@ -228,3 +228,49 @@ func FilterMediaFilesByAccess(files []*models.MediaFile, filter AccessFilter) []
 	}
 	return filtered
 }
+
+// MediaFileQualityCeilingSQL renders the playback-quality ceiling as a SQL
+// condition over the given media_files alias, or "" when the filter sets no
+// ceiling. It mirrors access.QualityAllowed, trimming ASCII whitespace.
+// Use octal \013 for vertical tab; PostgreSQL treats \v as a literal v.
+// Go's TrimSpace also strips Unicode spaces (such as U+00A0); the scanner has
+// never been observed to write those.
+func MediaFileQualityCeilingSQL(alias string, maxPlaybackQuality string) string {
+	quality := access.NormalizePlaybackQuality(maxPlaybackQuality)
+	if quality == "" {
+		return ""
+	}
+	maxRank := 3
+	if quality == access.PlaybackQuality4K {
+		maxRank = 4
+	}
+	return fmt.Sprintf(`CASE UPPER(BTRIM(COALESCE(%s.resolution, ''), E' \t\n\013\f\r'))
+		WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
+		WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, alias, maxRank)
+}
+
+// MediaFileAccessSQL renders FileAllowedByAccess as SQL conditions over the
+// given media_files alias, appending any bind values to args and numbering
+// placeholders from the resulting argument positions. Callers must append the
+// returned args in order.
+//
+// This is the SQL mirror of FileAllowedByAccess and must stay in step with it:
+// it exists so queries that would otherwise ship every candidate file to Go can
+// filter and reduce inside PostgreSQL instead.
+func MediaFileAccessSQL(alias string, filter AccessFilter, args []any) ([]string, []any) {
+	conditions := make([]string, 0, 3)
+
+	if filter.AllowedLibraryIDs != nil {
+		args = append(args, filter.AllowedLibraryIDs)
+		conditions = append(conditions, fmt.Sprintf("%s.media_folder_id = ANY($%d)", alias, len(args)))
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		args = append(args, filter.DisabledLibraryIDs)
+		conditions = append(conditions, fmt.Sprintf("NOT (%s.media_folder_id = ANY($%d))", alias, len(args)))
+	}
+	if ceiling := MediaFileQualityCeilingSQL(alias, filter.MaxPlaybackQuality); ceiling != "" {
+		conditions = append(conditions, ceiling)
+	}
+
+	return conditions, args
+}

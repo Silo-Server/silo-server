@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
@@ -59,7 +61,12 @@ const editorialCandidateCacheTTL = 24 * time.Hour
 // load-testing pool contention.
 const fetchAllMaxConcurrency = 6
 const slowSectionFetchThreshold = 500 * time.Millisecond
-const slowAggregateFetchThreshold = time.Second
+
+// slowAggregateFetchThreshold sits below the typical aggregate duration on
+// purpose. At one second it matched the middle of the production distribution
+// and fired on well under one percent of requests, which read as "FetchAll is
+// fine" when it was simply never tripping.
+const slowAggregateFetchThreshold = 500 * time.Millisecond
 
 type recommendationReader interface {
 	GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
@@ -91,6 +98,9 @@ type Fetcher struct {
 	// Snapshots are produced out-of-band by TrendingRefresher, so the read path
 	// never calls the upstream provider.
 	TrendingSnapshots trendingSnapshotGetter
+
+	overlaySummaryCacheOnce sync.Once
+	overlaySummaryCache     *cache.TTLCache[*models.OverlaySummary]
 
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
@@ -1096,33 +1106,180 @@ func (f *Fetcher) FetchEpisodesByContentIDs(ctx context.Context, contentIDs []st
 	return f.fetchEpisodeTargetsByContentIDs(ctx, contentIDs, nil, nil, filter)
 }
 
+// overlaySummaryCacheTTL bounds how stale a card's quality badges may be. A
+// summary only changes when the underlying files do — a rescan or a re-probe —
+// so this trades a few minutes of badge staleness for not re-deriving the same
+// answer for every profile that loads the same home screen. It matches
+// resolvedListRefreshAfter so the two caches age on the same cadence.
+const overlaySummaryCacheTTL = 5 * time.Minute
+
+func (f *Fetcher) overlaySummaries() *cache.TTLCache[*models.OverlaySummary] {
+	f.overlaySummaryCacheOnce.Do(func() {
+		f.overlaySummaryCache = cache.NewTTLCache[*models.OverlaySummary]()
+	})
+	return f.overlaySummaryCache
+}
+
+// overlaySummaryCacheScope fingerprints the parts of an access filter that can
+// change which file a card's summary is built from. MaxContentRating is absent
+// deliberately: it gates items, not files, and never reaches
+// catalog.FileAllowedByAccess.
+func overlaySummaryCacheScope(filter catalog.AccessFilter) string {
+	var b strings.Builder
+	if filter.AllowedLibraryIDs == nil {
+		// A nil allow-list means unrestricted, which is not the same as an empty
+		// one, so the two must not fingerprint alike.
+		b.WriteString("a:*")
+	} else {
+		allowed := append([]int(nil), filter.AllowedLibraryIDs...)
+		sort.Ints(allowed)
+		b.WriteString("a:")
+		for _, id := range allowed {
+			b.WriteString(strconv.Itoa(id))
+			b.WriteByte(',')
+		}
+	}
+	disabled := append([]int(nil), filter.DisabledLibraryIDs...)
+	sort.Ints(disabled)
+	b.WriteString("|d:")
+	for _, id := range disabled {
+		b.WriteString(strconv.Itoa(id))
+		b.WriteByte(',')
+	}
+	b.WriteString("|q:")
+	b.WriteString(access.NormalizePlaybackQuality(filter.MaxPlaybackQuality))
+	return b.String()
+}
+
+// overlaySummaryResolutionRankSQL mirrors overlays.ResolutionRank: "4k"/"uhd"
+// rank as 2160p, signed digits followed by "p" rank as their value, otherwise 0.
+// Use octal \013 for vertical tab; PostgreSQL treats \v as a literal v.
+// Trim ASCII whitespace as Go does. Go's TrimSpace also strips Unicode spaces
+// (such as U+00A0), which the scanner has never been observed to write.
+// Limit numeric matches to 18 digits so they fit in int64, as required by Atoi.
+const overlaySummaryResolutionRankSQL = `CASE
+				WHEN lower(btrim(coalesce(mf.resolution, ''), E' \t\n\013\f\r')) IN ('4k', 'uhd') THEN 2160
+				WHEN lower(btrim(coalesce(mf.resolution, ''), E' \t\n\013\f\r')) ~ '^[+-]?[0-9]{1,18}p$'
+					THEN substring(lower(btrim(mf.resolution, E' \t\n\013\f\r')) from '^([+-]?[0-9]{1,18})p$')::numeric
+				ELSE 0
+			END`
+
+// overlaySummaryRangeRankSQL mirrors overlays.RangeRank: Dolby Vision outranks a
+// typed HDR flavor, which outranks the bare hdr boolean. The two jsonpath
+// predicates mirror overlays.hasDolbyVision and overlays.hdrTypeFromTracks
+// respectively. Note the asymmetry those two carry: hasDolbyVision tests the
+// raw video_range_type while hdrTypeFromTracks trims it first, so only the
+// latter's patterns tolerate surrounding whitespace. \s is deliberately not used
+// — jsonpath's string lexer eats the backslash, silently turning the class into
+// a literal "s". jsonb_path_exists is used rather than expanding the
+// array with jsonb_array_elements: on a real library the expansion costs about
+// three times as much for the same answer.
+const overlaySummaryRangeRankSQL = `CASE
+				WHEN jsonb_path_exists(coalesce(mf.video_tracks, '[]'::jsonb),
+					'$[*] ? ((@.dolby_vision.type() == "string" && @.dolby_vision != "") || @.dv_profile > 0 || @.video_range_type like_regex "^DOVI")') THEN 3
+				WHEN jsonb_path_exists(coalesce(mf.video_tracks, '[]'::jsonb),
+					'$[*] ? (@.hdr10_plus == true || @.video_range_type like_regex "HDR10Plus" || @.video_range_type like_regex "^[[:space:]]*HDR10[[:space:]]*$" || @.video_range_type like_regex "WithHDR10[[:space:]]*$" || @.video_range_type like_regex "^[[:space:]]*HLG[[:space:]]*$" || @.video_range_type like_regex "WithHLG[[:space:]]*$" || @.color_transfer like_regex "smpte2084" flag "i" || @.color_transfer like_regex "arib-std-b67" flag "i")') THEN 2
+				WHEN coalesce(mf.hdr, false) THEN 1
+				ELSE 0
+			END`
+
 // ListOverlaySummaries batches file lookups for section cards and derives the
-// compact overlay summary per content ID.
+// compact overlay summary per content ID. Each requested ID independently gets
+// all accessible, non-missing files matching its content_id or episode_id.
+// A series therefore retains every episode file even when that episode is also
+// requested, making summaries independent of page composition and cache state.
+//
+// PostgreSQL reduces each card to the single file the summary is built from
+// rather than returning every candidate. That matters because episode files
+// carry their series' content_id: without the reduction one series card drags
+// back every episode file of the show (over 8,000 rows for the largest series
+// in a real library), so a home screen of series cards moved megabytes of
+// track JSON per request to render a handful of badges. The DISTINCT ON
+// ordering mirrors overlays.BestFile, and the access predicate mirrors
+// catalog.FileAllowedByAccess.
 func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]*models.OverlaySummary, error) {
+	summaries, _, err := f.listOverlaySummaries(ctx, contentIDs, filter)
+	return summaries, err
+}
+
+// listOverlaySummaries is ListOverlaySummaries plus the number of rows the
+// query actually read, which tests use to assert the reduction is happening.
+func (f *Fetcher) listOverlaySummaries(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]*models.OverlaySummary, int, error) {
 	summaries := make(map[string]*models.OverlaySummary, len(contentIDs))
 	if len(contentIDs) == 0 {
-		return summaries, nil
+		return summaries, 0, nil
 	}
 
-	rows, err := f.pool.Query(ctx, `
-		SELECT content_id, episode_id, file_path, resolution, codec_audio, audio_tracks, hdr, video_tracks,
-		       codec_video, audio_channels, container, subtitle_tracks, external_subtitles, edition_key
-		FROM media_files
-		WHERE (content_id = ANY($1) OR episode_id = ANY($1)) AND missing_since IS NULL
-		ORDER BY content_id ASC, episode_id ASC, id ASC
-	`, contentIDs)
+	// Cached summaries are shared across profiles and must never be mutated in
+	// place; nothing downstream does, the response only reads them.
+	summaryCache := f.overlaySummaries()
+	scope := overlaySummaryCacheScope(filter)
+	uncached := make([]string, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		// A card with no usable file caches as a nil summary rather than as a
+		// miss, so it is not re-queried on every request.
+		if summary, ok := summaryCache.Get(scope + "\x00" + contentID); ok {
+			if summary != nil {
+				summaries[contentID] = summary
+			}
+			continue
+		}
+		uncached = append(uncached, contentID)
+	}
+	if len(uncached) == 0 {
+		return summaries, 0, nil
+	}
+
+	args := []any{uncached}
+	conditions := []string{
+		"(mf.content_id = ANY($1) OR mf.episode_id = ANY($1))",
+		"mf.missing_since IS NULL",
+		"g.group_key = ANY($1)",
+	}
+	accessConditions, args := catalog.MediaFileAccessSQL("mf", filter, args)
+	conditions = append(conditions, accessConditions...)
+
+	// Deliberately let a file contribute to both its series and episode cards:
+	// unlike the old exclusive grouping, a series always reports its best file
+	// regardless of which episodes are on the page. Keep the media_files OR
+	// predicate to drive index lookups before fanning out to requested groups.
+	// The ranking sorts narrow (group_key, id, rank) tuples, joining winners back
+	// for their columns afterwards, because sorting the wide rows themselves
+	// costs noticeably more.
+	query := fmt.Sprintf(`
+		WITH winners AS (
+			SELECT DISTINCT ON (group_key) group_key, id
+			FROM (
+				SELECT
+					g.group_key,
+					mf.id, mf.content_id, mf.episode_id,
+					%s AS resolution_rank,
+					%s AS range_rank
+				FROM media_files mf
+				CROSS JOIN LATERAL (VALUES (mf.content_id), (mf.episode_id)) AS g(group_key)
+				WHERE %s
+			) candidates
+			-- The final tiebreak repeats the legacy row order (content_id,
+			-- episode_id, id) rather than id alone, because overlays.BestFile keeps
+			-- the earliest file in the slice and that slice arrived in this order.
+			ORDER BY group_key, resolution_rank DESC, range_rank DESC, content_id ASC, episode_id ASC, id ASC
+		)
+		SELECT winners.group_key, mf.content_id, mf.episode_id, mf.file_path, mf.resolution, mf.codec_audio,
+			mf.audio_tracks, mf.hdr, mf.video_tracks, mf.codec_video, mf.audio_channels, mf.container,
+			mf.subtitle_tracks, mf.external_subtitles, mf.edition_key
+		FROM winners
+		JOIN media_files mf ON mf.id = winners.id
+	`, overlaySummaryResolutionRankSQL, overlaySummaryRangeRankSQL, strings.Join(conditions, " AND "))
+
+	rows, err := f.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("querying overlay summaries: %w", err)
+		return nil, 0, fmt.Errorf("querying overlay summaries: %w", err)
 	}
 	defer rows.Close()
 
-	requested := make(map[string]struct{}, len(contentIDs))
-	for _, contentID := range contentIDs {
-		requested[contentID] = struct{}{}
-	}
-
-	grouped := make(map[string][]*models.MediaFile, len(contentIDs))
+	rowCount := 0
 	for rows.Next() {
+		var groupKey string
 		var contentID string
 		var episodeID *string
 		var filePath string
@@ -1139,11 +1296,12 @@ func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string,
 		var editionKey *string
 
 		if err := rows.Scan(
-			&contentID, &episodeID, &filePath, &resolution, &codecAudio, &audioTracksJSON, &hdr, &videoTracksJSON,
-			&codecVideo, &audioChannels, &container, &subtitleTracksJSON, &externalSubtitlesJSON, &editionKey,
+			&groupKey, &contentID, &episodeID, &filePath, &resolution, &codecAudio, &audioTracksJSON, &hdr,
+			&videoTracksJSON, &codecVideo, &audioChannels, &container, &subtitleTracksJSON, &externalSubtitlesJSON, &editionKey,
 		); err != nil {
-			return nil, fmt.Errorf("scanning overlay summary row: %w", err)
+			return nil, 0, fmt.Errorf("scanning overlay summary row: %w", err)
 		}
+		rowCount++
 
 		file := &models.MediaFile{
 			ContentID: contentID,
@@ -1173,45 +1331,38 @@ func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string,
 		}
 		if len(audioTracksJSON) > 0 {
 			if err := json.Unmarshal(audioTracksJSON, &file.AudioTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay audio tracks: %w", err)
+				return nil, 0, fmt.Errorf("unmarshaling overlay audio tracks: %w", err)
 			}
 		}
 		if len(videoTracksJSON) > 0 {
 			if err := json.Unmarshal(videoTracksJSON, &file.VideoTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay video tracks: %w", err)
+				return nil, 0, fmt.Errorf("unmarshaling overlay video tracks: %w", err)
 			}
 		}
 		if len(subtitleTracksJSON) > 0 {
 			if err := json.Unmarshal(subtitleTracksJSON, &file.SubtitleTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay subtitle tracks: %w", err)
+				return nil, 0, fmt.Errorf("unmarshaling overlay subtitle tracks: %w", err)
 			}
 		}
 		if len(externalSubtitlesJSON) > 0 {
 			if err := json.Unmarshal(externalSubtitlesJSON, &file.ExternalSubtitles); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay external subtitles: %w", err)
+				return nil, 0, fmt.Errorf("unmarshaling overlay external subtitles: %w", err)
 			}
 		}
 
-		groupKey := contentID
-		if episodeID != nil {
-			if _, ok := requested[*episodeID]; ok {
-				groupKey = *episodeID
-			}
+		if summary := overlays.BuildSummary([]*models.MediaFile{file}); summary != nil {
+			summaries[groupKey] = summary
 		}
-		grouped[groupKey] = append(grouped[groupKey], file)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating overlay summary rows: %w", err)
+		return nil, 0, fmt.Errorf("iterating overlay summary rows: %w", err)
 	}
 
-	for contentID, files := range grouped {
-		files = catalog.FilterMediaFilesByAccess(files, filter)
-		if summary := overlays.BuildSummary(files); summary != nil {
-			summaries[contentID] = summary
-		}
+	for _, contentID := range uncached {
+		summaryCache.Set(scope+"\x00"+contentID, summaries[contentID], overlaySummaryCacheTTL)
 	}
 
-	return summaries, nil
+	return summaries, rowCount, nil
 }
 
 // userAgnosticSectionFetch is the signature shared by every fetch helper whose
