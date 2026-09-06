@@ -2,15 +2,15 @@ import { Link } from "react-router";
 import { Play } from "lucide-react";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions } from "@/hooks/queries/admin/stats";
 import { getSessionClientLabel } from "@/pages/adminActivityPresentation";
 import { formatRelativeTime } from "@/lib/date";
 import { ActivitySkeletonRows, SectionError } from "../feedback";
 import { SessionProfilePill } from "./SessionProfilePill";
 
 export function RecentActivityWidget() {
-  const sessionsQuery = useAdminSessions();
-  const sessions = sessionsQuery.data ?? [];
+  const sessionsQuery = useAdminLiveSessions(false);
+  const sessions = sessionsQuery.data?.sessions ?? [];
 
   return (
     <Card className="h-full">

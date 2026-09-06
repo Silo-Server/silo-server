@@ -28,7 +28,9 @@ const mockUseBuildInfo = vi.fn<() => MockBuildInfoResult>(() => ({
   isPending: false,
   isError: false,
 }));
-const mockUseAdminSessions = vi.fn(() => ({ data: [] }));
+const mockUseAdminLiveSessions = vi.fn((_includeHidden: boolean) => ({
+  data: { sessions: [] },
+}));
 const mockUseAdminPluginInstallations = vi.fn(() => ({ data: [] }));
 const mockUsePolicyCapability = vi.fn(() => ({
   data: {
@@ -48,7 +50,7 @@ vi.mock("@/hooks/queries/admin/system", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/stats", () => ({
-  useAdminSessions: () => mockUseAdminSessions(),
+  useAdminLiveSessions: (includeHidden: boolean) => mockUseAdminLiveSessions(includeHidden),
 }));
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
@@ -93,6 +95,14 @@ describe("AdminSidebar", () => {
 
     expect(settingsLinks).toEqual(['href="/admin/settings"']);
     expect(markup).not.toContain("/admin/settings?tab=");
+  });
+
+  it("counts sessions from the live endpoint, excluding idle rows", () => {
+    renderSidebar();
+
+    // include_idle stays OFF here: it reveals unclaimed_idle rows too, which are ENDED
+    // sessions the registry still remembers. A "live" badge must not count them.
+    expect(mockUseAdminLiveSessions).toHaveBeenCalledWith(false);
   });
 
   it("renders as an embedded rail inside the mobile drawer", () => {

@@ -2577,6 +2577,123 @@ export interface AdminSession {
   routing_egress?: string;
   routing_egress_node_id?: number;
   routing_egress_node_name?: string;
+  /**
+   * Measured delivery for this session, from stream telemetry. Only ever
+   * populated by GET /admin/sessions/live, where every row of the merged view
+   * carries one. It is absent only on the legacy fallback paths, when
+   * `telemetry_enabled` or `view_available` is false on the envelope.
+   */
+  telemetry?: AdminSessionTelemetry;
+}
+
+/**
+ * The per-session block from the merged telemetry view: what actually reached
+ * the viewer, how fast, from which addresses, and which side of the picture each
+ * fact came from.
+ *
+ * Absent on every row when the server has telemetry switched off.
+ */
+export interface AdminSessionTelemetry {
+  /**
+   * Read this first.
+   * - `reported` — a client claims to be watching. Nothing measured leaving.
+   * - `measured` — bytes went out. No session manager claims them.
+   * - `both` — an ordinary, corroborated viewer.
+   */
+  evidence: "reported" | "measured" | "both";
+  /**
+   * Reported as PLAYING with no measured bytes: a client posting progress for a
+   * stream nothing is sending. A session reported as PAUSED is never flagged,
+   * because a paused client legitimately stops pulling bytes.
+   */
+  no_delivery?: boolean;
+  /**
+   * Measured delivery whose reporter has gone away and whose viewer edge is no
+   * longer active. This is the server's own classification — it already knows
+   * whether bytes are still moving at the viewer edge, which no client can work
+   * out from `evidence` alone — so read it rather than re-deriving it.
+   */
+  unclaimed_idle?: boolean;
+  /**
+   * The byte total is bounded memory retained from a retired measurement, not a
+   * publisher still observing the session.
+   */
+  measurement_pruned?: boolean;
+  /** Bytes delivered to the viewer at the outermost edge. */
+  viewer_bytes: number;
+  /** Internal proxy-to-node traffic. Never counts toward a concurrency cap. */
+  relay_bytes?: number;
+  /** The total is known to be short because a publisher dropped records. */
+  bytes_degraded?: boolean;
+  /**
+   * Measured between two consecutive view builds, so it is absent until a
+   * session has been seen twice. Absent means "not yet known" and must not be
+   * rendered as zero, which would read as a stalled stream.
+   */
+  delivery_rate_kbps?: number;
+  /** When the last byte was accepted on any route, viewer or relay. */
+  last_byte_at?: string;
+  /** Requests currently open across every route, viewer or relay. */
+  open_observations: number;
+  request_count?: number;
+  /**
+   * Every address that pulled bytes for this session. More than one is not
+   * automatically abuse (carrier NAT and network handoff both produce it).
+   */
+  viewer_ips?: string[];
+  /** The playback control socket is open, as the session manager reports it. */
+  realtime_alive?: boolean;
+  /** Publishers disagreed about who is watching. An abuse signal, not noise. */
+  identity_conflict?: boolean;
+  /** Everyone who contributed. */
+  publishers?: string[];
+  /** Strictly who served bytes — what answers "from which node?". */
+  viewer_edge_publishers?: string[];
+}
+
+/**
+ * Envelope returned by GET /admin/sessions/live.
+ *
+ * The merged telemetry view is the source: every process publishes into it, so
+ * the list already holds every session anybody knows about. There is no
+ * "telemetry or legacy?" question to ask — only how complete the view is.
+ */
+export interface AdminLiveSessionsResponse {
+  /**
+   * False means the server has telemetry switched off, and `sessions` is the
+   * legacy projection with no telemetry block on any row.
+   */
+  telemetry_enabled: boolean;
+  /**
+   * False before the first view build. An empty list with this false means "not
+   * known yet", never "nothing is streaming".
+   */
+  view_available: boolean;
+  view_complete: boolean;
+  view_stale: boolean;
+  /** Age of the served view build, in milliseconds. */
+  view_age_ms: number;
+  /** Why the view is incomplete, when it is. */
+  incomplete_reasons?: string[];
+  /**
+   * Degradations that are NOT completeness claims and never suppress
+   * classification. Currently only `publisher_transfer_capacity`.
+   */
+  view_advisories?: string[];
+  /** Download and probe observations that lost per-transfer attribution. */
+  dropped_transfer_observations?: number;
+  /** How many rows are reported-as-playing with no measured bytes. */
+  no_delivery_count: number;
+  no_delivery_shown: boolean;
+  /**
+   * The server withholds TWO classes of row behind the same `include_idle` switch:
+   * `no_delivery` (claimed but nothing was ever sent) and `unclaimed_idle` (bytes were
+   * measured, nobody claims it any more, delivery has gone quiet). Reading only the
+   * no-delivery pair leaves the second class unreachable — no count, and no reveal control.
+   */
+  unclaimed_idle_count: number;
+  unclaimed_idle_shown: boolean;
+  sessions: AdminSession[];
 }
 
 export interface OperationalLogEntry {

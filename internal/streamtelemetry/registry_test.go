@@ -3,10 +3,14 @@ package streamtelemetry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -205,6 +209,126 @@ func TestPruneReleasesReservations(t *testing.T) {
 	}
 }
 
+func recordSessionBytes(t *testing.T, registry *Registry, id, pattern string, role Role, bytes int64, endedAt time.Time) {
+	t.Helper()
+	route := testRoute(ClassPlayback)
+	route.Pattern = pattern
+	route.Role = role
+	obs := registry.begin(route, CaptureSet{Method: http.MethodGet, Pattern: pattern, ReceivedAt: endedAt.Add(-time.Second)})
+	registry.attach(obs, testAttachment(id))
+	obs.AddBytes(bytes)
+	previousNow := now
+	now = func() time.Time { return endedAt }
+	registry.release(obs, httpstreamOutcomeCompleted)
+	now = previousNow
+}
+
+func TestPruneLeavesFrozenByteTombstone(t *testing.T) {
+	cfg := testConfig()
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "remembered", "/viewer", RoleViewerEgress, 4096, endedAt)
+
+	prunedAt := endedAt.Add(2 * cfg.Retention)
+	snapshot := registry.sweep(prunedAt)
+	if len(snapshot.Sessions) != 1 {
+		t.Fatalf("sessions = %+v, want one tombstone", snapshot.Sessions)
+	}
+	got := snapshot.Sessions[0]
+	if !got.MeasurementPruned || got.BytesAccepted != 4096 || got.OpenObservations != 0 || got.RealtimeConnectionAlive {
+		t.Fatalf("tombstone liveness/bytes = %+v", got)
+	}
+	if len(got.Routes) != 1 || got.Routes[0].Role != RoleViewerEgress || got.Routes[0].BytesAccepted != 4096 ||
+		got.Routes[0].Open != 0 || !got.Routes[0].LastByteAccepted.Equal(prunedAt) {
+		t.Fatalf("tombstone routes = %+v", got.Routes)
+	}
+	if len(got.ViewerIPs) != 0 || len(got.DeviceIDs) != 0 || len(got.UserAgents) != 0 ||
+		len(got.ClientVariants) != 0 || len(got.MediaFileIDs) != 0 || len(got.PlayMethods) != 0 ||
+		len(got.TokenIssuedAts) != 0 || len(got.IdentityConflicts) != 0 || len(got.Outcomes) != 0 {
+		t.Fatalf("tombstone retained bounded-set state: %+v", got)
+	}
+}
+
+func TestPruneWithoutBytesLeavesNoTombstone(t *testing.T) {
+	cfg := testConfig()
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "empty", "/viewer", RoleViewerEgress, 0, endedAt)
+	if snapshot := registry.sweep(endedAt.Add(2 * cfg.Retention)); len(snapshot.Sessions) != 0 {
+		t.Fatalf("byte-less session left a tombstone: %+v", snapshot.Sessions)
+	}
+}
+
+func TestReattachClearsSessionTombstone(t *testing.T) {
+	cfg := testConfig()
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "revived", "/viewer", RoleViewerEgress, 100, endedAt)
+	registry.sweep(endedAt.Add(2 * cfg.Retention))
+
+	recordSessionBytes(t, registry, "revived", "/viewer", RoleViewerEgress, 7, endedAt.Add(time.Minute))
+	snapshot := registry.sweep(endedAt.Add(time.Minute + cfg.Retention/2))
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].MeasurementPruned || snapshot.Sessions[0].BytesAccepted != 7 {
+		t.Fatalf("revived session counted against its tombstone: %+v", snapshot.Sessions)
+	}
+}
+
+func TestTombstonesExpireAtRetention(t *testing.T) {
+	cfg := testConfig()
+	cfg.TombstoneRetention = 10 * time.Millisecond
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "expires", "/viewer", RoleViewerEgress, 1, endedAt)
+	prunedAt := endedAt.Add(2 * cfg.Retention)
+	registry.sweep(prunedAt)
+	if snapshot := registry.sweep(prunedAt.Add(cfg.TombstoneRetention)); len(snapshot.Sessions) != 0 {
+		t.Fatalf("expired tombstone remained: %+v", snapshot.Sessions)
+	}
+}
+
+func TestTombstoneBoundEvictsOldest(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxSessions = 1
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	ids := make([]string, 0, 2)
+	for candidate := 0; len(ids) < 2; candidate++ {
+		id := fmt.Sprintf("same-shard-%d", candidate)
+		if len(ids) == 0 || registry.shard(id) == registry.shard(ids[0]) {
+			ids = append(ids, id)
+		}
+	}
+	base := time.Unix(1_700_000_000, 0)
+	for i, id := range ids {
+		endedAt := base.Add(time.Duration(i) * time.Minute)
+		recordSessionBytes(t, registry, id, "/viewer", RoleViewerEgress, int64(i+1), endedAt)
+		registry.sweep(endedAt.Add(2 * cfg.Retention))
+	}
+	snapshot := registry.SnapshotAt(base.Add(2 * time.Minute))
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].SessionID != ids[1] {
+		t.Fatalf("bounded tombstones = %+v, want only freshest %q", snapshot.Sessions, ids[1])
+	}
+	if snapshot.Truncated || snapshot.DroppedObservations != 0 {
+		t.Fatalf("tombstone eviction reported observation loss: truncated=%v dropped=%d", snapshot.Truncated, snapshot.DroppedObservations)
+	}
+}
+
+func TestTombstoneKeepsRouteOverflowDegradation(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxRoutesPerSession = 1
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "overflow", "/one", RoleViewerEgress, 1, endedAt)
+	recordSessionBytes(t, registry, "overflow", "/two", RoleViewerEgress, 2, endedAt)
+	snapshot := registry.sweep(endedAt.Add(2 * cfg.Retention))
+	if len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].MeasurementPruned || !snapshot.Sessions[0].RoutesOverflowed {
+		t.Fatalf("route-overflow tombstone = %+v", snapshot.Sessions)
+	}
+}
+
 func TestRouteBoundDropsNewestRouteWithoutDroppingObservation(t *testing.T) {
 	cfg := testConfig()
 	cfg.MaxRoutesPerSession = 1
@@ -274,6 +398,20 @@ type lifecycleStore struct {
 	leaveCalls     int
 	failFirstLeave bool
 }
+
+type firstSnapshotStore struct {
+	published chan Snapshot
+}
+
+func (s *firstSnapshotStore) Publish(_ context.Context, snapshot Snapshot) error {
+	select {
+	case s.published <- snapshot:
+	default:
+	}
+	return nil
+}
+
+func (s *firstSnapshotStore) Load(context.Context) (Snapshot, error) { return Snapshot{}, nil }
 
 func (s *lifecycleStore) Publish(_ context.Context, snapshot Snapshot) error {
 	s.mu.Lock()
@@ -385,7 +523,7 @@ func TestRegistryGlobalView(t *testing.T) {
 	at := time.Now()
 	store := NewLocalStore()
 	registry := NewRegistry(testConfig(), store, nil)
-	if err := store.Publish(context.Background(), Snapshot{PublisherID: "test-publisher", PublisherEpoch: 1, Sequence: 1, CapturedAt: at}); err != nil {
+	if err := store.Publish(context.Background(), Snapshot{PublisherID: "test-publisher", PublisherEpoch: 1, Sequence: 1, CapturedAt: at, Coverage: fullCoverage()}); err != nil {
 		t.Fatal(err)
 	}
 	originalNow := now
@@ -407,6 +545,40 @@ func TestRegistryGlobalView(t *testing.T) {
 	var nilRegistry *Registry
 	if zero, err := nilRegistry.GlobalView(context.Background()); err != nil || !reflect.DeepEqual(zero, GlobalMonitoringView{}) {
 		t.Fatalf("nil view = %+v, %v", zero, err)
+	}
+}
+
+func TestRegistryDeclaresConfiguredCoverageAndPredeclaredReporter(t *testing.T) {
+	cfg := testConfig()
+	cfg.SweepInterval = time.Millisecond
+	store := &firstSnapshotStore{published: make(chan Snapshot, 1)}
+	registry := NewRegistry(cfg, store, nil)
+	registry.DeclareReportingPublisher("test-publisher#reported")
+	ctx, cancel := context.WithCancel(context.Background())
+	registry.Start(ctx)
+	var first Snapshot
+	select {
+	case first = <-store.published:
+	case <-time.After(time.Second):
+		t.Fatal("registry did not publish its first snapshot")
+	}
+	cancel()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if err := registry.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	if !first.Coverage.Declared || !reflect.DeepEqual(first.Coverage.ConfiguredFamilies, AllFamilies) {
+		t.Fatalf("default coverage = %+v", first.Coverage)
+	}
+	if first.ReportingPublisherID != "test-publisher#reported" {
+		t.Fatalf("first snapshot reporter = %q", first.ReportingPublisherID)
+	}
+
+	cfg.Families = map[Family]bool{FamilyProxy: true}
+	narrowed := NewRegistry(cfg, NewLocalStore(), nil).SnapshotAt(time.Unix(1, 0))
+	if !narrowed.Coverage.Declared || !reflect.DeepEqual(narrowed.Coverage.ConfiguredFamilies, []Family{FamilyProxy}) {
+		t.Fatalf("narrowed coverage = %+v", narrowed.Coverage)
 	}
 }
 
@@ -614,6 +786,55 @@ func TestTransfersSeparateByFileAndSubject(t *testing.T) {
 	}
 }
 
+// Two viewers are two transfers, and the shared table stays globally bounded.
+// Each viewer here is a distinct principal on purpose: the per-subject budget is
+// clamped to an eighth of the table (config.resolve), so a MaxTransfers small
+// enough to exercise the GLOBAL cap can only be reached by several principals —
+// which is exactly what that clamp guarantees. Same-principal viewer
+// distinctness is covered by TestOneSubjectCannotConsumeAnotherSubjectsTransferBudget.
+func TestTransfersSeparateViewersAndRemainGloballyBounded(t *testing.T) {
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	cfg.MaxTransfers = 2
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	handler := registry.Observe(testTransferRoute())(transferAttachHandler("chunk"))
+	serve := func(subject Subject, viewer, device string) {
+		attachment := testAttachment("")
+		attachment.Subject = subject
+		serveTransferAs(handler, attachment, viewer, device)
+	}
+
+	serve(UserSubject(7), "192.0.2.1", "living-room")
+	serve(UserSubject(8), "192.0.2.2", "phone")
+	serve(UserSubject(7), "192.0.2.1", "living-room") // folds into the first viewer's transfer
+	serve(UserSubject(9), "192.0.2.3", "tablet")      // exceeds the global transfer cap
+
+	snapshot := registry.Sweep()
+	if len(snapshot.Transfers) != 2 {
+		t.Fatalf("transfers = %+v, want two viewer-scoped records", snapshot.Transfers)
+	}
+	counts := make(map[string]int64, len(snapshot.Transfers))
+	for _, transfer := range snapshot.Transfers {
+		counts[transfer.ViewerIP+"\x00"+transfer.DeviceID] = transfer.RequestCount
+	}
+	if counts["192.0.2.1\x00living-room"] != 2 || counts["192.0.2.2\x00phone"] != 1 {
+		t.Fatalf("viewer transfer counts = %+v", counts)
+	}
+	// The GLOBAL table filled, which is blindness about downloads and says
+	// nothing about whether the session picture is complete. It must therefore
+	// never reach Truncated: that flag becomes publisher_truncated, which makes
+	// the merged view incomplete, which switches ghost classification off for the
+	// whole fleet.
+	if snapshot.Truncated || snapshot.DroppedObservations != 0 {
+		t.Fatalf("transfer exhaustion leaked into the session picture: truncated=%v dropped=%d",
+			snapshot.Truncated, snapshot.DroppedObservations)
+	}
+	if !snapshot.TransfersTruncated || snapshot.DroppedTransferObservations != 1 {
+		t.Fatalf("transfer cap state: truncated=%v dropped=%d",
+			snapshot.TransfersTruncated, snapshot.DroppedTransferObservations)
+	}
+}
+
 // HasIdentityConflict and IdentityConflicts must agree. A started-at authority
 // upgrade that confirms the recorded instant is not a conflict at all and must
 // not consume the per-session budget; one that moves it is, and sets the flag.
@@ -649,4 +870,576 @@ func TestStartedAtAuthorityUpgradeAndConflictAgree(t *testing.T) {
 			t.Fatalf("started at = %v, want %v", session.startedAt, moved)
 		}
 	})
+}
+
+// The transfer id becomes a Redis hash field name, so it must not leak the
+// identity it is derived from. A viewer's IP address and their client-supplied
+// device id belong in the record's fields, where reading them is a deliberate
+// act, not in a key name that SCAN, MONITOR, slowlog and an RDB dump all expose.
+// The id must also stay ASCII-safe: the pre-hash id joined its components with
+// NUL, which silently truncates every line-oriented reader of the keyspace.
+func TestTransferIDHidesViewerIdentity(t *testing.T) {
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	route := testRoute(ClassTransfer)
+	route.Capture = func(r *http.Request) CaptureSet {
+		return CaptureSet{Method: r.Method, Pattern: route.Pattern,
+			ViewerIP: "198.51.100.77", DeviceID: "kitchen-tv-8842"}
+	}
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	handler := registry.Observe(route)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Attach(r.Context(), testAttachment(""))
+		_, _ = w.Write([]byte("chunk"))
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/media/x", nil))
+
+	snapshot := registry.Sweep()
+	if len(snapshot.Transfers) != 1 {
+		t.Fatalf("transfers = %d, want 1", len(snapshot.Transfers))
+	}
+	transfer := snapshot.Transfers[0]
+	for _, secret := range []string{"198.51.100.77", "kitchen-tv-8842", route.Pattern, "\x00"} {
+		if strings.Contains(transfer.ID, secret) {
+			t.Fatalf("transfer id %q leaks %q", transfer.ID, secret)
+		}
+	}
+	if transfer.ViewerIP != "198.51.100.77" || transfer.DeviceID != "kitchen-tv-8842" {
+		t.Fatalf("identity must survive as fields: ip=%q device=%q", transfer.ViewerIP, transfer.DeviceID)
+	}
+}
+
+// Hashing the id must not fold two viewers together, and must be stable across
+// processes — a runtime-seeded hash would give two publishers different ids for
+// the same logical transfer, which the merge is entitled to assume it can trust.
+func TestTransferKeyIsStableAndViewerDistinct(t *testing.T) {
+	attachment := testAttachment("")
+	base := CaptureSet{Method: http.MethodGet, Pattern: "/media/{id}", ViewerIP: "203.0.113.5", DeviceID: "den"}
+	other := base
+	other.ViewerIP = "203.0.113.6"
+
+	first, again, elsewhere := transferKey(attachment, base), transferKey(attachment, base), transferKey(attachment, other)
+	if first != again {
+		t.Fatalf("transfer key is not deterministic: %q then %q", first, again)
+	}
+	if first == elsewhere {
+		t.Fatalf("two viewers folded into one transfer key: %q", first)
+	}
+	if len(first) != 32 {
+		t.Fatalf("transfer key = %q, want 32 hex characters", first)
+	}
+
+	// The per-subject catch-all row shares the transfer keyspace, so its id has to
+	// be just as deterministic, just as opaque, and unable to collide with any
+	// ordinary identity for the same principal.
+	subject, otherSubject := attachment.Subject, UserSubject(8)
+	fold := overflowTransferKey(subject, RoleViewerEgress, ClassTransfer)
+	if foldAgain := overflowTransferKey(subject, RoleViewerEgress, ClassTransfer); fold != foldAgain {
+		t.Fatalf("overflow transfer key is not deterministic: %q then %q", fold, foldAgain)
+	}
+	if len(fold) != 32 {
+		t.Fatalf("overflow transfer key = %q, want 32 hex characters", fold)
+	}
+	if fold == overflowTransferKey(otherSubject, RoleViewerEgress, ClassTransfer) {
+		t.Fatalf("two subjects share one overflow transfer key: %q", fold)
+	}
+	// Role and class are part of the fold identity: a relay's fold row and a
+	// probe's fold row must not share the viewer-egress transfer row.
+	if fold == overflowTransferKey(subject, RoleInternalRelay, ClassTransfer) ||
+		fold == overflowTransferKey(subject, RoleViewerEgress, ClassProbe) {
+		t.Fatalf("overflow transfer key ignores role or class: %q", fold)
+	}
+	for _, capture := range []CaptureSet{base, other, {}, {Method: http.MethodHead}} {
+		if ordinary := transferKey(attachment, capture); ordinary == fold {
+			t.Fatalf("overflow key collides with an ordinary transfer key: %q", fold)
+		}
+	}
+}
+
+// serveTransferAs issues one transfer-class request carrying the given identity.
+// The route Capture in these tests reads the viewer and device from headers, so
+// this is how a test mints a distinct transfer key.
+func serveTransferAs(handler http.Handler, attachment Attachment, viewer, device string) {
+	request := httptest.NewRequest(http.MethodGet, "/media/x", nil)
+	request.Header.Set("X-Test-Viewer", viewer)
+	request.Header.Set("X-Test-Device", device)
+	handler.ServeHTTP(httptest.NewRecorder(), request.WithContext(withTestAttachment(request, attachment)))
+}
+
+// transferAttachHandler attaches whatever identity serveTransferAs put on the
+// request and writes payload, so one handler serves many principals.
+func transferAttachHandler(payload string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if attachment, ok := r.Context().Value(testAttachmentKey{}).(Attachment); ok {
+			Attach(r.Context(), attachment)
+		} else {
+			Attach(r.Context(), testAttachment(""))
+		}
+		_, _ = w.Write([]byte(payload))
+	}
+}
+
+type testAttachmentKey struct{}
+
+func withTestAttachment(r *http.Request, attachment Attachment) context.Context {
+	return context.WithValue(r.Context(), testAttachmentKey{}, attachment)
+}
+
+// testTransferRoute is a transfer-class route whose capture reads the viewer
+// address and device id from request headers, so a test can mint distinct
+// transfer identities the way a real client's device-id churn does.
+func testTransferRoute() MediaRoute {
+	route := testRoute(ClassTransfer)
+	route.Capture = func(r *http.Request) CaptureSet {
+		return CaptureSet{Method: r.Method, Pattern: "/media/{id}",
+			ViewerIP: r.Header.Get("X-Test-Viewer"), DeviceID: r.Header.Get("X-Test-Device")}
+	}
+	return route
+}
+
+// The whole point of splitting the drop bookkeeping: a full transfer table is a
+// download-attribution problem, and a transfer key is minted partly from
+// client-supplied device ids, so it must never make the merged view incomplete —
+// that would clear no_delivery and unclaimed_idle on every row for every reader.
+// A genuine session-picture drop still does.
+func TestTransferCapDoesNotMakeTheViewIncomplete(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0)
+	originalNow := now
+	now = func() time.Time { return at }
+	defer func() { now = originalNow }()
+
+	t.Run("transfer exhaustion is an advisory", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.Retention = time.Hour
+		cfg.MaxTransfers = 1
+		store := NewLocalStore()
+		registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
+		handler := registry.Observe(testTransferRoute())(transferAttachHandler("chunk"))
+		for _, subject := range []Subject{UserSubject(7), UserSubject(8)} {
+			attachment := testAttachment("")
+			attachment.Subject = subject
+			serveTransferAs(handler, attachment, "192.0.2.1", "device")
+		}
+		snapshot := registry.Sweep()
+		if !snapshot.TransfersTruncated || snapshot.Truncated {
+			t.Fatalf("snapshot flags: transfers=%v sessions=%v", snapshot.TransfersTruncated, snapshot.Truncated)
+		}
+		if err := store.Publish(context.Background(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+		view, err := registry.GlobalView(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !view.Complete || len(view.IncompleteReasons) != 0 {
+			t.Fatalf("transfer exhaustion made the view incomplete: complete=%v reasons=%v",
+				view.Complete, view.IncompleteReasons)
+		}
+		if !slices.Contains(view.Advisories, "publisher_transfer_capacity") {
+			t.Fatalf("advisories = %v, want publisher_transfer_capacity", view.Advisories)
+		}
+		if !view.TransfersTruncated || view.DroppedTransferObservations != 1 {
+			t.Fatalf("merged transfer counters: truncated=%v dropped=%d",
+				view.TransfersTruncated, view.DroppedTransferObservations)
+		}
+	})
+
+	t.Run("session exhaustion still makes it incomplete", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.Retention = time.Hour
+		cfg.MaxSessions = 0
+		store := NewLocalStore()
+		registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
+		handler := registry.Observe(testRoute(ClassPlayback))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Attach(r.Context(), testAttachment("session-1"))
+			_, _ = w.Write([]byte("chunk"))
+		}))
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/media/x", nil))
+		snapshot := registry.Sweep()
+		if !snapshot.Truncated {
+			t.Fatal("session capacity exhaustion did not set Truncated")
+		}
+		if err := store.Publish(context.Background(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+		view, err := registry.GlobalView(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.Complete || !slices.Contains(view.IncompleteReasons, "publisher_truncated") {
+			t.Fatalf("session truncation did not degrade the view: complete=%v reasons=%v",
+				view.Complete, view.IncompleteReasons)
+		}
+	})
+}
+
+// TransfersTruncated states CURRENT transfer-table blindness, so it decays on the
+// same horizon Truncated does — and the same event must never set Truncated.
+func TestTransfersTruncatedDecaysAfterFreshness(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxTransfers = 0 // force the very first transfer observation to be dropped
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	handler := registry.Observe(testTransferRoute())(transferAttachHandler("payload"))
+	serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device")
+
+	dropAt := time.Now()
+	atDrop := registry.SnapshotAt(dropAt)
+	if !atDrop.TransfersTruncated {
+		t.Fatal("snapshot taken at the drop is not transfer-truncated")
+	}
+	inside := registry.SnapshotAt(dropAt.Add(cfg.Freshness / 2))
+	if !inside.TransfersTruncated {
+		t.Fatal("snapshot inside the freshness window is not transfer-truncated")
+	}
+	later := registry.SnapshotAt(dropAt.Add(cfg.Freshness + time.Second))
+	if later.TransfersTruncated {
+		t.Fatal("TransfersTruncated is still set an entire freshness window after the drop")
+	}
+	// The permanent record stays monotonic.
+	if later.DroppedTransferObservations == 0 {
+		t.Fatalf("dropped transfer observations = %d, want the drop to still be counted",
+			later.DroppedTransferObservations)
+	}
+	for _, snapshot := range []Snapshot{atDrop, inside, later} {
+		if snapshot.Truncated || snapshot.DroppedObservations != 0 {
+			t.Fatalf("a transfer drop leaked into the session picture: truncated=%v dropped=%d",
+				snapshot.Truncated, snapshot.DroppedObservations)
+		}
+	}
+}
+
+// The attack this budget exists to stop: one authenticated client rotating device
+// ids used to be able to mint an unbounded share of the shared transfer table and
+// take every other principal's attribution with it.
+func TestOneSubjectCannotConsumeAnotherSubjectsTransferBudget(t *testing.T) {
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	cfg.MaxTransfersPerSubject = 2
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	handler := registry.Observe(testTransferRoute())(transferAttachHandler("chunk"))
+	serve := func(subject Subject, device string) {
+		attachment := testAttachment("")
+		attachment.Subject = subject
+		serveTransferAs(handler, attachment, "192.0.2.1", device)
+	}
+
+	noisy, quiet := UserSubject(7), UserSubject(8)
+	for i := range 20 {
+		serve(noisy, fmt.Sprintf("churned-device-%d", i))
+	}
+	for i := range 3 {
+		serve(quiet, fmt.Sprintf("household-device-%d", i))
+	}
+
+	snapshot := registry.Sweep()
+	bySubject := make(map[string][]TransferView)
+	for _, transfer := range snapshot.Transfers {
+		bySubject[transfer.Subject.ID] = append(bySubject[transfer.Subject.ID], transfer)
+	}
+	for name, subject := range map[string]Subject{"noisy": noisy, "quiet": quiet} {
+		records := bySubject[subject.ID]
+		if len(records) != 3 {
+			t.Fatalf("%s subject holds %d records, want 2 ordinary plus one fold: %+v", name, len(records), records)
+		}
+		folds := 0
+		for _, record := range records {
+			if record.Overflowed {
+				folds++
+				continue
+			}
+			if record.DeviceID == "" {
+				t.Fatalf("%s subject's ordinary record has no device id: %+v", name, record)
+			}
+		}
+		if folds != 1 {
+			t.Fatalf("%s subject has %d fold rows, want exactly 1: %+v", name, folds, records)
+		}
+	}
+	if snapshot.Truncated || snapshot.TransfersTruncated {
+		t.Fatalf("folding is not blindness: truncated=%v transfers=%v", snapshot.Truncated, snapshot.TransfersTruncated)
+	}
+}
+
+// Overflow is degradation of DETAIL, not loss. The bytes stay attributed to the
+// principal, and the fold row asserts nothing it cannot know: a plausible wrong
+// identity is worse for an operator than an absent one.
+func TestPerSubjectOverflowFoldsInsteadOfLosingBytes(t *testing.T) {
+	const payload = "chunk"
+	const devices = 12
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	cfg.MaxTransfersPerSubject = 1
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	handler := registry.Observe(testTransferRoute())(transferAttachHandler(payload))
+	for i := range devices {
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", fmt.Sprintf("device-%d", i))
+	}
+
+	snapshot := registry.Sweep()
+	total, folds := int64(0), 0
+	var fold TransferView
+	for _, transfer := range snapshot.Transfers {
+		total += transfer.BytesAccepted
+		if transfer.Overflowed {
+			folds++
+			fold = transfer
+		}
+	}
+	if want := int64(devices * len(payload)); total != want {
+		t.Fatalf("bytes across the subject's transfers = %d, want %d", total, want)
+	}
+	if snapshot.DroppedObservations != 0 || snapshot.DroppedTransferObservations != 0 {
+		t.Fatalf("folding dropped observations: sessions=%d transfers=%d",
+			snapshot.DroppedObservations, snapshot.DroppedTransferObservations)
+	}
+	if folds != 1 {
+		t.Fatalf("fold rows = %d, want exactly 1: %+v", folds, snapshot.Transfers)
+	}
+	if fold.Subject != UserSubject(7) {
+		t.Fatalf("fold row lost the one identity it may keep: %+v", fold.Subject)
+	}
+	if fold.ViewerIP != "" || fold.DeviceID != "" || fold.Client != (ClientVariant{}) || fold.UserAgent != "" ||
+		fold.ProfileID != "" || fold.MediaFileID != 0 || fold.Method != "" || fold.Pattern != "" {
+		t.Fatalf("fold row asserts an identity it cannot know: %+v", fold)
+	}
+	// Role and class are the two fields a byte-summing consumer keys on, and
+	// they are part of the fold identity, so the row keeps them.
+	if fold.Role != RoleViewerEgress || fold.Class != ClassTransfer {
+		t.Fatalf("fold row lost its role or class: %+v", fold)
+	}
+	if fold.RequestCount != devices-1 {
+		t.Fatalf("fold row request count = %d, want %d", fold.RequestCount, devices-1)
+	}
+}
+
+// sweep() is the ONLY release path for the per-subject allowance. A leak here is
+// a permanent lockout: the principal folds forever even after its records prune.
+func TestTransferBudgetIsReleasedOnPrune(t *testing.T) {
+	newClock := func(t *testing.T, start time.Time) *time.Time {
+		t.Helper()
+		clock := start
+		originalNow := now
+		now = func() time.Time { return clock }
+		t.Cleanup(func() { now = originalNow })
+		return &clock
+	}
+
+	t.Run("full prune returns the whole allowance", func(t *testing.T) {
+		start := time.Unix(1_700_000_000, 0)
+		clock := newClock(t, start)
+		cfg := testConfig()
+		cfg.Retention = time.Minute
+		cfg.MaxTransfersPerSubject = 1
+		registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+		handler := registry.Observe(testTransferRoute())(transferAttachHandler("chunk"))
+
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device-1")
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device-2") // folds
+		*clock = start.Add(2 * time.Minute)
+		if pruned := registry.Sweep(); len(pruned.Transfers) != 0 {
+			t.Fatalf("records survived the retention window: %+v", pruned.Transfers)
+		}
+		registry.transfersMu.RLock()
+		held := len(registry.transfersBySubject)
+		registry.transfersMu.RUnlock()
+		if held != 0 {
+			t.Fatalf("per-subject counters = %d entries, want the map emptied", held)
+		}
+
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device-3")
+		snapshot := registry.Sweep()
+		if len(snapshot.Transfers) != 1 || snapshot.Transfers[0].Overflowed {
+			t.Fatalf("a fresh identity did not get an ordinary record: %+v", snapshot.Transfers)
+		}
+	})
+
+	// The shape that catches counting the fold row against the allowance: a
+	// long-lived fold row would pin the counter at the cap after the ordinary
+	// rows prune, and the subject would fold forever.
+	t.Run("partial prune returns the ordinary allowance", func(t *testing.T) {
+		start := time.Unix(1_700_000_000, 0)
+		clock := newClock(t, start)
+		cfg := testConfig()
+		cfg.Retention = time.Minute
+		cfg.MaxTransfersPerSubject = 1
+		registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+		handler := registry.Observe(testTransferRoute())(transferAttachHandler("chunk"))
+
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device-1") // ordinary
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device-2") // folds
+		*clock = start.Add(45 * time.Second)
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device-3") // keeps the fold row alive
+		*clock = start.Add(70 * time.Second)
+
+		snapshot := registry.Sweep()
+		if len(snapshot.Transfers) != 1 || !snapshot.Transfers[0].Overflowed {
+			t.Fatalf("want only the still-active fold row to survive: %+v", snapshot.Transfers)
+		}
+		*clock = start.Add(71 * time.Second)
+		serveTransferAs(handler, testAttachment(""), "192.0.2.1", "device-4")
+		after := registry.Sweep()
+		ordinary := 0
+		for _, transfer := range after.Transfers {
+			if !transfer.Overflowed {
+				ordinary++
+				if transfer.DeviceID != "device-4" {
+					t.Fatalf("unexpected ordinary record: %+v", transfer)
+				}
+			}
+		}
+		if ordinary != 1 {
+			t.Fatalf("the released allowance was not reusable: %+v", after.Transfers)
+		}
+	})
+}
+
+// A fold row keeps the two fields consumers sum on. dashmetrics only counts a
+// transfer as egress when its Role is viewer_egress, and only counts it as media
+// when its Class is not probe; a fold row that zeroed both silently removed every
+// folded byte from the egress series while claiming the bytes were retained.
+func TestOverflowTransferRowKeepsRoleAndClass(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxTransfersPerSubject = 1
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	transfers := registry.Observe(testTransferRoute())(transferAttachHandler("chunk"))
+	probeRoute := testTransferRoute()
+	probeRoute.Class = ClassProbe
+	probeRoute.Pattern = "/probe"
+	probes := registry.Observe(probeRoute)(transferAttachHandler("zeroes"))
+
+	serveTransferAs(transfers, testAttachment(""), "192.0.2.1", "device-1") // ordinary
+	serveTransferAs(transfers, testAttachment(""), "192.0.2.1", "device-2") // folds
+	serveTransferAs(probes, testAttachment(""), "192.0.2.1", "device-3")    // folds separately
+
+	snapshot := registry.Sweep()
+	var ordinary, transferFold, probeFold int
+	for _, transfer := range snapshot.Transfers {
+		switch {
+		case !transfer.Overflowed:
+			ordinary++
+			if transfer.Role != RoleViewerEgress || transfer.Class != ClassTransfer {
+				t.Fatalf("ordinary record lost role or class: %+v", transfer)
+			}
+		case transfer.Class == ClassProbe:
+			probeFold++
+			if transfer.Role != RoleViewerEgress || transfer.BytesAccepted != int64(len("zeroes")) {
+				t.Fatalf("probe fold row = %+v", transfer)
+			}
+		default:
+			transferFold++
+			if transfer.Role != RoleViewerEgress || transfer.Class != ClassTransfer ||
+				transfer.BytesAccepted != int64(len("chunk")) {
+				t.Fatalf("transfer fold row = %+v", transfer)
+			}
+			if transfer.Pattern != "" || transfer.DeviceID != "" || transfer.ViewerIP != "" {
+				t.Fatalf("fold row asserted an identity it cannot know: %+v", transfer)
+			}
+		}
+	}
+	if ordinary != 1 || transferFold != 1 || probeFold != 1 {
+		t.Fatalf("records = %d ordinary, %d transfer folds, %d probe folds: %+v",
+			ordinary, transferFold, probeFold, snapshot.Transfers)
+	}
+}
+
+// The per-subject budget is a sub-allocation of the shared table. An operator who
+// lowers MaxTransfers below it must not hand one principal the whole table back.
+func TestPerSubjectBudgetIsClampedToAShareOfTheTable(t *testing.T) {
+	for _, test := range []struct {
+		name                        string
+		transfers, perSubject, want int64
+	}{
+		{"defaults do not bind", 10_000, 128, 128},
+		{"lowered table clamps to an eighth", 16, 128, 2},
+		{"tiny table keeps a floor of one", 4, 128, 1},
+		{"an already-small budget is left alone", 10_000, 8, 8},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := DefaultConfig("node")
+			cfg.MaxTransfers, cfg.MaxTransfersPerSubject = test.transfers, test.perSubject
+			cfg.resolve()
+			if cfg.MaxTransfersPerSubject != test.want {
+				t.Fatalf("resolved per-subject budget = %d, want %d", cfg.MaxTransfersPerSubject, test.want)
+			}
+			// A Config built in code must resolve exactly as one parsed from the
+			// environment does, or the invariant protects only half the callers.
+			built := DefaultConfig("node")
+			built.MaxTransfers, built.MaxTransfersPerSubject = test.transfers, test.perSubject
+			registry := NewRegistry(built, NewLocalStore(), slog.New(slog.DiscardHandler))
+			if got := registry.Config().MaxTransfersPerSubject; got != test.want {
+				t.Fatalf("NewRegistry resolved per-subject budget = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+// One client must not be able to switch ghost detection off for everybody by
+// hammering a single session id. Exceeding MaxObservationsPerSession under-counts
+// that ONE session's bytes; it cannot hide a session, so it must not raise
+// Snapshot.Truncated — which becomes publisher_truncated, which makes the view
+// incomplete, which clears no_delivery and unclaimed_idle on every row for every
+// reader. The overflow still has to be recorded and operator-visible.
+func TestPerSessionObservationCapDegradesOnlyThatSession(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0)
+	originalNow := now
+	now = func() time.Time { return at }
+	defer func() { now = originalNow }()
+
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	cfg.MaxObservationsPerSession = 2
+	store := NewLocalStore()
+	registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
+
+	// Held open, so the observation table stays full rather than draining between
+	// requests — the shape a client produces with concurrent range GETs.
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	handler := registry.Observe(testRoute(ClassPlayback))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Attach(r.Context(), testAttachment("session-1"))
+		_, _ = w.Write([]byte("chunk"))
+		<-release
+	}))
+	for range cfg.MaxObservationsPerSession + 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/media/x", nil))
+		}()
+	}
+	// Wait for the table to be full before releasing, otherwise the cap may never
+	// be reached and the test would pass without exercising anything.
+	for {
+		snapshot := registry.SnapshotAt(at)
+		if len(snapshot.Sessions) == 1 && snapshot.Sessions[0].ObservationsOverflowed {
+			break
+		}
+		runtime.Gosched()
+	}
+	close(release)
+	wg.Wait()
+
+	snapshot := registry.Sweep()
+	if snapshot.Truncated {
+		t.Fatal("per-session observation overflow set Snapshot.Truncated")
+	}
+	if len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].ObservationsOverflowed {
+		t.Fatalf("sessions = %+v", snapshot.Sessions)
+	}
+	if snapshot.DroppedObservations == 0 {
+		t.Fatal("overflow was not counted")
+	}
+	if err := store.Publish(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	view, err := registry.GlobalView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Complete || len(view.IncompleteReasons) != 0 {
+		t.Fatalf("per-session overflow made the view incomplete: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
+	}
+	if len(view.Sessions) != 1 || !view.Sessions[0].ObservationsOverflowed || !view.Sessions[0].BytesDegraded {
+		t.Fatalf("merged session = %+v", view.Sessions)
+	}
 }

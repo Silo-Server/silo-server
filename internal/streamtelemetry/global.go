@@ -37,7 +37,12 @@ type PublisherStatus struct {
 	State         PublisherState
 	DecodeErrors  int
 	Truncated     bool
-	Reason        string
+	// TransfersTruncated is this publisher's transfer-table blindness. It is
+	// reported but deliberately does NOT make the publisher Degraded: Degraded is
+	// an input to the completeness reasoning, and a signal a client can mint at
+	// will must stay out of it. See Registry.dropTransfer.
+	TransfersTruncated bool
+	Reason             string
 }
 
 type AttributedValue struct {
@@ -78,6 +83,7 @@ type GlobalSessionView struct {
 	RequestCount                int64
 	Routes                      []RouteActivityView
 	RoutesOverflowed            bool
+	ObservationsOverflowed      bool
 	ViewerIPs                   []string
 	ViewerIPsOverflowed         bool
 	DeviceIDs                   []string
@@ -101,6 +107,21 @@ type GlobalSessionView struct {
 	Publishers                  []PublisherRef
 	ViewerEdgePublishers        []PublisherRef
 	PerPublisherPlayMethods     []PublisherValue
+	// MeasurementPruned means every measuring contribution is bounded memory
+	// retained after idleness; no publisher is measuring this session right now.
+	MeasurementPruned bool
+
+	// Reported is true when a playback session manager told us this session
+	// exists. Together with ViewerBytesAccepted it is the whole #666 signal:
+	//   Reported && ViewerBytesAccepted == 0 -> a client claims to be watching
+	//                                          something nothing is being sent for
+	//   !Reported && ViewerBytesAccepted > 0 -> delivery nobody has claimed
+	//   both                                 -> an ordinary, corroborated viewer
+	Reported                bool
+	ReportedPaused          bool
+	ReportedPositionSeconds float64
+	ReportedAt              time.Time
+	ReportingPublishers     []PublisherRef
 }
 
 type GlobalTransferView struct {
@@ -124,6 +145,12 @@ type GlobalMonitoringView struct {
 	UnattributedBytes        int64
 	DecodeErrors             int
 	ClockSkewSuspected       bool
+	// Advisories are operator-visible degradations that are NOT completeness
+	// claims. They never affect Complete: the admin reader keys classification off
+	// Complete, and a signal a client can mint at will must not reach it.
+	Advisories                  []string
+	TransfersTruncated          bool
+	DroppedTransferObservations int64
 }
 
 type ViewParams struct {
@@ -185,7 +212,8 @@ type sessionContribution struct {
 }
 
 func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMonitoringView {
-	view := GlobalMonitoringView{BuiltAt: at, Complete: true, Truncated: set.Truncated}
+	view := GlobalMonitoringView{BuiltAt: at, Complete: true, Truncated: set.SessionsTruncated,
+		TransfersTruncated: set.TransfersTruncated}
 	snapshots := make(map[string]Snapshot, len(set.Snapshots))
 	for _, snapshot := range set.Snapshots {
 		snapshots[snapshot.PublisherID] = snapshot
@@ -212,7 +240,8 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 		snapshot, hasSnapshot := snapshots[member.PublisherID]
 		ref := PublisherRef{PublisherID: member.PublisherID, NodeID: snapshot.NodeID}
 		status := PublisherStatus{PublisherRef: ref, LastHeartbeat: member.LastHeartbeat, CapturedAt: snapshot.CapturedAt,
-			Epoch: snapshot.PublisherEpoch, Sequence: snapshot.Sequence, Truncated: snapshot.Truncated}
+			Epoch: snapshot.PublisherEpoch, Sequence: snapshot.Sequence, Truncated: snapshot.Truncated,
+			TransfersTruncated: snapshot.TransfersTruncated}
 		// Skew is only detectable in one direction from a single sample. A
 		// publisher whose clock runs AHEAD stamps a future time and is caught
 		// here. One running BEHIND is indistinguishable from one that stopped
@@ -250,7 +279,7 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 		}
 		if !hasSnapshot || unusable || capturedAge > params.Freshness {
 			status.State = PublisherStale
-			view.MissingPublishers = append(view.MissingPublishers, ref)
+			addMissingPublisher(&view, ref)
 			view.Publishers = append(view.Publishers, status)
 			continue
 		}
@@ -261,16 +290,61 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 		view.Publishers = append(view.Publishers, status)
 		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot})
 	}
+	// Coverage is pessimistic across rolling deploys: an un-upgraded contributor
+	// cannot tell us which families or reporting companion it covers, so its
+	// silence makes the whole view incomplete. That fleet-wide consequence is
+	// deliberate because the admin classifier treats incompleteness as blindness,
+	// suppressing no-delivery and unclaimed-idle rather than manufacturing ghosts.
+	contributing := make(map[string]struct{}, len(contributions))
+	for _, contribution := range contributions {
+		contributing[contribution.ref.PublisherID] = struct{}{}
+	}
+	for _, contribution := range contributions {
+		coverage := contribution.snapshot.Coverage
+		if !coverage.Declared {
+			addReason(&view, "unknown_publisher_coverage")
+			continue
+		}
+		// Role is positional, exactly as normalizeProvenance decides it. A
+		// reporting id measures nothing, so no family expectation applies to it,
+		// and no self-declared role can move a publisher into or out of this set.
+		if strings.HasSuffix(contribution.ref.PublisherID, ReportedPublisherSuffix) {
+			continue
+		}
+		if !observesAllFamilies(coverage.ConfiguredFamilies) {
+			addReason(&view, "partial_family_observation")
+		}
+		companion := contribution.snapshot.ReportingPublisherID
+		if companion == "" {
+			continue
+		}
+		if _, ok := contributing[companion]; !ok {
+			addReason(&view, "missing_reported_publisher")
+			addMissingPublisher(&view,
+				PublisherRef{PublisherID: companion, NodeID: contribution.snapshot.NodeID})
+		}
+	}
 	sort.Slice(view.MissingPublishers, func(i, j int) bool { return refLess(view.MissingPublishers[i], view.MissingPublishers[j]) })
 	if len(view.MissingPublishers) > 0 {
 		addReason(&view, "missing_publisher")
 	}
-	if set.Truncated {
+	if set.SessionsTruncated {
 		addReason(&view, "truncated")
+	}
+	// The reader's aggregate transfer budget is deliberately NOT a completeness
+	// reason. Exhausting it says nothing about whether a session is missing, and
+	// a transfer key is minted partly from client-supplied input, so treating it
+	// as one would let a single authenticated client fill the budget and switch
+	// no-delivery and unclaimed-idle classification off for every reader.
+	if set.TransfersTruncated {
+		addAdvisory(&view, "publisher_transfer_capacity")
 	}
 	for _, status := range view.Publishers {
 		if (status.State == PublisherFresh || status.State == PublisherDegraded) && status.Truncated {
 			addReason(&view, "publisher_truncated")
+		}
+		if (status.State == PublisherFresh || status.State == PublisherDegraded) && status.TransfersTruncated {
+			addAdvisory(&view, "publisher_transfer_capacity")
 		}
 		if status.DecodeErrors > 0 || status.Reason == publisherReasonCountMismatch || status.Reason == publisherReasonDecode {
 			addReason(&view, "decode_errors")
@@ -280,6 +354,36 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 	view.Epoch = globalEpoch(contributions)
 	view.Complete = len(view.IncompleteReasons) == 0
 	return view
+}
+
+func observesAllFamilies(configured []Family) bool {
+	observed := make(map[Family]struct{}, len(configured))
+	for _, family := range configured {
+		observed[family] = struct{}{}
+	}
+	for _, family := range AllFamilies {
+		if _, ok := observed[family]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// addMissingPublisher keeps the roster projection unique by publisher id. A
+// declared reporting companion can already be present in the roster but stale
+// or unusable; the ordinary publisher pass records it first and the companion
+// gate must not add the same publisher a second time.
+func addMissingPublisher(view *GlobalMonitoringView, ref PublisherRef) {
+	for i := range view.MissingPublishers {
+		if view.MissingPublishers[i].PublisherID != ref.PublisherID {
+			continue
+		}
+		if view.MissingPublishers[i].NodeID == "" {
+			view.MissingPublishers[i].NodeID = ref.NodeID
+		}
+		return
+	}
+	view.MissingPublishers = append(view.MissingPublishers, ref)
 }
 
 func addReason(view *GlobalMonitoringView, reason string) {
@@ -292,15 +396,31 @@ func addReason(view *GlobalMonitoringView, reason string) {
 	sort.Strings(view.IncompleteReasons)
 }
 
+// addAdvisory mirrors addReason, but writes the advisory list. It is a separate
+// function and a separate list precisely so an advisory can never be mistaken
+// for an incomplete reason: view.Complete is computed from IncompleteReasons
+// alone, and nothing here may move it.
+func addAdvisory(view *GlobalMonitoringView, advisory string) {
+	for _, existing := range view.Advisories {
+		if existing == advisory {
+			return
+		}
+	}
+	view.Advisories = append(view.Advisories, advisory)
+	sort.Strings(view.Advisories)
+}
+
 func mergeContributions(view *GlobalMonitoringView, contributions []publisherContribution, params ViewParams) {
 	sort.Slice(contributions, func(i, j int) bool { return refLess(contributions[i].ref, contributions[j].ref) })
 	bySession := make(map[string][]sessionContribution)
 	for _, contribution := range contributions {
 		view.DroppedObservations = saturatingAdd(view.DroppedObservations, contribution.snapshot.DroppedObservations)
+		view.DroppedTransferObservations = saturatingAdd(view.DroppedTransferObservations, contribution.snapshot.DroppedTransferObservations)
 		view.DroppedBytes = saturatingAdd(view.DroppedBytes, contribution.snapshot.DroppedBytes)
 		view.UnattributedObservations = saturatingAdd(view.UnattributedObservations, contribution.snapshot.UnattributedObservations)
 		view.UnattributedBytes = saturatingAdd(view.UnattributedBytes, contribution.snapshot.UnattributedBytes)
 		view.Truncated = view.Truncated || contribution.snapshot.Truncated
+		view.TransfersTruncated = view.TransfersTruncated || contribution.snapshot.TransfersTruncated
 		for _, session := range contribution.snapshot.Sessions {
 			bySession[session.SessionID] = append(bySession[session.SessionID], sessionContribution{ref: contribution.ref, view: session})
 		}
@@ -308,11 +428,25 @@ func mergeContributions(view *GlobalMonitoringView, contributions []publisherCon
 			view.Transfers = append(view.Transfers, GlobalTransferView{TransferView: cloneTransfer(transfer), Publisher: contribution.ref})
 		}
 	}
-	ids := make([]string, 0, len(bySession))
-	for id := range bySession {
-		ids = append(ids, id)
+	priorityIDs := make([]string, 0, len(bySession))
+	tombstoneOnlyIDs := make([]string, 0, len(bySession))
+	for id, sessions := range bySession {
+		priority := false
+		for _, session := range sessions {
+			if !session.view.MeasurementPruned || session.view.Reported {
+				priority = true
+				break
+			}
+		}
+		if priority {
+			priorityIDs = append(priorityIDs, id)
+		} else {
+			tombstoneOnlyIDs = append(tombstoneOnlyIDs, id)
+		}
 	}
-	sort.Strings(ids)
+	sort.Strings(priorityIDs)
+	sort.Strings(tombstoneOnlyIDs)
+	ids := append(priorityIDs, tombstoneOnlyIDs...)
 	if params.MaxMergedSessions > 0 && len(ids) > params.MaxMergedSessions {
 		ids = ids[:params.MaxMergedSessions]
 		view.Truncated = true
@@ -328,9 +462,11 @@ func mergeContributions(view *GlobalMonitoringView, contributions []publisherCon
 		return refLess(view.Transfers[i].Publisher, view.Transfers[j].Publisher)
 	})
 	if params.MaxMergedTransfers > 0 && len(view.Transfers) > params.MaxMergedTransfers {
+		// Same rule as the store's aggregate transfer cap: a short transfer list is
+		// an advisory, never a claim that sessions are missing. See PublisherSet.
 		view.Transfers = view.Transfers[:params.MaxMergedTransfers]
-		view.Truncated = true
-		addReason(view, "truncated")
+		view.TransfersTruncated = true
+		addAdvisory(view, "publisher_transfer_capacity")
 	}
 }
 
@@ -344,20 +480,32 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	subjectValues, profileValues, mediaValues := map[string][]PublisherRef{}, map[string][]PublisherRef{}, map[string][]PublisherRef{}
 	winningRank := 0
 	winningTimes := map[int64]struct{}{}
+	// Normalize once. The viewer-edge pre-pass and the merge below both need the
+	// stripped view, and normalizing twice per contribution is pure duplicate work
+	// on the hot path for a function whose whole job is to be deterministic.
+	normalized := make([]SessionView, len(contributions))
+	for i, contribution := range contributions {
+		normalized[i] = normalizeProvenance(contribution.view, contribution.ref)
+	}
 	hasViewerEdge := false
-	for _, contribution := range contributions {
-		for _, route := range contribution.view.Routes {
+	hasLiveMeasurement := false
+	hasPrunedMeasurement := false
+	for _, session := range normalized {
+		if session.MeasurementPruned {
+			hasPrunedMeasurement = true
+		} else if len(session.Routes) > 0 {
+			hasLiveMeasurement = true
+		}
+		for _, route := range session.Routes {
 			if route.Role == RoleViewerEgress {
 				hasViewerEdge = true
 				break
 			}
 		}
-		if hasViewerEdge {
-			break
-		}
 	}
-	for _, contribution := range contributions {
-		session, ref := contribution.view, contribution.ref
+	result.MeasurementPruned = hasPrunedMeasurement && !hasLiveMeasurement
+	for i, contribution := range contributions {
+		session, ref := normalized[i], contribution.ref
 		result.Publishers = append(result.Publishers, ref)
 		viewerEdge := false
 		for _, route := range session.Routes {
@@ -366,8 +514,36 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 				break
 			}
 		}
+		if session.Reported {
+			result.Reported = true
+			result.ReportingPublishers = append(result.ReportingPublishers, ref)
+			// Newest wins. A session that moved between API processes is briefly
+			// reported by both, and the current owner is the one to believe.
+			if session.ReportedAt.After(result.ReportedAt) {
+				result.ReportedAt = session.ReportedAt
+				result.ReportedPaused = session.ReportedPaused
+				result.ReportedPositionSeconds = session.ReportedPositionSeconds
+			}
+		}
+		// Identity is the viewer edge's to state. Only an edge sees who actually
+		// pulled the bytes, and letting a reporting publisher into the conflict
+		// sets would manufacture disagreements between "what the client claimed"
+		// and "what we measured".
+		//
+		// With no edge at all, a REPORTING publisher may supply it, which is what
+		// lets a byte-less session appear in the view as itself rather than as an
+		// anonymous row. A RELAY still may not, edge or no edge: a transcode node
+		// publishes a correlation key and nothing else, because it cannot know who
+		// is watching and would otherwise record the proxy in front of it as the
+		// viewer (§2.5). TestBuildGlobalViewRelayDoesNotSupplyIdentity pins that.
 		if viewerEdge {
+			// Strictly the publishers that served viewer bytes. Consumers read
+			// this to answer "which node is this viewer being served from?", so a
+			// reporting publisher must never appear here however little else is
+			// known about the session.
 			result.ViewerEdgePublishers = append(result.ViewerEdgePublishers, ref)
+		}
+		if viewerEdge || (!hasViewerEdge && session.Reported) {
 			if session.Subject.Kind != "" && session.Subject.ID != "" {
 				key := string(session.Subject.Kind) + "\x00" + session.Subject.ID
 				subjectValues[key] = append(subjectValues[key], ref)
@@ -379,7 +555,16 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 				mediaValues[strconv.Itoa(session.MediaFileID)] = append(mediaValues[strconv.Itoa(session.MediaFileID)], ref)
 			}
 		}
-		if viewerEdge || !hasViewerEdge {
+		// A viewer edge, a reporting publisher, or — with neither present — whoever
+		// is left. The Reported arm is what lets the session manager's rank-3
+		// StartedAtSourceSession actually win: it is never a viewer edge by
+		// construction (normalizeProvenance strips its routes), so without this it
+		// was excluded from the merge for every session that was streaming, and
+		// the ladder's authoritative rung could only ever apply to sessions
+		// delivering nothing. A relay still cannot reach here — it cannot know
+		// when playback began, and normalizeProvenance has already cleared any
+		// Reported it claimed.
+		if viewerEdge || !hasViewerEdge || session.Reported {
 			rank := startedAtRank(session.StartedAtSource)
 			if !session.StartedAt.IsZero() && rank > 0 {
 				if rank > winningRank {
@@ -406,7 +591,8 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 			result.LastObservationEnd = session.LastObservationEnd
 		}
 		result.RoutesOverflowed = result.RoutesOverflowed || session.RoutesOverflowed
-		result.BytesDegraded = result.BytesDegraded || session.RoutesOverflowed
+		result.ObservationsOverflowed = result.ObservationsOverflowed || session.ObservationsOverflowed
+		result.BytesDegraded = result.BytesDegraded || session.RoutesOverflowed || session.ObservationsOverflowed
 		for _, route := range session.Routes {
 			key := route.Method + "\x00" + route.Pattern + "\x00" + string(route.Role)
 			merged, seen := routes[key]
@@ -656,4 +842,75 @@ func routeViewKey(route RouteActivityView) string {
 func cloneTransfer(value TransferView) TransferView {
 	value.Outcomes = cloneOutcomes(value.Outcomes)
 	return value
+}
+
+// normalizeProvenance strips claims a publisher is not entitled to make, before
+// the merge acts on them.
+//
+// Provenance was self-asserted: nothing stopped a reporting publisher from
+// emitting a viewer-egress route, bytes and an IP, which would have put it in
+// ViewerEdgePublishers and its address into the viewer set — nor a relay from
+// setting Reported and supplying identity through the no-edge fallback. Both
+// break §2.5's rule that viewer bytes and viewer IP belong exclusively to the
+// outermost edge. The well-formed publishers in this repository never do either;
+// this makes a buggy or compromised one unable to.
+//
+// The rule is positional, so it needs no trust: a publisher writing under the
+// reporting id reports, and one whose only routes are relays relays.
+func normalizeProvenance(view SessionView, ref PublisherRef) SessionView {
+	if strings.HasSuffix(ref.PublisherID, ReportedPublisherSuffix) {
+		// An allowlist, not a list of fields to zero. Stripping named fields
+		// silently re-opens this hole every time SessionView grows one, and the
+		// merge folds far more than routes and bytes: LastByteAccepted,
+		// OpenObservations and RequestCount are enough on their own to fabricate
+		// measured-looking liveness on a session nothing was sent for. Rebuilding
+		// from what a session manager actually knows makes the claim
+		// unrepresentable rather than merely unmade.
+		return SessionView{
+			Subject:                 view.Subject,
+			ProfileID:               view.ProfileID,
+			SessionID:               view.SessionID,
+			MediaFileID:             view.MediaFileID,
+			PlayMethod:              view.PlayMethod,
+			StartedAt:               view.StartedAt,
+			StartedAtSource:         view.StartedAtSource,
+			StartedAtDegraded:       view.StartedAtDegraded,
+			RealtimeConnectionAlive: view.RealtimeConnectionAlive,
+			Reported:                view.Reported,
+			ReportedPaused:          view.ReportedPaused,
+			ReportedPositionSeconds: view.ReportedPositionSeconds,
+			ReportedAt:              view.ReportedAt,
+		}
+	}
+	viewerEdge := false
+	for _, route := range view.Routes {
+		if route.Role == RoleViewerEgress {
+			viewerEdge = true
+			break
+		}
+	}
+	if !viewerEdge {
+		// Gated positively on an egress route being present, never on a relay
+		// role being absent: mergeSession unions ViewerIPs with no provenance
+		// check, so a relay that recorded the proxy address in front of it would
+		// otherwise land it in the viewer set. Publishers in this repository omit
+		// it by convention (transcodenode/media_routes.go); this enforces it.
+		view.ViewerIPs = nil
+		view.ViewerIPsOverflowed = false
+	}
+	if !view.Reported {
+		return view
+	}
+	if viewerEdge {
+		// A real viewer edge that also reports: keep both, it is entitled to.
+		return view
+	}
+	// Anything else claiming Reported is not a reporter — most importantly a
+	// relay, which cannot know who is watching and would otherwise supply
+	// identity through the no-viewer-edge fallback.
+	view.Reported = false
+	view.ReportedPaused = false
+	view.ReportedPositionSeconds = 0
+	view.ReportedAt = time.Time{}
+	return view
 }

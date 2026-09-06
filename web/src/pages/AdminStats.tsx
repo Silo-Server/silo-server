@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions, useAdminStats } from "@/hooks/queries/admin/stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -18,8 +18,8 @@ import { formatDateTime } from "@/lib/datetime";
 
 export default function AdminStats() {
   const statsQuery = useAdminStats();
-  const sessionsQuery = useAdminSessions();
-  const sessions = sessionsQuery.data ?? [];
+  const sessionsQuery = useAdminLiveSessions(false);
+  const sessions = sessionsQuery.data?.sessions ?? [];
 
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
