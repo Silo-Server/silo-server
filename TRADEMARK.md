@@ -43,7 +43,8 @@ marks.** This reservation is expressly permitted by AGPL-3.0 §7(e).
   identity.
 - Using the marks in a **company, product, domain, or app name**, or in any way
   that implies Silo Media operates or endorses your offering.
-- **Merchandise** or other commercial use of the logo or wordmark.
+- **Merchandise**, or using the logo or wordmark to sell your own product
+  beyond a referential "works with Silo" placement.
 
 Never use the marks to promote piracy or to impersonate the project.
 
@@ -53,8 +54,9 @@ Give your client, plugin, or fork its own name, then mention Silo in the
 tagline or description: "Bramble — a Silo client for Android TV," "Trakt sync
 plugin for Silo." That is referential use and needs no permission.
 
-Official products use "Silo" alone or join it to a product word with no space
-(**SiloRemote**, **SiloMac**), so those patterns are reserved. Please avoid:
+Official products use "Silo" alone, **Silo Server**, or "Silo" joined to a
+product word (**SiloRemote**, **SiloMac**). Those patterns are reserved and
+need written permission:
 
 - "Silo" on its own, or as the first word of a product name
 - "Silo[word]" names such as SiloTV or SiloPlay, which read as official apps
@@ -76,8 +78,8 @@ only describes what the code plugs into.
 ## Colors and motif
 
 You may use the Silo colors, and the three-bar motif from the website, in your
-own interface. The logo itself is what we reserve, so keep your own logo a
-different shape and do not build the Silo mark into it.
+own interface. The logo, wordmark, and icons are what we reserve, so keep your
+own logo a different shape and do not build the Silo mark into it.
 
 ## Forks must rebrand
 
@@ -113,8 +115,11 @@ or email **trademark@siloserver.org**. We answer quickly and usually say yes.
 The goal of this policy is only to prevent user confusion and unauthorized
 "official-looking" releases.
 
-This file is the canonical policy. The brand page at <https://siloserver.org/brand>
-is the practical guide and asset library, and follows this file.
+The canonical copy of this policy is the one in the siloserver.org repository:
+<https://github.com/Silo-Server/siloserver.org/blob/main/TRADEMARK.md>. Other
+Silo repositories carry synchronized copies. The brand page at
+<https://siloserver.org/brand> is the practical guide and asset library, and
+follows the canonical file.
 
 ---
 
