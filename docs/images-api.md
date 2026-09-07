@@ -81,6 +81,7 @@ GET /api/v1/images/capability
 {
   "schema_version": 1,
   "param": "image_size",
+  "season_list_artwork_param": "include_artwork",
   "sizes": ["small", "medium", "large", "original"],
   "widths": {
     "poster": { "small": 300, "medium": 500, "large": 780 },
@@ -96,30 +97,49 @@ GET /api/v1/images/capability
 A `404` here means the server predates `image_size`. Keep using the server's
 defaults rather than sending a parameter it will ignore.
 
-## Fallback while artwork is being regenerated
+## Publication and fallback
 
-The wide rungs (780px posters and stills, 1280px logos) were added after this
-ladder shipped, so artwork cached by an earlier version has no object at those
-keys. A one-shot background pass regenerates it, and until that pass reaches a
-given image the server serves the next narrower rung it does have, ending at the
-original. With public or token-authenticated delivery, the server checks the
-same client-facing GET path rather than treating an S3 storage HEAD as proof
-that the public URL works.
+Catalog reads select cached artwork from durable publication and delivery
+records. They never issue storage HEAD requests or fetch artwork delivery URLs.
+The publisher records the exact variant keys after every upload succeeds;
+partially uploaded revisions are not advertised. The revision remains part of
+each key, so an old manifest cannot establish availability for new artwork.
 
-The practical consequence for a client is that shortly after a server upgrade,
-`image_size=large` may return an image narrower than the table above. The server
-validates the selected URL through its own delivery route and falls back
-automatically; no client action is required to pick up the correct width once
-the pass completes. URLs served from a fallback carry a shortened expiry so the
-real rung is picked up promptly rather than a day later. Externally delivered
-wide-rung URLs are also revalidated on that shorter cadence, because public
-delivery health can change independently of the backing object. The first
-delivery error in a batch stops later entries from probing the same failing
-endpoint, bounding browse latency during an outage. This safe fallback is why
-the capability endpoint can continue advertising the `large` request semantic
-while a deployment's wide-rung backfill is incomplete. The check does not prove
-client renderability or delivery from every CDN edge; a remote client may still
-reach an edge with transient edge-local state.
+A bounded background task verifies both storage and the client-facing GET path.
+Publication makes a revision eligible for verification. Workers claim up to 100
+revisions per run, use at most 12 concurrent checks, and stop after one minute.
+Completed checks become eligible again after 15 minutes; a large backlog can
+extend that interval. A worker failure leaves a recoverable two-minute lease.
+Delivery verification is scoped to the storage and delivery configuration.
+Transport errors preserve the last completed verdict and are retried. Confirmed
+storage loss schedules image caching for regenerable provider artwork while
+retaining catalog pointers and surviving variants;
+delivery-only failures retain the catalog pointers and are checked again.
+
+Before external delivery is verified, the server avoids newly added wide rungs
+and selects a published smaller size or original. Legacy artwork without a
+publication manifest uses an established smaller size until the ladder backfill
+regenerates it. A completed delivery check restricts selection to working keys.
+If none remain, the URL is empty and the client should display its placeholder.
+Images can still fail at a particular client or CDN edge; this must not prevent
+rendering titles, episode counts, progress, or navigation.
+
+`image_size=large` expresses the preferred size; the response may contain a
+smaller variant. The server caches resolved artwork URLs for at most five minutes
+so background recovery becomes visible without waiting for signature expiry.
+Cold resolver caches read the same durable records and never rediscover image
+availability through network probes.
+
+## Season selectors without artwork
+
+`GET /api/v1/catalog/series/{id}/seasons?include_artwork=false` skips poster URL
+preparation and omits poster thumbhashes. Season metadata, counts, and user data
+are unchanged. The default is `true`. Invalid boolean values return
+`400 invalid_include_artwork`.
+
+The images capability response advertises this option as
+`"season_list_artwork_param": "include_artwork"`. tvOS uses it for text-only
+season selectors; clients that render season posters should keep the default.
 
 ## Jellyfin compatibility
 
@@ -127,3 +147,8 @@ The Jellyfin-protocol surface maps its own `MaxWidth`/`MaxHeight`/`FillWidth`/
 `FillHeight` parameters onto the same ladder: up to 320px is `small`, 780px to
 1199px is `large`, 1200px and above is `original`, and everything else is
 `medium`.
+
+The shared cached-artwork resolver applies the same persisted availability
+selection to Jellyfin image URL resolution. Its protocol parameters and image
+response shapes are unchanged; image fetching remains independent of catalog
+metadata responses.

@@ -1640,6 +1640,9 @@ func main() {
 				presignTTL = 4 * time.Hour
 			}
 			imageResolver.SetS3Presigner(deps.S3Public, deps.S3Public.EffectivePresignTTL(presignTTL))
+			imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
+				deps.DB, deps.S3Public.ArtworkDeliveryScope(), deps.S3Public.UsesExternalDelivery(),
+			))
 		}
 		deps.ImageResolver = imageResolver
 		deps.PluginImageResolver = imageResolver
@@ -2537,6 +2540,10 @@ func main() {
 			taskMgr.Register(tasks.NewBackfillMetadataImagesTask(metadataImageCacheProcessor))
 		}
 		if deps.S3Public != nil {
+			taskMgr.Register(tasks.NewVerifyArtworkDeliveryTask(
+				metadata.NewArtworkDeliveryStore(deps.DB, deps.S3Public.ArtworkDeliveryScope(), deps.S3Public.UsesExternalDelivery()),
+				deps.S3Public,
+			))
 			identity := tasks.ArtworkStorageIdentity(cfg.S3.Public.Endpoint, cfg.S3.Public.Bucket, cfg.S3.Public.KeyPrefix)
 			// Seed the fingerprint on first boot. After a provider change the
 			// stored (old) identity survives this call, so the startup preflight

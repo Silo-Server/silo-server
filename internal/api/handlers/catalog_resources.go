@@ -214,6 +214,11 @@ func (h *CatalogResourceHandler) HandleGetItemEpisodes(w http.ResponseWriter, r 
 }
 
 func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http.Request) {
+	includeArtwork, valid := seasonListArtwork(r)
+	if !valid {
+		writeError(w, http.StatusBadRequest, "invalid_include_artwork", "include_artwork must be true or false")
+		return
+	}
 	filter, ok := h.items.accessFilterOrError(w, r)
 	if !ok {
 		return
@@ -261,6 +266,16 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 			}
 			progressMap, hasProgressMap := h.items.progressMapForEpisodes(r, flattenEpisodeGroups(episodesBySeason))
 
+			var posterURLs map[string]catalog.ResolvedImageURL
+			if includeArtwork && h.items.detailSvc != nil {
+				paths := make([]string, 0, len(seasons))
+				for _, season := range seasons {
+					if len(episodesBySeason[season.SeasonNumber]) > 0 && season.PosterPath != "" {
+						paths = append(paths, sizedPosterPath(season.PosterPath, filter.ImageSize))
+					}
+				}
+				posterURLs = h.items.detailSvc.PresignURLsWithExpiry(r.Context(), paths, requestVariantHint("featured", filter.ImageSize))
+			}
 			resp := make([]seasonResponse, 0, len(seasons))
 			for _, s := range seasons {
 				episodes := episodesBySeason[s.SeasonNumber]
@@ -271,7 +286,14 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 				if hasProgressMap {
 					userData = catalog.EpisodeRollupUserData(episodes, progressMap)
 				}
-				sr := h.items.seasonResponseFromEpisodes(r, s, episodes, userData, filter.ImageSize)
+				// Construct metadata without resolving each season again.
+				season := *s
+				season.PosterPath = ""
+				if !includeArtwork {
+					season.PosterThumbhash = ""
+				}
+				sr := h.items.seasonResponseFromEpisodes(r, &season, episodes, userData, filter.ImageSize)
+				sr.PosterURL = posterURLs[sizedPosterPath(s.PosterPath, filter.ImageSize)].URL
 				resp = append(resp, sr)
 			}
 
@@ -619,4 +641,14 @@ func (h *CatalogResourceHandler) enrichViewerState(r *http.Request, detail *cata
 	}
 
 	detail.UserRating = &rating.Rating
+}
+
+// seasonListArtwork allows text-only selectors to omit all poster preparation.
+func seasonListArtwork(r *http.Request) (bool, bool) {
+	value := r.URL.Query().Get("include_artwork")
+	if value == "" {
+		return true, true
+	}
+	include, err := strconv.ParseBool(value)
+	return include, err == nil
 }
