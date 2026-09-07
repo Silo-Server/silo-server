@@ -371,8 +371,35 @@ you already have it.
 | `proxy` | Dedicated stream and source-download delivery node. |
 | `transcode` | Dedicated HLS and prepared-download worker. |
 
-The main Compose file contains commented proxy and transcode examples. Leave
-them disabled on a single host; `integrated` already proxies and transcodes.
+The main [`docker-compose.yml`](../../../docker-compose.yml) file contains commented `silo-proxy` and `silo-transcode` service examples. Leave them disabled on a single host; `integrated` mode already handles proxying and transcoding.
+
+### Dedicated remote transcode worker node
+
+For a multi-host deployment with a dedicated remote transcode node, create a Compose file on the worker host that sets `MODE: transcode`, connects to the shared database and Redis instances, and shares the same `SECRET_KEY`:
+
+```yaml
+services:
+  silo-transcode:
+    image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
+    restart: unless-stopped
+    environment:
+      MODE: transcode
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
+      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@db-host:5432/${POSTGRES_DB:-silo}?sslmode=disable
+      REDIS_URL: redis://redis-host:6379
+      PORT: "8080"
+    ports:
+      - "${TRANSCODE_PORT:-8082}:8080"
+    volumes:
+      - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
+      - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
+      - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
+```
+
+To enable GPU acceleration on the remote transcode worker, combine it with the hardware acceleration overlay ([`docker-compose.vaapi.yml`](../../../docker-compose.vaapi.yml) or [`docker-compose.nvidia.yml`](../../../docker-compose.nvidia.yml)).
 
 For a distributed deployment:
 
