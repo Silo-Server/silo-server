@@ -113,11 +113,11 @@ func (c *Client) fetchLists(ctx context.Context, path string, q url.Values) ([]L
 	u := c.baseURL + path + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating mdblist request: %w", err)
+		return nil, fmt.Errorf("creating mdblist request: %w", sanitizeAPIKeyError(err, c.currentAPIKey()))
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("calling mdblist: %w", err)
+		return nil, fmt.Errorf("calling mdblist: %w", sanitizeAPIKeyError(err, c.currentAPIKey()))
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
@@ -150,4 +150,30 @@ func canonicalListURL(user, slug string) string {
 		return ""
 	}
 	return fmt.Sprintf("https://mdblist.com/lists/%s/%s", user, slug)
+}
+
+func sanitizeAPIKeyError(err error, apiKey string) error {
+	if err == nil {
+		return nil
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		sanitized := *urlErr
+		if parsed, parseErr := url.Parse(sanitized.URL); parseErr == nil {
+			q := parsed.Query()
+			if q.Has("apikey") {
+				q.Set("apikey", "[REDACTED]")
+				parsed.RawQuery = q.Encode()
+				sanitized.URL = parsed.String()
+			}
+		}
+		if apiKey != "" && strings.Contains(sanitized.URL, apiKey) {
+			sanitized.URL = strings.ReplaceAll(sanitized.URL, apiKey, "[REDACTED]")
+		}
+		return &sanitized
+	}
+	if apiKey != "" && strings.Contains(err.Error(), apiKey) {
+		return errors.New(strings.ReplaceAll(err.Error(), apiKey, "[REDACTED]"))
+	}
+	return err
 }
