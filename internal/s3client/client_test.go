@@ -464,3 +464,16 @@ func parseQuery(raw string) url.Values {
 	}
 	return values
 }
+
+func TestArtworkDeliveryScopeExcludesCredentials(t *testing.T) {
+	client := &Client{endpoint: "https://storage.example", bucket: "artwork", publicEndpoint: "https://images.example", tokenSecret: "first-secret"}
+	scope := client.ArtworkDeliveryScope()
+	client.tokenSecret = "rotated-secret"
+	if got := client.ArtworkDeliveryScope(); got != scope {
+		t.Fatal("credential entered persisted scope digest")
+	}
+	client.publicEndpoint = "https://other-images.example"
+	if got := client.ArtworkDeliveryScope(); got == scope {
+		t.Fatal("delivery endpoint change did not change scope")
+	}
+}

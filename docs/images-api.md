@@ -99,6 +99,9 @@ defaults rather than sending a parameter it will ignore.
 
 ## Publication and fallback
 
+Historical GC manifests are verified in the background before they become
+publication records; their listed keys alone do not prove upload completion.
+
 Catalog reads select cached artwork from durable publication and delivery
 records. They never issue storage HEAD requests or fetch artwork delivery URLs.
 The publisher records the exact variant keys after every upload succeeds;

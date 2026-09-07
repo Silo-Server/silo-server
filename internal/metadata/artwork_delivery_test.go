@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,14 +19,24 @@ type deliveryTestChecker struct {
 	existing    map[string]bool
 	available   map[string]bool
 	err         error
-	beforeCheck func()
+	beforeCheck func() error
+	mu          sync.Mutex
+	hookErr     error
 }
 
 func (c *deliveryTestChecker) Bucket() string { return "test" }
 func (c *deliveryTestChecker) ObjectExists(_ context.Context, _, key string) (bool, error) {
-	if c.beforeCheck != nil {
-		c.beforeCheck()
-		c.beforeCheck = nil
+	c.mu.Lock()
+	hook := c.beforeCheck
+	c.beforeCheck = nil
+	c.mu.Unlock()
+	if hook != nil {
+		if err := hook(); err != nil {
+			c.mu.Lock()
+			c.hookErr = err
+			c.mu.Unlock()
+			return false, err
+		}
 	}
 	if c.existing != nil {
 		return c.existing[key], c.err
@@ -138,9 +150,15 @@ func TestArtworkDeliveryPublicationAndReconciliation(t *testing.T) {
 	track(keys)
 	checker.err = nil
 	checker.available = map[string]bool{}
-	checker.beforeCheck = func() { track(keys) }
+	checker.beforeCheck = func() error { return tracker.TrackArtworkRevision(ctx, original, "poster", keys) }
 	if _, err := store.Reconcile(ctx, checker); err != nil {
 		t.Fatal(err)
+	}
+	checker.mu.Lock()
+	hookErr := checker.hookErr
+	checker.mu.Unlock()
+	if hookErr != nil {
+		t.Fatal(hookErr)
 	}
 	if got := selectPublishedVariant(large, read(), true); got != large {
 		t.Fatalf("stale worker overwrote publication: %q", got)
@@ -188,4 +206,90 @@ func TestArtworkDeliveryPublicationAndReconciliation(t *testing.T) {
 		t.Fatalf("repair status = %s", jobStatus)
 	}
 
+}
+
+func TestDeliveryCheckerConcurrentHook(t *testing.T) {
+	var calls atomic.Int32
+	hookFailure := errors.New("publication failed")
+	checker := &deliveryTestChecker{beforeCheck: func() error {
+		calls.Add(1)
+		return hookFailure
+	}}
+	var group sync.WaitGroup
+	for range 32 {
+		group.Go(func() { _, _ = checker.ObjectExists(t.Context(), "test", "key") })
+	}
+	group.Wait()
+	if calls.Load() != 1 {
+		t.Fatalf("hook called %d times", calls.Load())
+	}
+	if !errors.Is(checker.hookErr, hookFailure) {
+		t.Fatalf("lost hook error: %v", checker.hookErr)
+	}
+}
+
+func TestArtworkDeliveryVerifiesLegacyManifests(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	prefix := fmt.Sprintf("tmdb/movies/legacy-delivery-%d", time.Now().UnixNano())
+	complete := prefix + "/poster/original.rev.webp"
+	partial := prefix + "/backdrop/original.rev.webp"
+	completeKeys := []string{complete, variantKey(complete, "w780")}
+	partialKeys := []string{partial, variantKey(partial, "w1920")}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)`, []string{complete, partial})
+	})
+	for path, keys := range map[string][]string{complete: completeKeys, partial: partialKeys} {
+		if _, err := pool.Exec(ctx, `INSERT INTO artwork_revision_gc_candidates(original_path,object_keys,not_before) VALUES($1,$2,NOW())`, path, keys); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := NewArtworkDeliveryStore(pool, "legacy-endpoint", true)
+	states, err := store.ArtworkAvailability(ctx, []string{complete, partial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 0 {
+		t.Fatal("unverified legacy manifests became publication records")
+	}
+	checker := &deliveryTestChecker{
+		existing:  map[string]bool{complete: true, completeKeys[1]: true, partial: true},
+		available: map[string]bool{complete: true, completeKeys[1]: true, partial: true},
+	}
+	if _, err := store.Reconcile(ctx, checker); err != nil {
+		t.Fatal(err)
+	}
+	states, err = store.ArtworkAvailability(ctx, []string{complete, partial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[complete].Verified || len(states[complete].Published) != 2 {
+		t.Fatal("storage-verified legacy artwork was not promoted")
+	}
+	if state := states[partial]; !state.Verified || len(state.Published) != 0 || selectPublishedVariant(partialKeys[1], state, true) != partial {
+		t.Fatal("partial legacy delivery verdict did not select the surviving original")
+	}
+	checker.existing[partialKeys[1]] = true
+	checker.available[partialKeys[1]] = true
+	if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET delivery_next_check=NOW() WHERE original_path=$1`, partial); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Reconcile(ctx, checker); err != nil {
+		t.Fatal(err)
+	}
+	states, err = store.ArtworkAvailability(ctx, []string{partial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[partial].Verified || len(states[partial].Published) != 2 {
+		t.Fatal("repaired legacy artwork was not promoted")
+	}
 }

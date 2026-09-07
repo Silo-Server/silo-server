@@ -29,7 +29,8 @@ func (s *ArtworkDeliveryStore) ArtworkAvailability(ctx context.Context, paths []
         delivery_scope = $2 AND delivery_checked_at IS NOT NULL
         FROM artwork_revision_gc_candidates
         WHERE original_path = ANY($1)
-          AND (published_keys IS NOT NULL OR deleted_at IS NOT NULL)`, paths, s.scope)
+          AND (published_keys IS NOT NULL OR deleted_at IS NOT NULL
+               OR (delivery_scope = $2 AND delivery_checked_at IS NOT NULL))`, paths, s.scope)
 	if err != nil {
 		return nil, err
 	}
@@ -76,13 +77,13 @@ func (s *ArtworkDeliveryStore) Reconcile(ctx context.Context, checker ArtworkDel
 	lease := uuid.NewString()
 	rows, err := s.pool.Query(ctx, `WITH due AS (
         SELECT id FROM artwork_revision_gc_candidates
-        WHERE deleted_at IS NULL AND cardinality(published_keys) > 0
+        WHERE deleted_at IS NULL AND cardinality(coalesce(published_keys, object_keys)) > 0
           AND delivery_next_check <= NOW()
         ORDER BY delivery_next_check, id LIMIT 100 FOR UPDATE SKIP LOCKED
     ) UPDATE artwork_revision_gc_candidates m
       SET delivery_next_check = NOW() + INTERVAL '2 minutes', delivery_lease = $1
       FROM due WHERE m.id = due.id
-      RETURNING m.id, m.original_path, m.published_keys`, lease)
+      RETURNING m.id, m.original_path, coalesce(m.published_keys, m.object_keys)`, lease)
 	if err != nil {
 		return ArtworkDeliveryStats{}, err
 	}
@@ -160,9 +161,10 @@ func (s *ArtworkDeliveryStore) verifyRevision(ctx context.Context, checker Artwo
 	// overwrite a newer publication or resurrect a garbage-collected revision.
 	tag, err := s.pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates
         SET delivery_keys = $3, delivery_scope = $4, delivery_checked_at = NOW(),
+            published_keys = CASE WHEN published_keys IS NULL AND $6 THEN $5 ELSE published_keys END,
             delivery_next_check = NOW() + INTERVAL '15 minutes', delivery_lease = ''
-        WHERE id = $1 AND delivery_lease = $2 AND published_keys = $5 AND deleted_at IS NULL`,
-		revision.id, lease, available, s.scope, revision.keys)
+        WHERE id = $1 AND delivery_lease = $2 AND coalesce(published_keys, object_keys) = $5 AND deleted_at IS NULL`,
+		revision.id, lease, available, s.scope, revision.keys, !storageMissing)
 	if err != nil {
 		return stats, "", fmt.Errorf("record artwork delivery: %w", err)
 	}

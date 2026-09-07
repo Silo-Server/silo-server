@@ -443,11 +443,12 @@ func (c *Client) ObjectExists(ctx context.Context, bucket, key string) (bool, er
 }
 
 // ArtworkDeliveryScope invalidates verification when storage or delivery
-// configuration changes. Only a digest is persisted; credentials stay private.
+// endpoint or URL policy changes. Credentials are excluded from this persisted
+// digest. Rotated credentials sign fresh URLs and use normal background checks.
 func (c *Client) ArtworkDeliveryScope() string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		c.endpoint, c.bucket, c.keyPrefix, c.publicEndpoint, c.urlAuth,
-		c.tokenParam, c.tokenSecret,
+		c.tokenParam,
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])
 }

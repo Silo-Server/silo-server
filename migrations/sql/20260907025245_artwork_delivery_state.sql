@@ -10,10 +10,10 @@ ALTER TABLE artwork_revision_gc_candidates
     ADD COLUMN delivery_checked_at timestamptz,
     ADD COLUMN delivery_next_check timestamptz NOT NULL DEFAULT NOW(),
     ADD COLUMN delivery_lease text NOT NULL DEFAULT '';
-UPDATE artwork_revision_gc_candidates SET published_keys = object_keys
-WHERE deleted_at IS NULL AND cardinality(object_keys) > 0;
+-- Historical nonempty GC manifests could be recorded before upload. The
+-- background verifier establishes publication only after checking storage.
 CREATE INDEX artwork_delivery_due_idx ON artwork_revision_gc_candidates (delivery_next_check, id)
-WHERE deleted_at IS NULL AND cardinality(published_keys) > 0;
+WHERE deleted_at IS NULL AND cardinality(coalesce(published_keys, object_keys)) > 0;
 
 -- +goose Down
 DROP INDEX artwork_delivery_due_idx;
