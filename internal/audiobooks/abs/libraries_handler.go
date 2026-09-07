@@ -894,20 +894,21 @@ func siloItemToLibraryItemDetail(item *models.MediaItem, files []*models.MediaFi
 		totalDuration = base.Media.Duration
 	}
 
-	// Chapters from the first file that has them.
+	// ABS expects chapters as one flat timeline spanning every audio file.
 	chapters := make([]ChapterABS, 0)
+	chapterOffset := float64(0)
+	chapterID := 0
 	for _, f := range files {
-		if len(f.Chapters) > 0 {
-			for i, c := range f.Chapters {
-				chapters = append(chapters, ChapterABS{
-					ID:    i,
-					Start: c.StartSeconds,
-					End:   c.EndSeconds,
-					Title: c.Title,
-				})
-			}
-			break
+		for _, c := range f.Chapters {
+			chapters = append(chapters, ChapterABS{
+				ID:    chapterID,
+				Start: chapterOffset + c.StartSeconds,
+				End:   chapterOffset + c.EndSeconds,
+				Title: c.Title,
+			})
+			chapterID++
 		}
+		chapterOffset += float64(f.Duration)
 	}
 
 	// libraryFiles + summed size mirror real ABS toOldJSONExpanded. Each entry
