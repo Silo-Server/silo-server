@@ -229,12 +229,21 @@ func FilterMediaFilesByAccess(files []*models.MediaFile, filter AccessFilter) []
 	return filtered
 }
 
+// SQLTrimSpaceChars is a PostgreSQL E-string holding exactly the runes Go's
+// strings.TrimSpace strips: ASCII whitespace plus every rune with the Unicode
+// White_Space property. Pass it as BTRIM's second argument wherever SQL has to
+// trim a value the way Go would, so a resolution such as "\u00a02160p" ranks
+// the same on both sides instead of falling through to the ELSE branch.
+//
+// Use octal \013 for vertical tab; PostgreSQL treats \v as a literal v. The
+// \uXXXX escapes need a UTF-8 database, which Silo requires anyway.
+const SQLTrimSpaceChars = `E' \t\n\013\f\r\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004` +
+	`\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000'`
+
 // MediaFileQualityCeilingSQL renders the playback-quality ceiling as a SQL
 // condition over the given media_files alias, or "" when the filter sets no
-// ceiling. It mirrors access.QualityAllowed, trimming ASCII whitespace.
-// Use octal \013 for vertical tab; PostgreSQL treats \v as a literal v.
-// Go's TrimSpace also strips Unicode spaces (such as U+00A0); the scanner has
-// never been observed to write those.
+// ceiling. It mirrors access.QualityAllowed, trimming whitespace the way Go
+// does (see SQLTrimSpaceChars).
 func MediaFileQualityCeilingSQL(alias string, maxPlaybackQuality string) string {
 	quality := access.NormalizePlaybackQuality(maxPlaybackQuality)
 	if quality == "" {
@@ -244,9 +253,9 @@ func MediaFileQualityCeilingSQL(alias string, maxPlaybackQuality string) string 
 	if quality == access.PlaybackQuality4K {
 		maxRank = 4
 	}
-	return fmt.Sprintf(`CASE UPPER(BTRIM(COALESCE(%s.resolution, ''), E' \t\n\013\f\r'))
+	return fmt.Sprintf(`CASE UPPER(BTRIM(COALESCE(%s.resolution, ''), %s))
 		WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
-		WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, alias, maxRank)
+		WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, alias, SQLTrimSpaceChars, maxRank)
 }
 
 // MediaFileAccessSQL renders FileAllowedByAccess as SQL conditions over the

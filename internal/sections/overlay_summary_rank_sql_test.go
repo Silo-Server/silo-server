@@ -36,6 +36,12 @@ func TestOverlaySummaryRankSQLMatchesGo(t *testing.T) {
 	}{
 		{"tab newline resolution", models.MediaFile{Resolution: "\t2160p\n"}, ""},
 		{"all ASCII whitespace", models.MediaFile{Resolution: " \t\n\v\f\r2160p \t\n\v\f\r"}, ""},
+		{"non-breaking space", models.MediaFile{Resolution: "\u00a02160p\u00a0"}, ""},
+		{"all Unicode whitespace", models.MediaFile{
+			Resolution: "\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u30002160p" +
+				"\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000",
+		}, ""},
+		{"non-breaking space below ceiling", models.MediaFile{Resolution: "\u00a0720p\u00a0"}, ""},
 		{"leading plus", models.MediaFile{Resolution: "+2160p"}, ""},
 		{"leading zeros", models.MediaFile{Resolution: "0000002160p"}, ""},
 		{"padded signed zeros", models.MediaFile{Resolution: "\t+002160p\t"}, ""},

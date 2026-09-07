@@ -1153,14 +1153,13 @@ func overlaySummaryCacheScope(filter catalog.AccessFilter) string {
 
 // overlaySummaryResolutionRankSQL mirrors overlays.ResolutionRank: "4k"/"uhd"
 // rank as 2160p, signed digits followed by "p" rank as their value, otherwise 0.
-// Use octal \013 for vertical tab; PostgreSQL treats \v as a literal v.
-// Trim ASCII whitespace as Go does. Go's TrimSpace also strips Unicode spaces
-// (such as U+00A0), which the scanner has never been observed to write.
+// Whitespace is trimmed with catalog.SQLTrimSpaceChars so the set matches Go's
+// strings.TrimSpace exactly, Unicode spaces included.
 // Limit numeric matches to 18 digits so they fit in int64, as required by Atoi.
 const overlaySummaryResolutionRankSQL = `CASE
-				WHEN lower(btrim(coalesce(mf.resolution, ''), E' \t\n\013\f\r')) IN ('4k', 'uhd') THEN 2160
-				WHEN lower(btrim(coalesce(mf.resolution, ''), E' \t\n\013\f\r')) ~ '^[+-]?[0-9]{1,18}p$'
-					THEN substring(lower(btrim(mf.resolution, E' \t\n\013\f\r')) from '^([+-]?[0-9]{1,18})p$')::numeric
+				WHEN lower(btrim(coalesce(mf.resolution, ''), ` + catalog.SQLTrimSpaceChars + `)) IN ('4k', 'uhd') THEN 2160
+				WHEN lower(btrim(coalesce(mf.resolution, ''), ` + catalog.SQLTrimSpaceChars + `)) ~ '^[+-]?[0-9]{1,18}p$'
+					THEN substring(lower(btrim(mf.resolution, ` + catalog.SQLTrimSpaceChars + `)) from '^([+-]?[0-9]{1,18})p$')::numeric
 				ELSE 0
 			END`
 
