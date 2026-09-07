@@ -266,10 +266,17 @@
           "minItems": 1,
           "contains": {
             "type": "object",
-            "required": ["label", "preserves_source"],
+            "required": [
+              "label",
+              "preserves_source"
+            ],
             "properties": {
-              "label": { "const": "original" },
-              "preserves_source": { "const": true }
+              "label": {
+                "const": "original"
+              },
+              "preserves_source": {
+                "const": true
+              }
             }
           },
           "items": {
@@ -306,7 +313,30 @@
           ]
         }
       },
-      "additionalProperties": true
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "subtitle": {
+                "required": [
+                  "embedded"
+                ]
+              }
+            },
+            "required": [
+              "subtitle"
+            ]
+          },
+          "then": {
+            "properties": {
+              "delivery": {
+                "const": "original_http"
+              }
+            }
+          }
+        }
+      ]
     },
     "stream": {
       "type": "object",
@@ -547,7 +577,7 @@
         },
         "artifact": {
           "type": "object",
-          "description": "The prepared sidecar for the selected track. timing_origin_seconds is the source position the artifact's cue timestamps are relative to.",
+          "description": "The prepared sidecar for the selected track. Format and MIME describe the bytes served, not the source codec. Cue timestamps are absolute original-media time; timing_origin_seconds is zero regardless of video resume origin.",
           "required": [
             "url",
             "mime_type",
@@ -566,7 +596,8 @@
               "type": "string"
             },
             "timing_origin_seconds": {
-              "type": "number"
+              "type": "number",
+              "const": 0
             }
           },
           "additionalProperties": true
@@ -577,9 +608,51 @@
           "items": {
             "$ref": "#/$defs/subtitle_inventory_item"
           }
+        },
+        "embedded": {
+          "type": "object",
+          "description": "Select this exact embedded stream from the original media. Mutually exclusive with artifact; inventory URLs remain fallback options only.",
+          "required": [
+            "stream_index"
+          ],
+          "properties": {
+            "stream_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "container_track_id": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "additionalProperties": true
         }
       },
-      "additionalProperties": true
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "embedded"
+            ]
+          },
+          "then": {
+            "required": [
+              "track_id"
+            ],
+            "properties": {
+              "mode": {
+                "const": "render"
+              }
+            },
+            "not": {
+              "required": [
+                "artifact"
+              ]
+            }
+          }
+        }
+      ]
     },
     "subtitle_inventory_item": {
       "type": "object",
@@ -629,7 +702,7 @@
         },
         "delivery": {
           "type": "string",
-          "description": "`sidecar` tracks are fetchable from their published url. A `burn_in_only` track has no client-fetchable representation and carries no url, but still occupies its ordinal and stays selectable — omitting it would leave a hole that makes every later ordinal wrong.",
+          "description": "`sidecar` tracks are fetchable from their published url. A `burn_in_only` track has no client-fetchable representation and carries no url, but still occupies its ordinal and stays selectable \u2014 omitting it would leave a hole that makes every later ordinal wrong.",
           "enum": [
             "sidecar",
             "burn_in_only"
@@ -731,7 +804,7 @@
         },
         "duration_seconds": {
           "type": "number",
-          "description": "Full runtime of this source, independent of where the delivery's timeline is anchored. Absent means the server does not know the runtime; it is omitted rather than null so clients that coerce null to a numeric default do not read it as zero. Do not substitute the playback engine's reported duration — on an HLS copy remux the engine reports the length produced so far."
+          "description": "Full runtime of this source, independent of where the delivery's timeline is anchored. Absent means the server does not know the runtime; it is omitted rather than null so clients that coerce null to a numeric default do not read it as zero. Do not substitute the playback engine's reported duration \u2014 on an HLS copy remux the engine reports the length produced so far."
         },
         "container": {
           "type": "string"

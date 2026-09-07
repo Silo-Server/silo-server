@@ -101,7 +101,10 @@ describe("parseCatalogSearchParams", () => {
         .uses_source_order,
     ).toBe(false);
     expect(parseCatalogSearchParams(params("source=favorites")).uses_source_order).toBe(true);
-    expect(parseCatalogSearchParams(params("source=history")).uses_source_order).toBe(false);
+    expect(parseCatalogSearchParams(params("source=history")).uses_source_order).toBe(true);
+    expect(parseCatalogSearchParams(params("source=history&sort=title")).uses_source_order).toBe(
+      false,
+    );
   });
 
   it("normalizes legacy sort aliases in catalog URLs", () => {

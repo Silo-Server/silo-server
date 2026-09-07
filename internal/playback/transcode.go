@@ -113,9 +113,13 @@ type TranscodeOpts struct {
 	TargetBitrateKbps      int     // max video bitrate in kbps; 0 = CRF-only (no cap)
 	TotalDuration          float64 // total media duration in seconds (for VOD manifest)
 	FastStart              bool    // use superfast preset for faster first-segment production
-	NodeType               string
-	ExecutionMode          string
-	FFmpegLogSink          FFmpegLogSink
+	// ThrottleSeconds is the resolved forward-buffer policy for this session.
+	// Zero disables throttling. It is durable so a remote executor can preserve
+	// the API server's policy across node reconstruction without reading settings.
+	ThrottleSeconds int
+	NodeType        string
+	ExecutionMode   string
+	FFmpegLogSink   FFmpegLogSink
 }
 
 // DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a

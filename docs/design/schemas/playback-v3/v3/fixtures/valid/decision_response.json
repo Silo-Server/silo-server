@@ -3,6 +3,7 @@
   "server_features": [
     "playback_plan_v3",
     "neutral_playback_v3_contract_v1",
+    "embedded_subtitles_v1",
     "layout_aware_passthrough",
     "playback_route_diagnostics",
     "device_quirks_v1",
@@ -91,7 +92,7 @@
           "default": false,
           "hearing_impaired": false,
           "delivery": "sidecar",
-          "url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/0.vtt?file_id=42"
+          "url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/0.vtt?file_id=42\u0026external_subtitle_key=f903db1c5624c46c4a2c20f2fd8cd247fc0d46e6471c91d4ddb651ae4e039448"
         },
         {
           "track_id": "file:42:subtitle:1",
@@ -104,8 +105,8 @@
           "default": false,
           "hearing_impaired": false,
           "delivery": "sidecar",
-          "url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/1.ass?file_id=42",
-          "font_bundle_url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/1/fonts?file_id=42"
+          "url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/1.ass?file_id=42\u0026embedded_stream_index=0",
+          "font_bundle_url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/1/fonts?file_id=42\u0026embedded_stream_index=0"
         },
         {
           "track_id": "file:42:subtitle:2",
@@ -118,7 +119,7 @@
           "default": false,
           "hearing_impaired": false,
           "delivery": "sidecar",
-          "url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/2.sup?file_id=42"
+          "url": "/stream/11111111-1111-4111-8111-111111111111/subtitles/2.sup?file_id=42\u0026embedded_stream_index=1"
         },
         {
           "track_id": "file:42:subtitle:3",

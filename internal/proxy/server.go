@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -52,7 +53,7 @@ type Server struct {
 	egress        *egressMeter
 	clientIP      *clientip.Resolver
 	telemetry     *streamtelemetry.Registry
-	// subCache stores full-track PGS (.sup) extracts under the transcode dir
+	// subCache stores complete embedded subtitle extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
 	// Download limits are node-local once egress is delegated. Rebuild the
@@ -959,64 +960,33 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// When the URL requests SUP format (e.g. /subtitles/{token}/2.sup),
-	// serve the PGS track as a raw .sup elementary stream for client-side
-	// bitmap rendering (libpgs). Unlike the buffered text paths below, this
-	// serves the cached full-track extract when present, and otherwise
-	// streams ffmpeg output directly (the client renders progressively as
-	// data arrives) while teeing it into the cache for the next request.
-	// Clients that manage their own sliding window opt in with ?windowed=1
-	// (+ ?position=/?duration=), mirroring the API stream handler; windowed
-	// requests extract only the requested slice — from the cached full
-	// track when one exists (warming it in the background when not).
-	if requestedFormat == "sup" {
-		allowWindow, seek, duration := playback.PGSWindowRequest(r.URL.Query())
-		err := s.subCache.ServeSUPExtract(w, r, playback.StreamExtractOpts{
-			InputPath:       claims.MediaPath,
-			TrackIndex:      trackIndex,
-			SourceCodec:     "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
-			SeekSeconds:     seek,
-			DurationSeconds: duration,
-			AllowWindow:     allowWindow,
-			FFmpegPath:      cfg.Playback.FFmpegPath,
-		}, playback.StreamExtractSubtitle)
-		if err != nil && r.Context().Err() == nil {
-			// Headers already committed — log and let the client see a
-			// truncated response.
-			slog.ErrorContext(r.Context(), "stream subtitle (sup)", "component", "proxy", "error", err, "track", trackIndex,
-				"path", claims.MediaPath, "playback_session_id", claims.SessionID)
-		}
-		return
+	opts := playback.StreamExtractOpts{
+		InputPath:   claims.MediaPath,
+		TrackIndex:  trackIndex,
+		SourceCodec: "subrip",
+		FFmpegPath:  cfg.Playback.FFmpegPath,
 	}
-
-	// When the URL requests ASS format (e.g. /subtitles/{token}/2.ass),
-	// extract as raw ASS to preserve styling for client-side rendering.
-	if requestedFormat == "ass" {
-		data, err := playback.ExtractSubtitleWithFormat(r.Context(), claims.MediaPath, trackIndex, "ass", cfg.Playback.FFmpegPath)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "extract subtitle (ass)", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
+	switch requestedFormat {
+	case "sup":
+		opts.SourceCodec = "hdmv_pgs_subtitle"
+		opts.AllowWindow, opts.SeekSeconds, opts.DurationSeconds = playback.PGSWindowRequest(r.URL.Query())
+	case "ass":
+		opts.SourceCodec = "ass"
+	}
+	// Preserve whole-track proxy text semantics while streaming the first cues
+	// immediately and reusing complete extracts on subsequent requests.
+	response := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+	if err := s.subCache.ServeExtract(response, r, opts, playback.StreamExtractSubtitle); err != nil {
+		playback.LogSubtitleStreamError(r.Context(), err, claims.MediaFileID, trackIndex)
+		if r.Context().Err() != nil {
+			return
+		}
+		if response.Status() == 0 {
 			http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
 			return
 		}
-		playback.ServeSubtitle(w, data, "ass")
-		return
+		panic(http.ErrAbortHandler)
 	}
-
-	data, format, err := playback.ExtractSubtitle(r.Context(), claims.MediaPath, trackIndex, cfg.Playback.FFmpegPath)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "extract subtitle", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
-		http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
-		return
-	}
-
-	vtt, err := playback.ConvertToVTT(data, format)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "convert to vtt", "component", "proxy", "error", err, "playback_session_id", claims.SessionID)
-		http.Error(w, "subtitle conversion failed", http.StatusInternalServerError)
-		return
-	}
-
-	playback.ServeSubtitle(w, vtt, "vtt")
 }
 
 func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {

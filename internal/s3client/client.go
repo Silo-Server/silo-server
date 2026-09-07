@@ -42,9 +42,7 @@ const (
 // S3-compatible backends require parts of at least 5 MiB (except the last).
 const streamUploadPartSize = 8 * 1024 * 1024
 
-// publicDeliveryProbeTimeout bounds request-path latency when the external
-// artwork endpoint is unavailable. Ladder resolution probes candidates in
-// descending order, so an unbounded client could stall a whole browse page.
+// publicDeliveryProbeTimeout bounds background artwork delivery verification.
 const publicDeliveryProbeTimeout = 5 * time.Second
 
 // BucketConfig holds the configuration for connecting to a single S3 bucket.
@@ -442,6 +440,17 @@ func (c *Client) ObjectExists(ctx context.Context, bucket, key string) (bool, er
 	}
 
 	return true, nil
+}
+
+// ArtworkDeliveryScope invalidates verification when storage or delivery
+// endpoint or URL policy changes. Credentials are excluded from this persisted
+// digest. Rotated credentials sign fresh URLs and use normal background checks.
+func (c *Client) ArtworkDeliveryScope() string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		c.endpoint, c.bucket, c.keyPrefix, c.publicEndpoint, c.urlAuth,
+		c.tokenParam,
+	}, "\x00")))
+	return hex.EncodeToString(sum[:])
 }
 
 // ObjectAvailable reports whether a client-facing read URL is fetchable now.

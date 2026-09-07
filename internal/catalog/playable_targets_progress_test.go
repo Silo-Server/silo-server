@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -10,15 +11,39 @@ import (
 
 type recordingProgressStore struct {
 	batchSizes []int
+	ids        []string
+	delegate   PlayableTargetProgressStore
 }
 
-func (s *recordingProgressStore) ListProgressByMediaItems(_ context.Context, _ string, mediaItemIDs []string) (map[string]userstore.WatchProgress, error) {
+func (s *recordingProgressStore) ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]userstore.WatchProgress, error) {
 	s.batchSizes = append(s.batchSizes, len(mediaItemIDs))
+	s.ids = append(s.ids, mediaItemIDs...)
+	if s.delegate != nil {
+		return s.delegate.ListProgressByMediaItems(ctx, profileID, mediaItemIDs)
+	}
 	result := make(map[string]userstore.WatchProgress, len(mediaItemIDs))
 	for _, id := range mediaItemIDs {
 		result[id] = userstore.WatchProgress{MediaItemID: id, PositionSeconds: 1}
 	}
 	return result, nil
+}
+
+func TestPlayableTargetProgressIDsOnlyLoadsAmbiguousUnhintedCards(t *testing.T) {
+	candidates := map[string][]string{
+		"movie":        {"movie"},
+		"empty":        nil,
+		"one-episode":  {"episode-1"},
+		"hinted":       {"episode-1", "episode-2", "hinted-only"},
+		"series":       {"episode-1", "episode-2"},
+		"same-series":  {"episode-1", "episode-2"},
+		"invalid-hint": {"episode-3", "episode-4"},
+	}
+	ids := playableTargetProgressIDs(candidates, map[string]string{"hinted": "episode-2"})
+	slices.Sort(ids)
+	want := []string{"episode-1", "episode-2", "episode-3", "episode-4"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("progress IDs = %v, want %v", ids, want)
+	}
 }
 
 // The PostgreSQL store binds one parameter per ID, so a page of long-running

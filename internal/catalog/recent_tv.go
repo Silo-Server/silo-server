@@ -15,8 +15,9 @@ const (
 	recentTVTypeSeries  = "series"
 )
 
-// RecentTVTarget is one card-producing TV availability event. Separate scan
-// runs remain separate even when two multi-episode runs target the same show.
+// RecentTVTarget is one card-producing TV availability event. By default,
+// separate scan runs remain separate even when two multi-episode runs target
+// the same show; RecentTVQuery.UniqueTargets can collapse them for keyed rows.
 type RecentTVTarget struct {
 	ContentID string
 	Type      string
@@ -35,13 +36,14 @@ type RecentTVTarget struct {
 
 // RecentTVQuery describes one page of Plex-style recently-added TV events.
 type RecentTVQuery struct {
-	LibraryIDs []int
-	Access     AccessFilter
-	NamePrefix string
-	SnapshotAt *time.Time
-	Limit      int
-	Offset     int
-	SkipTotal  bool
+	LibraryIDs    []int
+	Access        AccessFilter
+	NamePrefix    string
+	SnapshotAt    *time.Time
+	Limit         int
+	Offset        int
+	SkipTotal     bool
+	UniqueTargets bool // collapse repeated target content IDs, keeping the newest event
 }
 
 // RecentTVRepository resolves scan-batched episode availability into episode
@@ -150,7 +152,9 @@ func ResolveRecentTVLibraryIDs(
 	return sortedUniqueInts(ids), true, nil
 }
 
-// List returns one page after event grouping and per-event target de-duplication.
+// List returns one page after event grouping. UniqueTargets collapses repeated
+// target content IDs before counting and pagination; otherwise each scan event
+// remains independently addressable.
 func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]RecentTVTarget, int, bool, error) {
 	if r == nil || r.pool == nil || len(q.LibraryIDs) == 0 {
 		return []RecentTVTarget{}, 0, false, nil
@@ -246,14 +250,33 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 	// aggregation, so that path keeps the single-pass shape.
 	var sqlText string
 	if strings.TrimSpace(q.NamePrefix) == "" {
-		totalsCTE := `,
+		if q.UniqueTargets {
+			totalsCTE := `,
+			totals AS (
+				SELECT COUNT(*)::int AS total_count FROM unique_target_keys
+			)`
+			if q.SkipTotal {
+				totalsCTE = ""
+			}
+			sqlText = buildUniqueRecentTVNoPrefixQuery(
+				strings.Join(episodeRowConditions, " AND "),
+				eventWhere,
+				strings.Join(seriesConditions, " AND "),
+				limitIdx,
+				offsetIdx,
+				totalsCTE,
+				totalColumn,
+				fromClause,
+			)
+		} else {
+			totalsCTE := `,
 		totals AS (
 			SELECT ((SELECT COUNT(*) FROM event_keys) + (SELECT COUNT(*) FROM series_without_episode_events))::int AS total_count
 		)`
-		if q.SkipTotal {
-			totalsCTE = ""
-		}
-		sqlText = fmt.Sprintf(`
+			if q.SkipTotal {
+				totalsCTE = ""
+			}
+			sqlText = fmt.Sprintf(`
 		WITH raw_event_keys AS MATERIALIZED (
 			-- Narrow first pass: one row per (series, scan run) availability
 			-- event carrying only its added_at. It deliberately applies only
@@ -342,36 +365,9 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 			ORDER BY added_at DESC, target_type ASC, target_id ASC, event_id ASC
 			LIMIT $%[4]d OFFSET $%[5]d
 		)
-		SELECT page.target_id, page.target_type, page.added_at,
-		       COALESCE(page.single_episode_id, play_target.content_id) AS play_content_id%[7]s
-		%[8]s
-		-- Anchor hint only: profile-independent by design, so this page can be
-		-- shared through the process-global resolved-list cache. Playback
-		-- quality is enforced later by PlayableTargetResolver, which re-checks
-		-- this hint before using it (see RecentTVTarget.PlayContentID).
-		LEFT JOIN LATERAL (
-			SELECT e_play.content_id
-			FROM episodes e_play
-			WHERE page.target_type = 'series'
-			  AND e_play.series_id = page.series_id
-			  AND e_play.season_number = page.anchor_season_number
-			  AND EXISTS (
-				SELECT 1
-				FROM episode_libraries el_play
-				WHERE el_play.episode_id = e_play.content_id
-				  AND el_play.media_folder_id = ANY($1)
-				  AND EXISTS (
-					SELECT 1 FROM media_files mf_play
-					WHERE mf_play.episode_id = el_play.episode_id
-					  AND mf_play.media_folder_id = el_play.media_folder_id
-					  AND mf_play.missing_since IS NULL
-				  )
-			  )
-			ORDER BY e_play.episode_number ASC, e_play.content_id ASC
-			LIMIT 1
-		) play_target ON true
-		ORDER BY page.added_at DESC, page.target_type ASC, page.target_id ASC, page.event_id ASC
-	`, strings.Join(episodeRowConditions, " AND "), eventWhere, strings.Join(seriesConditions, " AND "), limitIdx, offsetIdx, totalsCTE, totalColumn, fromClause)
+			`, strings.Join(episodeRowConditions, " AND "), eventWhere, strings.Join(seriesConditions, " AND "), limitIdx, offsetIdx, totalsCTE)
+			sqlText += buildRecentTVResultQuery(totalColumn, fromClause)
+		}
 	} else {
 		totalsCTE := `,
 		totals AS (
@@ -379,6 +375,14 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 		)`
 		if q.SkipTotal {
 			totalsCTE = ""
+		}
+		filteredSQL := `SELECT target_id, target_type, added_at, event_id, series_id, anchor_season_number, single_episode_id
+			FROM all_events`
+		if q.UniqueTargets {
+			filteredSQL = `SELECT DISTINCT ON (target_id)
+				target_id, target_type, added_at, event_id, series_id, anchor_season_number, single_episode_id
+			FROM all_events
+			ORDER BY target_id, added_at DESC, target_type ASC, event_id ASC`
 		}
 		sqlText = fmt.Sprintf(`
 		WITH available_episode_rows AS MATERIALIZED (
@@ -443,15 +447,8 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 			SELECT series_id, 'series'::text, added_at, ''::text, series_id, NULL::integer, NULL::text
 			FROM series_without_episode_events
 		),
-		-- No de-duplication pass: (target_id, target_type, event_id) is already
-		-- unique. episode_events groups by (series_id, first_seen_scan_run_id)
-		-- and an episode belongs to exactly one series, and
-		-- series_without_episode_events is disjoint from it by construction —
-		-- it only emits series with no present episode file, which every
-		-- episode_events row requires.
 		filtered AS (
-			SELECT target_id, target_type, added_at, event_id, series_id, anchor_season_number, single_episode_id
-			FROM all_events
+			%s
 		)%s,
 		page AS (
 			SELECT target_id, target_type, added_at, event_id, series_id, anchor_season_number, single_episode_id
@@ -459,36 +456,8 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 			ORDER BY added_at DESC, target_type ASC, target_id ASC, event_id ASC
 			LIMIT $%d OFFSET $%d
 		)
-		SELECT page.target_id, page.target_type, page.added_at,
-		       COALESCE(page.single_episode_id, play_target.content_id) AS play_content_id%s
-		%s
-		-- Anchor hint only: profile-independent by design, so this page can be
-		-- shared through the process-global resolved-list cache. Playback
-		-- quality is enforced later by PlayableTargetResolver, which re-checks
-		-- this hint before using it (see RecentTVTarget.PlayContentID).
-		LEFT JOIN LATERAL (
-			SELECT e_play.content_id
-			FROM episodes e_play
-			WHERE page.target_type = 'series'
-			  AND e_play.series_id = page.series_id
-			  AND e_play.season_number = page.anchor_season_number
-			  AND EXISTS (
-				SELECT 1
-				FROM episode_libraries el_play
-				WHERE el_play.episode_id = e_play.content_id
-				  AND el_play.media_folder_id = ANY($1)
-				  AND EXISTS (
-					SELECT 1 FROM media_files mf_play
-					WHERE mf_play.episode_id = el_play.episode_id
-					  AND mf_play.media_folder_id = el_play.media_folder_id
-					  AND mf_play.missing_since IS NULL
-				  )
-			  )
-			ORDER BY e_play.episode_number ASC, e_play.content_id ASC
-			LIMIT 1
-		) play_target ON true
-		ORDER BY page.added_at DESC, page.target_type ASC, page.target_id ASC, page.event_id ASC
-	`, strings.Join(episodeRowConditions, " AND "), eventWhere, strings.Join(seriesConditions, " AND "), totalsCTE, limitIdx, offsetIdx, totalColumn, fromClause)
+		`, strings.Join(episodeRowConditions, " AND "), eventWhere, strings.Join(seriesConditions, " AND "), filteredSQL, totalsCTE, limitIdx, offsetIdx)
+		sqlText += buildRecentTVResultQuery(totalColumn, fromClause)
 	}
 
 	rows, err := r.pool.Query(ctx, sqlText, args...)
@@ -528,6 +497,136 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 		return targets, 0, hasMore, nil
 	}
 	return targets, total, q.Offset+len(targets) < total, nil
+}
+
+// buildUniqueRecentTVNoPrefixQuery keeps the no-prefix path's expensive anchor
+// aggregation page-bounded while selecting and counting unique card targets.
+// MIN/MAX is enough to distinguish a one-episode scan event from a multi-
+// episode event even when one episode has availability rows in several folders.
+func buildUniqueRecentTVNoPrefixQuery(
+	episodeConditions string,
+	eventConditions string,
+	seriesConditions string,
+	limitIdx int,
+	offsetIdx int,
+	totalsCTE string,
+	totalColumn string,
+	fromClause string,
+) string {
+	return fmt.Sprintf(`
+	WITH raw_event_keys AS MATERIALIZED (
+		-- Keep this first pass narrow: target identity needs only scalar
+		-- aggregates. Episode counts and playback anchors remain page-bound.
+		SELECT e.series_id,
+		       el.first_seen_scan_run_id AS scan_run_id,
+		       MAX(el.first_seen_at) AS added_at,
+		       MIN(el.episode_id) AS min_episode_id,
+		       MAX(el.episode_id) AS max_episode_id
+		FROM episode_libraries el
+		JOIN episodes e ON e.content_id = el.episode_id
+		WHERE %[1]s
+		GROUP BY e.series_id, el.first_seen_scan_run_id
+	),
+	series_without_episode_events AS MATERIALIZED (
+		SELECT mi.content_id AS series_id,
+		       MAX(mil.first_seen_at) AS added_at
+		FROM media_item_libraries mil
+		JOIN media_items mi ON mi.content_id = mil.content_id
+		WHERE %[3]s
+		  AND NOT EXISTS (
+			SELECT 1 FROM raw_event_keys rek WHERE rek.series_id = mi.content_id
+		  )
+		GROUP BY mi.content_id
+	),
+	target_keys AS (
+		SELECT CASE
+		         WHEN rek.scan_run_id IS NOT NULL AND rek.min_episode_id = rek.max_episode_id THEN rek.min_episode_id
+		         ELSE rek.series_id
+		       END AS target_id,
+		       CASE
+		         WHEN rek.scan_run_id IS NOT NULL AND rek.min_episode_id = rek.max_episode_id THEN 'episode'::text
+		         ELSE 'series'::text
+		       END AS target_type,
+		       rek.added_at,
+		       COALESCE(rek.scan_run_id, '') AS event_id,
+		       rek.series_id,
+		       rek.scan_run_id
+		FROM raw_event_keys rek
+		JOIN media_items si ON si.content_id = rek.series_id
+		WHERE %[2]s
+		UNION ALL
+		SELECT series_id, 'series'::text, added_at, ''::text, series_id, NULL::text
+		FROM series_without_episode_events
+	),
+	unique_target_keys AS MATERIALIZED (
+		SELECT DISTINCT ON (target_id)
+		       target_id, target_type, added_at, event_id, series_id, scan_run_id
+		FROM target_keys
+		ORDER BY target_id, added_at DESC, target_type ASC, event_id ASC
+	)%[6]s,
+	page_keys AS MATERIALIZED (
+		SELECT target_id, target_type, added_at, event_id, series_id, scan_run_id
+		FROM unique_target_keys
+		ORDER BY added_at DESC, target_type ASC, target_id ASC, event_id ASC
+		LIMIT $%[4]d OFFSET $%[5]d
+	),
+	page AS (
+		SELECT pk.target_id,
+		       pk.target_type,
+		       pk.added_at,
+		       pk.event_id,
+		       pk.series_id,
+		       anchor.anchor_season_number,
+		       CASE WHEN pk.target_type = 'episode' THEN pk.target_id END AS single_episode_id
+		FROM page_keys pk
+		LEFT JOIN LATERAL (
+			SELECT (array_agg(e.season_number ORDER BY el.first_seen_at DESC, e.season_number DESC, e.episode_number DESC, el.episode_id ASC))[1] AS anchor_season_number
+			FROM episodes e
+			JOIN episode_libraries el
+			  ON el.episode_id = e.content_id
+			 AND el.first_seen_scan_run_id IS NOT DISTINCT FROM pk.scan_run_id
+			WHERE pk.target_type = 'series'
+			  AND e.series_id = pk.series_id
+			  AND %[1]s
+		) anchor ON true
+	)
+	`, episodeConditions, eventConditions, seriesConditions, limitIdx, offsetIdx, totalsCTE) + buildRecentTVResultQuery(totalColumn, fromClause)
+}
+
+// buildRecentTVResultQuery renders the common result projection after each
+// query shape has produced the same page columns.
+func buildRecentTVResultQuery(totalColumn, fromClause string) string {
+	return fmt.Sprintf(`
+	SELECT page.target_id, page.target_type, page.added_at,
+	       COALESCE(page.single_episode_id, play_target.content_id) AS play_content_id%s
+	%s
+	-- Anchor hint only: profile-independent by design, so this page can be
+	-- shared through the process-global resolved-list cache. Playback quality
+	-- is enforced later by PlayableTargetResolver, which re-checks this hint
+	-- before using it (see RecentTVTarget.PlayContentID).
+	LEFT JOIN LATERAL (
+		SELECT e_play.content_id
+		FROM episodes e_play
+		WHERE page.target_type = 'series'
+		  AND e_play.series_id = page.series_id
+		  AND e_play.season_number = page.anchor_season_number
+		  AND EXISTS (
+			SELECT 1
+			FROM episode_libraries el_play
+			WHERE el_play.episode_id = e_play.content_id
+			  AND el_play.media_folder_id = ANY($1)
+			  AND EXISTS (
+				SELECT 1 FROM media_files mf_play
+				WHERE mf_play.episode_id = el_play.episode_id
+				  AND mf_play.media_folder_id = el_play.media_folder_id
+				  AND mf_play.missing_since IS NULL
+			  )
+		  )
+		ORDER BY e_play.episode_number ASC, e_play.content_id ASC
+		LIMIT 1
+	) play_target ON true
+	ORDER BY page.added_at DESC, page.target_type ASC, page.target_id ASC, page.event_id ASC
+	`, totalColumn, fromClause)
 }
 
 func appendAllowedContentCondition(column string, allowed []string, conditions *[]string, args *[]any, argIdx *int) {

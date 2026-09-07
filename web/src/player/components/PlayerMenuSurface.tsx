@@ -17,17 +17,21 @@ export function PlayerMenuSurface({
   const isCoarsePointer = useCoarsePointer();
 
   useEffect(() => {
-    if (!isCoarsePointer) return;
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isCoarsePointer, onClose]);
+  }, [onClose]);
 
   if (!isCoarsePointer) {
     return (
-      <div role="menu" className={className} onKeyDown={onKeyDown}>
+      <div
+        role="menu"
+        className={`player-menu-surface ${className}`}
+        onKeyDown={onKeyDown}
+        onClick={(event) => event.stopPropagation()}
+      >
         {children}
       </div>
     );

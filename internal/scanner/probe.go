@@ -198,15 +198,16 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 			}
 		case "subtitle":
 			track := SubtitleTrackInfo{
-				Index:           s.Index,
-				Codec:           s.CodecName,
-				Language:        lang.Canonical(s.Tags["language"]),
-				Title:           firstNonEmpty(s.Tags["title"], strings.ToUpper(s.CodecName)),
-				EmbeddedTitle:   s.Tags["title"],
-				Resolution:      subtitleResolutionLabel(s),
-				Forced:          s.Disposition.Forced == 1,
-				Default:         s.Disposition.Default == 1,
-				HearingImpaired: dispositionFlag(s.Tags, "hearing_impaired"),
+				ContainerTrackID: canonicalContainerTrackID(string(s.ID)),
+				Index:            s.Index,
+				Codec:            s.CodecName,
+				Language:         lang.Canonical(s.Tags["language"]),
+				Title:            firstNonEmpty(s.Tags["title"], strings.ToUpper(s.CodecName)),
+				EmbeddedTitle:    s.Tags["title"],
+				Resolution:       subtitleResolutionLabel(s),
+				Forced:           s.Disposition.Forced == 1,
+				Default:          s.Disposition.Default == 1,
+				HearingImpaired:  dispositionFlag(s.Tags, "hearing_impaired"),
 			}
 			pd.SubtitleTracks = append(pd.SubtitleTracks, track)
 		}
@@ -774,4 +775,20 @@ func detectContainer(formatName string) string {
 		return strings.TrimSpace(parts[0])
 	}
 	return formatName
+}
+
+// FFprobe emits MP4 track IDs as hexadecimal strings. Keep a canonical decimal
+// identifier for players using container IDs; absent IDs must never be guessed.
+func canonicalContainerTrackID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	base := 10
+	if strings.HasPrefix(raw, "0x") || strings.HasPrefix(raw, "0X") {
+		raw = raw[2:]
+		base = 16
+	}
+	id, err := strconv.ParseUint(raw, base, 32)
+	if err != nil || id == 0 {
+		return ""
+	}
+	return strconv.FormatUint(id, 10)
 }

@@ -15,10 +15,12 @@ library collection, user collection, Watchlist, or Favorites. The request is:
 
 `collection_kind` accepts `library`, `user`, `watchlist`, or `favorites`.
 `collection_id` is required for collection kinds and is omitted or ignored for
-Watchlist and Favorites. Personal lists accept the same non-personalized sort
-fields as the personal catalog browse; `added_at` means the date the item was
+Watchlist and Favorites. Saved personal-list preferences accept non-personalized sort
+fields; `added_at` means the date the item was
 added to the list. Personalized sorts (`progress`, `date_viewed`, and `plays`)
-are rejected, matching the browse. An empty `field` pins the profile to list
+are rejected for both saved preferences and Favorites/Watchlist browse. History
+accepts `date_viewed` with an active profile, but rejects mutable `progress` and
+`plays` sorts. An empty `field` pins the profile to list
 source order. `DELETE /api/v1/collections/sort-preference?collection_kind=watchlist`
 removes the saved preference. Collection kinds also require `collection_id` on
 DELETE.
@@ -43,15 +45,11 @@ Check it before saving a Watchlist or Favorites preference. The older
 personal-list kinds and reject them with a 400, so it cannot be used to detect
 them. When `sort_preference_kinds` is absent, assume `library` and `user` only.
 
-The same response includes `user_collection_sync_schedule`. Its `presets`
-are the values the current account may send as `sync_schedule` when importing
-or updating a personal collection. `editable` reports support for changing the
-schedule through `PUT /api/v1/collections/{id}`. When `custom_cron` is true,
-the account is a server admin and may use any valid five-field cron expression;
-the advertised presets match the server-collection schedule presets. Regular
-accounts receive the bounded `daily`, `weekly`, and `monthly` values. An empty
-value disables automatic sync. Those bounded values map to the matching server
-presets: daily at 03:00, weekly on Sunday at 03:00, and monthly on the first at
-03:00. If an admin account is changed to a regular account, an admin-only
-personal-collection schedule is changed to the bounded daily schedule before
-another scheduled provider request is made.
+## History ordering
+
+History defaults to chronological watch-event order. Explicit `date_viewed`
+sorting uses each displayed item's latest visible history event, including
+episode events collapsed into their parent series; it does not require a
+completed watch. `order=asc` puts the oldest latest watch first, and `desc`
+puts the newest first. Library/media-scope/search overlays retain this order
+before pagination. History does not currently support saved sort preferences.

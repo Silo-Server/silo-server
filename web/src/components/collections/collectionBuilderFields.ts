@@ -1,3 +1,4 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import type { QuerySort } from "@/api/types";
 import { getQuerySortOptions, type QuerySortRelevanceScope } from "@/lib/querySortOptions";
 
@@ -260,7 +261,7 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
 ];
 
 export function getCollectionSortOptions(
-  includePersonalized = false,
+  includePersonalized: PersonalizedSorts = false,
   relevanceScope?: QuerySortRelevanceScope,
 ): Array<{ value: QuerySort["field"]; label: string }> {
   return getQuerySortOptions({ includePersonalized, relevanceScope }).map((option) => ({

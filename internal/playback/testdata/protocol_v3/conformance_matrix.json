@@ -1978,7 +1978,7 @@
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
         "progress_persistence": "client",
-        "audio_track_id": "file:42:audio:0",
+        "audio_track_id": "file:77:audio:0",
         "audio_track_index": 0,
         "metered": false,
         "client_capabilities": {
@@ -4573,7 +4573,7 @@
               "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
-                "sidecar_text": false,
+                "sidecar_text": true,
                 "ass_styling": true,
                 "embedded_bitmap": false,
                 "sidecar_bitmap": false,
@@ -4601,7 +4601,7 @@
               "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
-                "sidecar_text": false,
+                "sidecar_text": true,
                 "ass_styling": true,
                 "embedded_bitmap": false,
                 "sidecar_bitmap": false,
@@ -4628,7 +4628,7 @@
               "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
-                "sidecar_text": false,
+                "sidecar_text": true,
                 "ass_styling": true,
                 "embedded_bitmap": false,
                 "sidecar_bitmap": false,
@@ -6753,6 +6753,7 @@
           "server_features": [
             "playback_plan_v3",
             "neutral_playback_v3_contract_v1",
+            "embedded_subtitles_v1",
             "layout_aware_passthrough",
             "playback_route_diagnostics",
             "device_quirks_v1",

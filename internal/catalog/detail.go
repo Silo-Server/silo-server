@@ -1307,6 +1307,75 @@ func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*m
 
 // GetItemDetail retrieves a full item detail with presigned URLs and file versions.
 func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
+	target, err := s.resolveDetailTarget(ctx, contentID, filter)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case target.item != nil:
+		return s.buildMediaItemDetail(ctx, target.item, contentID, filter, nil)
+	case target.season != nil:
+		return s.buildSeasonDetail(ctx, target.season, filter)
+	case target.episode != nil:
+		seriesCtx, err := s.buildSeriesDetailContext(ctx, target.episode.SeriesID, filter)
+		if err != nil {
+			return nil, err
+		}
+		return s.buildEpisodeDetail(ctx, target.episode, seriesCtx, filter)
+	default:
+		return s.buildExtraItemDetail(ctx, target.extra, filter)
+	}
+}
+
+const detailTypeAudiobook = "audiobook"
+
+// GetItemVersions builds the browse version selector without loading unrelated
+// presentation data. It shares detail authorization and playback metadata, but
+// does not require localization, credits, artwork, or recommendations to succeed.
+func (s *DetailService) GetItemVersions(ctx context.Context, contentID string, filter AccessFilter) ([]FileVersion, error) {
+	target, err := s.resolveDetailTarget(ctx, contentID, filter)
+	if err != nil {
+		return nil, err
+	}
+	var files []*models.MediaFile
+	audioPreferenceContentID := contentID
+	switch {
+	case target.season != nil || (target.item != nil && target.item.Type == playableTypeSeries):
+		return []FileVersion{}, nil
+	case target.item != nil:
+		files, err = s.fileFetcher.GetByContentID(ctx, contentID)
+	case target.episode != nil:
+		files, err = s.fileFetcher.GetByEpisodeID(ctx, contentID)
+		audioPreferenceContentID = target.episode.SeriesID
+	default:
+		fetcher, ok := s.fileFetcher.(extraFileFetcher)
+		if !ok {
+			return nil, ErrItemNotFound
+		}
+		files, err = fetcher.GetByExtraID(ctx, contentID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fetching file versions: %w", err)
+	}
+	files = FilterMediaFilesByAccess(files, filter)
+	if target.item != nil && target.item.Type == detailTypeAudiobook {
+		sortAudiobookMediaFiles(files)
+	}
+	files = s.prepareBrowseFiles(ctx, files)
+	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID)
+	return versions, nil
+}
+
+// detailTarget is exactly one authorized catalog row. Keeping target resolution
+// shared prevents versions-only reads from drifting from detail access rules.
+type detailTarget struct {
+	item    *models.MediaItem
+	season  *models.Season
+	episode *models.Episode
+	extra   *models.MediaExtra
+}
+
+func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID string, filter AccessFilter) (*detailTarget, error) {
 	item, err := s.itemRepo.GetByID(ctx, contentID)
 	switch {
 	case err == nil:
@@ -1316,7 +1385,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err := s.validatePresentationItemAccess(ctx, filter, contentID); err != nil {
 			return nil, err
 		}
-		return s.buildMediaItemDetail(ctx, item, contentID, filter, nil)
+		return &detailTarget{item: item}, nil
 	case !errors.Is(err, ErrItemNotFound):
 		return nil, err
 	}
@@ -1333,7 +1402,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err := s.validatePresentationItemAccess(ctx, filter, season.SeriesID); err != nil {
 			return nil, err
 		}
-		return s.buildSeasonDetail(ctx, season, filter)
+		return &detailTarget{season: season}, nil
 	} else if !errors.Is(err, ErrSeasonNotFound) {
 		return nil, err
 	}
@@ -1345,11 +1414,23 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	episode, err := s.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
 		if errors.Is(err, ErrEpisodeNotFound) {
-			// Fourth tier: a local extra. Serving it from GetItemDetail keeps
-			// per-item consumers that resolve arbitrary content ids
-			// (jellycompat PlaybackInfo in particular) playable without a
-			// separate lookup path.
-			return s.buildExtraItemDetail(ctx, contentID, filter)
+			if s.extraRepo == nil {
+				return nil, ErrItemNotFound
+			}
+			extra, err := s.extraRepo.GetByID(ctx, contentID)
+			if err != nil {
+				if errors.Is(err, ErrExtraNotFound) {
+					return nil, ErrItemNotFound
+				}
+				return nil, err
+			}
+			if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
+				return nil, err
+			}
+			if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
+				return nil, err
+			}
+			return &detailTarget{extra: extra}, nil
 		}
 		return nil, err
 	}
@@ -1359,33 +1440,13 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
 		return nil, err
 	}
-	seriesCtx, err := s.buildSeriesDetailContext(ctx, episode.SeriesID, filter)
-	if err != nil {
-		return nil, err
-	}
-	return s.buildEpisodeDetail(ctx, episode, seriesCtx, filter)
+	return &detailTarget{episode: episode}, nil
 }
 
 // buildExtraItemDetail resolves a local extra as a minimal ItemDetail:
 // title/kind plus the ordinary playback surface (versions, subtitles) built
 // from its backing files. Access control is the parent item's.
-func (s *DetailService) buildExtraItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
-	if s.extraRepo == nil {
-		return nil, ErrItemNotFound
-	}
-	extra, err := s.extraRepo.GetByID(ctx, contentID)
-	if err != nil {
-		if errors.Is(err, ErrExtraNotFound) {
-			return nil, ErrItemNotFound
-		}
-		return nil, err
-	}
-	if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
-		return nil, err
-	}
-	if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
-		return nil, err
-	}
+func (s *DetailService) buildExtraItemDetail(ctx context.Context, extra *models.MediaExtra, filter AccessFilter) (*ItemDetail, error) {
 	fetcher, ok := s.fileFetcher.(extraFileFetcher)
 	if !ok {
 		return nil, ErrItemNotFound
@@ -1803,8 +1864,22 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		pendingTranslation = pf.pendingTranslation
 		item = pf.localizedItem
 	} else {
-		pendingTranslation = s.PendingTranslationLanguage(ctx, item, filter)
-		localizedItem, err := s.LocalizeItemModel(ctx, item, filter)
+		// Share the language and row with the pending-translation decision,
+		// just as the batch detail path does.
+		targets, localizations, err := s.loadItemLocalizations(ctx, []*models.MediaItem{item}, filter)
+		var localizedItem *models.MediaItem
+		if err != nil && strings.TrimSpace(item.Overview) != "" && s.itemLocRepo != nil {
+			// PendingTranslationLanguage historically suppressed its lookup
+			// error before the required localization read. Preserve that retry
+			// on failure without repeating successful lookups.
+			localizedItem, err = s.LocalizeItemModel(ctx, item, filter)
+		} else if err == nil {
+			language, loc := targets[item.ContentID], localizations[item.ContentID]
+			if s.itemLocRepo != nil {
+				pendingTranslation = pendingTranslationLanguageWith(item, language, loc)
+			}
+			localizedItem = s.localizeItemModelWith(item, language, loc)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("localizing item detail: %w", err)
 		}
@@ -1879,7 +1954,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		}
 
 		files = FilterMediaFilesByAccess(files, filter)
-		if item.Type == "audiobook" {
+		if item.Type == detailTypeAudiobook {
 			sortAudiobookMediaFiles(files)
 		}
 		files = s.prepareBrowseFiles(ctx, files)
@@ -1906,7 +1981,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		detail.Extras = s.fetchItemExtras(ctx, contentID, pf)
 	}
 
-	if item.Type == "audiobook" {
+	if item.Type == detailTypeAudiobook {
 		detail.Audiobook = s.buildAudiobookExtension(ctx, item, detail.Versions, crewCredits, filter)
 	}
 	if item.Type == "ebook" {
@@ -1993,8 +2068,38 @@ func applyWorkSummaryValue(detail *ItemDetail, summary *WorkSummary) {
 
 // personCredits converts ItemPerson slice to PersonCredit slice with presigned URLs.
 func (s *DetailService) personCredits(ctx context.Context, people []models.ItemPerson, filter AccessFilter) []PersonCredit {
+	photoPaths := make([]string, len(people))
+	paths := make([]string, 0, len(people))
+	seen := make(map[string]struct{}, len(people))
+	variant := imagesize.PluginVariantFeatured
+	if filter.ImageSize != imagesize.Unset {
+		variant = sizeToVariant(string(filter.ImageSize))
+	}
+	for i, person := range people {
+		path := person.PhotoPath
+		if path == "" || path == "-" || strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+			continue
+		}
+		// An absent size preserves the stored key and historical plugin hint;
+		// explicit sizes use the same profile ladder as individual resolution.
+		if filter.ImageSize != imagesize.Unset {
+			path = cachedImageVariantPath(path, artworkkey.ImageProfile, string(filter.ImageSize))
+		}
+		photoPaths[i] = path
+		if _, ok := seen[path]; !ok {
+			seen[path] = struct{}{}
+			paths = append(paths, path)
+		}
+	}
+	photoURLs := s.PresignURLsWithExpiry(ctx, paths, variant)
+	for _, path := range paths {
+		if photoURLs[path].URL == "" {
+			// Partial batch implementations retain their individual fallback.
+			photoURLs[path] = s.PresignURLWithExpiry(ctx, path, variant)
+		}
+	}
 	credits := make([]PersonCredit, 0, len(people))
-	for _, p := range people {
+	for i, p := range people {
 		pc := PersonCredit{
 			PersonID:  p.ID,
 			Name:      p.Name,
@@ -2006,15 +2111,10 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 			TvdbID:    p.TvdbID,
 			PlexGUID:  p.PlexGUID,
 		}
-		if p.PhotoPath != "" && p.PhotoPath != "-" {
-			// Without an explicit size the stored key is presigned as-is, which
-			// is what this has always returned. An explicit size resolves the
-			// profile ladder instead, the same as every other image on the page.
-			if filter.ImageSize == imagesize.Unset {
-				pc.PhotoURL = s.PresignURL(ctx, p.PhotoPath, imagesize.PluginVariantFeatured)
-			} else {
-				pc.PhotoURL = s.PresignImageURL(ctx, p.PhotoPath, artworkkey.ImageProfile, string(filter.ImageSize))
-			}
+		if strings.HasPrefix(p.PhotoPath, "http://") || strings.HasPrefix(p.PhotoPath, "https://") {
+			pc.PhotoURL = p.PhotoPath
+		} else if photoPaths[i] != "" {
+			pc.PhotoURL = photoURLs[photoPaths[i]].URL
 		}
 		if p.PhotoThumbhash != "" && p.PhotoThumbhash != "-" {
 			pc.PhotoThumbhash = p.PhotoThumbhash

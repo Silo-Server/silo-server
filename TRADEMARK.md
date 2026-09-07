@@ -41,9 +41,58 @@ marks.** This reservation is expressly permitted by AGPL-3.0 §7(e).
 - **Publishing an app to any app store** — Apple App Store, Google Play,
   F-Droid, or similar — under the Silo name, logo, or a confusingly similar
   identity.
-- Using the marks in a **company, product, domain, or app name**, or in any way
-  that implies Silo Media operates or endorses your offering.
-- **Merchandise** or other commercial use of the logo or wordmark.
+- Using the marks in a **company, product, domain, or app name** in a way that
+  reads as official (see *Naming your project*; wordplay is exempt), or in any
+  way that implies Silo Media operates or endorses your offering.
+- **Merchandise**, or using the logo or wordmark to sell your own product
+  beyond a referential "works with Silo" placement.
+
+Never use the marks to promote piracy or to impersonate the project.
+
+## Naming your project
+
+Give your client, plugin, or fork its own name, then mention Silo in the
+tagline or description: "Bramble — a Silo client for Android TV," "Trakt sync
+plugin for Silo." That is referential use and needs no permission.
+
+Official products use "Silo" alone, **Silo Server**, or "Silo" joined to a
+product word (**SiloRemote**, **SiloMac**). Those patterns are reserved and
+need written permission:
+
+- "Silo" on its own, or as the first word of a product name, including
+  generic descriptors used as the name such as "Silo Client" or "Silo Player"
+- "Silo[word]" names such as SiloTV or SiloPlay, which read as official apps
+- "[word]Silo" names such as OpenSilo or MySilo, which read as the project
+- misspellings and look-alikes such as Sylo or Si1o
+
+Repository and package names such as `silo-plugin-trakt` are fine when "silo"
+only describes what the code plugs into.
+
+**Wordplay is fine, and is the exception to the rules above.** A name such as
+"Siloette" or "Silodeon" contains the mark but reads as its own word, not as an
+official product, so it needs no permission, wherever you publish it, including
+app stores and commercial offerings. The test is whether a reasonable user would
+think the Silo team made it. Keep a description that says what the project is
+("Siloette, a Silo client"), use your own logo, and do not describe the project
+as official. Describing your project as "a Silo client" is fine; naming it
+"Silo Client" is not.
+
+## Writing the name
+
+- Prose and UI text: **Silo**, capital S, one word. The server product is
+  **Silo Server**.
+- Repositories, packages, and command-line binaries: lowercase `silo`
+  (`silo-server`). App bundles and product names keep the display form
+  (`Silo`, `SiloTV`).
+- Paths and config directories: follow the platform convention
+  (`/var/lib/silo`, `~/Library/Application Support/Silo`).
+- Never SILO, SiLo, or a typeset "Silo" in place of the supplied wordmark.
+
+## Colors and motif
+
+You may use the Silo colors, and the three-bar motif from the website, in your
+own interface. The logo, wordmark, and icons are what we reserve, so keep your
+own logo a different shape and do not build the Silo mark into it.
 
 ## Forks must rebrand
 
@@ -70,13 +119,22 @@ The only official Silo software comes from:
 - official app-store listings published by **Silo Media L.L.C.**
 
 Any app-store listing, download, or "Silo" app that does not originate from the
-above is **not** official and is **not** authorized to use the Silo marks.
+above is **not** official and is **not** authorized to present itself as Silo.
+Third-party projects that follow *Naming your project*, including wordplay
+names, are unaffected.
 
 ## Requesting permission / reporting misuse
 
-Email **trademark@siloserver.org** with the details. We're generally glad to
-grant reasonable requests — the goal of this policy is only to prevent user
-confusion and unauthorized "official-looking" releases.
+Not sure whether your use is fine? Ask in Discord (<https://discord.gg/siloserver>)
+or email **trademark@siloserver.org**. We answer quickly and usually say yes.
+The goal of this policy is only to prevent user confusion and unauthorized
+"official-looking" releases.
+
+The canonical copy of this policy is the one in the siloserver.org repository:
+<https://github.com/Silo-Server/siloserver.org/blob/main/TRADEMARK.md>. Other
+Silo repositories carry synchronized copies. The brand page at
+<https://siloserver.org/brand> is the practical guide and asset library, and
+follows the canonical file.
 
 ---
 

@@ -1,3 +1,4 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import type { QueryDefinition } from "@/api/types";
 import type { FilterConfig } from "@/api/types";
 import FilterRuleEditor from "@/components/FilterRuleEditor";
@@ -19,7 +20,7 @@ interface CollectionRulesEditorProps {
   allowLibrarySelection?: boolean;
   showMediaScopeSelector?: boolean;
   allowPersonalizedFilters?: boolean;
-  allowPersonalizedSorts?: boolean;
+  allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   readOnly?: boolean;
 }

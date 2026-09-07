@@ -74,7 +74,12 @@ function isCollectionSource(source: CatalogSource): boolean {
 // field. The watchlist's stored order can mirror a watch provider's list
 // order (e.g. MDBList) via sort_index; favorites use their entry order.
 export function catalogSourceSupportsSourceOrder(source: CatalogSource): boolean {
-  return isCollectionSource(source) || source === "watchlist" || source === "favorites";
+  return (
+    isCollectionSource(source) ||
+    source === "watchlist" ||
+    source === "favorites" ||
+    source === "history"
+  );
 }
 
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {

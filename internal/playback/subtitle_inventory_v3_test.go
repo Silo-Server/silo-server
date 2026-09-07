@@ -113,9 +113,9 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		url           string
 		fontBundleURL string
 	}{
-		{0, "/stream/sess-1/subtitles/0.vtt?file_id=44", ""},
-		{1, "/stream/sess-1/subtitles/1.ass?file_id=44", "/stream/sess-1/subtitles/1/fonts?file_id=44"},
-		{2, "/stream/sess-1/subtitles/2.sup?file_id=44", ""},
+		{0, "/stream/sess-1/subtitles/0.vtt?file_id=44&embedded_stream_index=0", ""},
+		{1, "/stream/sess-1/subtitles/1.ass?file_id=44&embedded_stream_index=1", "/stream/sess-1/subtitles/1/fonts?file_id=44&embedded_stream_index=1"},
+		{2, "/stream/sess-1/subtitles/2.sup?file_id=44&embedded_stream_index=2", ""},
 		{3, "", ""},
 	}
 	for _, tc := range cases {
@@ -126,6 +126,26 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		if got.FontBundleURL != tc.fontBundleURL {
 			t.Errorf("item %d font_bundle_url = %q, want %q", tc.index, got.FontBundleURL, tc.fontBundleURL)
 		}
+	}
+}
+
+func TestScopeSubtitleInventoryV3PreservesPinnedIdentity(t *testing.T) {
+	file := &models.MediaFile{ID: 42,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/selected.srt", Format: "srt"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Index: 4, Codec: "ass"}},
+	}
+	inventory := SubtitleInventoryV3("original-session", file, nil)
+	wantKey := ExternalSubtitlePathKeyV3(file.ExternalSubtitles[0].Path)
+	if !strings.Contains(inventory[0].URL, "external_subtitle_key="+wantKey) || strings.Contains(inventory[0].URL, "selected.srt") {
+		t.Fatalf("external URL must carry an opaque path identity: %q", inventory[0].URL)
+	}
+	// Restoring a frozen inventory must not rebind its pins after a scan.
+	file.ExternalSubtitles = append([]models.ExternalSubtitle{{Path: "/media/new.srt", Format: "srt"}}, file.ExternalSubtitles...)
+	scoped := ScopeSubtitleInventoryV3("new-session", file, inventory)
+	if !strings.Contains(scoped[0].URL, "external_subtitle_key="+wantKey) ||
+		!strings.Contains(scoped[1].URL, "embedded_stream_index=4") ||
+		!strings.Contains(scoped[1].FontBundleURL, "embedded_stream_index=4") {
+		t.Fatalf("rescoping changed subtitle identities: %#v", scoped)
 	}
 }
 

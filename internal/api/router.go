@@ -97,21 +97,25 @@ type Dependencies struct {
 	BootstrapSensitiveValues     map[string]string
 	RedisBootstrapAvailable      bool
 	AppContext                   context.Context
-	DB                           *pgxpool.Pool
-	SecretCipher                 *secret.Cipher // at-rest credential cipher (required when DB is set)
-	FrontendFS                   fs.FS
-	S3Public                     *s3client.Client              // public assets bucket client (may be nil)
-	S3Private                    *s3client.Client              // private internal bucket client (may be nil)
-	S3UserDB                     *s3client.Client              // user-db bucket client (may be nil)
-	BrandingService              *branding.Service             // white-label branding (nil when DB unavailable)
-	FolderRepo                   *catalog.FolderRepository     // media folder repository (may be nil)
-	FileRepo                     *scanner.FileRepository       // media file repository (may be nil)
-	Scanner                      *scanner.Scanner              // scanner instance (may be nil)
-	LibraryIngester              *libraryingest.Executor       // shared library ingest executor (may be nil)
-	ProbeEnsurer                 handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
-	UserStoreProvider            userstore.UserStoreProvider   // user store provider (may be nil)
-	SessionMgr                   *playback.SessionManager      // playback session manager (may be nil)
-	StreamTelemetry              *streamtelemetry.Registry     // local observation-only stream telemetry (may be nil)
+	// RegisterShutdownWork retains asynchronous cleanup completion until main's
+	// graceful-shutdown deadline. Nil is valid in tests and embedded routers.
+	RegisterShutdownWork func(<-chan struct{})
+
+	DB                *pgxpool.Pool
+	SecretCipher      *secret.Cipher // at-rest credential cipher (required when DB is set)
+	FrontendFS        fs.FS
+	S3Public          *s3client.Client              // public assets bucket client (may be nil)
+	S3Private         *s3client.Client              // private internal bucket client (may be nil)
+	S3UserDB          *s3client.Client              // user-db bucket client (may be nil)
+	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
+	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
+	Scanner           *scanner.Scanner              // scanner instance (may be nil)
+	LibraryIngester   *libraryingest.Executor       // shared library ingest executor (may be nil)
+	ProbeEnsurer      handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
+	UserStoreProvider userstore.UserStoreProvider   // user store provider (may be nil)
+	SessionMgr        *playback.SessionManager      // playback session manager (may be nil)
+	StreamTelemetry   *streamtelemetry.Registry     // local observation-only stream telemetry (may be nil)
 	// StreamTelemetryViewCache serves the merged global view with bounded
 	// staleness so the admin parity endpoint never rebuilds it per request.
 	StreamTelemetryViewCache *streamtelemetry.ViewCache
@@ -1064,6 +1068,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			// from its token/recipe, so the worst case is a wasted rebuild. A shared
 			// active-set source across both managers would remove even that.
 			playback.StartPeriodicOrphanCleanup(deps.AppContext, "api", deps.Config.Playback.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes, playback.OrphanCleanupInterval)
+			cleanupDone := playbackHandler.TranscodeManager().StartShutdownCleanup(deps.AppContext)
+			if deps.RegisterShutdownWork != nil {
+				deps.RegisterShutdownWork(cleanupDone)
+			}
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer
@@ -2134,6 +2142,49 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Apple notification display metadata: authenticated by either the
+		// normal access token or the long-lived display token minted at Apple
+		// push registration. Sits outside the RequireAuth group because the
+		// display token is not an access token; RequireApplePushDisplayAuth
+		// still validates the session and binds the profile from the claims.
+		if authMiddleware != nil && deps.Notifications != nil {
+			// The route only left the authenticated group to accept the
+			// display token. Both credential paths share the same
+			// post-auth chain: the limiter (per-API-key budgets need
+			// claims), then viewer access so a deleted or foreign profile
+			// is rejected and rejected resolutions still consume budget.
+			// The limiter also runs once before auth: a display token lives
+			// as long as a refresh token, so its session lookup must not be
+			// reachable outside the global and per-IP budgets.
+			var limiter func(http.Handler) http.Handler
+			if deps.RateLimitMW != nil {
+				limiter = deps.RateLimitMW.Handler
+			}
+			postAuth := func(next http.Handler) http.Handler {
+				chain := apimw.RequireProfile(next)
+				if viewerAccessMiddleware != nil {
+					chain = viewerAccessMiddleware.RequireViewerAccess(chain)
+				}
+				if limiter != nil {
+					chain = limiter(chain)
+				}
+				return chain
+			}
+			standardDisplayAuth := func(next http.Handler) http.Handler {
+				return authMiddleware.RequireAuth(postAuth(next))
+			}
+			displayMiddlewares := []func(http.Handler) http.Handler{}
+			if limiter != nil {
+				displayMiddlewares = append(displayMiddlewares, limiter)
+			}
+			displayMiddlewares = append(displayMiddlewares,
+				authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, postAuth))
+			r.With(displayMiddlewares...).Get(
+				"/notifications/push/apple/display/{delivery_id}",
+				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,
+			)
+		}
+
 		// All remaining routes require auth.
 		if authMiddleware != nil {
 			r.Group(func(r chi.Router) {
@@ -2178,6 +2229,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.Notifications.SetImageResolver(detailSvc)
 					}
 					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
+					notificationsHandler.SetApplePushDisplayTokenIssuer(jwtService)
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
 					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
 					// Discord DM channel: the linked identity and mode hang off
@@ -2198,7 +2250,6 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/capability", notificationsHandler.HandleCapability)
 						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
-						r.Get("/push/apple/display/{delivery_id}", notificationsHandler.HandleApplePushDisplay)
 						// Platform-generic registration used by the Android
 						// client; Apple keeps its dedicated route above.
 						r.Post("/push/devices", notificationsHandler.HandleRegisterPushDevice)

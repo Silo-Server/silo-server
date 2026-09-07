@@ -40,6 +40,7 @@ export async function playerFetch<T>(
     headers["Content-Type"] = "application/json";
   }
 
+  const authContext = config.getAuthContext?.();
   const token = config.getAccessToken();
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -57,10 +58,35 @@ export async function playerFetch<T>(
 
   headers["X-Silo-Device-Id"] = config.getDeviceId();
 
-  const res = await fetch(`${config.apiBaseUrl}${path}`, {
+  let res = await fetch(`${config.apiBaseUrl}${path}`, {
     ...options,
     headers,
   });
+
+  if (
+    res.status === 401 &&
+    config.refreshToken &&
+    config.getAuthContext?.() === authContext &&
+    !options.signal?.aborted
+  ) {
+    // A late 401 may arrive after another request already rotated the token.
+    const alreadyRefreshed = config.getAccessToken() !== token && config.getAccessToken() !== null;
+    const refreshed = alreadyRefreshed || (await config.refreshToken());
+    const refreshedToken = config.getAccessToken();
+    if (
+      refreshed &&
+      refreshedToken &&
+      config.getAuthContext?.() === authContext &&
+      !options.signal?.aborted
+    ) {
+      // Keep the original profile/PIN, device, body, and abort signal. Only
+      // same-account token rotation may change authority during this retry.
+      res = await fetch(`${config.apiBaseUrl}${path}`, {
+        ...options,
+        headers: { ...headers, Authorization: `Bearer ${refreshedToken}` },
+      });
+    }
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);

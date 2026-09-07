@@ -37,6 +37,12 @@ const (
 	TokenTypeRefresh      = "refresh"
 	TokenTypeAPIKey       = "api_key"
 	TokenTypePluginAccess = "plugin_access"
+	// TokenTypeApplePushDisplay is a long-lived, profile-scoped credential
+	// issued at Apple push registration. It is only accepted by the
+	// notification display endpoint the iOS Notification Service extension
+	// calls, so an expired short-lived access token no longer degrades every
+	// push to generic text.
+	TokenTypeApplePushDisplay = "apple_push_display"
 )
 
 const PluginAccessCookieName = "silo_plugin_access"
@@ -107,6 +113,38 @@ func (j *JWTService) GeneratePluginAccessToken(
 		SessionID: sessionID,
 		ProfileID: profileID,
 	}, TokenTypePluginAccess, ttl)
+}
+
+// GenerateApplePushDisplayToken creates a signed token scoped to one
+// profile that the notification display endpoint accepts. Its lifetime
+// follows the refresh token: the session must still be valid at use time,
+// so revoking the session revokes the display token too.
+// impersonatorUserID is carried so display fetches made under an
+// impersonated session stay attributed to the acting admin.
+func (j *JWTService) GenerateApplePushDisplayToken(
+	userID int, role, sessionID, profileID string, impersonatorUserID *int,
+) (string, time.Time, error) {
+	if sessionID == "" {
+		return "", time.Time{}, fmt.Errorf("%w: session is required", ErrInvalidToken)
+	}
+	if profileID == "" {
+		return "", time.Time{}, fmt.Errorf("%w: profile is required", ErrInvalidToken)
+	}
+	ttl := j.RefreshExpiry()
+	if ttl <= 0 {
+		ttl = 30 * 24 * time.Hour
+	}
+	token, err := j.generateToken(Claims{
+		UserID:             userID,
+		Role:               role,
+		SessionID:          sessionID,
+		ProfileID:          profileID,
+		ImpersonatorUserID: impersonatorUserID,
+	}, TokenTypeApplePushDisplay, ttl)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return token, time.Now().Add(ttl), nil
 }
 
 func (j *JWTService) generateAccessToken(claims Claims) (string, error) {

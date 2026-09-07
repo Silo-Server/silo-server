@@ -362,7 +362,13 @@ function CatalogResults({
         }}
         allowLibrarySelection={!isCollectionSource}
         allowPersonalizedFilters={allowPersonalizedOverlayControls}
-        allowPersonalizedSorts={allowPersonalizedOverlayControls}
+        allowPersonalizedSorts={
+          isHistorySource
+            ? "date_viewed"
+            : state.source === "favorites" || state.source === "watchlist"
+              ? false
+              : allowPersonalizedOverlayControls
+        }
       />
 
       {isHistorySource && (

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerFetch, PlayerFetchError } from "../player-fetch";
-import { LANGUAGES, getLanguageName } from "../utils/languageNames";
+import { LANGUAGES, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
 import {
   buildSubtitleTranslateRequest,
   isTranslatableSource,
@@ -13,6 +13,7 @@ import {
 import { QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
 
 interface SubtitleTranslateModalProps {
+  preferredSubtitleLanguage?: string | null;
   mediaFileId: number;
   playerConfig: PlayerConfig;
   tracks: PlayerSubtitleInfo[];
@@ -48,6 +49,7 @@ interface TranscribeQuota {
 }
 
 export function SubtitleTranslateModal({
+  preferredSubtitleLanguage,
   mediaFileId,
   playerConfig,
   tracks,
@@ -69,7 +71,10 @@ export function SubtitleTranslateModal({
   const [mode, setMode] = useState<SubtitleTranslateMode>(canTranslate ? "subtitles" : "audio");
   const [sourceIndex, setSourceIndex] = useState<number | null>(null);
   const [audioIndex, setAudioIndex] = useState(0);
-  const [targetLang, setTargetLang] = useState("en");
+  const [targetLang, setTargetLang] = useState(() => {
+    const preferred = normalizeLanguageCode(preferredSubtitleLanguage);
+    return LANGUAGES.some((language) => language.code === preferred) ? preferred : "en";
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quota, setQuota] = useState<TranscribeQuota | null>(null);

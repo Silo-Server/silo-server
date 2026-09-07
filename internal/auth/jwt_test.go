@@ -291,3 +291,34 @@ func TestJWT_DifferentUsersGetDifferentTokens(t *testing.T) {
 		t.Error("tokens for different users should be different")
 	}
 }
+
+func TestJWT_ApplePushDisplayTokenIsProfileScopedAndLongLived(t *testing.T) {
+	svc := newTestJWTService()
+
+	admin := 7
+	token, expiresAt, err := svc.GenerateApplePushDisplayToken(42, "user", "sess-1", "profile-1", &admin)
+	if err != nil {
+		t.Fatalf("GenerateApplePushDisplayToken() error: %v", err)
+	}
+	claims, err := svc.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if claims.TokenType != auth.TokenTypeApplePushDisplay {
+		t.Fatalf("token_type = %q, want %q", claims.TokenType, auth.TokenTypeApplePushDisplay)
+	}
+	if claims.UserID != 42 || claims.SessionID != "sess-1" || claims.ProfileID != "profile-1" ||
+		claims.ImpersonatorUserID == nil || *claims.ImpersonatorUserID != 7 {
+		t.Fatalf("claims = %+v", claims)
+	}
+	// Follows the refresh expiry (7d in the test service), not the 15m access expiry.
+	if remaining := time.Until(expiresAt); remaining < 6*24*time.Hour {
+		t.Fatalf("expiry too short: %v", remaining)
+	}
+	if _, _, err := svc.GenerateApplePushDisplayToken(42, "user", "", "profile-1", nil); err == nil {
+		t.Fatal("expected error without session")
+	}
+	if _, _, err := svc.GenerateApplePushDisplayToken(42, "user", "sess-1", "", nil); err == nil {
+		t.Fatal("expected error without profile")
+	}
+}

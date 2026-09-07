@@ -28,6 +28,7 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 		FeaturePlaybackPlanV3:             {},
 		FeatureNeutralContractV3:          {},
 		FeatureLayoutPassthrough:          {},
+		FeatureEmbeddedSubtitlesV3:        {},
 		FeatureRouteDiagnostics:           {},
 		FeatureDeviceQuirksV3:             {},
 		FeatureSeekReanchorV3:             {},

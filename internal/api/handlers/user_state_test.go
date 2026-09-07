@@ -114,7 +114,7 @@ func TestResolveItemUserStatesIncludesCompletedHistory(t *testing.T) {
 }
 
 func TestAllEpisodesCompletedIncludesCompletedHistory(t *testing.T) {
-	episodes := []*models.Episode{{ContentID: "episode-progress"}, {ContentID: "episode-history"}}
+	episodes := []string{"episode-progress", "episode-history"}
 	progress := map[string]userstore.WatchProgress{
 		"episode-progress": {MediaItemID: "episode-progress", Completed: true},
 		"episode-history":  {MediaItemID: "episode-history", Completed: true},

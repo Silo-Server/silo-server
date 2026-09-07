@@ -36,7 +36,8 @@ type imageSizeWidths struct {
 // that predates image_size: it should keep using the server's per-context
 // defaults instead of sending a parameter that would be ignored.
 type imagesCapabilityResponse struct {
-	SchemaVersion int `json:"schema_version"`
+	SchemaVersion          int    `json:"schema_version"`
+	SeasonListArtworkParam string `json:"season_list_artwork_param"`
 	// Param is the query parameter name, so a client does not hardcode it.
 	Param string `json:"param"`
 	// Sizes is every value the parameter accepts, narrowest first. Sending
@@ -64,11 +65,12 @@ func HandleImagesCapability(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(imagesCapabilityResponse{
-		SchemaVersion:      1,
-		Param:              imagesize.QueryParam,
-		Sizes:              imagesize.All,
-		Widths:             widths,
-		OriginalMaxWidthPx: imageutil.MaxCachedOriginalDimension,
+		SchemaVersion:          1,
+		SeasonListArtworkParam: "include_artwork",
+		Param:                  imagesize.QueryParam,
+		Sizes:                  imagesize.All,
+		Widths:                 widths,
+		OriginalMaxWidthPx:     imageutil.MaxCachedOriginalDimension,
 	})
 }
 

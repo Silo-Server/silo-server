@@ -15,7 +15,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Pause, PictureInPicture2, Play, SkipBack, SkipForward, Tv, X } from "lucide-react";
 import { useLocation } from "react-router";
 import type { WatchDetail } from "@/api/types";
-import { getAccessToken, getOrCreateDeviceId, getProfileToken } from "@/api/client";
+import {
+  getAccessToken,
+  getAuthContextVersion,
+  getOrCreateDeviceId,
+  getProfileToken,
+  refreshAuthentication,
+} from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -495,6 +501,8 @@ export function WatchPlaybackHost() {
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
       getDeviceId: () => getOrCreateDeviceId(),
+      refreshToken: refreshAuthentication,
+      getAuthContext: getAuthContextVersion,
     }),
     [],
   );

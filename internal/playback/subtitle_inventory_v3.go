@@ -154,6 +154,7 @@ func ScopeSubtitleInventoryV3(sessionID string, file *models.MediaFile, inventor
 		if items[i].Delivery != SubtitleDeliverySidecarV3 {
 			continue
 		}
+		previousURL := items[i].URL
 		items[i].URL = SubtitleStreamURLV3(sessionID, items[i].CombinedIndex, items[i].Codec, file.ID)
 		if items[i].Source == SubtitleSourceDownloadedV3 && items[i].downloadedSubtitleID > 0 {
 			items[i].URL = DownloadedSubtitleStreamURLV3(
@@ -164,8 +165,28 @@ func ScopeSubtitleInventoryV3(sessionID string, file *models.MediaFile, inventor
 				items[i].downloadedSubtitleID,
 			)
 		}
-		if items[i].Source == SubtitleSourceEmbeddedV3 {
+		switch items[i].Source {
+		case SubtitleSourceExternalV3:
+			key := subtitleURLIdentityV3(previousURL, ExternalSubtitleKeyParamV3, file.ID)
+			if index := items[i].CombinedIndex; key == "" && index >= 0 && index < len(file.ExternalSubtitles) {
+				key = ExternalSubtitlePathKeyV3(file.ExternalSubtitles[index].Path)
+			}
+			if key != "" {
+				items[i].URL += "&" + ExternalSubtitleKeyParamV3 + "=" + key
+			}
+		case SubtitleSourceEmbeddedV3:
 			items[i].FontBundleURL = SubtitleFontBundleURLV3(sessionID, items[i].CombinedIndex, items[i].Codec, file.ID)
+			index := subtitleURLIdentityV3(previousURL, EmbeddedSubtitleStreamIndexParamV3, file.ID)
+			if ordinal := items[i].CombinedIndex - len(file.ExternalSubtitles); index == "" && ordinal >= 0 && ordinal < len(file.SubtitleTracks) {
+				index = strconv.Itoa(file.SubtitleTracks[ordinal].Index)
+			}
+			if index != "" {
+				identity := "&" + EmbeddedSubtitleStreamIndexParamV3 + "=" + index
+				items[i].URL += identity
+				if items[i].FontBundleURL != "" {
+					items[i].FontBundleURL += identity
+				}
+			}
 		}
 	}
 	return items

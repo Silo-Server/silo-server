@@ -1424,6 +1424,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     animation: player-breathe 2.6s ease-in-out infinite;
   }
 
+  .player-controls {
+    container-type: size;
+    container-name: player-controls;
+    contain: layout;
+  }
+
   /* Bottom HUD rail — title/time on the left, utilities on the right. */
   .player-hud {
     background: linear-gradient(
@@ -2592,5 +2598,70 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .impersonation-end-btn:focus-visible {
     border-color: var(--impersonation-accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--impersonation-accent) 28%, transparent);
+  }
+}
+
+@layer utilities {
+  /* On laptops, keep transport centered in the bottom row. Only phone-sized
+     players move it over the picture, where touch controls already live. */
+  @container player-controls (min-width: 48rem) {
+    .player-controls[data-compact="true"][data-touch="false"] .player-compact-transport {
+      top: auto;
+      bottom: 1.25rem;
+      height: 4rem;
+    }
+
+    .player-controls[data-compact="true"][data-touch="false"] .player-hud {
+      z-index: auto;
+    }
+
+    .player-controls[data-compact="true"][data-touch="false"] .player-compact-row {
+      min-height: 4rem;
+    }
+
+    .player-controls[data-compact="true"][data-touch="false"] .player-compact-metadata {
+      max-width: calc(50% - 12rem);
+      margin-right: auto;
+    }
+
+    .player-controls[data-compact="true"][data-touch="false"] .player-quality-trigger {
+      width: 2.5rem;
+      padding-inline: 0;
+    }
+
+    .player-controls[data-compact="true"][data-touch="false"] .player-quality-trigger > span {
+      display: none;
+    }
+  }
+
+  @container player-controls (height < 20rem) {
+    .player-compact-transport {
+      bottom: 4rem;
+    }
+  }
+
+  .player-controls[data-compact="true"] .player-hud {
+    animation: none;
+  }
+
+  /* Compact desktop menus stay anchored inside the player at every width. */
+  .player-controls[data-compact="true"] .player-menu-surface {
+    position: fixed;
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    width: min(20rem, calc(100cqw - 1.5rem));
+    min-width: 0;
+    max-width: none;
+    max-height: calc(100cqh - 1.5rem);
+    margin: 0;
+    overflow-y: auto;
+    z-index: 60;
+  }
+
+  .player-overflow-menu {
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 0.75rem;
+    background: rgb(12 12 12 / 0.98);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.4);
   }
 }

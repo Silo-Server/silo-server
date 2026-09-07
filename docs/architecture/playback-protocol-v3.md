@@ -98,7 +98,7 @@ the document is always the full one:
 {
   "enabled": true,
   "protocol_versions": [3],
-  "features": ["playback_plan_v3", "neutral_playback_v3_contract_v1", "layout_aware_passthrough", "playback_route_diagnostics",
+  "features": ["playback_plan_v3", "neutral_playback_v3_contract_v1", "embedded_subtitles_v1", "layout_aware_passthrough", "playback_route_diagnostics",
                "device_quirks_v1", "seek_reanchor_v1", "output_change_v1", "output_display_evidence_v1", "direct_stream_resume_v1",
                "header_authenticated_media_v1", "authorized_media_origins_v1", "software_video_decode_v1",
                "plan_invalidated_v1", "plan_source_duration_v1"],
@@ -107,12 +107,13 @@ the document is always the full one:
 }
 ```
 
-The fourteen feature strings above are the full set this server version advertises:
+The fifteen feature strings above are the full set this server version advertises:
 
 | Feature | What it promises |
 | --- | --- |
 | `playback_plan_v3` | The three plan endpoints exist and behave as specified here |
 | `neutral_playback_v3_contract_v1` | The server mints opaque `plan_attempt_key` values that clients only echo, and exposes track/quality intent replans distinct from failure recovery |
+| `embedded_subtitles_v1` | Exact native embedded subtitle selection on `original_http`, with a sidecar or burn-in fallback after selection failure (§8) |
 | `layout_aware_passthrough` | Audio passthrough is decided from channel *layouts*, not just channel counts (§3) |
 | `playback_route_diagnostics` | `POST /playback/route-events` is accepted |
 | `device_quirks_v1` | Plans may carry `applied_quirks` and `runtime_corrections` (§9) |
@@ -536,7 +537,7 @@ Each `deliveries` entry describes one class:
 | `audio_passthrough_codecs` | Bitstream-out candidates; only ever honoured under the `exact` tier (§3) |
 | `max_channels` | Optional ceiling applied to audio routing |
 | `hdr_details` | Optional per-class HDR support, overriding the device-level value |
-| `subtitles` | Six booleans: `embedded_text`, `sidecar_text`, `ass_styling`, `embedded_bitmap`, `sidecar_bitmap`, `font_attachments` |
+| `subtitles` | `sidecar_text`, `ass_styling`, `embedded_bitmap`, `sidecar_bitmap`, `font_attachments`, the legacy `embedded_text` hint, and optional `native_embedded` attestations (§8) |
 | `features` | Class-scoped feature strings |
 | `auth_header_refresh` | The client can re-fetch stream auth headers without restarting playback |
 | `validated_claims` | Claims the client asserts it has verified for this class |
@@ -686,18 +687,16 @@ parameter, and never carries a parameter across families.
 | --- | --- | --- |
 | Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` only — the progressive-remux start offset in seconds, present only when it is non-zero |
 | Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` only, with the same meaning; these routes never accept a credential parameter of any kind |
-| Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; plus `downloaded_subtitle_id` when the track is a downloaded or AI-generated one (§8) |
+| Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
 
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session
 already names the file it plays, and the media timeline is anchored by `seek`
 plus the fields in §5. A subtitle route never carries `seek`: a sidecar is
-fetched whole and timed against `subtitle.artifact.timing_origin_seconds`.
+fetched whole with absolute source timestamps and `subtitle.artifact.timing_origin_seconds: 0`. A receiver that cannot map its video clock may request a VTT-only `timestamp_offset` equal to the negative video timeline offset. The server shifts cues after reading the canonical artifact; this does not alter the extraction cache or the ordinary artifact contract. Shifted responses stream complete cues, omit cues that ended before time zero, clip overlapping cues at zero, and do not support byte ranges or conditional caching.
 
 `file_id` is required on a subtitle route because a plan can fall back to an
 alternate edition, so the session id alone does not fix which file's ordinal
-space `{combined_index}` addresses. `downloaded_subtitle_id` pins the exact
-downloaded row behind that ordinal, which is what keeps the URL stable when the
-downloaded segment of the inventory is reordered or grows mid-session (§8).
+space `{combined_index}` addresses. `embedded_stream_index` pins the probed FFmpeg stream index; `external_subtitle_key` pins an opaque SHA-256 hash of the sidecar path; `downloaded_subtitle_id` pins the downloaded row. These identities keep already-issued subtitle and font URLs attached to the same track when inventory order changes. Missing or ambiguous pinned tracks return an error rather than falling back to the path ordinal. Legacy unpinned URLs retain ordinal lookup.
 
 An attempt that did not opt into `header_authenticated_media_v1` additionally
 carries the signed stream token `st` on its media URLs — never on subtitle or
@@ -1122,30 +1121,63 @@ or replan that resolves to `subtitle.mode: "off"` still publishes every sidecar
 entry with its fetchable `url`, so a client can build its full subtitle menu
 without first asking for a plan it does not want.
 
-`subtitle.mode` is `off`, `render` (client draws the sidecar), `convert` (server
+`subtitle.mode` is `off`, `render` (client renders the selected embedded stream or sidecar), `convert` (server
 transcodes it to a client-renderable format first — always to WebVTT, served as
 `text/vtt` at a `.vtt` URL), or `burn_in` (rendered into the video, which forces
 a transcode).
 
-`subtitle.artifact` is the one track the plan tells the client to draw, and it
-is present **only** under `render` and `convert`. Under `off` and `burn_in` it
-is absent, and every plan states this afresh: an artifact is never carried over
+`subtitle.artifact` describes the selected sidecar. A `render` decision carries either `artifact` or `embedded`, never both; `convert` carries an artifact. Under `off` and `burn_in` both are absent, and every plan states this afresh: an artifact is never carried over
 from an earlier plan of the same session, so a client must take the current
 plan's `subtitle` block literally rather than remembering the previous one.
 `off` also carries no `subtitle.track_id`. The inventory `url`s are unaffected
 — they describe what is fetchable, not what is selected, and stay published in
 every mode.
 
+Native embedded selection requires `embedded_subtitles_v1` in `client_features` and an exact capability in `client_playback_context.deliveries.original_http.subtitles.native_embedded`:
+
+```json
+{
+  "container": "mp4",
+  "codecs": ["mov_text"],
+  "track_identity": "container_track_id",
+  "ass_styling": false,
+  "font_attachments": false
+}
+```
+
+`track_identity` is either `ffmpeg_stream_index` (the absolute probed AVStream index) or `container_track_id` (the canonical positive decimal container track ID, when available from probing). Neither is a combined subtitle ordinal. Missing or ambiguous identity metadata disqualifies the native route. Container and codec support must match; authored ASS preservation additionally requires styling and font support. The old `embedded_text` flag alone never authorizes native selection. Text sidecar rendering depends on `sidecar_text`, regardless of the source being embedded or external.
+
+The native decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:0", "embedded":{"stream_index":3,"container_track_id":"4"}, "inventory":[...]}`. The client selects that exact stream from the original media and does not mount the inventory's fallback URL. Native selection applies only to `original_http`; remux and transcode plans use sidecars or burn-in. Inventory `delivery` continues to describe the available server representation, so even a `burn_in_only` entry can be selected natively when the client attests the exact bitmap codec.
+
+A confirmed native selection failure triggers `failure_recovery` with `failure.classification: "subtitle_embedded_failed"`. The server disables native selection for the rest of that playback attempt, including later capability refreshes, and replans with an executable fallback. The native identity participates in both plan identifiers, so the same video route with extracted subtitles is a distinct attempt. Seek reanchors preserve the native identity and reject source drift.
+
 Subtitle artifact, inventory and font-bundle URLs are session-scoped and carry
 their own query parameters; see §4.2 for the per-route-family contract.
 
 The sidecar URL suffix is part of the representation contract, not decoration.
+The artifact `format` and `mime_type` describe served bytes, independently of the source codec. SRT, SubRip, and mov_text sources served as VTT therefore report `format: "vtt"` and `mime_type: "text/vtt"`. Artifact timestamps are absolute original-media time, with `timing_origin_seconds: 0` even when the video transport resumes from a nonzero source position.
+
 An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
 URL with `application/octet-stream`; cached full-track responses support `HEAD`
 and byte ranges. Text conversion is always WebVTT at `.vtt`, while lossless
 ASS/SSA uses `.ass`. A suffix that does not match the selected track or a valid
 conversion is rejected with `415` rather than returning bytes of a different
 type under the requested extension.
+
+Embedded text URLs return the complete track from source time zero by default,
+including when playback starts at a resume position. Consumers that maintain a
+sliding window may explicitly supply `position` (nonnegative source seconds)
+and `duration` (positive seconds, at most 3600). They must request subsequent
+windows themselves; HTTP EOF ends only the requested window. ASS remains a
+complete script. PGS windows require `windowed=1` in addition to the window
+parameters. External and downloaded sidecars are always returned whole.
+
+Complete embedded text and PGS extracts are cached by source file identity,
+modification time, size, subtitle ordinal, and output format. Partial or failed
+extracts are never published. Text cache misses stream while extracting; repeated
+complete text requests reuse the finished artifact. A failed extraction returns
+an error response before output begins, or aborts an already-started stream so
+clients can distinguish failure from a complete track and retry.
 
 ---
 
@@ -1156,7 +1188,7 @@ tokens and never implement either identity algorithm.** Their wire prefixes and
 lengths are validation syntax, not a derivation recipe.
 
 `plan_id` identifies the server's playback decision. It is stable when the same
-attempt produces the same source, delivery, recipe, tracks, subtitle mode,
+attempt produces the same source, delivery, recipe, tracks, subtitle mode and native identity,
 transformations, applied quirks, and recipe revision. A change to any of those
 inputs produces a different identity.
 

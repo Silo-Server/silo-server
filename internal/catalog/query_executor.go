@@ -13,6 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+const querySortTitle = "title"
+
 type QueryExecutor struct {
 	Pool  *pgxpool.Pool
 	Scope string
@@ -69,6 +71,10 @@ func (e *QueryExecutor) PreviewPage(
 		return nil, 0, false, err
 	}
 
+	return e.executePreviewPagePlan(ctx, build, includeTotal)
+}
+
+func (e *QueryExecutor) executePreviewPagePlan(ctx context.Context, build previewPagePlan, includeTotal bool) ([]*models.MediaItem, int, bool, error) {
 	pagedSQL, pagedArgs := build.pagedSQL(false)
 	rows, err := e.Pool.Query(ctx, pagedSQL, pagedArgs...)
 	if err != nil {
@@ -100,9 +106,16 @@ func (e *QueryExecutor) PreviewPage(
 	}
 
 	if includeTotal {
-		countSQL, countArgs := build.countSQL()
-		if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			return nil, 0, false, fmt.Errorf("counting preview items: %w", err)
+		// No extra row means this page exhausted the matches (or reached the
+		// configured cap). An empty offset may have overshot the actual end,
+		// and a zero limit fetches nothing, so neither proves an exact total.
+		if !hasMore && build.limit > 0 && (len(items) > 0 || build.offset == 0) {
+			total = build.offset + len(items)
+		} else {
+			countSQL, countArgs := build.countSQL()
+			if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+				return nil, 0, false, fmt.Errorf("counting preview items: %w", err)
+			}
 		}
 		hasMore = total > build.offset+len(items)
 		return items, total, hasMore, nil
@@ -129,15 +142,16 @@ type previewPagePlan struct {
 	fromClausePaged string
 	// fromClauseCount is the FROM clause for exact totals. It includes filter
 	// joins, but intentionally excludes sort-only joins.
-	fromClauseCount string
-	whereClause     string
-	args            []any
-	orderBy         string
-	sortArgs        []any
-	limit           int
-	offset          int
-	maxResults      int
-	limitArgIdx     int
+	fromClauseCount       string
+	whereClause           string
+	args                  []any
+	orderBy               string
+	sortArgs              []any
+	limit                 int
+	offset                int
+	maxResults            int
+	limitArgIdx           int
+	deferEpisodeHydration bool
 }
 
 // countSQL renders a count-only query that returns the total number of rows
@@ -198,6 +212,21 @@ func (p previewPagePlan) pagedSQL(includeTotal bool) (string, []any) {
 	withClause := ""
 	if len(p.ctes) > 0 {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
+	}
+	// Source-specific builders can add CTEs after the base plan is built.
+	// Keep those plans on the original renderer with their complete bindings.
+	if p.deferEpisodeHydration && len(p.ctes) == 0 {
+		// The episode base has one row per content ID. Selecting those IDs
+		// first lets PostgreSQL prune metadata/season joins from the skipped
+		// prefix. Hydrate and sort only the selected page in the same statement
+		// snapshot; the original title order includes the content-ID tie-break.
+		sql := fmt.Sprintf(`WITH page_ids AS MATERIALIZED (
+			SELECT mi.content_id %s %s %s LIMIT $%d%s
+		) SELECT %s %s
+		JOIN page_ids ON page_ids.content_id = mi.content_id
+		%s`, p.fromClausePaged, p.whereClause, p.orderBy, p.limitArgIdx, offsetClause,
+			selectList, p.fromClausePaged, p.orderBy)
+		return sql, args
 	}
 	sql := fmt.Sprintf(
 		`%sSELECT %s %s %s %s LIMIT $%d%s`,
@@ -402,6 +431,11 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		offset:          offset,
 		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
+		// Keep non-episode relations, sort joins and history CTEs on their existing
+		// paths. Only the built-in episode relation guarantees the unique IDs
+		// and simple, deterministic title sort required by deferred hydration.
+		deferEpisodeHydration: isEpisodeCatalogScope(effectiveScope) && offset > 0 &&
+			NormalizeQuerySort(def.Sort).Field == querySortTitle && len(sortPlan.Joins) == 0 && len(ctes) == 0,
 	}, nil
 }
 

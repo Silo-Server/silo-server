@@ -252,7 +252,7 @@ func buildForgottenFavoritesQuery(f ForgottenFavoritesFilter) (string, []any) {
 		WHERE uwh.user_id = $%d
 		  AND uwh.profile_id = $%d
 		  AND uwh.media_item_id = mi.content_id
-		  AND uwh.watched_at >= NOW() - ($%d || ' days')::interval
+		  AND uwh.watched_at >= NOW() - make_interval(days => $%d)
 	)`, argIdx, argIdx+1, argIdx+2))
 	args = append(args, f.UserID, f.ProfileID, f.LookbackDays)
 	argIdx += 3

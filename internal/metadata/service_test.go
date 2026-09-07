@@ -421,6 +421,30 @@ func (r *fakeRefreshDebtRepo) DeleteDebt(ctx context.Context, contentID string) 
 	return r.DeleteTargetDebt(ctx, RefreshTargetItem, contentID)
 }
 
+func (r *fakeRefreshDebtRepo) SnapshotEpisodeDebts(_ context.Context, _ string) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	versions := make(map[string]string)
+	for _, debt := range r.debts {
+		if debt.TargetType == RefreshTargetEpisode {
+			versions[debt.ContentID] = fmt.Sprintf("%#v", debt)
+		}
+	}
+	return versions, nil
+}
+
+func (r *fakeRefreshDebtRepo) DeleteEpisodeDebts(_ context.Context, contentIDs []string, versions map[string]string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range contentIDs {
+		key := fakeRefreshDebtKey(RefreshTargetEpisode, id)
+		if debt, ok := r.debts[key]; ok && versions[id] == fmt.Sprintf("%#v", debt) {
+			delete(r.debts, key)
+		}
+	}
+	return nil
+}
+
 func (r *fakeRefreshDebtRepo) DeleteTargetDebt(_ context.Context, targetType, contentID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

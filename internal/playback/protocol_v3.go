@@ -13,6 +13,7 @@ import (
 const (
 	ProtocolV3                   = 3
 	FeaturePlaybackPlanV3        = "playback_plan_v3"
+	FeatureEmbeddedSubtitlesV3   = "embedded_subtitles_v1"
 	FeatureNeutralContractV3     = "neutral_playback_v3_contract_v1"
 	FeatureLayoutPassthrough     = "layout_aware_passthrough"
 	FeatureClientVideoTransforms = "client_video_transformations_v1"
@@ -111,6 +112,7 @@ func ServerFeaturesV3() []string {
 	return []string{
 		FeaturePlaybackPlanV3,
 		FeatureNeutralContractV3,
+		FeatureEmbeddedSubtitlesV3,
 		FeatureLayoutPassthrough,
 		FeatureRouteDiagnostics,
 		FeatureDeviceQuirksV3,
@@ -446,13 +448,29 @@ const (
 	OutputHDREvidenceUnknownV3 = "unknown"
 )
 
+const (
+	subtitleIdentityFFmpegV3    = "ffmpeg_stream_index"
+	subtitleIdentityContainerV3 = "container_track_id"
+)
+
+// NativeEmbeddedSubtitleCapabilityV3 attests native selection for one container
+// and codec set. Stream indexes and container track IDs are distinct namespaces.
+type NativeEmbeddedSubtitleCapabilityV3 struct {
+	Container       string   `json:"container"`
+	Codecs          []string `json:"codecs"`
+	TrackIdentity   string   `json:"track_identity"`
+	ASSStyling      bool     `json:"ass_styling"`
+	FontAttachments bool     `json:"font_attachments"`
+}
+
 type DeliverySubtitleCapabilitiesV3 struct {
-	EmbeddedText    bool `json:"embedded_text"`
-	SidecarText     bool `json:"sidecar_text"`
-	ASSStyling      bool `json:"ass_styling"`
-	EmbeddedBitmap  bool `json:"embedded_bitmap"`
-	SidecarBitmap   bool `json:"sidecar_bitmap"`
-	FontAttachments bool `json:"font_attachments"`
+	NativeEmbedded  []NativeEmbeddedSubtitleCapabilityV3 `json:"native_embedded,omitempty"`
+	EmbeddedText    bool                                 `json:"embedded_text"`
+	SidecarText     bool                                 `json:"sidecar_text"`
+	ASSStyling      bool                                 `json:"ass_styling"`
+	EmbeddedBitmap  bool                                 `json:"embedded_bitmap"`
+	SidecarBitmap   bool                                 `json:"sidecar_bitmap"`
+	FontAttachments bool                                 `json:"font_attachments"`
 }
 
 type DeliveryCapabilityV3 struct {
@@ -763,10 +781,18 @@ type SubtitleArtifactV3 struct {
 	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
 }
 
+// EmbeddedSubtitleV3 selects a track in the unmodified media source. The
+// container identifier is canonical decimal when the probe supplies one.
+type EmbeddedSubtitleV3 struct {
+	StreamIndex      int    `json:"stream_index"`
+	ContainerTrackID string `json:"container_track_id,omitempty"`
+}
+
 type SubtitleDecisionV3 struct {
-	Mode    SubtitleModeV3 `json:"mode"`
-	TrackID string         `json:"track_id,omitempty"`
-	// Artifact is the single track the client draws. It exists only under
+	Embedded *EmbeddedSubtitleV3 `json:"embedded,omitempty"`
+	Mode     SubtitleModeV3      `json:"mode"`
+	TrackID  string              `json:"track_id,omitempty"`
+	// Artifact is the selected sidecar, mutually exclusive with Embedded. It exists only under
 	// SubtitleRenderV3 and SubtitleConvertV3; SubtitleOffV3 and
 	// SubtitleBurnInV3 have no client-fetchable artifact and must publish none,
 	// including on a plan derived from an earlier plan of the same session.
@@ -1172,6 +1198,25 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				if len(value) > 64 {
 					return errors.New("delivery capability value exceeds supported size")
 				}
+			}
+		}
+		if len(delivery.Subtitles.NativeEmbedded) > 16 {
+			return errors.New("native subtitle capability list exceeds supported size")
+		}
+		for i := range delivery.Subtitles.NativeEmbedded {
+			native := &delivery.Subtitles.NativeEmbedded[i]
+			native.Container = strings.ToLower(strings.TrimSpace(native.Container))
+			if native.Container == "" || len(native.Container) > 32 || len(native.Codecs) == 0 || len(native.Codecs) > 32 {
+				return errors.New("invalid native subtitle capability")
+			}
+			if native.TrackIdentity != subtitleIdentityFFmpegV3 && native.TrackIdentity != subtitleIdentityContainerV3 {
+				return errors.New("invalid native subtitle track identity")
+			}
+			for j, codec := range native.Codecs {
+				if strings.TrimSpace(codec) == "" || len(codec) > 64 {
+					return errors.New("invalid native subtitle codec")
+				}
+				native.Codecs[j] = normalizeNativeSubtitleCodecV3(codec)
 			}
 		}
 		seenTransformations := make(map[string]struct{}, len(delivery.Transformations))

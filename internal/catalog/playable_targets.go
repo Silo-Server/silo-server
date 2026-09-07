@@ -308,8 +308,6 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 	defer rows.Close()
 	candidates := make(map[string][]string, len(ids))
 	hints := make(map[string]string, len(ids))
-	allCandidateIDs := make([]string, 0, len(ids))
-	seenCandidateIDs := make(map[string]struct{}, len(ids))
 	for rows.Next() {
 		var ord int64
 		var playContentID string
@@ -329,17 +327,14 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 			continue
 		}
 		candidates[key] = append(candidates[key], playContentID)
-		if _, ok := seenCandidateIDs[playContentID]; !ok {
-			seenCandidateIDs[playContentID] = struct{}{}
-			allCandidateIDs = append(allCandidateIDs, playContentID)
-		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating playable poster targets: %w", err)
 	}
 	progress := map[string]userstore.WatchProgress{}
-	if q.ProgressStore != nil && len(allCandidateIDs) > 0 {
-		progress, err = listPlayableTargetProgress(ctx, q.ProgressStore, q.ProfileID, allCandidateIDs)
+	if q.ProgressStore != nil {
+		progressIDs := playableTargetProgressIDs(candidates, hints)
+		progress, err = listPlayableTargetProgress(ctx, q.ProgressStore, q.ProfileID, progressIDs)
 		if err != nil {
 			return nil, fmt.Errorf("listing progress for playable poster targets: %w", err)
 		}
@@ -355,6 +350,25 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 		result[key] = hint
 	}
 	return result, nil
+}
+
+// Progress can only affect a card with several candidates and no validated
+// anchor. A leaf shared with such a card must still participate in its ranking.
+func playableTargetProgressIDs(candidates map[string][]string, hints map[string]string) []string {
+	var ids []string
+	seen := make(map[string]struct{})
+	for key, targets := range candidates {
+		if _, hinted := hints[key]; hinted || len(targets) < 2 {
+			continue
+		}
+		for _, id := range targets {
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
 }
 
 // listPlayableTargetProgress fetches progress in batches: the PostgreSQL store

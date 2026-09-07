@@ -1333,6 +1333,42 @@ func TestSessionManager_CleanInactive_TriggersExpirationHook(t *testing.T) {
 	}
 }
 
+func TestSessionManager_CleanInactive_TriggersAllExpirationHooks(t *testing.T) {
+	sm := playback.NewSessionManager(0, 0)
+
+	session, err := sm.StartSession(1, "prof", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	called := make(chan string, 2)
+	sm.SetExpirationHook(func(session *playback.Session) {
+		called <- "native:" + session.ID
+	})
+	sm.AddExpirationHook(func(session *playback.Session) {
+		called <- "compat:" + session.ID
+	})
+
+	if expired := sm.CleanInactive(0, 0); len(expired) != 1 {
+		t.Fatalf("CleanInactive removed %d sessions, want 1", len(expired))
+	}
+
+	got := map[string]bool{}
+	for range 2 {
+		select {
+		case call := <-called:
+			got[call] = true
+		case <-time.After(time.Second):
+			t.Fatal("not all expiration hooks were called")
+		}
+	}
+	for _, want := range []string{"native:" + session.ID, "compat:" + session.ID} {
+		if !got[want] {
+			t.Fatalf("expiration calls = %v, missing %q", got, want)
+		}
+	}
+}
+
 func TestSessionManager_CleanExpired_PausedGracePeriod(t *testing.T) {
 	sm := playback.NewSessionManager(0, 0)
 

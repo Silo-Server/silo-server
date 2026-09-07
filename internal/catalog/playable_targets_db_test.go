@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -149,10 +150,11 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 		{ContentID: deniedSeries, Type: "series"},
 	}
 	resolver := NewPlayableTargetResolver(pool)
-	progressStore, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
+	postgresProgressStore, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
 	if err != nil {
 		t.Fatalf("create postgres progress store: %v", err)
 	}
+	progressStore := &recordingProgressStore{delegate: postgresProgressStore}
 	targetsA, err := resolver.Resolve(ctx, PlayableTargetQuery{
 		UserID: userID, ProfileID: profileA, Items: inputs,
 		Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
@@ -172,6 +174,24 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	if !reflect.DeepEqual(targetsA, wantA) {
 		t.Fatalf("profile A targets = %#v, want %#v", targetsA, wantA)
 	}
+	if slices.Contains(progressStore.ids, movie) || !slices.Contains(progressStore.ids, episode1) {
+		t.Fatalf("progress lookup should omit leaf-only movies but retain episodes shared with series: %v", progressStore.ids)
+	}
+
+	t.Run("leaf cards do not query progress", func(t *testing.T) {
+		store := &recordingProgressStore{delegate: postgresProgressStore}
+		_, err := resolver.Resolve(t.Context(), PlayableTargetQuery{
+			UserID: userID, ProfileID: profileA,
+			Items:  []PlayableTargetInput{{ContentID: movie, Type: "movie"}, {ContentID: episode1, Type: "episode"}},
+			Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: store,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(store.batchSizes) != 0 {
+			t.Fatalf("leaf-only progress queries = %v, want none", store.batchSizes)
+		}
+	})
 
 	cappedInput := PlayableTargetInput{ContentID: movie, Type: "movie"}
 	qualityCapped, err := resolver.Resolve(ctx, PlayableTargetQuery{
@@ -211,6 +231,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			progressStore.batchSizes = nil
 			input := PlayableTargetInput{ContentID: series, Type: "series", PreferredContentID: tc.hint}
 			targets, err := resolver.Resolve(ctx, PlayableTargetQuery{
 				UserID: userID, ProfileID: profileA,
@@ -220,6 +241,9 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 			})
 			if err != nil || targets[input.Key()] != tc.want {
 				t.Fatalf("hinted target = %#v, err %v; want %s", targets, err, tc.want)
+			}
+			if tc.want == tc.hint && len(progressStore.batchSizes) != 0 {
+				t.Fatalf("validated hint issued progress queries: %v", progressStore.batchSizes)
 			}
 		})
 	}

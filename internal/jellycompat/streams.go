@@ -1407,9 +1407,15 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeSubtitleResponse(w, requestedFormat, data)
 				return
 			}
-			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format)
+			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
 			if subErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
+				return
+			}
+			if requestedFormat == "js" {
+				if writeErr := writeJellyfinJSONSubtitleResponse(w, data); writeErr != nil {
+					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+				}
 				return
 			}
 			writeSubtitleResponse(w, "vtt", data)
@@ -1443,13 +1449,25 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			}
 			// If already VTT, serve directly.
 			if dl.Format == subtitles.FormatVTT {
+				if requestedFormat == "js" {
+					if writeErr := writeJellyfinJSONSubtitleResponse(w, data); writeErr != nil {
+						writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+					}
+					return
+				}
 				writeSubtitleResponse(w, "vtt", data)
 				return
 			}
 
-			vttData, convErr := playback.ConvertToVTT(data, string(dl.Format))
+			vttData, convErr := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.FFmpegPath)
 			if convErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
+				return
+			}
+			if requestedFormat == "js" {
+				if writeErr := writeJellyfinJSONSubtitleResponse(w, vttData); writeErr != nil {
+					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+				}
 				return
 			}
 			writeSubtitleResponse(w, "vtt", vttData)
@@ -1469,7 +1487,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 
 	// Serve ASS/SSA as raw ASS when requested, preserving styled subtitle data.
 	if requestedFormat == "ass" && playback.IsASS(embeddedTrack.Codec) {
-		data, err := playback.ExtractSubtitleWithFormat(r.Context(), file.FilePath, embeddedOrdinal, "ass", h.FFmpegPath)
+		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "ass")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 			return
@@ -1478,11 +1496,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	data, format, subErr := playback.ExtractSubtitle(r.Context(), file.FilePath, embeddedOrdinal)
+	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "srt")
 	if subErr != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 		return
 	}
+	format := "srt"
 	if requestedFormat == "srt" && subtitleCanServeSRT(format) {
 		writeSubtitleResponse(w, requestedFormat, data)
 		return
@@ -1490,6 +1509,12 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	vttData, convErr := playback.ConvertToVTT(data, format)
 	if convErr != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
+		return
+	}
+	if requestedFormat == "js" {
+		if writeErr := writeJellyfinJSONSubtitleResponse(w, vttData); writeErr != nil {
+			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to encode subtitle")
+		}
 		return
 	}
 	writeSubtitleResponse(w, "vtt", vttData)
@@ -1545,6 +1570,45 @@ func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, filePath string, trackIndex int, format string) ([]byte, error) {
+	return h.SubtitleCache.ExtractText(ctx, filePath, trackIndex, format, func(ctx context.Context) ([]byte, error) {
+		return playback.ExtractSubtitleWithFormat(ctx, filePath, trackIndex, format, h.FFmpegPath)
+	})
+}
+
+type jellyfinSubtitleTrackEvent struct {
+	ID                 string `json:"Id"`
+	Text               string `json:"Text"`
+	StartPositionTicks int64  `json:"StartPositionTicks"`
+	EndPositionTicks   int64  `json:"EndPositionTicks"`
+}
+
+func writeJellyfinJSONSubtitleResponse(w http.ResponseWriter, data []byte) error {
+	cues, err := subtitles.ParseCues(data)
+	if err != nil {
+		return err
+	}
+	events := make([]jellyfinSubtitleTrackEvent, 0, len(cues))
+	for i, cue := range cues {
+		events = append(events, jellyfinSubtitleTrackEvent{
+			ID:                 strconv.Itoa(i + 1),
+			Text:               strings.Join(cue.Lines, "\n"),
+			StartPositionTicks: int64(cue.Start / (100 * time.Nanosecond)),
+			EndPositionTicks:   int64(cue.End / (100 * time.Nanosecond)),
+		})
+	}
+	payload, err := json.Marshal(struct {
+		TrackEvents []jellyfinSubtitleTrackEvent `json:"TrackEvents"`
+	}{TrackEvents: events})
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(payload)
+	return err
 }
 
 // HandleSessionPlaying handles POST /Sessions/Playing.
@@ -2603,7 +2667,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		unlock()
 		return nil, err
 	}
-	h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
+	if !h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession) {
+		unlock()
+		return nil, context.Canceled
+	}
 	unlock()
 
 	if opts.ToneMapMode != "" {
@@ -2633,7 +2700,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				replaceUnlock()
 				return nil, err
 			}
-			h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
+			if !h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession) {
+				replaceUnlock()
+				return nil, context.Canceled
+			}
 			replaceUnlock()
 			fallbackManifestDeadline := time.Now().Add(compatManifestStartupTimeout)
 			if _, fallbackErr := transcodeSession.WaitForManifest(time.Until(fallbackManifestDeadline)); fallbackErr != nil {
@@ -2676,6 +2746,15 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// Register the exit monitor and persist the reconstruction recipe (shared with
 	// the remote path). On a failed compat-store write roll back this abandoned
 	// transcode rather than leaking it.
+	transcodeSession.SetRestartHook(func(ctx context.Context) {
+		if h.tm.StartThrottler != nil {
+			h.tm.StartThrottler(ctx, transcodeSession)
+		}
+		h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
+	})
+	if h.tm.StartThrottler != nil {
+		h.tm.StartThrottler(ctx, transcodeSession)
+	}
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {

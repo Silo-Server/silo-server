@@ -288,6 +288,68 @@ func (r *RefreshDebtRepository) DeleteTargetDebt(ctx context.Context, targetType
 	return nil
 }
 
+// SnapshotEpisodeDebts captures short-lived PostgreSQL row-version tokens before
+// the caller reads episode completeness. xmin changes across transactions; ctid
+// also changes when a row is rewritten within the same transaction. These tokens
+// are only for the current cleanup, never durable row identifiers.
+func (r *RefreshDebtRepository) SnapshotEpisodeDebts(ctx context.Context, seriesID string) (map[string]string, error) {
+	if err := r.requireConfigured(); err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT d.content_id, d.xmin::text || ':' || d.ctid::text
+		FROM metadata_refresh_debt d
+		JOIN episodes e ON e.content_id = d.content_id
+		WHERE d.target_type = 'episode' AND e.series_id = $1
+	`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("snapshotting episode metadata refresh debt: %w", err)
+	}
+	defer rows.Close()
+	versions := make(map[string]string)
+	for rows.Next() {
+		var id, version string
+		if err := rows.Scan(&id, &version); err != nil {
+			return nil, fmt.Errorf("scanning episode metadata refresh debt version: %w", err)
+		}
+		versions[id] = version
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating episode metadata refresh debt versions: %w", err)
+	}
+	return versions, nil
+}
+
+// DeleteEpisodeDebts clears only complete episode debt unchanged since the
+// snapshot. Keep the version predicate on the DELETE target: PostgreSQL rechecks
+// it against the new row version after waiting for a concurrent updater.
+func (r *RefreshDebtRepository) DeleteEpisodeDebts(ctx context.Context, contentIDs []string, versions map[string]string) error {
+	ids := make([]string, 0, len(contentIDs))
+	observedVersions := make([]string, 0, len(contentIDs))
+	for _, id := range contentIDs {
+		if version, ok := versions[id]; ok {
+			ids = append(ids, id)
+			observedVersions = append(observedVersions, version)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := r.requireConfigured(); err != nil {
+		return err
+	}
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM metadata_refresh_debt d
+		USING unnest($1::text[], $2::text[]) AS observed(content_id, row_version)
+		WHERE d.target_type = 'episode' AND d.content_id = observed.content_id
+		  AND d.xmin::text || ':' || d.ctid::text = observed.row_version
+	`, ids, observedVersions)
+	if err != nil {
+		return fmt.Errorf("deleting episode metadata refresh debt: %w", err)
+	}
+	return nil
+}
+
 func (r *RefreshDebtRepository) MarkFailure(
 	ctx context.Context,
 	contentID string,

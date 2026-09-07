@@ -29,6 +29,11 @@ type PlaybackSession struct {
 	ClientDeviceID string
 	ItemID         string
 	RouteItemID    string
+	// NegotiationVariant identifies the playback-affecting source and track
+	// selections. Duplicate PlaybackInfo calls replace only an equivalent
+	// unstarted variant, so a subtitle switch cannot invalidate the URL the
+	// client is about to open.
+	NegotiationVariant string
 	// ClientPlaySessionID records the client's own generated PlaySessionId
 	// when it differs from ours (Static=true direct play skips PlaybackInfo,
 	// so the client never learns the server id). Playback reports carrying
@@ -232,7 +237,8 @@ func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) 
 			}
 			if existing.CompatToken == session.CompatToken &&
 				existing.ClientDeviceID == session.ClientDeviceID &&
-				mediaSourceIDsEqual(existing.RouteItemID, session.RouteItemID) {
+				mediaSourceIDsEqual(existing.RouteItemID, session.RouteItemID) &&
+				existing.NegotiationVariant == session.NegotiationVariant {
 				delete(s.sessions, id)
 				removed = append(removed, id)
 			}

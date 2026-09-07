@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -769,5 +770,70 @@ func TestHandleTransportStartFailure_KeepsSessionForNonMissingError(t *testing.T
 	}
 	if syncer.calls != 0 {
 		t.Fatalf("sync calls = %d, want 0", syncer.calls)
+	}
+}
+
+func TestSubtitleDefaultRequestReturnsWholeTrack(t *testing.T) {
+	for _, query := range []string{"", "?file_id=42", "?duration=invalid", "?position=NaN", "?position=+Inf"} {
+		req := httptest.NewRequest(http.MethodGet, "/subtitles/0.vtt"+query, nil)
+		if got := subtitleSeekPosition(req); got != 0 {
+			t.Errorf("query %q seek = %v, want full track from zero", query, got)
+		}
+		if got := subtitleWindowDuration(req); got != 0 {
+			t.Errorf("query %q duration = %v, want complete track", query, got)
+		}
+	}
+}
+
+func TestSubtitleExplicitWindow(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/subtitles/0.vtt?position=1200&duration=600", nil)
+	if got := subtitleSeekPosition(req); got != 1200 {
+		t.Fatalf("seek = %v", got)
+	}
+	if got := subtitleWindowDuration(req); got != 600 {
+		t.Fatalf("duration = %v", got)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/subtitles/0.vtt?duration=600", nil)
+	if got := subtitleSeekPosition(req); got != 0 {
+		t.Fatalf("duration-only seek = %v, want zero", got)
+	}
+}
+
+func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, script string
+		status       int
+		interrupted  bool
+	}{
+		{"before_output", "exit 1", http.StatusInternalServerError, false},
+		{"after_output", "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", http.StatusOK, true},
+		{"complete", "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", http.StatusOK, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\n"+tc.script+"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			handler := NewStreamHandler(nil, nil)
+			handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: ffmpeg} }
+			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: "subrip"}}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.streamEmbeddedSubtitle(w, r, file, 0, "vtt") }))
+			defer server.Close()
+			response, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = response.Body.Close() }()
+			_, err = io.ReadAll(response.Body)
+			if response.StatusCode != tc.status {
+				t.Fatalf("status=%d, want %d", response.StatusCode, tc.status)
+			}
+			if tc.interrupted && err == nil {
+				t.Fatal("failed extraction ended with successful EOF")
+			}
+			if !tc.interrupted && err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

@@ -77,9 +77,11 @@ const mediaSearchTitleVector = `(
 
 const mediaSearchOverviewVector = `to_tsvector('english', COALESCE(mi.overview, ''))`
 
-const mixedSearchOrder = `exact_title_match DESC, contiguous_title_match DESC, year_match DESC,
-	phrase_rank DESC, title_prefix_rank DESC, overview_rank DESC,
-	LOWER(title) ASC, content_id ASC`
+func mixedSearchOrder(prefix string) string {
+	return fmt.Sprintf(`%[1]sexact_title_match DESC, %[1]scontiguous_title_match DESC, %[1]syear_match DESC,
+	%[1]sphrase_rank DESC, %[1]stitle_prefix_rank DESC, %[1]soverview_rank DESC,
+	LOWER(%[1]stitle) ASC, %[1]scontent_id ASC`, prefix)
+}
 
 // buildMixedSearchSQLFromParsed builds one ranked candidate set from the two
 // physical catalog sources. The scored CTE deliberately carries only ranking
@@ -303,11 +305,11 @@ func (r *ItemRepository) buildMixedSearchSQLFromParsed(
 	args = append(args, limit, offset)
 
 	pageCTE := fmt.Sprintf(`, page AS (
-		SELECT scored.*, ROW_NUMBER() OVER (ORDER BY %s) AS ordinal%s
+		SELECT scored.*%s
 		%s
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d
-	)`, mixedSearchOrder, pageTotalColumn, postFilter, mixedSearchOrder, limitIdx, offsetIdx)
+	)`, pageTotalColumn, postFilter, mixedSearchOrder(""), limitIdx, offsetIdx)
 
 	hydratedRelation := fmt.Sprintf(`LATERAL (
 		SELECT %s
@@ -325,7 +327,7 @@ func (r *ItemRepository) buildMixedSearchSQLFromParsed(
 		SELECT %s%s
 		FROM page
 		JOIN %s ON true
-		ORDER BY page.ordinal`, qualifiedItemColumns("hydrated"), finalTotalColumn, hydratedRelation)
+		ORDER BY %s`, qualifiedItemColumns("hydrated"), finalTotalColumn, hydratedRelation, mixedSearchOrder("page."))
 	countSQL = scoredCTE + fmt.Sprintf("\nSELECT COUNT(*)\n%s", postFilter)
 	return dataSQL, countSQL, args
 }

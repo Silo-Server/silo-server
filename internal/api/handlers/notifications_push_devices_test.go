@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -74,7 +75,7 @@ func handlerPushCipher(t *testing.T) *secret.Cipher {
 
 func newApplePushRequest(body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/push/apple", strings.NewReader(body))
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 42, Role: "user", TokenType: auth.TokenTypeAccess})
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 42, Role: "user", SessionID: "sess-1", TokenType: auth.TokenTypeAccess})
 	ctx = apimw.SetProfileID(ctx, "profile-1")
 	return req.WithContext(ctx)
 }
@@ -111,6 +112,65 @@ func TestHandleRegisterApplePushDevice(t *testing.T) {
 	if store.got.UserID != 42 || store.got.ProfileID != "profile-1" || store.got.DeviceID != "local-device" {
 		t.Fatalf("unexpected stored registration: %+v", store.got)
 	}
+	if response.DisplayToken != "" || response.DisplayTokenExpiresAt != "" {
+		t.Fatalf("display token must be omitted without an issuer: %+v", response)
+	}
+}
+
+func TestHandleRegisterApplePushDeviceMintsDisplayToken(t *testing.T) {
+	store := &handlerPushStore{}
+	handler := NewNotificationsHandler(&notifications.System{
+		PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
+	}, nil)
+	jwt := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
+	handler.SetApplePushDisplayTokenIssuer(jwt)
+
+	body := `{
+		"device_id":"local-device",
+		"apns_token":"` + strings.Repeat("a", 64) + `",
+		"apns_environment":"production",
+		"apns_topic":"org.siloserver.silo",
+		"push_mode":"private_push"
+	}`
+	rr := httptest.NewRecorder()
+	handler.HandleRegisterApplePushDevice(rr, newApplePushRequest(body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var response applePushRegisterResponse
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.DisplayToken == "" {
+		t.Fatalf("expected display token: %+v", response)
+	}
+	claims, err := jwt.ValidateToken(response.DisplayToken)
+	if err != nil {
+		t.Fatalf("validate display token: %v", err)
+	}
+	if claims.TokenType != auth.TokenTypeApplePushDisplay || claims.UserID != 42 ||
+		claims.SessionID != "sess-1" || claims.ProfileID != "profile-1" {
+		t.Fatalf("claims = %+v", claims)
+	}
+	if _, err := time.Parse(time.RFC3339, response.DisplayTokenExpiresAt); err != nil {
+		t.Fatalf("display_token_expires_at = %q: %v", response.DisplayTokenExpiresAt, err)
+	}
+
+	// A typed-nil JWT service must behave as "no issuer", not panic.
+	var nilJWT *auth.JWTService
+	handler.SetApplePushDisplayTokenIssuer(nilJWT)
+	rr = httptest.NewRecorder()
+	handler.HandleRegisterApplePushDevice(rr, newApplePushRequest(body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	response = applePushRegisterResponse{}
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.DisplayToken != "" {
+		t.Fatalf("display token should be omitted with nil issuer")
+	}
 }
 
 func newPushDevicesRequest(method, target, body string) *http.Request {
@@ -125,6 +185,9 @@ func TestHandleRegisterPushDeviceAndroid(t *testing.T) {
 	handler := NewNotificationsHandler(&notifications.System{
 		PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
 	}, nil)
+	// The Apple display token is Apple-only: Android registration must never
+	// receive one even when an issuer is configured.
+	handler.SetApplePushDisplayTokenIssuer(auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour))
 
 	token := strings.Repeat("F", 140)
 	body := `{
