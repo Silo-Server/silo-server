@@ -11,6 +11,29 @@ This document is new and covers only the routes listed below. The rest of the
 admin surface predates it and is currently documented by the code and by the
 design documents under `docs/design/`.
 
+## Task schedules
+
+`PUT /api/v1/admin/tasks/{key}/triggers` replaces the task's complete trigger
+array. Saving `[]` disables automatic runs; the task can still be run manually.
+Added, edited, and removed triggers survive server restarts and upgrades,
+including an explicitly empty schedule. Defaults are persisted only when a
+task has never had a saved schedule. Tasks marked `manual_only` reject nonempty
+trigger arrays.
+
+If startup cannot load or initialize a task's schedule, automatic runs for that
+task remain idle and the server logs the error. Saving its triggers again or
+restarting after storage recovers reloads scheduling.
+
+The schedule-persistence migration retains existing trigger rows. Older servers
+did not record the difference between a new task and an intentionally cleared
+schedule, so administrators must clear previously restored triggers again after
+upgrading. Run only upgraded server instances when clearing schedules; older
+instances still restore defaults on restart.
+
+These rules govern task schedule saves and initialization. Saving Autoscan
+settings separately replaces the Autoscan poll task's triggers with its configured
+poll interval.
+
 ## Branding assets
 
 Uploadable images white-label the server: the sidebar wordmark, the square
