@@ -1214,7 +1214,8 @@ func main() {
 		markerContributionStore := markers.NewContributionStore(deps.DB)
 		deps.MarkerContributionStore = markerContributionStore
 		deps.MarkerContributionService = markers.NewContributionService(
-			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore, slog.Default(),
+			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore,
+			slog.Default().With("component", "markers.contribute"),
 		)
 	}
 	var watchProviderService *watchsync.Service
