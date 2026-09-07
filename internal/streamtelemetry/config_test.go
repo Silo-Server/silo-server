@@ -11,9 +11,40 @@ func TestConfigFromEnvValidation(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
 		clearConfigEnv(t)
 		cfg := ConfigFromEnv("node")
-		if !cfg.Enabled || cfg.Distributed || cfg.DistributedExplicit || cfg.SweepInterval != time.Second || cfg.Retention != 5*time.Minute || cfg.MaxObservations != 50_000 ||
-			cfg.Freshness != 5*time.Second || cfg.MembershipTTL != time.Minute || cfg.KeyPrefix != "silo:stelem" || cfg.FullResyncEvery != 60 || cfg.MaxPublishers != 256 || cfg.MaxMergedSessions != 50_000 || cfg.MaxMergedTransfers != 50_000 {
+		if !cfg.Enabled || cfg.Distributed || cfg.DistributedExplicit || cfg.SweepInterval != time.Second || cfg.Retention != 5*time.Minute || cfg.TombstoneRetention != 30*time.Minute || cfg.MaxObservations != 50_000 ||
+			cfg.Freshness != 5*time.Second || cfg.MembershipTTL != time.Minute || cfg.KeyPrefix != "silo:stelem" || cfg.FullResyncEvery != 60 || cfg.MaxPublishers != 512 || cfg.MaxMergedSessions != 50_000 || cfg.MaxMergedTransfers != 50_000 {
 			t.Fatalf("defaults = %+v", cfg)
+		}
+	})
+	t.Run("valid tombstone retention override", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(tombstoneRetentionEnv, "2h")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.TombstoneRetention != 2*time.Hour {
+			t.Fatalf("tombstone retention override = %+v", cfg)
+		}
+	})
+	t.Run("invalid tombstone retention disables telemetry", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(tombstoneRetentionEnv, "eventually")
+		if cfg := ConfigFromEnv("node"); cfg.Enabled {
+			t.Fatalf("invalid tombstone retention remained enabled: %+v", cfg)
+		}
+	})
+	t.Run("default tombstone retention follows a longer retention", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(retentionEnv, "45m")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.Retention != 45*time.Minute || cfg.TombstoneRetention != 90*time.Minute {
+			t.Fatalf("retention repair = %+v", cfg)
+		}
+	})
+	t.Run("default tombstone retention repair clamps overflow", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(retentionEnv, "2000000h")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.TombstoneRetention != time.Duration(1<<63-1) {
+			t.Fatalf("overflowing retention repair = %+v", cfg)
 		}
 	})
 	// The kill switch has to work, and has to fail towards off: an operator who
@@ -237,6 +268,43 @@ func TestConfigFromEnvValidation(t *testing.T) {
 			t.Fatalf("config = %+v", cfg)
 		}
 	})
+	// The per-subject transfer budget follows the house semantics for a core cap:
+	// a broken value disables telemetry rather than quietly removing the bound
+	// that stops one client exhausting the shared table.
+	t.Run("per-subject transfer budget defaults", func(t *testing.T) {
+		clearConfigEnv(t)
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.MaxTransfersPerSubject != 128 {
+			t.Fatalf("per-subject budget default = %+v", cfg)
+		}
+	})
+	t.Run("valid per-subject transfer budget override", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(maxTransfersPerSubjectEnv, "64")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.MaxTransfersPerSubject != 64 {
+			t.Fatalf("per-subject budget override = %+v", cfg)
+		}
+	})
+	for _, value := range []string{"0", "-1", "many"} {
+		t.Run("invalid per-subject transfer budget "+value+" disables telemetry", func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv(maxTransfersPerSubjectEnv, value)
+			cfg := ConfigFromEnv("node")
+			if cfg.Enabled || cfg.MaxTransfersPerSubject != 128 {
+				t.Fatalf("invalid per-subject budget = %+v", cfg)
+			}
+		})
+	}
+	t.Run("per-subject transfer budget is clamped to a share of a lowered table", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(maxTransfersEnv, "16")
+		t.Setenv(maxTransfersPerSubjectEnv, "128")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.MaxTransfers != 16 || cfg.MaxTransfersPerSubject != 2 {
+			t.Fatalf("clamped per-subject budget = %+v", cfg)
+		}
+	})
 	t.Run("membership expiry overflow", func(t *testing.T) {
 		clearConfigEnv(t)
 		t.Setenv(enabledEnv, "true")
@@ -251,7 +319,7 @@ func TestConfigFromEnvValidation(t *testing.T) {
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{enabledEnv, sweepIntervalEnv, retentionEnv, maxSessionsEnv, maxTransfersEnv, maxObservationsEnv,
+	for _, name := range []string{enabledEnv, sweepIntervalEnv, retentionEnv, tombstoneRetentionEnv, maxSessionsEnv, maxTransfersEnv, maxTransfersPerSubjectEnv, maxObservationsEnv,
 		distributedEnv, freshnessEnv, membershipTTLEnv, keyPrefixEnv, fullResyncEveryEnv, maxPublishersEnv, maxMergedSessionsEnv, maxMergedTransfersEnv,
 		familiesEnv, viewTTLEnv} {
 		t.Setenv(name, "")
@@ -339,4 +407,23 @@ func TestConfigFamilyGate(t *testing.T) {
 			t.Fatalf("config = %+v", cfg)
 		}
 	})
+}
+
+func TestConfigObservesAllFamilies(t *testing.T) {
+	if !DefaultConfig("node").ObservesAllFamilies() {
+		t.Fatal("unset family configuration is not full coverage")
+	}
+	narrowed := DefaultConfig("node")
+	narrowed.Families = map[Family]bool{FamilyProxy: true}
+	if narrowed.ObservesAllFamilies() {
+		t.Fatal("narrowed family configuration reported full coverage")
+	}
+	explicit := DefaultConfig("node")
+	explicit.Families = make(map[Family]bool, len(AllFamilies))
+	for _, family := range AllFamilies {
+		explicit.Families[family] = true
+	}
+	if !explicit.ObservesAllFamilies() {
+		t.Fatal("explicit canonical family set did not report full coverage")
+	}
 }

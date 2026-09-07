@@ -51,10 +51,21 @@ func digest128(value []byte) [16]byte {
 
 func snapshotHashFields(snapshot Snapshot) (map[string][]byte, error) {
 	fields := make(map[string][]byte, len(snapshot.Sessions)+len(snapshot.Transfers)+1)
+	var coverage *wireCoverage
+	if snapshot.Coverage.Declared {
+		families := make([]string, 0, len(snapshot.Coverage.ConfiguredFamilies))
+		for _, family := range snapshot.Coverage.ConfiguredFamilies {
+			families = append(families, string(family))
+		}
+		coverage = &wireCoverage{Families: families}
+	}
 	meta, err := encodeMeta(publisherMeta{
-		PublisherID: snapshot.PublisherID, NodeID: snapshot.NodeID, Epoch: snapshot.PublisherEpoch,
+		PublisherID: snapshot.PublisherID, ReportingPublisherID: snapshot.ReportingPublisherID,
+		Coverage: coverage,
+		NodeID:   snapshot.NodeID, Epoch: snapshot.PublisherEpoch,
 		Sequence: snapshot.Sequence, CapturedAtUnixNano: timeToUnixNano(snapshot.CapturedAt), Truncated: snapshot.Truncated,
-		DroppedObservations: snapshot.DroppedObservations, DroppedBytes: snapshot.DroppedBytes,
+		DroppedObservations: snapshot.DroppedObservations, TransfersTruncated: snapshot.TransfersTruncated,
+		DroppedTransferObservations: snapshot.DroppedTransferObservations, DroppedBytes: snapshot.DroppedBytes,
 		UnattributedObservations: snapshot.UnattributedObservations, UnattributedBytes: snapshot.UnattributedBytes,
 		SessionCount: len(snapshot.Sessions), TransferCount: len(snapshot.Transfers),
 	})
@@ -218,7 +229,9 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 		return set, err
 	}
 	if len(members) > s.cfg.MaxPublishers {
-		set.Truncated = true
+		// A publisher over the roster cap is not read at all, so every session it
+		// alone carries is absent from the merge. That is session blindness.
+		set.SessionsTruncated = true
 		set.Errors = append(set.Errors, PublisherError{Reason: "publisher_cap"})
 		members = members[:s.cfg.MaxPublishers]
 	}
@@ -280,10 +293,10 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 			continue
 		}
 		if len(snapshot.Sessions) == remainingSessions && countFields(fields, "s:") > remainingSessions {
-			set.Truncated = true
+			set.SessionsTruncated = true
 		}
 		if len(snapshot.Transfers) == remainingTransfers && countFields(fields, "t:") > remainingTransfers {
-			set.Truncated = true
+			set.TransfersTruncated = true
 		}
 		remainingSessions -= len(snapshot.Sessions)
 		remainingTransfers -= len(snapshot.Transfers)
@@ -299,8 +312,27 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 	return set, nil
 }
 
+// maxFieldsPerPublisher bounds what one publisher's hash may contain before the
+// reader refuses it outright. It has to be derived from everything that can
+// become a field, not from the session RESERVATION counter: a pruned session
+// gives its reservation back and then lives on as a tombstone, which is still
+// published as an ordinary s: field. Counting only MaxSessions left the bound
+// tight by fifteen fields and a saturated tombstone table overshot it by the
+// whole tombstone budget.
+//
+// The per-subject transfer budget (Config.MaxTransfersPerSubject) does not widen
+// this bound: a principal's catch-all fold row still takes an ordinary
+// MaxTransfers reservation, so the budget is a sub-allocation of that table and
+// the worst-case number of t: fields stays MaxTransfers.
+//
+// Getting this wrong is expensive and silent. An oversized hash is not truncated
+// and carries no Truncated flag — it is skipped entirely, which makes the
+// publisher missing, which makes the view incomplete, which disables no_delivery
+// and unclaimed_idle classification for the WHOLE fleet. And it does not
+// self-correct: the publisher rewrites the same oversized hash every sweep.
 func (s *RedisStore) maxFieldsPerPublisher() int64 {
-	maximum := s.cfg.MaxSessions + s.cfg.MaxTransfers + 16
+	maximum := s.cfg.MaxSessions + maxTombstonesPerShard(s.cfg.MaxSessions)*shardCount +
+		s.cfg.MaxTransfers + 16
 	if maximum < 16 {
 		return int64(^uint64(0) >> 1)
 	}
@@ -334,8 +366,18 @@ func decodeSnapshotHash(publisherID string, fields map[string]string, maxSession
 		problem.Reason = publisherReasonIdentityMismatch
 		return Snapshot{}, problem, nil
 	}
-	snapshot := Snapshot{PublisherID: meta.PublisherID, NodeID: meta.NodeID, PublisherEpoch: meta.Epoch, Sequence: meta.Sequence,
+	coverage := PublisherCoverage{}
+	if meta.Coverage != nil {
+		coverage.Declared = true
+		coverage.ConfiguredFamilies = make([]Family, 0, len(meta.Coverage.Families))
+		for _, family := range meta.Coverage.Families {
+			coverage.ConfiguredFamilies = append(coverage.ConfiguredFamilies, Family(family))
+		}
+	}
+	snapshot := Snapshot{PublisherID: meta.PublisherID, ReportingPublisherID: meta.ReportingPublisherID, Coverage: coverage,
+		NodeID: meta.NodeID, PublisherEpoch: meta.Epoch, Sequence: meta.Sequence,
 		CapturedAt: timeFromUnixNano(meta.CapturedAtUnixNano), Truncated: meta.Truncated, DroppedObservations: meta.DroppedObservations,
+		TransfersTruncated: meta.TransfersTruncated, DroppedTransferObservations: meta.DroppedTransferObservations,
 		DroppedBytes: meta.DroppedBytes, UnattributedObservations: meta.UnattributedObservations, UnattributedBytes: meta.UnattributedBytes}
 	names := make([]string, 0, len(fields))
 	for field := range fields {

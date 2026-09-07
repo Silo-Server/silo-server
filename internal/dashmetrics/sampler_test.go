@@ -110,6 +110,22 @@ func TestComputeEgressDelta(t *testing.T) {
 			wantNext:  map[string]int64{"transfer:t1": 1_200},
 		},
 		{
+			// A bandwidth probe is observed and cap-exempt but its bytes are
+			// filler, not media. A per-subject fold row keeps its role and class,
+			// so folded download bytes still count.
+			name: "probe transfers are excluded and fold rows still count",
+			prev: map[string]int64{},
+			snapshot: streamtelemetry.Snapshot{
+				Transfers: []streamtelemetry.TransferView{
+					{ID: "probe", Role: streamtelemetry.RoleViewerEgress, Class: streamtelemetry.ClassProbe, BytesAccepted: 1 << 20},
+					{ID: "fold", Role: streamtelemetry.RoleViewerEgress, Class: streamtelemetry.ClassTransfer, Overflowed: true, BytesAccepted: 5_000},
+					{ID: "legacy", Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 300},
+				},
+			},
+			wantDelta: egressDelta{Total: 5_300, Download: 5_300},
+			wantNext:  map[string]int64{"transfer:fold": 5_000, "transfer:legacy": 300},
+		},
+		{
 			name: "sessions and transfers with the same id stay separate",
 			prev: map[string]int64{},
 			snapshot: streamtelemetry.Snapshot{

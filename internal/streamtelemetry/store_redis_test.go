@@ -124,12 +124,49 @@ func TestRedisStoreKeyBuilders(t *testing.T) {
 	}
 }
 
+// TestMaxFieldsPerPublisherCoversEveryPublishableField pins the bound against the
+// caps it is derived from, rather than against a number someone once computed.
+//
+// It exists because the derivation silently went stale: the bound was
+// MaxSessions + MaxTransfers + 16, which left exactly fifteen fields of headroom,
+// and then tombstones started contributing s: fields of their own without being
+// counted by the session reservations the bound was reasoning about. Nothing
+// failed — a saturated tombstone table simply pushed the hash past the bound,
+// where the reader skips the publisher entirely, which reads downstream as a
+// missing publisher and switches off ghost classification for the whole fleet.
+//
+// So this asserts the invariant directly: whatever a publisher is permitted to
+// hold must fit in what the reader is willing to read.
+func TestMaxFieldsPerPublisherCoversEveryPublishableField(t *testing.T) {
+	base := testRedisStoreConfig("publisher")
+	for _, caps := range [][2]int64{{base.MaxSessions, base.MaxTransfers}, {1, 1}, {50_000, 10}} {
+		cfg := base
+		cfg.MaxSessions, cfg.MaxTransfers = caps[0], caps[1]
+		store := NewRedisStore(nil, cfg, nil)
+		// One meta field, every live session, every tombstone the registry may
+		// retain across all shards, and every transfer.
+		worst := int64(1) + cfg.MaxSessions + maxTombstonesPerShard(cfg.MaxSessions)*shardCount + cfg.MaxTransfers
+		if got := store.maxFieldsPerPublisher(); got < worst {
+			t.Fatalf("maxFieldsPerPublisher = %d for sessions=%d transfers=%d, but a publisher may hold %d fields",
+				got, cfg.MaxSessions, cfg.MaxTransfers, worst)
+		}
+	}
+}
+
 func TestSnapshotHashFieldsRoundTripAndDeterministicCap(t *testing.T) {
 	snapshot := Snapshot{PublisherID: "publisher", NodeID: "node", PublisherEpoch: 1, Sequence: 2, CapturedAt: time.Unix(3, 4),
+		Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: []Family{FamilyNative, Family("future_family")}},
+		// Transfer-table blindness and the per-subject fold marker travel in the
+		// hash like every other field: a publisher that dropped them here would
+		// look healthy to every reader of the merged view.
+		TransfersTruncated: true, DroppedTransferObservations: 6,
 		Sessions: []SessionView{
 			{SessionID: "z", TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
 			{SessionID: "a", TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
-		}, Transfers: []TransferView{{ID: "z", Outcomes: map[httpstream.StreamOutcome]int64{}}, {ID: "a", Outcomes: map[httpstream.StreamOutcome]int64{}}}}
+		}, Transfers: []TransferView{
+			{ID: "z", Outcomes: map[httpstream.StreamOutcome]int64{}},
+			{ID: "a", Overflowed: true, Outcomes: map[httpstream.StreamOutcome]int64{}},
+		}}
 	encoded, err := snapshotHashFields(snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -202,12 +239,14 @@ func TestRedisStoreIntegration(t *testing.T) {
 		prefix := "test:stelem:" + uuid.NewString()
 		store := newStore(prefix, "p1")
 		t.Cleanup(func() { _ = client.Del(ctx, store.rosterKey(), store.snapshotKey("p1")).Err() })
-		first := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: time.Now(), Sessions: []SessionView{{SessionID: "a"}, {SessionID: "removed"}}}
+		first := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: time.Now(),
+			Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: []Family{FamilyNative, FamilyProxy}},
+			Sessions: []SessionView{{SessionID: "a"}, {SessionID: "removed"}}}
 		if err := store.Publish(ctx, first); err != nil {
 			t.Fatal(err)
 		}
 		set, err := store.LoadAll(ctx)
-		if err != nil || len(set.Snapshots) != 1 || len(set.Snapshots[0].Sessions) != 2 {
+		if err != nil || len(set.Snapshots) != 1 || len(set.Snapshots[0].Sessions) != 2 || !reflect.DeepEqual(set.Snapshots[0].Coverage, first.Coverage) {
 			t.Fatalf("first load = %+v, %v", set, err)
 		}
 		second := cloneSnapshot(first)
@@ -254,7 +293,7 @@ func TestRedisStoreIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if set.Truncated || hasPublisherReason(set.Errors, "", "publisher_cap") {
+		if set.SessionsTruncated || hasPublisherReason(set.Errors, "", "publisher_cap") {
 			t.Fatalf("stale roster entries triggered cap: %+v", set)
 		}
 		if err := client.ZAdd(ctx, store.rosterKey(),
@@ -267,7 +306,7 @@ func TestRedisStoreIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !set.Truncated || !hasPublisherReason(set.Errors, "", "publisher_cap") {
+		if !set.SessionsTruncated || !hasPublisherReason(set.Errors, "", "publisher_cap") {
 			t.Fatalf("live roster cap not reported: %+v", set)
 		}
 	})
@@ -301,9 +340,12 @@ func TestRedisStoreIntegration(t *testing.T) {
 		}
 
 		one.cfg.MaxSessions, one.cfg.MaxTransfers = 1, 1
+		// Derived from the bound rather than hardcoded: the bound is computed from
+		// the caps, and a literal here silently stops being oversized the moment
+		// the derivation gains a term.
 		oversized := map[string]any{}
-		for i := 0; i < 19; i++ {
-			oversized[fmt.Sprintf("junk:%02d", i)] = "x"
+		for i := int64(0); i <= one.maxFieldsPerPublisher(); i++ {
+			oversized[fmt.Sprintf("junk:%04d", i)] = "x"
 		}
 		if err := client.HSet(ctx, one.snapshotKey("oversized"), oversized).Err(); err != nil {
 			t.Fatal(err)

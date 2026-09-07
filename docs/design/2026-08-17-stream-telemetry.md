@@ -38,7 +38,8 @@ kinds of process publish into Redis; a pure function merges them; an admin endpo
 serves the result and diffs it against the two projections admins read today.
 
 **What P0 deliberately does not do.** It makes no decisions. No request is denied,
-delayed or cut, and no existing admin read has been repointed onto it. Judgement —
+delayed or cut. `GET /admin/sessions` is untouched; the admin web UI reads the additive
+`GET /admin/sessions/live` instead, which walks the merged view. Judgement —
 which rate is a rip, which session to cut, who to suspend — is deferred on purpose:
 a threshold set before the traffic has been measured is a guess, and this is the thing
 that does the measuring. Monitoring becomes first-class here; enforcement is built on
@@ -248,6 +249,52 @@ monotonic dropped counters grow, and the registry emits at most one warning per 
 Bounded sets drop the newest value and expose their own overflow flag. Saturation
 serving through is a P0 decision — a fail-closed download policy belongs to P1.
 
+Only a GLOBAL cap sets `Truncated`, because only a global cap can leave a whole
+session unrepresented. A PER-SESSION cap cannot: the session is in the snapshot
+either way and it is the byte total that is short, so
+`MaxObservationsPerSession` sets that session's `ObservationsOverflowed` — which
+merges into `BytesDegraded`, rendering the row as a floor — and never
+`Truncated`. The distinction is load-bearing rather than tidy: the per-session
+cap is reachable by any client holding one stream token, with roughly
+`MaxObservationsPerSession` concurrent range requests carrying the same session
+id, so routing it into `Truncated` was a fleet-wide off switch for ghost
+detection in exactly the way transfer saturation was.
+
+Transfer-table saturation is deliberately kept OUT of `Truncated`, at every layer
+that can observe it: the publisher's own table, the reader's aggregate
+`MaxMergedTransfers` budget, and the roster reader's per-set accounting
+(`PublisherSet.TransfersTruncated`, kept separate from `SessionsTruncated` for
+exactly this reason). All of them set `TransfersTruncated` and grow
+`DroppedTransferObservations`, which surface as the `publisher_transfer_capacity`
+advisory rather than as an incomplete reason.
+`Truncated` is a claim about the SESSION picture, and it makes the merged view
+incomplete, which makes the live-sessions handler stop classifying `no_delivery`
+and `unclaimed_idle` for every reader on every row. Transfers feed no live-session
+facts, so an exhausted transfer table says nothing about session completeness —
+and a transfer key is minted partly from client-supplied input (the
+`X-Silo-Device-ID` header, the MediaBrowser `DeviceId`, and a viewer address that
+ordinary CGNAT churn rotates), so letting it reach `Truncated` handed one
+authenticated client a fleet-wide off switch for ghost detection.
+
+For the same reason a principal gets its own transfer budget,
+`MaxTransfersPerSubject`. Past it, that principal's further transfer identities
+fold into ONE catch-all row rather than being dropped: the bytes are real and
+belong to it, and dropping is exactly what let one client's device-id churn starve
+everybody else's attribution. A fold row carries only the subject, the route
+role and class, the byte totals, the request count and the outcomes — every other
+identity field is zeroed, because the first arrival's file, pattern, address and
+device asserted over many pours is a plausible wrong answer, which is worse for an
+operator than an absent one. Role and class are kept because they are part of the
+fold key, one row per `(subject, role, class)`, and because they are the two
+fields a byte-summing consumer keys on: dropping them silently removed every
+folded byte from the egress series. A subject therefore holds at most
+`MaxTransfersPerSubject` ordinary records plus one fold row per `(role, class)`
+pair it has overflowed on, the fold rows not counting against its allowance.
+
+An un-upgraded publisher still sets `Truncated` on transfer exhaustion and still
+makes the view incomplete. The new fields are `omitempty`, so it stays decodable;
+the defect simply persists on that process and clears as the deploy completes.
+
 ### 2.3 Transport: a `SnapshotStore` in every mode, never `nil`
 
 An explicit `SnapshotStore` interface with a **local in-process implementation** rather
@@ -294,8 +341,8 @@ Postgres nor Redis, and it is the property to copy for P1's evaluator.
 | Field | Merge rule |
 |---|---|
 | Session id | Canonical join key. Remote transport ids correlate to it explicitly; they are never treated as sessions. |
-| Subject, profile id, media file id | **Only viewer-egress publishers contribute.** Populated disagreements retain all attributed values, flag a conflict, and leave the scalar zero. |
-| `StartedAt` | Highest source rank (`claim`, `session`, `issued_at`, `first_seen`), then earliest value at that rank. **Degradation is viewer-edge-owned** — a relay's publisher-local first-seen stamp must not degrade an authoritative viewer-edge session. |
+| Subject, profile id, media file id | **Viewer-egress publishers contribute; with no viewer edge present, the reporting publisher may supply them** so a byte-less session appears as itself. A relay never may. Populated disagreements retain all attributed values, flag a conflict, and leave the scalar zero. |
+| `StartedAt` | Highest source rank (`claim`, `session`, `issued_at`, `first_seen`), then earliest value at that rank. Viewer-egress and reporting publishers contribute; the reporting arm is what lets the session manager's rank-3 `session` source win for a session that is streaming. **Degradation is viewer-edge-owned** — a relay's publisher-local first-seen stamp must not degrade an authoritative viewer-edge session. |
 | Viewer bytes | Sum **only** viewer-egress routes. Never `SessionView.BytesAccepted`, which includes every role. |
 | Relay bytes | Summed separately, for correlation only. |
 | Open observations, requests | Saturating sum. |
@@ -324,12 +371,33 @@ publisher is alive; it cannot say which publishers *must* be present before a de
 is safe. A publisher whose heartbeat is older than the membership TTL has departed and
 does not block completeness; a roster member without a usable fresh snapshot is stale,
 excluded, named in `MissingPublishers`, and does block it. `Complete` is true only when
-all four hold:
+all six hold:
 
 1. no publisher is missing or stale;
-2. no merged snapshot is truncated;
-3. the reader hit no publisher/session/transfer cap;
-4. no publisher has decode errors, a count mismatch, or an oversized hash.
+2. no merged snapshot reports session or global-observation truncation
+   (transfer-table exhaustion and per-session observation overflow are both
+   advisory/per-row degradations, not completeness claims — see Bounds);
+3. the reader hit no publisher or session cap (its transfer cap is an advisory);
+4. no publisher has decode errors, a count mismatch, or an oversized hash;
+5. every contributing publisher declares its coverage;
+6. every contributing measuring publisher observes all canonical families.
+
+Each snapshot declares the route families its configuration observes. The declaration
+is tri-state: an absent declaration identifies a pre-field binary and makes the view
+incomplete; a present empty family set means "observes none", never "all". This
+pessimistic default is intentional during rolling deploys: otherwise an older
+contributor is indistinguishable from a fully covered one and ghost classification can
+resume over evidence known to be short. Measuring publishers must name every family in
+the canonical set; reporting publishers are identified positionally by their
+`#reported` id and measure no families by construction.
+
+The coverage declaration deliberately does not carry route enrollment. Route
+declarations are mutable package-global state populated only when routers are built,
+after the measuring publisher has already started; publishing that state would be
+vacuously complete during the startup window and would let one test declaration
+contaminate later snapshots. Enrollment is instead a static invariant enforced for
+each family by its media-route manifest test, which fails if any declared route has
+`Enrolled:false`. There is therefore no runtime `unenrolled_media_routes` reason.
 
 **What the flag buys is telling blindness apart from absence.** A session that leaves
 the view because the viewer closed the player, one whose bytes stop growing because the
@@ -423,9 +491,14 @@ authorization, then starts a transcode, and can still 404.
 | `jellycompat` | 24 | `viewer_egress` | compat play session |
 | `abs` | 22 | `viewer_egress` | ABS session id / abs user / feed owner |
 
-Classes are `playback`, `manifest` and `transfer`. Cap relevance is per route, not per
-family: streams, segments and manifests are cap-relevant; downloads, ebook reads, ABS
-files and the Jellyfin bandwidth probe are observed but cap-exempt.
+Classes are `playback`, `manifest`, `transfer` and `probe`. Cap relevance is per route,
+not per family: streams, segments and manifests are cap-relevant; downloads, ebook reads,
+ABS files and the Jellyfin bandwidth probe are observed but cap-exempt. `probe` is the
+bandwidth probe alone: recorded exactly like a transfer, but its bytes are filler against
+no media file, so a consumer totalling delivered bytes must exclude it. The class travels
+on the transfer record (`TransferView.Class`, wire field `c`) for exactly that reason;
+`dashmetrics` excludes probe transfers from both egress series, and treats a record with
+no class — one from an un-upgraded publisher — as an ordinary transfer.
 
 **Manifest routes are enrolled and load-bearing.** A killed session that reaches an
 unenrolled manifest route can reconstruct or start ffmpeg before the next segment is
@@ -582,7 +655,10 @@ observed as soon as telemetry is enabled.
 **The family gate.** `SILO_STREAM_TELEMETRY_FAMILIES` defaults to every declared
 family — `native`, `proxy`, `transcode_node`, `jellycompat`, `abs`. The variable exists
 to narrow observation or drop one misbehaving family without losing the rest, not to
-stage a rollout: naming it takes away families rather than adding them.
+stage a rollout: naming it takes away families rather than adding them. A narrowed
+measuring publisher declares that fact, so the merged view is incomplete by design and
+fleet-wide `no_delivery` / `unclaimed_idle` classification remains suppressed until
+all five families are observed again.
 
 Since `SILO_STREAM_TELEMETRY_ENABLED` now defaults on, that master switch decides
 whether a process observes at all, and the family list — left unset by default — no
@@ -649,6 +725,13 @@ field only one side can express would manufacture mismatches and bury the real o
 - **`agrees` covers set membership and real contradiction, not absence.** Folding
   absences in would make the flag permanently false — legacy rows carry no value for
   several of these fields — and therefore useless. Read `fields_absent` too.
+- **Telemetry is split by evidence, and unhealthy reads cannot agree.** Agreement that
+  consists only of two projections of the playback session manager is self-derived, not
+  corroboration. `agrees` also refuses a verdict over an incomplete or stale telemetry
+  view or a truncated or lossy legacy read. Only a wholly reported-only intersection
+  withholds it — demanding measurement for every shared session would flap through the
+  first seconds of each play — so `in_both_reported_only` is read beside `agrees`, never
+  inferred from it.
 - **Start times compare with one second of tolerance.** Two independent writers cannot
   be expected to agree to the nanosecond, and nothing downstream needs them to: victim
   ordering only has to be a total order.
@@ -658,6 +741,13 @@ field only one side can express would manufacture mismatches and bury the real o
   a node that served no viewer.
 - **Every list is capped at 50 with an explicit dropped count.** Silent truncation
   would read as "covered everything".
+- **A retired-measurement tombstone nobody reports is an ended session, and is left
+  out of the projection.** It has already left `playback_sessions_sync` but stays in
+  the telemetry view for `Retention` plus `TombstoneRetention`, so counting it would
+  put every stream that ended in the last half hour into `telemetry_only` — and
+  `agrees` requires that list to be empty. A tombstone a session manager still
+  reports is a live session whose measurement was merely pruned, and stays as
+  measured evidence.
 - **The view's completeness travels with the diff.** A degraded view is missing
   sessions by construction, so a report built on one is evidence of blindness, not
   disagreement. A source that cannot be read reports itself unavailable *with a reason*
@@ -697,12 +787,15 @@ than it is: `abs` (no audiobook traffic exists on the host), `proxy` and `transc
 one publisher. Those rest on the per-family manifest tests and the two-publisher
 real-Redis integration test, not on production evidence.
 
-**What it found.** The parity projection surfaced a defect in the legacy view it is
-compared against: `playback_sessions_sync` treats a progress POST as liveness, so
-sessions that stopped fetching bytes persist indefinitely and their transcodes are never
-reaped. Telemetry is byte-path driven and correctly excluded them; they appeared
-one-sided in 179 of 185 consecutive samples. Filed as #666 — the finding belongs to the
-legacy store, not to this branch.
+**What it found (historical observation).** Before the reporting publisher existed,
+telemetry was byte-path only. The parity projection then surfaced a defect in the legacy
+view: `playback_sessions_sync` treats a progress POST as liveness, so sessions that
+stopped fetching bytes persist indefinitely and their transcodes are never reaped. Those
+ghosts appeared only on the legacy side in 179 of 185 consecutive samples. With the
+reporting publisher, the same ghosts appear on both sides; they are now counted as
+`in_both_reported_only`, listed by session id, and withhold `agrees` instead of reading as
+corroboration. Filed as #666 — the finding belongs to the legacy store, not to this
+branch.
 
 
 ### Legacy retirement — its own project, gated on parity evidence
@@ -793,7 +886,7 @@ every session vanish atomically while the node keeps serving.
 
 | Key | Type | Contents |
 |---|---|---|
-| `{prefix}:snap:{publisherID}` | hash | `meta`, `s:{sessionID}` and `t:{transferID}` fields |
+| `{prefix}:snap:{publisherID}` | hash | `meta`, `s:{sessionID}` and `t:{transferID}` fields; the transfer id is a 128-bit SHA-256 digest of the identity tuple, never the tuple itself, because field names surface in `SCAN`, `MONITOR`, slowlog and RDB dumps |
 | `{prefix}:roster` | sorted set | publisher id scored by heartbeat Unix nanoseconds |
 
 Every publish is one `MULTI`/`EXEC`: optionally delete the hash for a full resync,
@@ -826,7 +919,9 @@ evolving session shape is not worth its maintenance cost at these sizes:
 **Read bounds.** Decode rejects negative counters and byte totals and caps every map
 and slice before the data reaches the merge. A read selects live roster entries bounded
 by the publisher cap, pipelines `HLEN` per publisher and skips any hash larger than
-`MaxSessions + MaxTransfers + 16`, then fetches eligible hashes with pipelined
+`MaxSessions + tombstone budget + MaxTransfers + 16` (the tombstone budget is
+`MaxSessions/shards + 1` per shard, because a pruned session gives its reservation back
+and lives on as an ordinary `s:` field), then fetches eligible hashes with pipelined
 `HGETALL` — which keeps each per-publisher snapshot atomic, unlike paged `HSCAN`.
 Fields are sorted before reader caps are applied. Missing metadata, publisher-id
 mismatch, oversized hashes, count mismatch and field decode errors are all attributed
@@ -904,21 +999,28 @@ but cannot be parsed is treated as `false`, not as the default, because an opera
 mistypes a kill switch was reaching for "stop", and a mistyped disable that quietly left
 the feature running is the failure that costs them.
 
+Narrowing `SILO_STREAM_TELEMETRY_FAMILIES` is visible at startup and intentionally
+makes the merged view incomplete. The consequence is fleet-wide suppression of
+`no_delivery` and `unclaimed_idle`: a family omitted anywhere is blindness, not
+evidence that a session is absent.
+
 | Variable | Default | Scope | Meaning |
 |---|---:|---|---|
 | `SILO_STREAM_TELEMETRY_ENABLED` | `true` | core | Master switch, per process. Set it to `false` to stop observing; a value that cannot be parsed also reads as off. |
-| `SILO_STREAM_TELEMETRY_FAMILIES` | all five (`native,proxy,transcode_node,jellycompat,abs`) | core | Which route families are wrapped. Narrows or kills observation; naming it takes families away rather than staging them in. |
+| `SILO_STREAM_TELEMETRY_FAMILIES` | all five (`native,proxy,transcode_node,jellycompat,abs`) | core | Which route families are wrapped. Narrows or kills observation; naming it takes families away rather than staging them in, and makes the merged view incomplete until all five are restored. |
 | `SILO_STREAM_TELEMETRY_SWEEP_INTERVAL` | `1s` | core | Collector period. |
 | `SILO_STREAM_TELEMETRY_RETENTION` | `5m` | core | How long a session survives its last observation. |
+| `SILO_STREAM_TELEMETRY_TOMBSTONE_RETENTION` | `30m` | core | How long a pruned session's byte memory is still published after retirement. Repaired to `2×RETENTION` when left unset and below it. |
 | `SILO_STREAM_TELEMETRY_MAX_SESSIONS` | `10000` | core | Local session cap. |
 | `SILO_STREAM_TELEMETRY_MAX_TRANSFERS` | `10000` | core | Local transfer cap. |
+| `SILO_STREAM_TELEMETRY_MAX_TRANSFERS_PER_SUBJECT` | `128` | core | Distinct transfer identities one principal may hold before the rest fold into a catch-all row per `(role, class)`. Clamped to an eighth of `MAX_TRANSFERS`, floor 1. Fold rows still take an ordinary `MAX_TRANSFERS` reservation, so the global cap holds; the isolation the clamp buys is only meaningful once `MAX_TRANSFERS` is large enough for other principals to fit beside a full allowance. |
 | `SILO_STREAM_TELEMETRY_MAX_OBSERVATIONS` | `50000` | core | Local in-flight observation cap. |
 | `SILO_STREAM_TELEMETRY_DISTRIBUTED` | auto (on when Redis is configured) | distributed | Publish and read snapshots through Redis. Setting it pins the mode either way and stops the derivation; a rejected distributed configuration also pins it off. |
 | `SILO_STREAM_TELEMETRY_FRESHNESS` | `5s` | distributed | Maximum usable snapshot age; at least three sweep intervals. |
 | `SILO_STREAM_TELEMETRY_MEMBERSHIP_TTL` | `60s` | distributed | Heartbeat age after which a publisher has departed; must exceed freshness. |
 | `SILO_STREAM_TELEMETRY_KEY_PREFIX` | `silo:stelem` | distributed | Non-empty, whitespace-free Redis namespace. |
 | `SILO_STREAM_TELEMETRY_FULL_RESYNC_EVERY` | `60` | distributed | Successful publishes between full hash replacements. |
-| `SILO_STREAM_TELEMETRY_MAX_PUBLISHERS` | `256` | distributed | Roster entries considered by a read. |
+| `SILO_STREAM_TELEMETRY_MAX_PUBLISHERS` | `512` | distributed | Roster entries considered by a read. Each API process contributes two (measuring and reporting). |
 | `SILO_STREAM_TELEMETRY_MAX_MERGED_SESSIONS` | `50000` | distributed | Reader-side session cap across publishers. |
 | `SILO_STREAM_TELEMETRY_MAX_MERGED_TRANSFERS` | `50000` | distributed | Reader-side transfer cap across publishers. |
 | `SILO_STREAM_TELEMETRY_VIEW_TTL` | `5s` | distributed | How stale a served merged view may be before a read rebuilds it. |

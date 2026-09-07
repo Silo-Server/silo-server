@@ -1915,10 +1915,12 @@ func (h *PlaybackHandler) HandleCapabilitiesFull(w http.ResponseWriter, r *http.
 
 // HandleBitrateTest returns a small binary payload for clients that probe bandwidth.
 func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Request) {
-	// Jellyfin's authenticated bandwidth probe: transfer-observed, cap-exempt
+	// Jellyfin's authenticated bandwidth probe: probe-observed, cap-exempt
 	// (§4.2 "classify but exempt"). It resolves no play session, so the subject
 	// is all the identity there is; an unauthenticated probe attaches nothing and
-	// its bytes fall into Unattributed*.
+	// its bytes fall into Unattributed*. It folds in beside the transfers but
+	// carries ClassProbe, because the megabyte below is filler against no media
+	// file and must not read as delivered media in a per-viewer byte total.
 	attachCompatTransfer(r.Context(), SessionFromContext(r.Context()), 0)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)

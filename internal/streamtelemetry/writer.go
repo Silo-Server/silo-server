@@ -17,6 +17,12 @@ func (r *Registry) Observe(route MediaRoute) func(http.Handler) http.Handler {
 		// Evaluated once at mount time — Observe returns the middleware, and the
 		// closure below is what runs per request — so the family gate costs
 		// nothing on the hot path.
+		// An unobserved family is declared in publisher coverage and makes the
+		// merged view incomplete, so sessions skipped here cannot be mistaken for
+		// ghosts. An unenrolled route is deliberately not declared: routes do not
+		// exist until routers are built after publishers start, and declarations
+		// are mutable package-global state. Each family's media-route manifest test
+		// instead enforces enrollment as a static invariant.
 		if r == nil || !r.cfg.Enabled || !route.Enrolled || !r.cfg.ObservesFamily(route.Family) {
 			return next
 		}
@@ -80,30 +86,38 @@ func (w *observedWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// ReadFrom samples the cut flag once, at entry, whereas Write samples it every
-// ~32 KB. That difference is protocol-visible: on HTTP/1.1 the h1 writer is an
-// io.ReaderFrom, so a cut cannot interrupt an in-flight transfer and a 20 GB
-// direct play drains to the end; on HTTP/2 there is no ReaderFrom, the fallback
-// io.Copy goes through Write, and the same cut lands within 32 KB.
-//
-// Latent today — nothing calls cut.Store and this package is observational
-// (doc.go) — and deliberately left that way rather than half-fixed: a per-slice
-// cut check here would still only act at readFromChunk granularity, so the two
-// protocols would still disagree, just less visibly. The enforcement change that
-// introduces a caller for cut.Store owns making the granularity uniform, and
-// must land with a test that a cut behaves identically over h1 and h2.
+// ReadFrom is the one wrapper that does not use httpstream.ForwardReadFrom: it
+// needs a per-slice continuation check for the cut flag, which the shared helper
+// deliberately does not carry.
 func (w *observedWriter) ReadFrom(reader io.Reader) (int64, error) {
 	if w.observation.cut.Load() {
 		return 0, context.Canceled
 	}
+	readerFrom, ok := httpstream.ReaderFromOf(w.w)
+	if !ok {
+		// WriterOnly hides ReadFrom so io.Copy cannot recurse into this method;
+		// the bytes then route through Write, which samples the cut itself.
+		return io.Copy(httpstream.WriterOnly(w), reader)
+	}
 	if w.statusCode == 0 {
 		w.statusCode = http.StatusOK
 	}
-	return httpstream.ForwardReadFrom(w.w, w, reader, httpstream.ReadFromChunkDefault, func(n int64, err error) {
+	// Re-check the cut BETWEEN slices, not once at entry. Write samples it every
+	// ~32 KiB, and the HTTP/2 writer has no ReaderFrom so it falls back to that
+	// path; without a per-slice check an HTTP/1.1 sendfile would keep pouring
+	// until the whole file drained, making a kill switch behave differently by
+	// protocol. A slice is as fine as this path gets: once sendfile is in flight
+	// the kernel does not call back into Go.
+	return httpstream.CopyChunkedUntil(readerFrom, reader, httpstream.ReadFromChunkDefault, func(n int64, err error) {
 		if w.bodyEligible {
 			w.observation.AddBytes(n)
 		}
 		w.observation.recordWriteError(err)
+	}, func() error {
+		if w.observation.cut.Load() {
+			return context.Canceled
+		}
+		return nil
 	})
 }
 

@@ -185,3 +185,155 @@ func TestObserveSkipsUnobservedFamily(t *testing.T) {
 		t.Fatalf("observed family sessions = %+v", snapshot.Sessions)
 	}
 }
+
+// The cut flag has to be sampled BETWEEN slices, not once at entry. Write checks
+// it every ~32 KiB and the HTTP/2 writer has no ReaderFrom so it falls back to
+// Write; sampling once at entry left an HTTP/1.1 sendfile of the same session
+// pouring until the whole file drained. That made a kill switch behave
+// differently by protocol, which is why this test asserts both at once rather
+// than pinning h1 alone.
+func TestObservedWriterReadFromCutBehavesTheSameOverH1AndH2(t *testing.T) {
+	const slices = 8
+	total := slices * httpstream.ReadFromChunkDefault
+	cutAfter := 2 * httpstream.ReadFromChunkDefault
+	// One slice of overshoot is the floor on the zero-copy path: the kernel
+	// drives a sendfile already in flight to completion and never calls back
+	// into Go. The HTTP/2 fallback stops far sooner, and is held to the same
+	// bound rather than a tighter one so the assertion is genuinely shared.
+	limit := cutAfter + httpstream.ReadFromChunkDefault
+
+	for _, test := range []struct {
+		name  string
+		http2 bool
+	}{{name: "h1"}, {name: "h2", http2: true}} {
+		t.Run(test.name, func(t *testing.T) {
+			registry := NewRegistry(testConfig(), NewLocalStore(), nil)
+
+			var copied int64
+			var copyErr error
+			done := make(chan struct{})
+			handler := registry.Observe(testRoute(ClassPlayback))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(done)
+				Attach(r.Context(), testAttachment("session-cut"))
+				observation, _ := r.Context().Value(observationContextKey{}).(*Observation)
+				readerFrom, ok := w.(io.ReaderFrom)
+				if !ok {
+					t.Error("observedWriter does not implement io.ReaderFrom")
+					return
+				}
+				copied, copyErr = readerFrom.ReadFrom(&cuttingReader{
+					remaining: total, cutAt: cutAfter, observation: observation,
+				})
+			}))
+
+			server := httptest.NewUnstartedServer(handler)
+			server.EnableHTTP2 = test.http2
+			if test.http2 {
+				server.StartTLS()
+			} else {
+				server.Start()
+			}
+			defer server.Close()
+
+			response, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			if want := "HTTP/2.0"; test.http2 != (response.Proto == want) {
+				t.Fatalf("proto = %q, http2 = %v", response.Proto, test.http2)
+			}
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			<-done
+
+			if copyErr == nil {
+				t.Fatal("cut stream completed; the cut was only sampled at entry")
+			}
+			if copied > limit {
+				t.Fatalf("copied %d bytes after a cut at %d, want at most %d", copied, cutAfter, limit)
+			}
+		})
+	}
+}
+
+// cuttingReader trips the observation's cut flag once the stream has delivered
+// cutAt bytes, standing in for an operator ending a session mid-transfer.
+type cuttingReader struct {
+	remaining   int64
+	delivered   int64
+	cutAt       int64
+	observation *Observation
+}
+
+func (r *cuttingReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, io.EOF
+	}
+	n := int64(len(p))
+	if n > r.remaining {
+		n = r.remaining
+	}
+	r.remaining -= n
+	r.delivered += n
+	if r.delivered >= r.cutAt && r.observation != nil {
+		r.observation.cut.Store(true)
+	}
+	return int(n), nil
+}
+
+// A cut transfer is not a completed delivery, whatever the write path managed to
+// record. The two protocol shapes reach the cut differently — HTTP/1.1 has a
+// ReaderFrom and stops between sendfile slices, while the HTTP/2 writer has none
+// and falls back to Write — and both entry guards return before a byte is
+// attempted, so firstWriteErr can still be nil when the observation is released.
+// Classifying on that alone reported a deliberately severed stream as a full
+// delivery, which is the one thing an operator who just killed a session must
+// never read on the row they killed.
+func TestObservedWriterCutIsNeverReleasedAsCompleted(t *testing.T) {
+	tests := []struct {
+		name string
+		// readerFrom mirrors HTTP/1.1, whose writer has one; its absence mirrors
+		// HTTP/2, which drives the same cut through Write instead.
+		readerFrom bool
+		// cutAtEntry sets the flag before the first write, so nothing is ever
+		// attempted and no write error can exist to classify on.
+		cutAtEntry bool
+	}{
+		{name: "h1 cut mid transfer", readerFrom: true},
+		{name: "h2 cut mid transfer"},
+		{name: "cut before the first write", readerFrom: true, cutAtEntry: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			registry := NewRegistry(testConfig(), NewLocalStore(), nil)
+			obs := registry.begin(testRoute(ClassPlayback), CaptureSet{Method: http.MethodGet, Pattern: "/media/{id}", ReceivedAt: time.Now()})
+			registry.attach(obs, testAttachment("session-cut"))
+
+			var inner http.ResponseWriter = httptest.NewRecorder()
+			if test.readerFrom {
+				inner = &readerFromRecorder{ResponseRecorder: httptest.NewRecorder()}
+			}
+			writer := &observedWriter{w: inner, observation: obs, bodyEligible: true}
+			if test.cutAtEntry {
+				obs.cut.Store(true)
+			}
+			// A cut on the first byte read keeps the transfer to one slice; the
+			// point is which outcome is recorded, not how much escaped first.
+			_, copyErr := writer.ReadFrom(&cuttingReader{
+				remaining: 4 * httpstream.ReadFromChunkDefault, cutAt: 1, observation: obs,
+			})
+			if copyErr == nil {
+				t.Fatal("cut transfer returned no error")
+			}
+
+			registry.release(obs, obs.outcome(nil, true))
+			session := registry.Sweep().Sessions[0]
+			if session.Outcomes[httpstream.OutcomeCompleted] != 0 {
+				t.Fatalf("a cut transfer was released as completed: %+v", session.Outcomes)
+			}
+			if session.Outcomes[httpstream.OutcomeClientGone] != 1 {
+				t.Fatalf("outcomes = %+v, want one %s", session.Outcomes, httpstream.OutcomeClientGone)
+			}
+		})
+	}
+}

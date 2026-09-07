@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 func globalTestParams() ViewParams {
@@ -28,6 +30,10 @@ func globalSet(at time.Time, snapshots ...Snapshot) PublisherSet {
 	return set
 }
 
+func fullCoverage() PublisherCoverage {
+	return PublisherCoverage{Declared: true, ConfiguredFamilies: append([]Family(nil), AllFamilies...)}
+}
+
 func viewerRoute(bytes int64) RouteActivityView {
 	return RouteActivityView{Method: "GET", Pattern: "/stream", Role: RoleViewerEgress, BytesAccepted: bytes}
 }
@@ -36,12 +42,12 @@ func TestBuildGlobalViewMergeRules(t *testing.T) {
 	at := time.Unix(1_700_000_000, 0)
 	claim := at.Add(-time.Minute)
 	firstSeen := at.Add(-2 * time.Minute)
-	one := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: at,
+	one := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: at, Coverage: fullCoverage(),
 		Sessions: []SessionView{{SessionID: "session", Subject: UserSubject(1), ProfileID: "profile", MediaFileID: 10, PlayMethod: "direct",
 			StartedAt: firstSeen, StartedAtSource: StartedAtSourceFirstSeen, StartedAtDegraded: true, ViewerIPs: []string{"192.0.2.1"}, OpenObservations: 2, RequestCount: 3,
 			Routes:       []RouteActivityView{viewerRoute(100), {Method: "GET", Pattern: "/relay", Role: RoleInternalRelay, BytesAccepted: 50}},
 			MediaFileIDs: []int{10}, PlayMethods: []string{"direct"}}}}
-	two := Snapshot{PublisherID: "p2", NodeID: "n2", PublisherEpoch: 2, Sequence: 2, CapturedAt: at,
+	two := Snapshot{PublisherID: "p2", NodeID: "n2", PublisherEpoch: 2, Sequence: 2, CapturedAt: at, Coverage: fullCoverage(),
 		Sessions: []SessionView{{SessionID: "session", Subject: UserSubject(1), ProfileID: "profile", MediaFileID: 10, PlayMethod: "remux",
 			StartedAt: claim, StartedAtSource: StartedAtSourceClaim, ViewerIPs: []string{"192.0.2.2"}, OpenObservations: 4, RequestCount: 5,
 			Routes: []RouteActivityView{viewerRoute(200)}, MediaFileIDs: []int{10, 11}, PlayMethods: []string{"remux"}}}}
@@ -77,6 +83,161 @@ func TestBuildGlobalViewRelayDoesNotSupplyIdentity(t *testing.T) {
 	session := BuildGlobalView(globalSet(at, snapshot), at, globalTestParams()).Sessions[0]
 	if session.Subject != (Subject{}) || session.ProfileID != "" || session.MediaFileID != 0 || session.ViewerBytesAccepted != 0 || session.RelayBytesAccepted != 20 {
 		t.Fatalf("relay merge = %+v", session)
+	}
+}
+
+func TestBuildGlobalViewRelayCannotClaimReportedIdentityFallback(t *testing.T) {
+	at := time.Now()
+	relay := Snapshot{PublisherID: "relay", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(9), ProfileID: "p", MediaFileID: 8,
+		Reported: true, ReportedPaused: true, ReportedPositionSeconds: 12, ReportedAt: at,
+		Routes: []RouteActivityView{{Role: RoleInternalRelay, BytesAccepted: 20}},
+	}}}
+	session := BuildGlobalView(globalSet(at, relay), at, globalTestParams()).Sessions[0]
+	if session.Reported || session.Subject != (Subject{}) || session.ProfileID != "" || session.MediaFileID != 0 {
+		t.Fatalf("relay supplied reported identity: %+v", session)
+	}
+}
+
+func TestBuildGlobalViewReporterCannotClaimMeasuredProvenance(t *testing.T) {
+	at := time.Now()
+	// Everything below the identity block is measured provenance: a session
+	// manager knows what a client told it, never what left the building. The
+	// fields are enumerated one by one because the guard is an allowlist — a
+	// SessionView field the merge folds but the allowlist does not name is a fresh
+	// way to fabricate measured-looking liveness for a session nothing was sent
+	// for, and this test is what fails when the struct grows one.
+	reporter := Snapshot{PublisherID: "api#reported", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(9), Reported: true, ReportedAt: at,
+		MeasurementPruned: true,
+		ViewerIPs:         []string{"192.0.2.1"}, BytesAccepted: 99,
+		Routes:             []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 99}},
+		LastByteAccepted:   at,
+		LastObservationEnd: at,
+		OpenObservations:   3,
+		RequestCount:       7,
+		DeviceIDs:          []string{"device-1"},
+		UserAgents:         []string{"Silo/1.0"},
+		ClientVariants:     []ClientVariant{{Name: "Silo", Version: "1.0"}},
+		MediaFileIDs:       []int{404},
+		TokenIssuedAts:     []time.Time{at},
+		Outcomes:           map[httpstream.StreamOutcome]int64{OutcomeUnknown: 5},
+	}}}
+	session := BuildGlobalView(globalSet(at, reporter), at, globalTestParams()).Sessions[0]
+	if !session.Reported || session.MeasurementPruned || session.ViewerBytesAccepted != 0 || len(session.ViewerIPs) != 0 ||
+		len(session.ViewerEdgePublishers) != 0 || len(session.Routes) != 0 {
+		t.Fatalf("reporter supplied measured provenance: %+v", session)
+	}
+	// Liveness. Any one of these on its own makes a session nothing is being sent
+	// for read as one that is actively being served, which is the #666 shape this
+	// whole view exists to tell apart.
+	if !session.LastByteAccepted.IsZero() || !session.LastObservationEnd.IsZero() ||
+		session.OpenObservations != 0 || session.RequestCount != 0 {
+		t.Fatalf("reporter supplied measured liveness: %+v", session)
+	}
+	// Client identity and per-request history, every field of which is read off an
+	// observed request that a reporting publisher never sees.
+	if len(session.DeviceIDs) != 0 || len(session.UserAgents) != 0 || len(session.ClientVariants) != 0 ||
+		len(session.MediaFileIDs) != 0 || len(session.TokenIssuedAts) != 0 || len(session.Outcomes) != 0 {
+		t.Fatalf("reporter supplied measured client identity: %+v", session)
+	}
+}
+
+func TestBuildGlobalViewMergesTombstoneAsAttributedViewerMemory(t *testing.T) {
+	at := time.Now()
+	tombstone := Snapshot{PublisherID: "edge", NodeID: "node", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", MeasurementPruned: true, RoutesOverflowed: true,
+		Routes: []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 4096, LastByteAccepted: at.Add(-time.Minute)}},
+	}}}
+	session := BuildGlobalView(globalSet(at, tombstone), at, globalTestParams()).Sessions[0]
+	if !session.MeasurementPruned || session.ViewerBytesAccepted != 4096 || !session.BytesDegraded {
+		t.Fatalf("tombstone merge = %+v", session)
+	}
+	if len(session.ViewerEdgePublishers) != 1 || session.ViewerEdgePublishers[0].PublisherID != "edge" {
+		t.Fatalf("viewer edge publishers = %+v", session.ViewerEdgePublishers)
+	}
+}
+
+func TestBuildGlobalViewLiveMeasurementOverridesPrunedFlag(t *testing.T) {
+	at := time.Now()
+	tombstone := Snapshot{PublisherID: "old", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", MeasurementPruned: true, Routes: []RouteActivityView{viewerRoute(10)},
+	}}}
+	live := Snapshot{PublisherID: "live", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Routes: []RouteActivityView{viewerRoute(20)},
+	}}}
+	session := BuildGlobalView(globalSet(at, live, tombstone), at, globalTestParams()).Sessions[0]
+	if session.MeasurementPruned || session.ViewerBytesAccepted != 30 {
+		t.Fatalf("mixed live/pruned merge = %+v", session)
+	}
+}
+
+func TestBuildGlobalViewReportedAndTombstoneKeepsEdgeIdentity(t *testing.T) {
+	at := time.Now()
+	tombstone := Snapshot{PublisherID: "edge", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(7), ProfileID: "profile", MeasurementPruned: true,
+		Routes: []RouteActivityView{viewerRoute(100)},
+	}}}
+	reporter := Snapshot{PublisherID: "edge#reported", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(99), ProfileID: "other", Reported: true, ReportedAt: at,
+	}}}
+	session := BuildGlobalView(globalSet(at, reporter, tombstone), at, globalTestParams()).Sessions[0]
+	if !session.Reported || session.Subject != UserSubject(7) || session.ProfileID != "profile" {
+		t.Fatalf("reported tombstone identity = %+v", session)
+	}
+}
+
+func TestBuildGlobalViewTruncationPrefersLiveAndReportedSessions(t *testing.T) {
+	at := time.Now()
+	measuring := Snapshot{PublisherID: "edge", CapturedAt: at, Sessions: []SessionView{
+		{SessionID: "a-tombstone", MeasurementPruned: true, Routes: []RouteActivityView{viewerRoute(1)}},
+		{SessionID: "b-tombstone", MeasurementPruned: true, Routes: []RouteActivityView{viewerRoute(1)}},
+		{SessionID: "z-live", Routes: []RouteActivityView{viewerRoute(1)}},
+	}}
+	reporting := Snapshot{PublisherID: "edge#reported", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "z-reported", Reported: true, ReportedAt: at,
+	}}}
+	params := globalTestParams()
+	params.MaxMergedSessions = 2
+	view := BuildGlobalView(globalSet(at, measuring, reporting), at, params)
+	if len(view.Sessions) != 2 || view.Sessions[0].SessionID != "z-live" || view.Sessions[1].SessionID != "z-reported" {
+		t.Fatalf("truncated sessions = %+v, want live and reported ids", view.Sessions)
+	}
+	if !view.Truncated {
+		t.Fatal("session truncation was not reported")
+	}
+}
+
+// A relay is not a viewer edge: the only address it can see is the proxy in front
+// of it, not the viewer's. mergeSession unions ViewerIPs with no provenance check
+// of its own, so a relay that recorded one would put an internal hop into the set
+// an operator reads as "who is watching" — and an implausible count in that set is
+// the abuse signal it exists for. Publishers omit it by convention today; this
+// pins that the merge does not depend on the convention holding.
+func TestBuildGlobalViewRelayDoesNotSupplyViewerIPs(t *testing.T) {
+	at := time.Now()
+	relay := Snapshot{PublisherID: "relay", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", ViewerIPs: []string{"10.10.10.100"}, ViewerIPsOverflowed: true,
+		Routes: []RouteActivityView{{Role: RoleInternalRelay, BytesAccepted: 20}},
+	}}}
+	edge := Snapshot{PublisherID: "edge", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", ViewerIPs: []string{"203.0.113.7"},
+		Routes: []RouteActivityView{viewerRoute(20)},
+	}}}
+
+	merged := BuildGlobalView(globalSet(at, relay, edge), at, globalTestParams()).Sessions[0]
+	if !reflect.DeepEqual(merged.ViewerIPs, []string{"203.0.113.7"}) {
+		t.Fatalf("viewer IPs = %v, want only the viewer edge's", merged.ViewerIPs)
+	}
+	if merged.ViewerIPsOverflowed {
+		t.Fatal("a relay's overflow flag survived the address it was counting")
+	}
+
+	// With no edge present at all the relay still supplies none: an empty set is
+	// the honest answer, not a license to fall back on whatever the hop could see.
+	relayOnly := BuildGlobalView(globalSet(at, relay), at, globalTestParams()).Sessions[0]
+	if len(relayOnly.ViewerIPs) != 0 || relayOnly.ViewerIPsOverflowed {
+		t.Fatalf("relay-only viewer IPs = %v (overflowed=%t), want none", relayOnly.ViewerIPs, relayOnly.ViewerIPsOverflowed)
 	}
 }
 
@@ -189,7 +350,7 @@ func TestBuildGlobalViewMergesSeparateViewerAndRelayPublishers(t *testing.T) {
 func TestBuildGlobalViewCompleteness(t *testing.T) {
 	at := time.Now()
 	params := globalTestParams()
-	fresh := Snapshot{PublisherID: "p", NodeID: "n", CapturedAt: at}
+	fresh := Snapshot{PublisherID: "p", NodeID: "n", CapturedAt: at, Coverage: fullCoverage()}
 	tests := []struct {
 		name     string
 		set      PublisherSet
@@ -197,11 +358,11 @@ func TestBuildGlobalViewCompleteness(t *testing.T) {
 		complete bool
 	}{
 		{name: "fresh", set: globalSet(at, fresh), complete: true},
-		{name: "stale", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at}}, Snapshots: []Snapshot{{PublisherID: "p", NodeID: "n", CapturedAt: at.Add(-params.Freshness - time.Second)}}}, reason: "missing_publisher"},
+		{name: "stale", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at}}, Snapshots: []Snapshot{{PublisherID: "p", NodeID: "n", CapturedAt: at.Add(-params.Freshness - time.Second), Coverage: fullCoverage()}}}, reason: "missing_publisher"},
 		{name: "never published", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at}}}, reason: "missing_publisher"},
 		{name: "departed", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at.Add(-params.MembershipTTL - time.Second)}}}, complete: true},
 		{name: "publisher truncated", set: globalSet(at, func() Snapshot { value := fresh; value.Truncated = true; return value }()), reason: "publisher_truncated"},
-		{name: "reader truncated", set: PublisherSet{Members: globalSet(at, fresh).Members, Snapshots: []Snapshot{fresh}, Truncated: true}, reason: "truncated"},
+		{name: "reader truncated", set: PublisherSet{Members: globalSet(at, fresh).Members, Snapshots: []Snapshot{fresh}, SessionsTruncated: true}, reason: "truncated"},
 		{name: "decode errors", set: PublisherSet{Members: globalSet(at, fresh).Members, Snapshots: []Snapshot{fresh}, Errors: []PublisherError{{PublisherID: "p", DecodeErrors: 1, Reason: "decode"}}}, reason: "decode_errors"},
 	}
 	for _, test := range tests {
@@ -217,6 +378,111 @@ func TestBuildGlobalViewCompleteness(t *testing.T) {
 				t.Fatalf("missing = %+v", view.MissingPublishers)
 			}
 		})
+	}
+}
+
+func TestBuildGlobalViewDistinguishesEmptyReporterFromMissingReporter(t *testing.T) {
+	at := time.Now()
+	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at,
+		ReportingPublisherID: "api#reported", Coverage: fullCoverage()}
+	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node", CapturedAt: at,
+		Coverage: PublisherCoverage{Declared: true}}
+
+	complete := BuildGlobalView(globalSet(at, measuring, reporting), at, globalTestParams())
+	if !complete.Complete || len(complete.MissingPublishers) != 0 {
+		t.Fatalf("empty reporter treated as missing: complete=%v reasons=%v missing=%+v",
+			complete.Complete, complete.IncompleteReasons, complete.MissingPublishers)
+	}
+
+	missing := BuildGlobalView(globalSet(at, measuring), at, globalTestParams())
+	if missing.Complete || !slices.Contains(missing.IncompleteReasons, "missing_reported_publisher") {
+		t.Fatalf("absent reporter not detected: complete=%v reasons=%v", missing.Complete, missing.IncompleteReasons)
+	}
+	if len(missing.MissingPublishers) != 1 || missing.MissingPublishers[0].PublisherID != "api#reported" {
+		t.Fatalf("missing publishers = %+v, want the declared reporter once", missing.MissingPublishers)
+	}
+
+	noReporter := measuring
+	noReporter.ReportingPublisherID = ""
+	explicitNone := BuildGlobalView(globalSet(at, noReporter), at, globalTestParams())
+	if !explicitNone.Complete || slices.Contains(explicitNone.IncompleteReasons, "missing_reported_publisher") {
+		t.Fatalf("declared no-reporter process = complete %v reasons %v", explicitNone.Complete, explicitNone.IncompleteReasons)
+	}
+
+	undeclared := noReporter
+	undeclared.Coverage = PublisherCoverage{}
+	unknown := BuildGlobalView(globalSet(at, undeclared), at, globalTestParams())
+	if unknown.Complete || !slices.Contains(unknown.IncompleteReasons, "unknown_publisher_coverage") ||
+		slices.Contains(unknown.IncompleteReasons, "missing_reported_publisher") || len(unknown.MissingPublishers) != 0 {
+		t.Fatalf("undeclared coverage = complete %v reasons %v missing %+v", unknown.Complete, unknown.IncompleteReasons, unknown.MissingPublishers)
+	}
+}
+
+func TestBuildGlobalViewDoesNotDuplicateStaleDeclaredReporter(t *testing.T) {
+	at := time.Now()
+	params := globalTestParams()
+	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at,
+		ReportingPublisherID: "api#reported", Coverage: fullCoverage()}
+	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node",
+		CapturedAt: at.Add(-params.Freshness - time.Second), Coverage: PublisherCoverage{Declared: true}}
+	view := BuildGlobalView(globalSet(at, measuring, reporting), at, params)
+
+	if len(view.MissingPublishers) != 1 || view.MissingPublishers[0].PublisherID != "api#reported" {
+		t.Fatalf("missing publishers = %+v, want the stale declared reporter once", view.MissingPublishers)
+	}
+	if !slices.Contains(view.IncompleteReasons, "missing_reported_publisher") {
+		t.Fatalf("reasons = %v, want missing_reported_publisher", view.IncompleteReasons)
+	}
+}
+
+func TestBuildGlobalViewUndeclaredCoverageIsIncomplete(t *testing.T) {
+	at := time.Now()
+	view := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "old", CapturedAt: at}), at, globalTestParams())
+	if view.Complete || !slices.Contains(view.IncompleteReasons, "unknown_publisher_coverage") ||
+		slices.Contains(view.IncompleteReasons, "missing_reported_publisher") || len(view.MissingPublishers) != 0 {
+		t.Fatalf("view = complete %v reasons %v missing %+v", view.Complete, view.IncompleteReasons, view.MissingPublishers)
+	}
+}
+
+func TestBuildGlobalViewFullyDeclaredFleetIsComplete(t *testing.T) {
+	at := time.Now()
+	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at, Coverage: fullCoverage(), ReportingPublisherID: "api#reported"}
+	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node", CapturedAt: at, Coverage: PublisherCoverage{Declared: true}}
+	view := BuildGlobalView(globalSet(at, measuring, reporting), at, globalTestParams())
+	if !view.Complete || len(view.IncompleteReasons) != 0 {
+		t.Fatalf("fully declared fleet = complete %v reasons %v", view.Complete, view.IncompleteReasons)
+	}
+}
+
+func TestBuildGlobalViewNarrowedFamiliesIsIncomplete(t *testing.T) {
+	at := time.Now()
+	for _, test := range []struct {
+		name     string
+		families []Family
+	}{
+		{name: "missing one", families: append([]Family(nil), AllFamilies[:len(AllFamilies)-1]...)},
+		{name: "empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			view := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "api", CapturedAt: at,
+				Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: test.families}}), at, globalTestParams())
+			if view.Complete || !slices.Contains(view.IncompleteReasons, "partial_family_observation") {
+				t.Fatalf("view = complete %v reasons %v", view.Complete, view.IncompleteReasons)
+			}
+		})
+	}
+}
+
+func TestBuildGlobalViewReportingPublisherNeedsNoFamilies(t *testing.T) {
+	at := time.Now()
+	empty := PublisherCoverage{Declared: true}
+	reporting := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "api#reported", CapturedAt: at, Coverage: empty}), at, globalTestParams())
+	if !reporting.Complete || slices.Contains(reporting.IncompleteReasons, "partial_family_observation") {
+		t.Fatalf("reporting view = complete %v reasons %v", reporting.Complete, reporting.IncompleteReasons)
+	}
+	measuring := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "api", CapturedAt: at, Coverage: empty}), at, globalTestParams())
+	if measuring.Complete || !slices.Contains(measuring.IncompleteReasons, "partial_family_observation") {
+		t.Fatalf("measuring view = complete %v reasons %v", measuring.Complete, measuring.IncompleteReasons)
 	}
 }
 
@@ -259,6 +525,48 @@ func TestBuildGlobalViewBoundsTransfersAndSaturation(t *testing.T) {
 	}
 }
 
+// A publisher whose transfer table filled is an operator-visible degradation and
+// nothing more. It must never reach IncompleteReasons or Complete: the admin
+// reader keys ghost classification off Complete, and a transfer key is minted
+// partly from client-supplied device ids, so a client could otherwise switch
+// detection off for the whole fleet.
+func TestBuildGlobalViewTransferTruncationIsAdvisoryOnly(t *testing.T) {
+	at := time.Now()
+	full := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage(), TransfersTruncated: true,
+		DroppedTransferObservations: 4}
+	view := BuildGlobalView(globalSet(at, full), at, globalTestParams())
+	if !view.Complete {
+		t.Fatalf("transfer truncation made the view incomplete: %v", view.IncompleteReasons)
+	}
+	if slices.Contains(view.IncompleteReasons, "publisher_transfer_capacity") ||
+		slices.Contains(view.IncompleteReasons, "publisher_truncated") {
+		t.Fatalf("incomplete reasons = %v", view.IncompleteReasons)
+	}
+	if !slices.Contains(view.Advisories, "publisher_transfer_capacity") {
+		t.Fatalf("advisories = %v, want publisher_transfer_capacity", view.Advisories)
+	}
+	if !view.TransfersTruncated || view.DroppedTransferObservations != 4 {
+		t.Fatalf("merged transfer counters = %v/%d", view.TransfersTruncated, view.DroppedTransferObservations)
+	}
+	// Degraded is an input to the completeness reasoning, so it stays out of a
+	// client's reach too.
+	if view.Publishers[0].State != PublisherFresh || !view.Publishers[0].TransfersTruncated {
+		t.Fatalf("publisher status = %+v", view.Publishers[0])
+	}
+}
+
+// The merged transfer counter saturates like every other Dropped* counter rather
+// than wrapping negative.
+func TestBuildGlobalViewSaturatesDroppedTransferObservations(t *testing.T) {
+	at := time.Now()
+	one := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage(), DroppedTransferObservations: math.MaxInt64}
+	two := Snapshot{PublisherID: "b", CapturedAt: at, Coverage: fullCoverage(), DroppedTransferObservations: 5}
+	view := BuildGlobalView(globalSet(at, one, two), at, globalTestParams())
+	if view.DroppedTransferObservations != math.MaxInt64 {
+		t.Fatalf("dropped transfer observations wrapped: %d", view.DroppedTransferObservations)
+	}
+}
+
 func TestBuildGlobalViewWholeViewPermutationInvariant(t *testing.T) {
 	at := time.Now()
 	one := Snapshot{PublisherID: "b", PublisherEpoch: 2, Sequence: 3, CapturedAt: at, Sessions: []SessionView{
@@ -276,5 +584,154 @@ func TestBuildGlobalViewWholeViewPermutationInvariant(t *testing.T) {
 	rightJSON, _ := json.Marshal(right)
 	if string(leftJSON) != string(rightJSON) {
 		t.Fatalf("permutation changed view\nleft: %s\nright:%s", leftJSON, rightJSON)
+	}
+}
+
+// The session manager knows when playback began; the edge only knows when it
+// first saw bytes. StartedAtSourceSession outranks first_seen precisely to say
+// so, but a reporting publisher is never a viewer edge, so the merge has to let
+// it supply the instant or the authoritative rung never applies to a session
+// that is actually streaming.
+func TestBuildGlobalViewReportedStartedAtOutranksTheEdge(t *testing.T) {
+	at := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	trueStart := at.Add(-10 * time.Minute)
+	firstSeen := at.Add(-9 * time.Minute)
+
+	edge := Snapshot{PublisherID: "api-1", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s1", Subject: UserSubject(7),
+		StartedAt: firstSeen, StartedAtSource: StartedAtSourceFirstSeen, StartedAtDegraded: true,
+		BytesAccepted: 4096,
+		Routes: []RouteActivityView{{
+			Method: "GET", Pattern: "/x", Role: RoleViewerEgress, BytesAccepted: 4096,
+		}},
+	}}}
+	reporter := Snapshot{PublisherID: ReportedPublisherIDFor("api-1"), CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s1", Subject: UserSubject(7),
+		StartedAt: trueStart, StartedAtSource: StartedAtSourceSession,
+		Reported: true, ReportedAt: at,
+	}}}
+
+	view := BuildGlobalView(PublisherSet{
+		Members: []Member{
+			{PublisherID: "api-1", LastHeartbeat: at},
+			{PublisherID: ReportedPublisherIDFor("api-1"), LastHeartbeat: at},
+		},
+		Snapshots: []Snapshot{edge, reporter},
+	}, at, ViewParams{Freshness: 5 * time.Second, MaxMergedSessions: 100, MaxMergedTransfers: 100})
+
+	if len(view.Sessions) != 1 {
+		t.Fatalf("sessions = %+v, want one merged session", view.Sessions)
+	}
+	session := view.Sessions[0]
+	if !session.StartedAt.Equal(trueStart) || session.StartedAtSource != StartedAtSourceSession {
+		t.Fatalf("started at = %v from %q, want %v from %q",
+			session.StartedAt.UTC(), session.StartedAtSource, trueStart, StartedAtSourceSession)
+	}
+	// StartedAtDegraded stays true, and that is main's settled convention rather
+	// than an oversight: the flag means "someone contributing to this row was
+	// guessing", which the edge's first_seen was. What this test pins is that the
+	// value SERVED is the authoritative one, not the guess.
+	if !session.StartedAtDegraded {
+		t.Fatal("a degraded contributor stopped being carried onto the row")
+	}
+	// The edge is still the only one that served bytes.
+	if len(session.ViewerEdgePublishers) != 1 || session.ViewerEdgePublishers[0].PublisherID != "api-1" {
+		t.Fatalf("viewer edge publishers = %+v, want only the measuring publisher", session.ViewerEdgePublishers)
+	}
+}
+
+// Two processes reporting one session — the shape a session that moved between
+// them takes — disagree about the start. The earlier instant is kept and the
+// row says it is degraded, rather than one process silently winning.
+func TestBuildGlobalViewTwoReportersDisagreeingOnStartIsDegraded(t *testing.T) {
+	at := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	earlier, later := at.Add(-10*time.Minute), at.Add(-8*time.Minute)
+
+	reporterOf := func(id string, startedAt time.Time) Snapshot {
+		return Snapshot{PublisherID: ReportedPublisherIDFor(id), CapturedAt: at, Sessions: []SessionView{{
+			SessionID: "s1", Subject: UserSubject(7),
+			StartedAt: startedAt, StartedAtSource: StartedAtSourceSession,
+			Reported: true, ReportedAt: at,
+		}}}
+	}
+
+	view := BuildGlobalView(PublisherSet{
+		Members: []Member{
+			{PublisherID: ReportedPublisherIDFor("api-1"), LastHeartbeat: at},
+			{PublisherID: ReportedPublisherIDFor("api-2"), LastHeartbeat: at},
+		},
+		Snapshots: []Snapshot{reporterOf("api-1", earlier), reporterOf("api-2", later)},
+	}, at, ViewParams{Freshness: 5 * time.Second, MaxMergedSessions: 100, MaxMergedTransfers: 100})
+
+	session := view.Sessions[0]
+	if !session.StartedAt.Equal(earlier) {
+		t.Fatalf("started at = %v, want the earlier %v", session.StartedAt.UTC(), earlier)
+	}
+	if !session.StartedAtDegraded {
+		t.Fatal("two reporters disagreeing about the start was not marked degraded")
+	}
+}
+
+// The READER-side aggregate transfer budget carries exactly the signal a
+// publisher's own full transfer table carries, so it has to land in the same
+// place. It did not: the store raised one shared Truncated for both shortfalls,
+// so a fleet holding more transfers between them than MaxMergedTransfers made
+// the merged view incomplete — and an incomplete view clears no_delivery and
+// unclaimed_idle on every row for every reader. A transfer identity is minted
+// partly from client-supplied input, which makes that budget reachable by one
+// authenticated client. Session truncation, which really can hide a session,
+// must keep making the view incomplete.
+func TestBuildGlobalViewAggregateTransferTruncationIsAdvisoryOnly(t *testing.T) {
+	at := time.Now()
+	healthy := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage()}
+
+	transfers := globalSet(at, healthy)
+	transfers.TransfersTruncated = true
+	view := BuildGlobalView(transfers, at, globalTestParams())
+	if !view.Complete {
+		t.Fatalf("aggregate transfer truncation made the view incomplete: %v", view.IncompleteReasons)
+	}
+	if slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("incomplete reasons = %v", view.IncompleteReasons)
+	}
+	if !slices.Contains(view.Advisories, "publisher_transfer_capacity") {
+		t.Fatalf("advisories = %v, want publisher_transfer_capacity", view.Advisories)
+	}
+
+	sessions := globalSet(at, healthy)
+	sessions.SessionsTruncated = true
+	view = BuildGlobalView(sessions, at, globalTestParams())
+	if view.Complete || !slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("session truncation did not degrade the view: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
+	}
+}
+
+// The merge's own MaxMergedTransfers cap is the same class of shortfall as the
+// store's, and answers to the same rule. MaxMergedSessions is not: a session
+// dropped from the merge is a session no reader can see.
+func TestMergeTransferCapIsAdvisoryButSessionCapIsNot(t *testing.T) {
+	at := time.Now()
+	one := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage(),
+		Sessions:  []SessionView{{SessionID: "s1"}, {SessionID: "s2"}},
+		Transfers: []TransferView{{ID: "t1"}, {ID: "t2"}}}
+
+	params := globalTestParams()
+	params.MaxMergedTransfers = 1
+	view := BuildGlobalView(globalSet(at, one), at, params)
+	if !view.Complete || slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("merged transfer cap made the view incomplete: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
+	}
+	if !view.TransfersTruncated || !slices.Contains(view.Advisories, "publisher_transfer_capacity") {
+		t.Fatalf("merged transfer cap advisory = %v truncated=%v", view.Advisories, view.TransfersTruncated)
+	}
+
+	params = globalTestParams()
+	params.MaxMergedSessions = 1
+	view = BuildGlobalView(globalSet(at, one), at, params)
+	if view.Complete || !slices.Contains(view.IncompleteReasons, "truncated") {
+		t.Fatalf("merged session cap did not degrade the view: complete=%v reasons=%v",
+			view.Complete, view.IncompleteReasons)
 	}
 }

@@ -54,27 +54,31 @@ type wireIdentityConflict struct {
 }
 
 type wireSession struct {
-	V                           int                                `json:"v"`
-	Subject                     wireSubject                        `json:"sub"`
-	ProfileID                   string                             `json:"pid"`
-	SessionID                   string                             `json:"sid"`
-	MediaFileID                 int                                `json:"mfid"`
-	PlayMethod                  string                             `json:"pm"`
-	MediaFileIDs                []int                              `json:"mfids"`
-	MediaFileIDsOverflowed      bool                               `json:"mfido"`
-	PlayMethods                 []string                           `json:"pms"`
-	PlayMethodsOverflowed       bool                               `json:"pmo"`
-	StartedAt                   int64                              `json:"st"`
-	StartedAtSource             StartedAtSource                    `json:"sts"`
-	StartedAtDegraded           bool                               `json:"std"`
-	BytesAccepted               int64                              `json:"ba"`
-	LastByteAccepted            int64                              `json:"lb"`
-	LastObservationEnd          int64                              `json:"le"`
-	OpenObservations            int                                `json:"oo"`
-	RealtimeConnectionAlive     bool                               `json:"rt"`
-	RequestCount                int64                              `json:"rc"`
-	Routes                      []wireRouteActivity                `json:"routes"`
-	RoutesOverflowed            bool                               `json:"ro"`
+	V                       int                 `json:"v"`
+	Subject                 wireSubject         `json:"sub"`
+	ProfileID               string              `json:"pid"`
+	SessionID               string              `json:"sid"`
+	MediaFileID             int                 `json:"mfid"`
+	PlayMethod              string              `json:"pm"`
+	MediaFileIDs            []int               `json:"mfids"`
+	MediaFileIDsOverflowed  bool                `json:"mfido"`
+	PlayMethods             []string            `json:"pms"`
+	PlayMethodsOverflowed   bool                `json:"pmo"`
+	StartedAt               int64               `json:"st"`
+	StartedAtSource         StartedAtSource     `json:"sts"`
+	StartedAtDegraded       bool                `json:"std"`
+	BytesAccepted           int64               `json:"ba"`
+	LastByteAccepted        int64               `json:"lb"`
+	LastObservationEnd      int64               `json:"le"`
+	OpenObservations        int                 `json:"oo"`
+	RealtimeConnectionAlive bool                `json:"rt"`
+	RequestCount            int64               `json:"rc"`
+	Routes                  []wireRouteActivity `json:"routes"`
+	RoutesOverflowed        bool                `json:"ro"`
+	// ObservationsOverflowed is additive at codec v1: omitempty keeps a record
+	// written by an older publisher byte-identical, so the field costs nothing
+	// until a session actually overflows.
+	ObservationsOverflowed      bool                               `json:"obso,omitempty"`
 	ViewerIPs                   []string                           `json:"ips"`
 	ViewerIPsOverflowed         bool                               `json:"ipso"`
 	DeviceIDs                   []string                           `json:"dids"`
@@ -90,17 +94,32 @@ type wireSession struct {
 	HasIdentityConflict         bool                               `json:"hic"`
 	IdentityConflicts           []wireIdentityConflict             `json:"ics"`
 	IdentityConflictsOverflowed bool                               `json:"icso"`
+
+	// Reported-state block. These are additive: encoding/json ignores unknown
+	// fields on decode and leaves missing ones zero, so a publisher running older
+	// code stays decodable and simply contributes no reported state. That is why
+	// adding them needs no codecVersion bump, which would have made every older
+	// publisher's records undecodable through a rolling deploy.
+	MeasurementPruned       bool    `json:"mprn,omitempty"`
+	Reported                bool    `json:"rep,omitempty"`
+	ReportedPaused          bool    `json:"reppa,omitempty"`
+	ReportedPositionSeconds float64 `json:"reppos,omitempty"`
+	ReportedAt              int64   `json:"repat,omitempty"`
 }
 
 type wireTransfer struct {
-	V                  int                                `json:"v"`
-	ID                 string                             `json:"id"`
-	Subject            wireSubject                        `json:"sub"`
-	ProfileID          string                             `json:"pid"`
-	MediaFileID        int                                `json:"mfid"`
-	Method             string                             `json:"m"`
-	Pattern            string                             `json:"p"`
-	Role               Role                               `json:"r"`
+	V           int         `json:"v"`
+	ID          string      `json:"id"`
+	Subject     wireSubject `json:"sub"`
+	ProfileID   string      `json:"pid"`
+	MediaFileID int         `json:"mfid"`
+	Method      string      `json:"m"`
+	Pattern     string      `json:"p"`
+	Role        Role        `json:"r"`
+	// Class is additive at codec v1 like Overflowed below: a record from an
+	// un-upgraded publisher decodes with an empty class, which a consumer treats
+	// as an ordinary transfer.
+	Class              Class                              `json:"c,omitempty"`
 	BytesAccepted      int64                              `json:"ba"`
 	LastByteAccepted   int64                              `json:"lb"`
 	LastObservationEnd int64                              `json:"le"`
@@ -111,22 +130,42 @@ type wireTransfer struct {
 	Client             wireClientVariant                  `json:"client"`
 	UserAgent          string                             `json:"ua"`
 	Outcomes           map[httpstream.StreamOutcome]int64 `json:"out"`
+	// Overflowed is additive at codec v1: omitempty keeps a record written by an
+	// un-upgraded publisher decodable, exactly as the cov field and the reported
+	// block are.
+	Overflowed bool `json:"ovf,omitempty"`
 }
 
 type publisherMeta struct {
-	V                        int    `json:"v"`
-	PublisherID              string `json:"pid"`
-	NodeID                   string `json:"nid"`
-	Epoch                    int64  `json:"ep"`
-	Sequence                 uint64 `json:"sq"`
-	CapturedAtUnixNano       int64  `json:"cap"`
-	Truncated                bool   `json:"tr"`
-	DroppedObservations      int64  `json:"do"`
-	DroppedBytes             int64  `json:"db"`
-	UnattributedObservations int64  `json:"uo"`
-	UnattributedBytes        int64  `json:"ub"`
-	SessionCount             int    `json:"sc"`
-	TransferCount            int    `json:"tc"`
+	V                    int    `json:"v"`
+	PublisherID          string `json:"pid"`
+	ReportingPublisherID string `json:"rpid,omitempty"`
+	// Coverage is additive metadata under codec v1. The pointer is the wire
+	// tri-state: absent means an older publisher made no declaration, while a
+	// present object with fam:[] explicitly observes no families. Bumping the
+	// codec version instead would make every un-upgraded publisher undecodable
+	// during the rolling deploy this declaration is meant to describe safely.
+	Coverage            *wireCoverage `json:"cov,omitempty"`
+	NodeID              string        `json:"nid"`
+	Epoch               int64         `json:"ep"`
+	Sequence            uint64        `json:"sq"`
+	CapturedAtUnixNano  int64         `json:"cap"`
+	Truncated           bool          `json:"tr"`
+	DroppedObservations int64         `json:"do"`
+	// Transfer-table blindness is additive at codec v1, for the same reason the
+	// cov field and the reported block are: omitempty keeps an un-upgraded
+	// publisher's meta decodable through a rolling deploy.
+	TransfersTruncated          bool  `json:"ttr,omitempty"`
+	DroppedTransferObservations int64 `json:"dto,omitempty"`
+	DroppedBytes                int64 `json:"db"`
+	UnattributedObservations    int64 `json:"uo"`
+	UnattributedBytes           int64 `json:"ub"`
+	SessionCount                int   `json:"sc"`
+	TransferCount               int   `json:"tc"`
+}
+
+type wireCoverage struct {
+	Families []string `json:"fam"`
 }
 
 func timeToUnixNano(value time.Time) int64 {
@@ -163,11 +202,15 @@ func encodeSession(value SessionView) ([]byte, error) {
 		StartedAt: timeToUnixNano(value.StartedAt), StartedAtSource: value.StartedAtSource, StartedAtDegraded: value.StartedAtDegraded,
 		BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
 		OpenObservations: value.OpenObservations, RealtimeConnectionAlive: value.RealtimeConnectionAlive, RequestCount: value.RequestCount,
-		RoutesOverflowed: value.RoutesOverflowed, ViewerIPs: value.ViewerIPs, ViewerIPsOverflowed: value.ViewerIPsOverflowed,
+		RoutesOverflowed: value.RoutesOverflowed, ObservationsOverflowed: value.ObservationsOverflowed,
+		ViewerIPs: value.ViewerIPs, ViewerIPsOverflowed: value.ViewerIPsOverflowed,
 		DeviceIDs: value.DeviceIDs, DeviceIDsOverflowed: value.DeviceIDsOverflowed, UserAgents: value.UserAgents, UserAgentsOverflowed: value.UserAgentsOverflowed,
 		TokenIssuedAtsOverflowed: value.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources:     value.TokenIssuedAtSources, Outcomes: value.Outcomes, HasIdentityConflict: value.HasIdentityConflict,
-		IdentityConflictsOverflowed: value.IdentityConflictsOverflowed, ClientVariantsOverflowed: value.ClientVariantsOverflowed}
+		IdentityConflictsOverflowed: value.IdentityConflictsOverflowed, ClientVariantsOverflowed: value.ClientVariantsOverflowed,
+		MeasurementPruned: value.MeasurementPruned,
+		Reported:          value.Reported, ReportedPaused: value.ReportedPaused,
+		ReportedPositionSeconds: value.ReportedPositionSeconds, ReportedAt: timeToUnixNano(value.ReportedAt)}
 	for _, route := range value.Routes {
 		w.Routes = append(w.Routes, wireRouteActivity{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeToUnixNano(route.LastByteAccepted), LastObservationEnd: timeToUnixNano(route.LastObservationEnd)})
 	}
@@ -199,10 +242,14 @@ func decodeSession(data []byte) (SessionView, error) {
 		PlayMethods: w.PlayMethods, PlayMethodsOverflowed: w.PlayMethodsOverflowed, StartedAt: timeFromUnixNano(w.StartedAt), StartedAtSource: w.StartedAtSource,
 		StartedAtDegraded: w.StartedAtDegraded, BytesAccepted: w.BytesAccepted, LastByteAccepted: timeFromUnixNano(w.LastByteAccepted), LastObservationEnd: timeFromUnixNano(w.LastObservationEnd),
 		OpenObservations: w.OpenObservations, RealtimeConnectionAlive: w.RealtimeConnectionAlive, RequestCount: w.RequestCount, RoutesOverflowed: w.RoutesOverflowed,
-		ViewerIPs: w.ViewerIPs, ViewerIPsOverflowed: w.ViewerIPsOverflowed, DeviceIDs: w.DeviceIDs, DeviceIDsOverflowed: w.DeviceIDsOverflowed,
+		ObservationsOverflowed: w.ObservationsOverflowed,
+		ViewerIPs:              w.ViewerIPs, ViewerIPsOverflowed: w.ViewerIPsOverflowed, DeviceIDs: w.DeviceIDs, DeviceIDsOverflowed: w.DeviceIDsOverflowed,
 		UserAgents: w.UserAgents, UserAgentsOverflowed: w.UserAgentsOverflowed, TokenIssuedAtsOverflowed: w.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources: w.TokenIssuedAtSources, Outcomes: w.Outcomes, HasIdentityConflict: w.HasIdentityConflict,
-		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed}
+		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed,
+		MeasurementPruned: w.MeasurementPruned,
+		Reported:          w.Reported, ReportedPaused: w.ReportedPaused,
+		ReportedPositionSeconds: w.ReportedPositionSeconds, ReportedAt: timeFromUnixNano(w.ReportedAt)}
 	for _, route := range w.Routes {
 		v.Routes = append(v.Routes, RouteActivityView{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeFromUnixNano(route.LastByteAccepted), LastObservationEnd: timeFromUnixNano(route.LastObservationEnd)})
 	}
@@ -240,6 +287,12 @@ func validateSessionWire(w wireSession) error {
 		if route.Open < 0 || route.Requests < 0 || route.BytesAccepted < 0 {
 			return errors.New("negative route counter")
 		}
+		if w.MeasurementPruned && route.Open > 0 {
+			return errors.New("pruned measurement has open route")
+		}
+	}
+	if w.MeasurementPruned && w.OpenObservations > 0 {
+		return errors.New("pruned measurement has open observation")
 	}
 	for _, value := range w.TokenIssuedAtSources {
 		if value < 0 {
@@ -256,9 +309,10 @@ func validateSessionWire(w wireSession) error {
 
 func encodeTransfer(value TransferView) ([]byte, error) {
 	w := wireTransfer{V: codecVersion, ID: value.ID, Subject: wireSubject{Kind: value.Subject.Kind, ID: value.Subject.ID}, ProfileID: value.ProfileID, MediaFileID: value.MediaFileID,
-		Method: value.Method, Pattern: value.Pattern, Role: value.Role, BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
+		Method: value.Method, Pattern: value.Pattern, Role: value.Role, Class: value.Class, BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
 		OpenObservations: value.OpenObservations, RequestCount: value.RequestCount, ViewerIP: value.ViewerIP, DeviceID: value.DeviceID,
-		Client: wireClientVariant(value.Client), UserAgent: value.UserAgent, Outcomes: value.Outcomes}
+		Client: wireClientVariant(value.Client), UserAgent: value.UserAgent, Outcomes: value.Outcomes,
+		Overflowed: value.Overflowed}
 	return json.Marshal(w)
 }
 
@@ -281,12 +335,16 @@ func decodeTransfer(data []byte) (TransferView, error) {
 			return TransferView{}, errors.New("negative outcome counter")
 		}
 	}
-	return TransferView{ID: w.ID, Subject: Subject{Kind: w.Subject.Kind, ID: w.Subject.ID}, ProfileID: w.ProfileID, MediaFileID: w.MediaFileID, Method: w.Method, Pattern: w.Pattern, Role: w.Role,
+	return TransferView{ID: w.ID, Subject: Subject{Kind: w.Subject.Kind, ID: w.Subject.ID}, ProfileID: w.ProfileID, MediaFileID: w.MediaFileID, Method: w.Method, Pattern: w.Pattern, Role: w.Role, Class: w.Class,
 		BytesAccepted: w.BytesAccepted, LastByteAccepted: timeFromUnixNano(w.LastByteAccepted), LastObservationEnd: timeFromUnixNano(w.LastObservationEnd), OpenObservations: w.OpenObservations,
-		RequestCount: w.RequestCount, ViewerIP: w.ViewerIP, DeviceID: w.DeviceID, Client: ClientVariant(w.Client), UserAgent: w.UserAgent, Outcomes: w.Outcomes}, nil
+		RequestCount: w.RequestCount, ViewerIP: w.ViewerIP, DeviceID: w.DeviceID, Client: ClientVariant(w.Client), UserAgent: w.UserAgent, Outcomes: w.Outcomes,
+		Overflowed: w.Overflowed}, nil
 }
 
 func encodeMeta(value publisherMeta) ([]byte, error) {
+	if value.Coverage != nil && value.Coverage.Families == nil {
+		value.Coverage = &wireCoverage{Families: []string{}}
+	}
 	value.V = codecVersion
 	return json.Marshal(value)
 }
@@ -299,11 +357,14 @@ func decodeMeta(data []byte) (publisherMeta, error) {
 	if err := checkVersion(value.V); err != nil {
 		return publisherMeta{}, err
 	}
-	if value.DroppedObservations < 0 || value.DroppedBytes < 0 || value.UnattributedObservations < 0 || value.UnattributedBytes < 0 || value.SessionCount < 0 || value.TransferCount < 0 {
+	if value.DroppedObservations < 0 || value.DroppedTransferObservations < 0 || value.DroppedBytes < 0 || value.UnattributedObservations < 0 || value.UnattributedBytes < 0 || value.SessionCount < 0 || value.TransferCount < 0 {
 		return publisherMeta{}, errors.New("negative publisher metadata counter")
 	}
 	if value.SessionCount > maxWireSlice || value.TransferCount > maxWireSlice {
 		return publisherMeta{}, errors.New("publisher count too large")
+	}
+	if value.Coverage != nil && len(value.Coverage.Families) > maxWireMap {
+		return publisherMeta{}, errors.New("publisher coverage too large")
 	}
 	return value, nil
 }

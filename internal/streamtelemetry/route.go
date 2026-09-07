@@ -26,6 +26,16 @@ const (
 	ClassPlayback Class = "playback"
 	ClassManifest Class = "manifest"
 	ClassTransfer Class = "transfer"
+	// ClassProbe is a synthetic payload a client pulls to measure its own
+	// bandwidth — Jellyfin's /Playback/BitrateTest and anything like it. It is
+	// recorded exactly like a transfer (§4.2 keeps the probe observed but
+	// cap-exempt) and differs in one way that matters: the bytes are filler, not
+	// anyone's media. Giving it the transfer class made a megabyte of zeroes
+	// indistinguishable from a megabyte of a film in every per-viewer byte total,
+	// against a MediaFileID of 0 that names no file. A consumer that wants
+	// delivered bytes should exclude this class; one auditing what a client is
+	// doing should not.
+	ClassProbe Class = "probe"
 
 	RoleViewerEgress  Role = "viewer_egress"
 	RoleInternalRelay Role = "internal_relay"
@@ -143,3 +153,10 @@ func viewerIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
+
+// foldsIntoTransfer reports whether a class is recorded against a transfer
+// rather than a logical session. Both transfer-class and probe-class routes
+// resolve no play session — there is nothing to attach them to — so they fold by
+// principal and place instead. Kept as a method so adding a class forces a look
+// at this decision rather than silently defaulting to the session path.
+func (c Class) foldsIntoTransfer() bool { return c == ClassTransfer || c == ClassProbe }

@@ -123,6 +123,61 @@ func TestStreamTelemetryParitySurfacesViewCompleteness(t *testing.T) {
 	}
 }
 
+func TestTelemetrySideFromViewCarriesProjectionAndHealth(t *testing.T) {
+	view := streamtelemetry.GlobalMonitoringView{
+		Complete: false,
+		Sessions: []streamtelemetry.GlobalSessionView{{
+			SessionID:  "session-1",
+			Publishers: []streamtelemetry.PublisherRef{{PublisherID: "proxy-1"}},
+		}},
+	}
+	side := telemetrySideFromView(view, streamtelemetry.ViewCacheStatus{Stale: true})
+	if side.ViewComplete || !side.ViewStale {
+		t.Fatalf("health = %+v", side)
+	}
+	if len(side.Sessions) != 1 || side.Sessions[0].SessionID != "session-1" {
+		t.Fatalf("projection = %+v", side.Sessions)
+	}
+}
+
+func TestParitySourceResponseSerializesSelfDerivedAgreement(t *testing.T) {
+	telemetry := streamtelemetry.LiveSession{SessionID: "ghost-666", ReportedOnly: true}
+	report := streamtelemetry.CompareLiveSessions(
+		"playback_sessions_sync",
+		streamtelemetry.TelemetrySide{Sessions: []streamtelemetry.LiveSession{telemetry}, ViewComplete: true},
+		streamtelemetry.LegacySide{Sessions: []streamtelemetry.LiveSession{{SessionID: "ghost-666"}}},
+		streamtelemetry.DefaultParityLimit,
+	)
+	payload, err := json.Marshal(paritySourceResponse{
+		Source: "playback_sessions_sync", Available: true, Report: &report,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	reportJSON, ok := decoded["report"].(map[string]any)
+	if !ok {
+		t.Fatalf("report JSON = %#v", decoded["report"])
+	}
+	if agrees, ok := reportJSON["agrees"].(bool); !ok || agrees {
+		t.Fatalf("agrees = %#v", reportJSON["agrees"])
+	}
+	if selfDerived, ok := reportJSON["agreement_self_derived"].(bool); !ok || !selfDerived {
+		t.Fatalf("agreement_self_derived = %#v", reportJSON["agreement_self_derived"])
+	}
+	ids, ok := reportJSON["in_both_reported_only_sessions"].([]any)
+	if !ok || len(ids) != 1 || ids[0] != "ghost-666" {
+		t.Fatalf("in_both_reported_only_sessions = %#v", reportJSON["in_both_reported_only_sessions"])
+	}
+	reasons, ok := reportJSON["agrees_withheld"].([]any)
+	if !ok || len(reasons) != 1 || reasons[0] != "agreement_self_derived" {
+		t.Fatalf("agrees_withheld = %#v", reportJSON["agrees_withheld"])
+	}
+}
+
 // The endpoint must not rebuild the merged view per request: it measured ~347 ms
 // at the 50 000-session cap.
 func TestStreamTelemetryParityReusesTheCachedView(t *testing.T) {
