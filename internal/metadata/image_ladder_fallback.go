@@ -104,6 +104,9 @@ func selectPublishedVariant(key string, state ArtworkAvailability, known bool) s
 		keys = state.Deliverable
 	}
 	candidate := key
+	if keyVariant(key) == artworkkey.OriginalVariant && !slices.Contains(keys, key) {
+		candidate = variantKey(key, imagesize.Variant(imageType, imagesize.Large))
+	}
 	for {
 		if slices.Contains(keys, candidate) {
 			return candidate

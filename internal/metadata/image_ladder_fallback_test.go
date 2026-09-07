@@ -115,3 +115,30 @@ func TestKeyVariant(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginalArtworkFallsBackToResizedVariant(t *testing.T) {
+	original := "tmdb/movies/550/poster/original.abc123.webp"
+	large, medium := variantKey(original, "w780"), variantKey(original, "w500")
+	for _, tc := range []struct {
+		name string
+		keys []string
+		want string
+	}{
+		{"original preferred", []string{original, large}, original},
+		{"largest survivor", []string{medium, large}, large},
+		{"lower survivor", []string{medium}, medium},
+		{"none available", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, verified := range []bool{false, true} {
+				state := ArtworkAvailability{Published: tc.keys}
+				if verified {
+					state = ArtworkAvailability{Published: []string{original, large, medium}, External: true, Verified: true, Deliverable: tc.keys}
+				}
+				if got := selectPublishedVariant(original, state, true); got != tc.want {
+					t.Fatalf("verified=%v: got %q, want %q", verified, got, tc.want)
+				}
+			}
+		})
+	}
+}
