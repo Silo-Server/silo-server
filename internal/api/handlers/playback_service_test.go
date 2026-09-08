@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -295,5 +297,171 @@ func TestDeniedSessionIsGoneOnEveryServePath(t *testing.T) {
 	// The live session is untouched by the check itself; only serving is refused.
 	if _, err := manager.GetSession(session.ID); err != nil {
 		t.Fatalf("deny check removed the session: %v", err)
+	}
+}
+
+// TestProgressSideEffectsNeverOverwriteANewerSample drives the race the
+// row's compare-and-set alone does not close: sequence 1 wins its CAS, then
+// sequence 2 is applied and persisted before sequence 1's side effects run.
+// The live session must keep sequence 2's position.
+func TestProgressSideEffectsNeverOverwriteANewerSample(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := playback.ProgressSampleV3{Sequence: 1, Position: 600}
+	if _, err := store.ApplyProgress(context.Background(), f.session.ID, first); err != nil {
+		t.Fatal(err)
+	}
+	// Sequence 2 completes end to end while sequence 1 is still "in flight".
+	if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 2, Position: 1200}); err != nil {
+		t.Fatal(err)
+	}
+	// Sequence 1's side effects now run late; they must observe the newer row
+	// and do nothing.
+	f.handler.persistProgressV2(f.ctx, store, record, f.session.ID, first)
+	live, err := f.manager.GetSession(f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.Position != 1200 {
+		t.Fatalf("live position = %v, want 1200 (older sample overwrote a newer one)", live.Position)
+	}
+}
+
+// TestReplayedStopFinishesAnUnfinalizedStop models the winner dying between
+// the row CAS and its side effects: the row is stopped but the live session
+// survived. The replay must finish the job rather than answer "replayed" over
+// a session that is still serving.
+func TestReplayedStopFinishesAnUnfinalizedStop(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	stopID := uuid.NewString()
+	if _, first, err := store.StopAttempt(context.Background(), f.session.ID, stopID, nil); err != nil || !first {
+		t.Fatalf("seed stop: first=%v err=%v", first, err)
+	}
+	if _, err := f.manager.GetSession(f.session.ID); err != nil {
+		t.Fatalf("precondition: live session should have survived the interrupted stop: %v", err)
+	}
+	view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
+	if err != nil || view.Outcome != PlaybackOutcomeReplayed || view.StopID != stopID {
+		t.Fatalf("view = %+v, %v", view, err)
+	}
+	if _, err := f.manager.GetSession(f.session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("replay left the live session serving: %v", err)
+	}
+	receipt, first, err := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil)
+	if err != nil || first || !receipt.Finalized {
+		t.Fatalf("receipt after replay = %+v first=%v err=%v", receipt, first, err)
+	}
+}
+
+// TestExpiryDefersToAStoppedOrActiveRow: a replica reaping a stale local
+// copy must not finalize an attempt another replica stopped or is still
+// feeding progress.
+func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
+	t.Run("already stopped elsewhere", func(t *testing.T) {
+		f := newPlaybackServiceFixture(t)
+		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+		remoteStop := uuid.NewString()
+		if _, _, err := store.StopAttempt(context.Background(), f.session.ID, remoteStop, &playback.ProgressSampleV3{Sequence: 9, Position: 900}); err != nil {
+			t.Fatal(err)
+		}
+		f.handler.handleExpiredSession(f.session)
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			receipt, _, err := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if receipt.StopID != remoteStop || receipt.Accepted == nil || receipt.Accepted.Position != 900 {
+				t.Fatalf("expiry overwrote the remote stop: %+v", receipt)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+	t.Run("active elsewhere", func(t *testing.T) {
+		f := newPlaybackServiceFixture(t)
+		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+		// The local copy went idle before the row's last accepted sample.
+		f.session.LastActivityAt = time.Now().Add(-time.Hour)
+		if _, err := store.ApplyProgress(context.Background(), f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+			t.Fatal(err)
+		}
+		f.handler.handleExpiredSession(f.session)
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.StoppedAt != nil {
+				t.Fatalf("expiry stopped an attempt that is live on another replica: %+v", record)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+}
+
+// TestSidecarRoutesEnforceOwningProfile: a household profile must not read
+// another profile's sidecars or HLS by session id.
+func TestSidecarRoutesEnforceOwningProfile(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 100, playback.PlayTranscode, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewPlaybackHandler(manager)
+	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
+	stream.TM = handler.TranscodeManager()
+	params := map[string]string{"session_id": session.ID, "track": "0", "name": "segment0.m4s"}
+	for name, serve := range map[string]http.HandlerFunc{
+		"manifest": handler.HandleGetTranscodeManifest,
+		"segment":  handler.HandleGetTranscodeSegment,
+		"stream":   stream.HandleStream,
+		"subtitle": stream.HandleSubtitle,
+		"fonts":    stream.HandleSubtitleFonts,
+	} {
+		req := playbackTestRequest(http.MethodGet, "/", nil, params)
+		req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-2"))
+		rr := httptest.NewRecorder()
+		serve(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("%s: status = %d, want 403 for another profile; body = %s", name, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+// TestSidecarRoutesReconstructFromTheStreamReference: after a restart the
+// subtitle and font URLs carry the same signed reference as the media URL
+// and must rebuild the session from it instead of answering 404.
+func TestSidecarRoutesReconstructFromTheStreamReference(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager)
+	handler.JWTSecret = "sidecar-secret"
+	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
+	stream.JWTSecret = handler.JWTSecret
+	stream.TM = handler.TranscodeManager()
+	sessionID := uuid.NewString()
+	card := playback.NewDirectRecipeCard(sessionID, 1, "profile-1", 100)
+	token := handler.signStreamClaims(card.ToClaims())
+	if token == "" {
+		t.Fatal("no stream token")
+	}
+	params := map[string]string{"session_id": sessionID, "track": "0"}
+	for name, serve := range map[string]http.HandlerFunc{
+		"subtitle": stream.HandleSubtitle,
+		"fonts":    stream.HandleSubtitleFonts,
+	} {
+		rr := httptest.NewRecorder()
+		serve(rr, playbackTestRequest(http.MethodGet, "/?"+streamTokenParam+"="+token, nil, params))
+		if rr.Code == http.StatusNotFound && strings.Contains(rr.Body.String(), "session") {
+			t.Fatalf("%s: session was not reconstructed: %d %s", name, rr.Code, rr.Body.String())
+		}
+		if _, err := manager.GetSession(sessionID); err != nil {
+			t.Fatalf("%s: session not registered after reconstruction: %v", name, err)
+		}
 	}
 }

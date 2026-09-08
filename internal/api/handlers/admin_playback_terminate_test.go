@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -53,6 +56,13 @@ func TestAdminTerminateStopsThenNotifies(t *testing.T) {
 			if _, err := control.Terminate(t.Context(), AdminTerminateInput{SessionID: session.ID, ActorID: 2}); !errors.Is(err, playback.ErrSessionNotFound) {
 				t.Fatalf("repeat err = %v", err)
 			}
+			// The durable attempt is stopped too, so no replica accepts
+			// progress for it afterwards.
+			if store, ok := control.playback.PlanStoreV3.(playback.ProgressStoreV3); ok {
+				if _, err := store.ApplyProgress(t.Context(), session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 5}); !errors.Is(err, playback.ErrAttemptStoppedV3) && !errors.Is(err, playback.ErrSessionNotFound) {
+					t.Fatalf("progress after terminate = %v, want stopped attempt", err)
+				}
+			}
 			if conn != nil && len(conn.messages) != 1 {
 				t.Fatalf("repeat dispatched: %d messages", len(conn.messages))
 			}
@@ -74,5 +84,28 @@ func TestAdminTerminateErrors(t *testing.T) {
 	var unwired *AdminPlaybackControlHandler
 	if _, err := unwired.Terminate(context.Background(), AdminTerminateInput{SessionID: session.ID, ActorID: 2}); !errors.Is(err, ErrAdminTerminateUnavailable) {
 		t.Fatalf("unwired err = %v", err)
+	}
+}
+
+// TestAdminTerminateRevokesAnAttemptHeldElsewhere: the load balancer can route
+// an administrator's terminate to a replica that does not hold the live
+// session. The durable attempt is still stopped and denied, so the owning
+// replica's copy is reaped by the marker instead of the request failing.
+func TestAdminTerminateRevokesAnAttemptHeldElsewhere(t *testing.T) {
+	control, _, _, _ := newAdminPlaybackControlTestHandler(t)
+	remote := uuid.NewString()
+	if err := control.playback.PlanStoreV3.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+		PlaybackAttemptID: uuid.NewString(), SessionID: remote, UserID: 1, ProfileID: "profile-1",
+		RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := control.Terminate(t.Context(), AdminTerminateInput{SessionID: remote, ActorID: 2})
+	if err != nil || !view.AuthorityRevoked || view.DurableState != AdminTerminateDurableStopped {
+		t.Fatalf("view = %+v, %v", view, err)
+	}
+	record, err := control.playback.PlanStoreV3.GetAttempt(t.Context(), remote)
+	if err != nil || record.StoppedAt == nil {
+		t.Fatalf("remote attempt not stopped: %+v %v", record, err)
 	}
 }

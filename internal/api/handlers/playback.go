@@ -204,6 +204,9 @@ type PlaybackHandler struct {
 	// InstallationID is diagnostics.ServerInstanceID; v2 playback mutations
 	// carry it and are refused when it differs. Empty leaves v2 unconfigured.
 	InstallationID string
+	// progressSideEffectLocks serializes v2 progress side effects per session
+	// (see persistProgressV2).
+	progressSideEffectLocks sync.Map
 	// ProxyGrantStore hands a proxy the recipe it serves a header-authenticated
 	// session from. Optional: without it (or without Redis behind it) an attempt
 	// that negotiated authorized_media_origins_v1 simply stays on the API origin.
@@ -1268,14 +1271,25 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 		slog.Info("expired inactive playback session", append([]any{
 			"session", sessionCopy.ID, "playback_session_id", sessionCopy.ID,
 		}, sessionCopy.ClientInfo().LogAttrs()...)...)
+		ctx := context.Background()
+		// Another replica may own the live copy: its progress and media
+		// requests never touch this replica's activity clock. A row that saw
+		// progress after this copy went idle, or that is already stopped,
+		// means this copy is stale, not the session. Drop it without writing
+		// history, the deny marker, or a stop over the other replica's.
+		if h.attemptStoppedElsewhere(ctx, sessionCopy.ID) || h.attemptActiveElsewhere(ctx, &sessionCopy) {
+			slog.Info("dropped stale local playback session copy", "session", sessionCopy.ID, "playback_session_id", sessionCopy.ID)
+			h.closeTranscodeForSession(&sessionCopy)
+			return
+		}
 		// Expiry is a liveness reap, not a user stop — keep the recipe card so a
 		// resume reconstructs under the same id (the card's own TTL reaps it if
 		// the session is truly abandoned).
-		h.finalizeSessionStop(context.Background(), &sessionCopy, false, "", false)
+		h.finalizeSessionStop(ctx, &sessionCopy, false, "", false)
 		// The attempt is over: mark its row stopped under a server-minted stop
 		// id so a start replay reports session_expired on every replica, and
 		// deny its tokens so no replica serves it again.
-		h.markAttemptStoppedServerSide(context.Background(), sessionCopy.ID)
+		h.markAttemptStoppedServerSide(ctx, sessionCopy.ID)
 	}()
 }
 
@@ -1645,6 +1659,9 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode session is temporarily unavailable")
 		return
 	}
+	if !requireOwningProfile(w, r, session) {
+		return
+	}
 	if !requireNativeSessionAPIEgressV3(w, session) {
 		return
 	}
@@ -1755,6 +1772,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			return
 		}
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode session is temporarily unavailable")
+		return
+	}
+	if !requireOwningProfile(w, r, session) {
 		return
 	}
 	if !requireNativeSessionAPIEgressV3(w, session) {

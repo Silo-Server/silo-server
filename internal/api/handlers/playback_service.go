@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -274,14 +275,37 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	if receipt.Outcome != playback.ProgressAppliedV3 {
 		return view, nil
 	}
-	h.persistProgressV2(ctx, record, sessionID, sample)
+	h.persistProgressV2(ctx, store, record, sessionID, sample)
 	return view, nil
+}
+
+// progressSampleCurrent reports whether sample is still the attempt's latest
+// accepted sample. The CAS orders samples on the row, but the side effects
+// below run after it: without this check, sequence 1 could finish its writes
+// after sequence 2 and leave the live session and the saved resume position
+// behind the row.
+func progressSampleCurrent(ctx context.Context, store playback.ProgressStoreV3, sessionID string, sample playback.ProgressSampleV3) bool {
+	receipt, err := store.ApplyProgress(ctx, sessionID, sample)
+	if err != nil {
+		return false
+	}
+	// A repeat of the latest sample is "replayed"; anything else means a
+	// newer sample has since been accepted.
+	return receipt.Outcome == playback.ProgressReplayedV3
 }
 
 // persistProgressV2 runs the v1 progress side effects for an applied sample:
 // the manager position when this replica holds the session, the user-store
 // writer either way.
-func (h *PlaybackHandler) persistProgressV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, sample playback.ProgressSampleV3) {
+func (h *PlaybackHandler) persistProgressV2(ctx context.Context, store playback.ProgressStoreV3, record *playback.AttemptRecordV3, sessionID string, sample playback.ProgressSampleV3) {
+	// Serialize the side effects per session and re-check the row under the
+	// lock: two applied samples racing here would otherwise write in the
+	// order they finished, not the order the row accepted them.
+	unlock := h.progressSideEffectLock(sessionID)
+	defer unlock()
+	if !progressSampleCurrent(ctx, store, sessionID, sample) {
+		return
+	}
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err == nil && session != nil {
 		wasPaused := session.IsPaused
@@ -296,6 +320,17 @@ func (h *PlaybackHandler) persistProgressV2(ctx context.Context, record *playbac
 		}
 	}
 	h.persistProgress(ctx, h.attemptSessionV2(ctx, record, sample.Position, sample.IsPaused))
+}
+
+// progressSideEffectLock serializes progress side effects for one session.
+func (h *PlaybackHandler) progressSideEffectLock(sessionID string) func() {
+	entry, _ := h.progressSideEffectLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	mu, ok := entry.(*sync.Mutex)
+	if !ok {
+		return func() {}
+	}
+	mu.Lock()
+	return mu.Unlock
 }
 
 func (h *PlaybackHandler) scrobblePauseTransitionV2(ctx context.Context, sess *playback.Session, wasPaused bool) {
@@ -360,16 +395,30 @@ func (h *PlaybackHandler) StopPlaybackV2(ctx context.Context, caller PlaybackCal
 	case err != nil:
 		return PlaybackMutationView{}, playbackStoreOperationError()
 	}
-	if !first {
+	if !first && receipt.Finalized {
 		return PlaybackMutationView{Outcome: PlaybackOutcomeReplayed, Accepted: acceptedProgressV2(receipt.Accepted), StopID: receipt.StopID, HistoryID: receipt.HistoryID}, nil
 	}
-	// This stop won: nothing after this point may fail the request. The
-	// receipt is already durable, so the writers below run best effort.
+	// This stop won, or a replay found the winner's side effects unfinished
+	// (the winning replica died between the CAS and the writers below). Either
+	// way the receipt is already durable, so the writers run best effort and
+	// the request cannot fail from here. The deny marker, teardown and history
+	// are idempotent, so finishing them twice is safe.
+	receipt = h.finalizeStopV2(ctx, store, record, sessionID, receipt)
+	outcome := PlaybackOutcomeStopped
+	if !first {
+		outcome = PlaybackOutcomeReplayed
+	}
+	return PlaybackMutationView{Outcome: outcome, Accepted: acceptedProgressV2(receipt.Accepted), StopID: receipt.StopID, HistoryID: receipt.HistoryID}, nil
+}
+
+// finalizeStopV2 runs the stop side effects and records the finalized receipt.
+func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.ProgressStoreV3, record *playback.AttemptRecordV3, sessionID string, receipt playback.StopReceiptV3) playback.StopReceiptV3 {
 	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted)
+	receipt.Finalized = true
 	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
 		slog.WarnContext(ctx, "failed to record playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 	}
-	return PlaybackMutationView{Outcome: PlaybackOutcomeStopped, Accepted: acceptedProgressV2(receipt.Accepted), StopID: receipt.StopID, HistoryID: receipt.HistoryID}, nil
+	return receipt
 }
 
 // finishStopV2 runs the v1 stop side effects for the winning stop: the
@@ -555,8 +604,45 @@ func markAttemptStoppedServerSide(ctx context.Context, planStore playback.PlanSt
 		return
 	}
 	if first {
+		// The local teardown already ran; the receipt is complete.
+		receipt.Finalized = true
 		if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
 			slog.WarnContext(ctx, "failed to record expired playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		}
 	}
+}
+
+// attemptLive reports whether the attempt row exists and is not stopped.
+func (h *PlaybackHandler) attemptLive(ctx context.Context, sessionID string) bool {
+	if h == nil || h.PlanStoreV3 == nil || sessionID == "" {
+		return false
+	}
+	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
+	return err == nil && record != nil && record.StoppedAt == nil
+}
+
+// attemptStoppedElsewhere reports whether the attempt row is already stopped,
+// so a replica reaping its stale local copy does not overwrite a stop another
+// replica accepted. Unknown rows (no plan store, not found) report false.
+func (h *PlaybackHandler) attemptStoppedElsewhere(ctx context.Context, sessionID string) bool {
+	if h == nil || h.PlanStoreV3 == nil || sessionID == "" {
+		return false
+	}
+	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
+	return err == nil && record != nil && record.StoppedAt != nil
+}
+
+// attemptActiveElsewhere reports whether the attempt row saw progress more
+// recently than this replica's copy did. Media and progress requests can land
+// on another replica, leaving the local activity clock stale; that copy is
+// dropped without finalizing so the live session elsewhere keeps serving.
+func (h *PlaybackHandler) attemptActiveElsewhere(ctx context.Context, session *playback.Session) bool {
+	if h == nil || h.PlanStoreV3 == nil || session == nil {
+		return false
+	}
+	record, err := h.PlanStoreV3.GetAttempt(ctx, session.ID)
+	if err != nil || record == nil || record.LastSample == nil || record.LastSampleAt.IsZero() {
+		return false
+	}
+	return record.LastSampleAt.After(session.LastActivityAt)
 }

@@ -74,6 +74,11 @@ type StopReceiptV3 struct {
 	// HistoryID is the watch-history row the stop writer produced, recorded
 	// through RecordStopReceipt after the writer runs.
 	HistoryID string `json:"history_id,omitempty"`
+	// Finalized is set by RecordStopReceipt once the stop's side effects
+	// (deny marker, teardown, history) have run. A replayed stop that finds it
+	// unset finishes them: the winning replica died between the CAS and the
+	// writers.
+	Finalized bool `json:"finalized,omitempty"`
 }
 
 // ProgressStoreV3 is the durable per-attempt progress and stop sequencing.
@@ -125,6 +130,10 @@ type AttemptRecordV3 struct {
 	// StoppedAt is set once the attempt has been stopped; a stopped attempt
 	// never replays as a playable decision.
 	StoppedAt *time.Time
+	// LastSampleAt is when the row last accepted a progress sample or a stop.
+	// A replica reaping a stale local copy compares it with its own activity
+	// clock, since requests can land on other replicas.
+	LastSampleAt time.Time
 }
 
 // AttemptIdentityV3 carries only the ownership columns of an attempt so
@@ -441,6 +450,7 @@ func (s *MemoryPlanStoreV3) ApplyProgress(_ context.Context, sessionID string, s
 	if sample.Sequence > record.LastSequence {
 		applied := sample
 		record.LastSequence, record.LastSample = sample.Sequence, &applied
+		record.LastSampleAt = time.Now()
 		s.attempts[attemptID] = *record
 		return ProgressReceiptV3{Outcome: ProgressAppliedV3, Accepted: &sample}, nil
 	}
@@ -487,6 +497,7 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	}
 	now := time.Now()
 	record.StoppedAt = &now
+	record.LastSampleAt = now
 	s.attempts[attemptID] = *record
 	receipt := StopReceiptV3{StopID: stopID}
 	if record.LastSample != nil {

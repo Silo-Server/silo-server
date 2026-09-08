@@ -256,6 +256,7 @@ export function useAudiobookPlayback({
   const fileId = activePart?.file.id;
   const currentTimeRef = useRef(currentTime);
   const activePartRef = useRef<AudiobookPart | undefined>(activePart);
+  const activeFileIndexRef = useRef(activeFileIndex);
   const sessionIdRef = useRef<string | null>(null);
   const planRef = useRef<PlanV3 | null>(null);
   const playbackAttemptIdRef = useRef<string | null>(null);
@@ -291,12 +292,21 @@ export function useAudiobookPlayback({
 
   useEffect(() => {
     activePartRef.current = activePart;
-  }, [activePart]);
+    activeFileIndexRef.current = activeFileIndex;
+  }, [activeFileIndex, activePart]);
 
+  // The stop of the previous part or source. The next start waits on it so
+  // an account at its stream cap is not refused capacity the old session
+  // still holds; the wait is bounded by the stop's own budget.
+  const pendingStopRef = useRef<Promise<void> | null>(null);
   const stopSession = useCallback(
     (sessionId: string, keepalive = false) => {
-      stopSequencedSession(config, sessionId, keepalive).catch(() => {
+      const stopping = stopSequencedSession(config, sessionId, keepalive).catch(() => {
         // Best effort: stale sessions are retired server-side.
+      });
+      pendingStopRef.current = stopping;
+      void stopping.finally(() => {
+        if (pendingStopRef.current === stopping) pendingStopRef.current = null;
       });
     },
     [config],
@@ -493,17 +503,34 @@ export function useAudiobookPlayback({
     };
   }, [config]);
 
+  const initialSeekAppliedRef = useRef(false);
   useEffect(() => {
     const target = clampedBookTime(initialPositionSeconds, duration);
     const index = findPartIndex(parts, target);
-    pendingLocalSeekRef.current = localTimeForPart(parts[index], target);
+    const local = localTimeForPart(parts[index], target);
+    const audio = audioRef.current;
+    const samePart = initialSeekAppliedRef.current && index === activeFileIndexRef.current;
+    initialSeekAppliedRef.current = true;
+    currentTimeRef.current = target;
+    setCurrentTime(target);
+    if (samePart && audio && audio.readyState > 0 && canSeekAnywhereRef.current) {
+      // A new start position for the part already loaded (a chapter picked
+      // on the book page while it plays): seek the element now. The source
+      // effect does not re-run for an unchanged part, so nothing else would.
+      pausedAtRef.current = null;
+      audio.currentTime = Math.max(0, local - timelineOffsetSecondsRef.current);
+      if (autoPlay && audio.paused) {
+        audio.play().catch(() => {});
+      }
+      reportRef.current(target);
+      return;
+    }
+    pendingLocalSeekRef.current = local;
     timelineOffsetSecondsRef.current = 0;
     canSeekAnywhereRef.current = true;
     autoPlayPendingRef.current = autoPlay;
     setBuffered(null);
     setActiveFileIndex(index);
-    currentTimeRef.current = target;
-    setCurrentTime(target);
   }, [autoPlay, contentId, duration, initialPositionSeconds, parts]);
 
   useEffect(() => {
@@ -535,6 +562,11 @@ export function useAudiobookPlayback({
       const profileId = config.getProfileId();
       if (!profileId) {
         throw new Error("Missing active profile");
+      }
+      const previousStop = pendingStopRef.current;
+      if (previousStop) {
+        await previousStop;
+        if (canceled) return;
       }
 
       const decision = await startPlaybackV2(

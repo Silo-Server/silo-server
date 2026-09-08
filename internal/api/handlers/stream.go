@@ -19,6 +19,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -160,6 +161,9 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	if !requireNativeSessionAPIEgressV3(w, session) {
 		return
 	}
+	if !requireOwningProfile(w, r, session) {
+		return
+	}
 
 	file, err := h.fileResolver.GetByID(r.Context(), session.MediaFileID)
 	if err != nil {
@@ -257,6 +261,47 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// loadSidecarSession resolves the session a subtitle or font request names.
+// Like HandleStream it reconstructs from the signed stream reference on a
+// miss, so sidecar URLs keep working after a restart or on a replica that
+// never served the media. Ownership is the account and, when the request
+// selects a profile, that profile: a household member must not read another
+// profile's sidecars by session id. On refusal the response is written and
+// ok is false.
+func (h *StreamHandler) loadSidecarSession(w http.ResponseWriter, r *http.Request, sessionID string, userID int) (*playback.Session, *streamtoken.Claims, bool) {
+	card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	loadCard := card
+	if _, err := h.sessionMgr.GetSession(sessionID); err == nil {
+		loadCard = nil
+	} else if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		loadCard = nil
+	}
+	session, status, _ := h.TM.LoadOrReconstructSessionDetail(r.Context(), h.sessionMgr.GetSession, sessionID, userID, loadCard)
+	switch status {
+	case playback.SessionMissing:
+		writePlaybackSessionNotFound(w)
+		return nil, nil, false
+	case playback.SessionLoadFailed:
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		return nil, nil, false
+	case playback.SessionForbidden:
+		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
+		return nil, nil, false
+	case playback.SessionUnauthorized:
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return nil, nil, false
+	}
+	if session == nil {
+		writePlaybackSessionNotFound(w)
+		return nil, nil, false
+	}
+	if profileID := apimw.GetProfileID(r.Context()); profileID != "" && session.ProfileID != "" && profileID != session.ProfileID {
+		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another profile")
+		return nil, nil, false
+	}
+	return session, claims, true
+}
+
 // HandleSubtitle extracts a subtitle track from the media file associated with
 // a playback session and serves it as WebVTT or raw ASS depending on the
 // URL extension (e.g. /subtitles/2.ass or /subtitles/2.vtt).
@@ -285,17 +330,11 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil {
-		writePlaybackSessionNotFound(w)
+	session, claims, ok := h.loadSidecarSession(w, r, sessionID, userID)
+	if !ok {
 		return
 	}
-
-	if session.UserID != userID {
-		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
-		return
-	}
-	attachPlaybackSession(r.Context(), session, nil)
+	attachPlaybackSession(r.Context(), session, claims)
 
 	fileID, err := subtitleSourceFileID(r, session)
 	if err != nil {
@@ -567,16 +606,11 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil {
-		writePlaybackSessionNotFound(w)
+	session, claims, ok := h.loadSidecarSession(w, r, sessionID, userID)
+	if !ok {
 		return
 	}
-	if session.UserID != userID {
-		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
-		return
-	}
-	attachPlaybackSession(r.Context(), session, nil)
+	attachPlaybackSession(r.Context(), session, claims)
 
 	fileID, err := subtitleSourceFileID(r, session)
 	if err != nil {

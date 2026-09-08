@@ -764,3 +764,103 @@ describe("useAudiobookPlayback", () => {
     expect(result.current.sleep.remainingMs).toBeNull();
   });
 });
+
+describe("useAudiobookPlayback sequencing", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetSessionMutations();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    resetSessionMutations();
+  });
+
+  it("waits for the previous part's stop before starting the next part", async () => {
+    let sessionCount = 0;
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const events: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          sessionCount += 1;
+          events.push(`start-${sessionCount}`);
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(audioOnlyDecision(`part-${sessionCount}`, body.start_position), {
+            status: 201,
+          });
+        }
+        if (init?.method === "DELETE") {
+          events.push("stop-requested");
+          await stopGate;
+          events.push("stop-done");
+          return stopReceipt();
+        }
+        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
+        return new Response(null, { status: 202 });
+      }),
+    );
+    const { result } = renderAudiobookPlayback({ files: multiFile, initialPositionSeconds: 0 });
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    expect(events).toEqual(["start-1"]);
+
+    // Crossing into the second part stops part 1 and starts part 2.
+    act(() => result.current.seekTo(310));
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start-1", "stop-requested"]);
+
+    releaseStop();
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start-1", "stop-requested", "stop-done", "start-2"]);
+  });
+
+  it("seeks the loaded element when the start position changes within the same part", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(audioOnlyDecision("same-part", body.start_position), { status: 201 });
+        }
+        if (init?.method === "DELETE") return stopReceipt();
+        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
+        return new Response(null, { status: 202 });
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ initialPositionSeconds }: { initialPositionSeconds: number }) =>
+        useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds }),
+      { wrapper, initialProps: { initialPositionSeconds: 0 } },
+    );
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    Object.defineProperty(audio, "readyState", { value: 4, writable: true });
+    act(() => audio.dispatchEvent(new Event("loadedmetadata")));
+    await flushAsyncWork();
+
+    // The book page picks chapter two while this part is already loaded.
+    rerender({ initialPositionSeconds: 300 });
+    await flushAsyncWork();
+    expect(audio.currentTime).toBe(300);
+    expect(result.current.currentTime).toBe(300);
+    const starts = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"));
+    expect(starts).toHaveLength(1);
+  });
+});

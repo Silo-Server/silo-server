@@ -84,11 +84,19 @@ func (h *AdminPlaybackControlHandler) Terminate(ctx context.Context, in AdminTer
 	defer unlock()
 
 	// 1. Stop the session (user-initiated: the recipe card is deleted, the
-	// stop/history writer runs) and deny its tokens everywhere.
+	// stop/history writer runs) and deny its tokens everywhere. The attempt
+	// row is stopped too, under the server-minted stop id, so progress after
+	// a terminate is refused and a start replay reports session_expired on
+	// every replica, not just the one that held the live session.
 	if err := h.playback.stopPlaybackSessionByID(ctx, in.SessionID, true); err != nil {
-		return AdminTerminateView{}, err
+		if !errors.Is(err, playback.ErrSessionNotFound) || !h.playback.attemptLive(ctx, in.SessionID) {
+			return AdminTerminateView{}, err
+		}
+		// No live copy here, but the attempt row is live: another replica
+		// holds the session. Revoke durably; that replica's copy is reaped
+		// by the deny marker and the stopped row.
 	}
-	h.playback.StreamDeny.Deny(ctx, in.SessionID)
+	h.playback.markAttemptStoppedServerSide(ctx, in.SessionID)
 	view.AuthorityRevoked = true
 
 	// 2. Best-effort client dismissal on the existing lane. The session is
