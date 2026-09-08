@@ -336,6 +336,29 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("bg-muted/50");
   });
 
+  it("queries ambiguous roots for the effective selected library", () => {
+    mocks.useAdminLibraries.mockReturnValue({
+      data: [
+        {
+          id: 42,
+          name: "Television",
+          paths: ["/media/tv"],
+          type: "tv",
+          enabled: true,
+          last_scanned_at: null,
+          scan_warning_code: null,
+          scan_warning_at: null,
+          scan_warning_message: null,
+        },
+      ],
+      isLoading: false,
+    });
+
+    renderPage();
+
+    expect(mocks.useLibraryRoots).toHaveBeenCalledWith(42, "ambiguous");
+  });
+
   it("renders Stale External IDs collapsed by default", () => {
     mocks.useStaleMediaIDs.mockReturnValue({
       data: [
