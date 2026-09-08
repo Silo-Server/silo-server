@@ -241,6 +241,8 @@ describe("AdminLibraries", () => {
 
     expect(markup).toContain("Ambiguous Roots");
     expect(markup).toContain("Scanner roots that stay visible");
+    expect(markup).toContain("text-amber-500");
+    expect(markup).toContain("bg-amber-500/10");
   });
 
   it("shows metadata matcher pending and parked counts", () => {
@@ -310,11 +312,28 @@ describe("AdminLibraries", () => {
 
   it("renders the collapsed Ambiguous Roots section when no roots exist", () => {
     // Default useLibraryRoots mock returns { data: [], isLoading: false }. The
-    // section itself still renders because it is gated on libraries.length.
+    // section itself still renders because it is gated on libraries.length, but
+    // uses neutral styling instead of an amber warning when count is 0.
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");
     expect(markup).toContain("Scanner roots that stay visible");
+    expect(markup).toContain("text-muted-foreground");
+    expect(markup).toContain("bg-muted/50");
+  });
+
+  it("renders a loading placeholder for Ambiguous Roots while loading", () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      data: [],
+      isLoading: true,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Ambiguous Roots");
+    expect(markup).toContain("Scanner roots that stay visible");
+    expect(markup).toContain('aria-label="Loading count"');
+    expect(markup).toContain("bg-muted/50");
   });
 
   it("renders Stale External IDs collapsed by default", () => {

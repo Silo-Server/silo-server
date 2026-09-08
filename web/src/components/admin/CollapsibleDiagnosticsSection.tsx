@@ -8,6 +8,7 @@ export function CollapsibleDiagnosticsSection({
   title,
   description,
   count,
+  isLoading,
   icon,
   iconClassName,
   open,
@@ -17,6 +18,7 @@ export function CollapsibleDiagnosticsSection({
   title: string;
   description: string;
   count: number;
+  isLoading?: boolean;
   icon: ReactNode;
   iconClassName?: string;
   open: boolean;
@@ -43,12 +45,32 @@ export function CollapsibleDiagnosticsSection({
           <h2 className="text-sm font-semibold tracking-wide">{title}</h2>
           <p className="text-muted-foreground text-xs leading-relaxed">{description}</p>
         </div>
-        {open ? (
+        {isLoading ? (
+          open ? (
+            <Badge variant="secondary" className="text-[11px] tabular-nums">
+              &mdash;
+            </Badge>
+          ) : (
+            <div
+              className="text-muted-foreground text-2xl leading-none font-bold tabular-nums"
+              aria-label="Loading count"
+            >
+              &mdash;
+            </div>
+          )
+        ) : open ? (
           <Badge variant="secondary" className="text-[11px] tabular-nums">
             {count}
           </Badge>
         ) : (
-          <div className="text-2xl leading-none font-bold tabular-nums">{count}</div>
+          <div
+            className={cn(
+              "text-2xl leading-none font-bold tabular-nums",
+              count === 0 && "text-muted-foreground",
+            )}
+          >
+            {count}
+          </div>
         )}
         <ChevronDown
           className={cn(
