@@ -1,12 +1,20 @@
-import { pendingDurableSessions } from "./durable-session-mutations";
-import { readOwnerLossRecovery, type OwnerLossRecovery } from "./owner-loss-recovery";
+import { pendingDurableSessions, retainedStartSession } from "./durable-session-mutations";
+import {
+  readOwnerLossRecovery,
+  PlaybackOwnerLostError,
+  type OwnerLossRecovery,
+} from "./owner-loss-recovery";
 import { readProgressTimeline, type ProgressTimeline } from "./bound-client-timeline";
 import type { components } from "@/api/v2/schema";
 import type { PlaybackMutationContext, PlayerConfig } from "./context/PlayerConfigContext";
 import { playerRequestHeaders, PlayerFetchError } from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
 import type { DecisionResponseV3, StartRequestV3 } from "./protocol-v3";
-import { offerPendingPlaybackStops, registerDurableSessionMutations } from "./session-mutations";
+import {
+  offerPendingPlaybackStops,
+  registerDurableSessionMutations,
+  stopSequencedSession,
+} from "./session-mutations";
 
 export type InitialPlaybackCapabilities = components["schemas"]["PlaybackCapabilities"];
 export async function initialPlaybackCapabilities(
@@ -102,9 +110,13 @@ export async function startInitialPlayback(
     file_id: String(body.file_id),
     installation_id: cap.installation_id,
   } satisfies components["schemas"]["PlaybackStartBody"]);
-  return await navigator.locks.request(key, { signal: AbortSignal.timeout(30000) }, async () => {
+  return await navigator.locks.request(key, { signal: AbortSignal.timeout(90000) }, async () => {
     if (!authority.isCurrent()) throw new Error("Playback identity changed");
-    const pending = localStorage.getItem(key);
+    let pending = localStorage.getItem(key);
+    if (pending && pending !== payload) {
+      await resolveRetainedStart(config, authority, cap.installation_id!, key, pending);
+      pending = localStorage.getItem(key);
+    }
     if (
       !pending &&
       body.progress_persistence === "client_bound" &&
@@ -112,12 +124,6 @@ export async function startInitialPlayback(
     ) {
       offerPendingPlaybackStops(config, cap.installation_id!, true);
       throw new Error("A previous audiobook part still needs its terminal stop receipt");
-    }
-    if (pending && pending !== payload) {
-      offerPendingInitialStart(config, cap);
-      throw new Error(
-        "An earlier playback start is still unconfirmed. Resolve it before starting another session.",
-      );
     }
     if (expectedTimeline) {
       const expected = JSON.stringify(expectedTimeline);
@@ -132,9 +138,17 @@ export async function startInitialPlayback(
     if (localStorage.getItem(key) !== payload)
       throw new Error("Playback retry storage unavailable");
     try {
-      return await dispatchInitialStart(config, authority, cap.installation_id!, key, payload);
+      const response = await dispatchInitialStartWithRetry(
+        config,
+        authority,
+        cap.installation_id!,
+        key,
+        payload,
+      );
+      config.onPlaybackStartResolved?.();
+      return response;
     } catch (error) {
-      offerPendingInitialStart(config, cap);
+      if (authority.isCurrent()) reportStartRecoveryFailure(config, cap, authority);
       throw error;
     }
   });
@@ -175,14 +189,11 @@ function startKey(context: PlaybackMutationContext, installationId: string): str
     )
   );
 }
-async function dispatchInitialStart(
-  config: PlayerConfig,
+function readSavedInitialStart(
+  payload: string,
   authority: PlaybackMutationContext,
   installationId: string,
-  key: string,
-  payload: string,
-): Promise<DecisionResponseV3> {
-  if (!authority.isCurrent()) throw new Error("Playback identity changed");
+) {
   const saved = JSON.parse(payload) as {
     installation_id?: string;
     playback_attempt_id?: string;
@@ -198,6 +209,19 @@ async function dispatchInitialStart(
     !saved.playback_attempt_id
   )
     throw new Error("Invalid saved playback start identity");
+  return { ...saved, playback_attempt_id: saved.playback_attempt_id };
+}
+async function dispatchInitialStart(
+  config: PlayerConfig,
+  authority: PlaybackMutationContext,
+  installationId: string,
+  key: string,
+  payload: string,
+  timeout: number,
+  retainUntilStopped: boolean,
+): Promise<DecisionResponseV3> {
+  if (!authority.isCurrent()) throw new Error("Playback identity changed");
+  const saved = readSavedInitialStart(payload, authority, installationId);
   let expectedTimeline;
   if (saved.progress_persistence === "client_bound") {
     const value = JSON.parse(
@@ -211,7 +235,7 @@ async function dispatchInitialStart(
     method: "POST",
     headers: playerRequestHeaders(config, undefined, true),
     body: payload,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeout),
   });
   if (!authority.isCurrent()) throw new Error("Playback identity changed while starting");
   if (!response.ok) {
@@ -249,7 +273,7 @@ async function dispatchInitialStart(
     if (localStorage.getItem(recoveryKey) !== recorded)
       throw new Error("Playback recovery receipt could not be saved");
     if (recovery.state === "draining")
-      throw new Error("Playback owner recovery is still draining. Retry the original request.");
+      throw new PlaybackStartDrainingError("Playback is still stopping on the server");
     // Persist terminal abandonment before releasing the old START. Its original bytes
     // and the server's accepted Last remain in the per-attempt recovery record.
     localStorage.removeItem(key);
@@ -309,51 +333,157 @@ async function dispatchInitialStart(
     );
   else if (!wire.terminal)
     throw new Error("Playback start returned no durable session or terminal decision");
-  localStorage.removeItem(key);
-  localStorage.removeItem(timelineKey(key));
+  if (!retainUntilStopped || !wire.session_id) {
+    localStorage.removeItem(key);
+    localStorage.removeItem(timelineKey(key));
+  }
   return { ...wire, playback_plan: converted } as DecisionResponseV3;
 }
 
+class PlaybackStartDrainingError extends Error {}
+
+// Retrying this operation never changes the attempt or launches a replacement.
+// A successful replay or retained terminal decision is the only journal release.
+async function dispatchInitialStartWithRetry(
+  config: PlayerConfig,
+  authority: PlaybackMutationContext,
+  installationId: string,
+  key: string,
+  payload: string,
+  retainUntilStopped = false,
+): Promise<DecisionResponseV3> {
+  const deadline = Date.now() + 60000;
+  let delay = 250;
+  for (;;) {
+    try {
+      return await dispatchInitialStart(
+        config,
+        authority,
+        installationId,
+        key,
+        payload,
+        Math.min(45000, deadline - Date.now()),
+        retainUntilStopped,
+      );
+    } catch (error) {
+      const transient =
+        error instanceof TypeError ||
+        (error instanceof DOMException &&
+          (error.name === "TimeoutError" || error.name === "AbortError")) ||
+        (error instanceof PlayerFetchError && error.status >= 500) ||
+        error instanceof PlaybackStartDrainingError;
+      if (!transient || !authority.isCurrent() || Date.now() + delay >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (!authority.isCurrent()) throw new Error("Playback identity changed");
+      delay = Math.min(delay * 2, 2000);
+    }
+  }
+}
+
+async function resolveRetainedStart(
+  config: PlayerConfig,
+  authority: PlaybackMutationContext,
+  installationId: string,
+  key: string,
+  payload: string,
+): Promise<void> {
+  const saved = readSavedInitialStart(payload, authority, installationId);
+  const retained = retainedStartSession(config, installationId, saved.playback_attempt_id!);
+  let sessionId: string | undefined;
+  if (retained) {
+    // Once START registered the session, STOP may have committed despite a lost
+    // reply. Resume that captured STOP directly; a stopped session need not have
+    // a replayable START decision anymore.
+    sessionId = retained.identity.sessionId;
+    await registerDurableSessionMutations(
+      config,
+      sessionId,
+      installationId,
+      retained.timeline,
+      authority,
+      saved.playback_attempt_id,
+    );
+  } else {
+    const response = await dispatchInitialStartWithRetry(
+      config,
+      authority,
+      installationId,
+      key,
+      payload,
+      true,
+    );
+    sessionId = response.session_id;
+  }
+  // This response belongs to an earlier, undisplayed start. Close that exact
+  // session through its normal durable STOP before returning to the new Play.
+  if (sessionId) {
+    try {
+      await stopSequencedSession(config, sessionId);
+    } catch (error) {
+      // This exception follows a durably validated terminal receipt. No old
+      // executor remains to stop, so the user's new Play may continue.
+      if (!(error instanceof PlaybackOwnerLostError)) throw error;
+    }
+    if (!authority.isCurrent()) throw new Error("Playback identity changed");
+    if (localStorage.getItem(key) !== payload)
+      throw new Error("The pending playback start changed while stopping its session");
+    localStorage.removeItem(key);
+    localStorage.removeItem(timelineKey(key));
+  }
+  config.onPlaybackStartResolved?.();
+}
+
+const recoveringStarts = new Map<string, Promise<void>>();
+
+// The video and audiobook hosts share the same durable START namespace. One
+// recovery task per key avoids duplicate requests and notifications in this tab;
+// the existing Web Lock serializes recovery against starts in other tabs.
 export function offerPendingInitialStart(
   config: PlayerConfig,
   cap: InitialPlaybackCapabilities,
-): void {
+): Promise<void> {
   const authority = config.capturePlaybackMutationContext?.();
-  if (!authority?.isCurrent() || !cap.installation_id) return;
+  if (!authority?.isCurrent() || !cap.installation_id) return Promise.resolve();
   const installationId = cap.installation_id;
   const key = startKey(authority, installationId);
-  const payload = localStorage.getItem(key);
-  if (!payload) return;
-  const retry = () => {
-    void (async () => {
-      if (!authority.isCurrent())
-        throw new Error("Return to the original playback identity before retrying.");
+  if (!localStorage.getItem(key)) return Promise.resolve();
+  const running = recoveringStarts.get(key);
+  if (running) return running;
+  const recovery = (async () => {
+    try {
       const current = await initialPlaybackCapabilities(config);
+      if (!authority.isCurrent()) return;
       if (
-        !current?.allowed ||
+        !current.allowed ||
         current.state !== "available" ||
         current.installation_id !== installationId
       )
-        throw new Error("The original playback installation is not currently admitted.");
-      if (!navigator.locks?.request)
-        throw new Error("Durable playback requires browser storage locking");
-      await navigator.locks.request(key, { signal: AbortSignal.timeout(30000) }, async () => {
-        if (localStorage.getItem(key) !== payload)
-          throw new Error("The pending playback start has already changed.");
-        await dispatchInitialStart(config, authority, installationId, key, payload);
+        throw new Error("Playback is currently unavailable on this server");
+      if (!navigator.locks?.request) throw new Error("Playback storage locking is unavailable");
+      await navigator.locks.request(key, { signal: AbortSignal.timeout(90000) }, async () => {
+        if (!authority.isCurrent()) return;
+        const payload = localStorage.getItem(key);
+        if (payload) await resolveRetainedStart(config, authority, installationId, key, payload);
       });
-      offerPendingPlaybackStops(config, installationId, true);
-    })().catch((error) =>
-      config.onPlaybackStartError?.(
-        error instanceof Error ? error : new Error("Playback start is unconfirmed"),
-        retry,
-      ),
-    );
-  };
+    } catch {
+      if (authority.isCurrent()) reportStartRecoveryFailure(config, cap, authority);
+    } finally {
+      recoveringStarts.delete(key);
+    }
+  })();
+  recoveringStarts.set(key, recovery);
+  return recovery;
+}
+
+function reportStartRecoveryFailure(
+  config: PlayerConfig,
+  cap: InitialPlaybackCapabilities,
+  authority: PlaybackMutationContext,
+): void {
   config.onPlaybackStartError?.(
-    new Error(
-      "A previous playback start is unconfirmed. Retry to resolve it before starting another session.",
-    ),
-    retry,
+    new Error("Unable to finish starting playback. Check your connection and try again."),
+    () => {
+      if (authority.isCurrent()) void offerPendingInitialStart(config, cap);
+    },
   );
 }

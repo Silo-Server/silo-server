@@ -12,12 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -268,22 +270,31 @@ func TestInitialPlaybackHTTPDistributed(t *testing.T) {
 			}
 			status, data := f.call(t, http.MethodPost, "/start", f.request)
 			if loseReadyReply {
-				if status != http.StatusServiceUnavailable || starts.Load() != 1 {
+				if status != http.StatusCreated || starts.Load() != 1 {
 					t.Fatalf("uncertain start status=%d starts=%d body=%s", status, starts.Load(), data)
+				}
+				var terminal playback.DecisionResponseV3
+				if err := json.Unmarshal(data, &terminal); err != nil || terminal.Terminal == nil || terminal.Terminal.Reason != "playback_start_aborted" || terminal.SessionID != "" || terminal.PlaybackPlan != nil {
+					t.Fatalf("failed worker start lacked definitive terminal: %s %v", data, err)
 				}
 				var phase, sessionID string
 				if err := f.pool.QueryRow(t.Context(), `SELECT control_activation->>'phase',session_id::text FROM playback_v3_attempts WHERE playback_attempt_id=$1`, f.request.PlaybackAttemptID).Scan(&phase, &sessionID); err != nil {
 					t.Fatal(err)
 				}
-				if phase != "aborting" && phase != "aborted" {
+				if phase != "aborted" {
 					t.Fatalf("uncertain executor became %s", phase)
 				}
 				if _, err := f.manager.GetSession(sessionID); !errors.Is(err, playback.ErrSessionNotFound) {
 					t.Fatal("uncertain start published session", err)
 				}
-				status, data = f.call(t, http.MethodPost, "/start", f.request)
-				if status != http.StatusServiceUnavailable || starts.Load() != 1 {
-					t.Fatalf("uncertain start replay status=%d starts=%d body=%s", status, starts.Load(), data)
+				// This fixture enters the transport handler directly. Replay through
+				// the same retained-recovery boundary used by the v2 adapter.
+				f.flow.InstallationID = uuid.NewString()
+				replayCtx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: f.userID, Role: "user", TokenType: auth.TokenTypeAccess})
+				replayCtx = apimw.SetProfileID(replayCtx, f.request.ProfileID)
+				status, recovered, handled, err := f.handler.RecoverInitialPlaybackStart(replayCtx, PlaybackCaller{UserID: f.userID, ProfileID: f.request.ProfileID, InstallationID: f.flow.InstallationID}, f.request)
+				if err != nil || !handled || status != http.StatusCreated || starts.Load() != 1 || !reflect.DeepEqual(recovered, terminal) {
+					t.Fatalf("uncertain start replay status=%d handled=%v starts=%d result=%+v err=%v", status, handled, starts.Load(), recovered, err)
 				}
 				return
 			}

@@ -257,7 +257,7 @@ func (s *Postgres) CompleteInitialAbort(ctx context.Context, binding playback.In
 		if state.AbortReason == playback.InitialAbortOwnerLostV3 && !row.admitting {
 			return zero, playback.ErrInitialActivationConflictV3
 		}
-		if state.AbortReason == playback.InitialAbortOwnerLostV3 && state.AbortID == abortID && state.DrainNotBefore.After(row.now) {
+		if state.AbortID == abortID && state.DrainNotBefore.After(row.now) {
 			return zero, playback.ErrPlaybackRecoveryDrainingV3
 		}
 		if state.AbortID != abortID || (state.Phase != playback.InitialActivationAbortingV3 && state.Phase != playback.InitialActivationAbortedV3) || state.DrainNotBefore.After(row.now) {

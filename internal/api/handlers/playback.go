@@ -1412,7 +1412,17 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 }
 
 func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
-	if h == nil || session == nil || nativeSessionExecutorBound(h.tm, session) {
+	if h == nil || session == nil {
+		return
+	}
+	if binding, ok := session.InitialActivationBinding(); ok && h.initialFlow != nil {
+		// The local session has already expired. Stop renewing its exact owner;
+		// retained owner-loss recovery must finish the durable source lifecycle.
+		// Keeping that owner alive would make every lost START replay fail forever.
+		h.closeInitialRuntimeV3(binding)
+		return
+	}
+	if nativeSessionExecutorBound(h.tm, session) {
 		return
 	}
 	sessionCopy := *session

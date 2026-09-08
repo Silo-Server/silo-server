@@ -357,7 +357,7 @@ func TestPlaybackOwnerLossHTTPDrainAndOriginalStop(t *testing.T) {
 			}
 			f.expire(t)
 			f.restart(t)
-			reconciled, err := f.application.ReconcileInitialPlayback(t.Context(), f.user, "", 10)
+			reconciled, err := f.application.ReconcileInitialPlayback(t.Context(), "", 10)
 			if err == nil || reconciled.Pending != 1 {
 				t.Fatalf("missing ordinary receipt was synthesized: %+v %v", reconciled, err)
 			}
@@ -507,12 +507,12 @@ func TestPlaybackOwnerLossReconcileRetentionExpiry(t *testing.T) {
 			if _, err := f.pool.Exec(t.Context(), `UPDATE playback_v3_attempts SET expires_at=clock_timestamp()-interval '1 second' WHERE playback_attempt_id=$1`, f.binding.Fence.AttemptID); err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.application.ReconcileInitialPlayback(t.Context(), f.user, "", 10)
+			result, err := f.application.ReconcileInitialPlayback(t.Context(), "", 10)
 			if err != nil || result.Visited != 1 || result.Completed != 1 || result.Pending != 0 {
 				t.Fatalf("expiry reconciliation: %+v %v", result, err)
 			}
 			assertRecovery(t, f.call(t, "POST", "/start", f.body), 201, f.binding, false)
-			again, err := f.application.ReconcileInitialPlayback(t.Context(), f.user, "", 10)
+			again, err := f.application.ReconcileInitialPlayback(t.Context(), "", 10)
 			if err != nil || again.Visited != 0 {
 				t.Fatalf("terminal re-inventoried: %+v %v", again, err)
 			}

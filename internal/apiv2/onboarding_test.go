@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -107,7 +108,7 @@ func TestOnboardingSQLiteAndTransport(t *testing.T) {
 	store := userdb.NewSQLiteUserStore(db.DB)
 	testOnboardingStore(t, store)
 	deps := pilotDeps(nil, nil)
-	deps.Onboarding = handlers.NewOnboardingHandler(collectionGuardHTTPProvider{stores: map[int]userstore.UserStore{1: store}}, onboarding.Gates{})
+	deps.Onboarding = handlers.NewOnboardingHandler(notifications.WrapUserStoreProvider(collectionGuardHTTPProvider{stores: map[int]userstore.UserStore{1: store}}, &notifications.System{}), onboarding.Gates{})
 	h := newTestHandler(t, deps)
 	read := do(t, h, "GET", Prefix+"/onboarding/state", "", profileOwner())
 	if read.Code != 200 {
@@ -189,6 +190,19 @@ func TestOnboardingPostgresDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	testOnboardingStore(t, store)
+	deps := pilotDeps(nil, nil)
+	provider := notifications.WrapUserStoreProvider(collectionGuardHTTPProvider{stores: map[int]userstore.UserStore{1: store}}, &notifications.System{})
+	deps.Onboarding = handlers.NewOnboardingHandler(provider, onboarding.Gates{})
+	h := newTestHandler(t, deps)
+	read := do(t, h, "GET", Prefix+"/onboarding/state", "", profileOwner())
+	if read.Code != 200 {
+		t.Fatalf("wrapped PostgreSQL onboarding: %d %s", read.Code, read.Body)
+	}
+	write := do(t, h, "PUT", Prefix+"/onboarding/progress", `{"tour_id":"`+onboarding.TourID+`","last_step":"playback"}`, with(profileOwner(), "If-Match", read.Header().Get("ETag")))
+	if write.Code != 200 {
+		t.Fatalf("wrapped PostgreSQL progress: %d %s", write.Code, write.Body)
+	}
+
 	other, err := pgstore.NewPostgresProvider(fixture).ForUser(t.Context(), 2)
 	if err != nil {
 		t.Fatal(err)

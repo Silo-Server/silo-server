@@ -406,10 +406,7 @@ export function durableStop(
 }
 
 // Restore only exact current ownership. Other identities remain untouched.
-export function pendingDurableSessions(
-  config: PlayerConfig,
-  installationId: string,
-): DurableSession[] {
+function storedDurableSessions(config: PlayerConfig, installationId: string): DurableSession[] {
   const context = config.capturePlaybackMutationContext?.();
   if (!context || !context.isCurrent()) return [];
   const pending: DurableSession[] = [];
@@ -435,8 +432,29 @@ export function pendingDurableSessions(
         ? { timeline: readProgressTimeline(timeline, timeline.media_item_id, timeline.file_id) }
         : {}),
     };
-    const record = read(binding);
-    if (!record.stopped && !hasDurableTermination(binding)) pending.push(binding);
+    read(binding); // Validate even completed records before exposing their binding.
+    pending.push(binding);
   }
   return pending;
+}
+
+export function pendingDurableSessions(
+  config: PlayerConfig,
+  installationId: string,
+): DurableSession[] {
+  return storedDurableSessions(config, installationId).filter(
+    (binding) => !read(binding).stopped && !hasDurableTermination(binding),
+  );
+}
+
+// A START retained through cleanup may outlive its STOP receipt. Recover the
+// original mapping even when that STOP has already completed locally.
+export function retainedStartSession(
+  config: PlayerConfig,
+  installationId: string,
+  attemptId: string,
+): DurableSession | undefined {
+  return storedDurableSessions(config, installationId).find(
+    (binding) => binding.attemptId === attemptId,
+  );
 }

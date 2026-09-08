@@ -122,6 +122,10 @@ type interestTrackingStore struct {
 	updater *InterestUpdater
 }
 
+// Optional capabilities not intercepted here retain the backing store's support.
+// Capability lookup checks this decorator first, preserving its mutation hooks.
+func (s *interestTrackingStore) UnwrapUserStore() userstore.UserStore { return s.UserStore }
+
 type interestTrackingStoreWithDevices struct {
 	*interestTrackingStore
 	userstore.DeviceRegistry

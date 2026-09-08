@@ -101,9 +101,11 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
           isCurrent: () => isCapturedProfileAuthorityActive(captured),
         };
       },
+      onPlaybackStartResolved: () => toast.dismiss("playback-start-pending"),
       onPlaybackStartError: (error, retry) =>
-        toast.error("Audiobook start unconfirmed", {
-          id: "audiobook-start-pending",
+        toast.error("Playback unavailable", {
+          id: "playback-start-pending",
+          duration: Infinity,
           description: error.message,
           action: { label: "Retry", onClick: retry },
         }),
@@ -127,9 +129,10 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
     if (accountId == null || !profileId) return;
     let disposed = false;
     void initialPlaybackCapabilities(playerConfig)
-      .then((cap) => {
+      .then(async (cap) => {
         if (disposed || !cap.installation_id) return;
-        offerPendingInitialStart(playerConfig, cap);
+        await offerPendingInitialStart(playerConfig, cap);
+        if (disposed) return;
         offerPendingPlaybackStops(playerConfig, cap.installation_id);
       })
       .catch(() => {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,7 +77,7 @@ func TestInitialPlaybackReconcileExpiredIntent(t *testing.T) {
 			if _, err := f.pool.Exec(ctx, `UPDATE playback_v3_attempts SET control_lease_expires_at=clock_timestamp()-interval '2 minutes',expires_at=clock_timestamp()-interval '1 minute' WHERE playback_attempt_id=$1`, f.request.PlaybackAttemptID); err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.handler.ReconcileInitialPlayback(ctx, f.userID, "", 10)
+			result, err := f.handler.ReconcileInitialPlayback(ctx, "", 10)
 			if scenario == "source unavailable" || scenario == "different terminal" {
 				if err == nil || result.Pending != 1 || result.Completed != 0 {
 					t.Fatalf("unavailable source: %+v %v", result, err)
@@ -150,7 +151,7 @@ func TestInitialPlaybackReconcileNormalStopRequiresReceipt(t *testing.T) {
 				}
 				before = result.State
 			}
-			result, err := f.handler.ReconcileInitialPlayback(ctx, f.userID, "", 10)
+			result, err := f.handler.ReconcileInitialPlayback(ctx, "", 10)
 			after, readErr := f.source.ReadPlaybackProgress(ctx, active.Binding.Scope)
 			if readErr != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("reconciler mutated source: before=%+v after=%+v err=%v", before, after, readErr)
@@ -226,7 +227,7 @@ func TestInitialPlaybackReconcileClosesMatchingTranscode(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		result, err := f.handler.ReconcileInitialPlayback(ctx, f.userID, "", 10)
+		result, err := f.handler.ReconcileInitialPlayback(ctx, "", 10)
 		if err == nil && result.Completed == 1 {
 			break
 		}
@@ -338,5 +339,143 @@ func TestInitialPlaybackAutomaticallyAdmitsOrdinaryAccount(t *testing.T) {
 				t.Fatalf("first admission receipt: %d %v", receipts, err)
 			}
 		})
+	}
+}
+
+// No account list and no browser request is needed after an API dies mid-start.
+func TestInitialPlaybackBackgroundReconcilesAccountsAfterRestart(t *testing.T) {
+	first, second := newInitialHTTPFixture(t), newInitialHTTPFixture(t)
+	bindings := []playback.InitialActivationBindingV3{
+		initialReconciliationBinding(t, first), initialReconciliationBinding(t, second),
+	}
+	for _, b := range bindings {
+		if _, err := first.pool.Exec(t.Context(), `UPDATE playback_v3_attempts SET control_lease_expires_at=clock_timestamp()-interval '1 minute' WHERE playback_attempt_id=$1`, b.Fence.AttemptID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); first.handler.RunInitialPlaybackReconciliation(ctx, 10*time.Millisecond) }()
+	defer func() { cancel(); <-done }()
+	deadline, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var completed int
+		if err := first.pool.QueryRow(t.Context(), `SELECT count(*) FROM playback_v3_attempts WHERE playback_attempt_id=ANY($1) AND control_state='stopped' AND control_activation->>'phase'='aborted' AND control_activation->'terminal' IS NOT NULL`, []string{bindings[0].Fence.AttemptID, bindings[1].Fence.AttemptID}).Scan(&completed); err != nil {
+			t.Fatal(err)
+		}
+		if completed == 2 {
+			return
+		}
+		select {
+		case <-deadline.Done():
+			t.Fatal("background recovery did not finish both accounts")
+		case <-tick.C:
+		}
+	}
+}
+
+type deadlineReconciliationControl struct {
+	InitialPlaybackControlV3
+	cursors chan string
+}
+
+func (s deadlineReconciliationControl) ListInitialReconciliation(_ context.Context, after string, _ int) ([]playback.InitialActivationV3, error) {
+	s.cursors <- after
+	if after != "" {
+		return nil, nil
+	}
+	return []playback.InitialActivationV3{
+		{Phase: playback.InitialActivationPendingV3, Binding: playback.InitialActivationBindingV3{Fence: userstore.PlaybackProgressFence{AttemptID: "first"}}},
+		{Phase: playback.InitialActivationPendingV3, Binding: playback.InitialActivationBindingV3{Fence: userstore.PlaybackProgressFence{AttemptID: "second"}}},
+	}, nil
+}
+
+func (s deadlineReconciliationControl) AbortInitialActivation(ctx context.Context, _ playback.InitialActivationBindingV3, _ string) (playback.InitialActivationV3, error) {
+	<-ctx.Done()
+	return playback.InitialActivationV3{}, ctx.Err()
+}
+
+func TestInitialPlaybackReconciliationAdvancesAfterPageDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	control := deadlineReconciliationControl{cursors: make(chan string, 2)}
+	h := &PlaybackHandler{initialFlow: &InitialPlaybackFlowV3{Control: control}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.RunInitialPlaybackReconciliation(ctx, time.Millisecond)
+	}()
+	for _, want := range []string{"", "first"} {
+		select {
+		case got := <-control.cursors:
+			if got != want {
+				t.Fatalf("cursor = %q, want %q; timed-out source starved later attempts", got, want)
+			}
+		case <-time.After(12 * time.Second):
+			t.Fatal("reconciliation did not advance after its page deadline")
+		}
+	}
+	cancel()
+	<-done
+}
+
+func TestInitialPlaybackExpiredUndisplayedStartReleasesOwner(t *testing.T) {
+	f := newInitialHTTPFixture(t)
+	f.flow.InstallationID = uuid.NewString()
+	f.flow.Policy = playback.RuntimeGrantPolicyV3{MaxDuration: 3 * time.Second, SafetyMargin: 100 * time.Millisecond, RenewBefore: time.Second, PollInterval: 10 * time.Millisecond}
+	status, data := f.call(t, http.MethodPost, "/start", f.request)
+	if status != http.StatusCreated {
+		t.Fatalf("start: %d %s", status, data)
+	}
+	var decision playback.DecisionResponseV3
+	if err := json.Unmarshal(data, &decision); err != nil {
+		t.Fatal(err)
+	}
+	value, ok := f.flow.owners.Load(decision.SessionID)
+	if !ok {
+		t.Fatal("missing owner")
+	}
+	owner := value.(*playback.RuntimeOwnerLeaseV3)
+	// A successful response can be lost before the browser ever opens media or
+	// sends progress. Exercise the real idle cleanup hook without a fixed sleep.
+	if expired := f.manager.CleanInactive(time.Nanosecond, time.Nanosecond); len(expired) != 1 {
+		t.Fatalf("expired sessions = %d, want 1", len(expired))
+	}
+	select {
+	case <-owner.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("expired session kept renewing its owner and blocked START recovery")
+	}
+	if _, ok := f.flow.pending.Load(decision.SessionID); ok {
+		t.Fatal("expired publication remains boot-local")
+	}
+	ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: f.userID, Role: "user", TokenType: auth.TokenTypeAccess})
+	ctx = apimw.SetProfileID(ctx, f.request.ProfileID)
+	caller := PlaybackCaller{UserID: f.userID, ProfileID: f.request.ProfileID, InstallationID: f.flow.InstallationID}
+	deadline := time.NewTimer(6 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		// Replay itself can finish owner-loss once the retained lease expires.
+		status, recovered, handled, err := f.handler.RecoverInitialPlaybackStart(ctx, caller, f.request)
+		if err == nil && handled && status == http.StatusCreated {
+			terminal, ok := recovered.(PlaybackOwnerLossStart)
+			if !ok || terminal.Terminal == nil || terminal.Terminal.Reason != "playback_owner_lost" || terminal.Recovery.PlaybackAttemptID != f.request.PlaybackAttemptID || terminal.Recovery.SessionID != decision.SessionID || terminal.Recovery.State != "aborted" || terminal.Recovery.Accepted != nil {
+				t.Fatalf("recovery replaced the original attempt or invented progress: %+v", recovered)
+			}
+			if _, err := f.manager.GetSession(decision.SessionID); !errors.Is(err, playback.ErrSessionNotFound) {
+				t.Fatalf("recovery reconstructed expired session: %v", err)
+			}
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("expired START did not reach terminal: status=%d handled=%v err=%v body=%+v", status, handled, err, recovered)
+		case <-tick.C:
+		}
 	}
 }

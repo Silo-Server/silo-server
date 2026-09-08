@@ -31,7 +31,7 @@ type initialRouterShutdownControl struct {
 	release chan struct{}
 }
 
-func (s initialRouterShutdownControl) ListInitialReconciliation(ctx context.Context, _ int, _ string, _ int) ([]playback.InitialActivationV3, error) {
+func (s initialRouterShutdownControl) ListInitialReconciliation(ctx context.Context, _ string, _ int) ([]playback.InitialActivationV3, error) {
 	close(s.entered)
 	<-ctx.Done()
 	<-s.release
@@ -63,7 +63,7 @@ func TestInitialPlaybackRouterJoinsReconciliation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var work []<-chan struct{}
-	_ = NewRouter(Dependencies{Config: cfg, AppContext: ctx, SessionMgr: playback.NewSessionManager(0, 0), InitialPlayback: flow, InitialPlaybackReconcileAccounts: []int{1}, RegisterShutdownWork: func(done <-chan struct{}) { work = append(work, done) }})
+	_ = NewRouter(Dependencies{Config: cfg, AppContext: ctx, SessionMgr: playback.NewSessionManager(0, 0), InitialPlayback: flow, RegisterShutdownWork: func(done <-chan struct{}) { work = append(work, done) }})
 	select {
 	case <-control.entered:
 	case <-time.After(3 * time.Second):

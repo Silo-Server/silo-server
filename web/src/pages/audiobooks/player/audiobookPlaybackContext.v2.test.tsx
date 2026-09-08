@@ -9,7 +9,7 @@ import {
 } from "./audiobookPlaybackContext";
 
 const identity = vi.hoisted(() => ({ account: 1, toast: vi.fn() }));
-vi.mock("sonner", () => ({ toast: { error: identity.toast } }));
+vi.mock("sonner", () => ({ toast: { error: identity.toast, dismiss: vi.fn() } }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: identity.account } }) }));
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({ profile: { id: "profile" } }),

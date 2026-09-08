@@ -89,7 +89,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 
 func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request transcodenode.TranscodeStartRequest) time.Duration {
 	if request.ToneMapMode == "" {
-		return 20 * time.Second
+		return playback.ManifestStartupTimeout + 5*time.Second
 	}
 	timeout := h.remoteToneMapProbeTimeoutV3(nodeURL) + playback.ManifestStartupTimeout
 	if request.ToneMapPreflightRequired {

@@ -208,7 +208,7 @@ const sessionReapInterval = time.Minute
 const sessionTrackingOperationTimeout = 2 * time.Second
 
 // TranscodeStartReadinessTimeout is the node-side RequireReady manifest budget.
-const TranscodeStartReadinessTimeout = 8 * time.Second
+const TranscodeStartReadinessTimeout = playback.ManifestStartupTimeout
 
 // progressiveRemuxShutdownTimeout bounds a destructive reload when a canceled
 // FFmpeg process does not exit. A timed-out reload must fail rather than report

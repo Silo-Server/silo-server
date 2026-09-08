@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -14,9 +15,9 @@ type InitialPlaybackReconciliation struct {
 	NextAttemptID               string
 }
 
-// ReconcileInitialPlayback processes one explicit account's retained intents.
+// ReconcileInitialPlayback processes a bounded page of retained intents across accounts.
 // It never enrolls sources, adopts active owners, or invents a final stop sample.
-func (h *PlaybackHandler) ReconcileInitialPlayback(ctx context.Context, accountID int, afterAttemptID string, limit int) (InitialPlaybackReconciliation, error) {
+func (h *PlaybackHandler) ReconcileInitialPlayback(ctx context.Context, afterAttemptID string, limit int) (InitialPlaybackReconciliation, error) {
 	var result InitialPlaybackReconciliation
 	if h.initialFlow == nil {
 		return result, playback.ErrInitialActivationUnavailableV3
@@ -25,7 +26,7 @@ func (h *PlaybackHandler) ReconcileInitialPlayback(ctx context.Context, accountI
 	if !ok {
 		return result, playback.ErrInitialActivationUnavailableV3
 	}
-	states, err := inventory.ListInitialReconciliation(ctx, accountID, afterAttemptID, limit)
+	states, err := inventory.ListInitialReconciliation(ctx, afterAttemptID, limit)
 	if err != nil {
 		return result, err
 	}
@@ -99,29 +100,29 @@ func (h *PlaybackHandler) reconcileInitialStopReceipt(ctx context.Context, state
 	return nil
 }
 
-// RunInitialPlaybackReconciliation is explicitly scoped by the embedding test
-// instance. Every tick visits at most one page per configured account. Failed
-// intents remain durable and recur on the next sweep; no new authority is minted.
-func (h *PlaybackHandler) RunInitialPlaybackReconciliation(ctx context.Context, accounts []int, interval time.Duration) {
-	if ctx == nil || interval <= 0 || len(accounts) == 0 {
+// RunInitialPlaybackReconciliation closes durable orphaned work without client
+// participation. Multiple API replicas may visit a row; the existing per-attempt
+// CAS transitions and exact receipts serialize completion without new authority.
+func (h *PlaybackHandler) RunInitialPlaybackReconciliation(ctx context.Context, interval time.Duration) {
+	if ctx == nil || interval <= 0 {
 		return
 	}
-	cursors := make(map[int]string, len(accounts))
-	for _, accountID := range accounts {
-		if accountID > 0 {
-			cursors[accountID] = ""
-		}
-	}
+	cursor := ""
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		for accountID, cursor := range cursors {
-			result, _ := h.ReconcileInitialPlayback(ctx, accountID, cursor, 100)
-			if result.Visited < 100 {
-				cursors[accountID] = ""
-			} else {
-				cursors[accountID] = result.NextAttemptID
-			}
+		pageCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		result, err := h.ReconcileInitialPlayback(pageCtx, cursor, 100)
+		cancel()
+		if err != nil && ctx.Err() == nil && result.Visited == 0 {
+			slog.WarnContext(ctx, "playback reconciliation inventory unavailable", "component", "playback")
+		}
+		// A deadline can interrupt a full inventory page after only a prefix.
+		// Advance past every visited row so a slow source cannot starve later accounts.
+		if result.Visited == 0 {
+			cursor = ""
+		} else {
+			cursor = result.NextAttemptID
 		}
 		select {
 		case <-ctx.Done():

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api"
@@ -62,6 +61,5 @@ func configureInitialPlaybackStartup(bootstrap *config.BootstrapConfig, deps *ap
 	flow.AuxiliaryEnabled = bootstrap.InitialPlaybackAPIOrigin != ""
 	flow.TimelineResolver = catalog.NewClientPlaybackManifestResolver(deps.DB)
 	deps.InitialPlayback = flow
-	deps.InitialPlaybackReconcileAccounts = slices.Clone(bootstrap.InitialPlaybackReconcileAccounts)
 	return nil
 }

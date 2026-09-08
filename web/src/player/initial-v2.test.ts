@@ -1,5 +1,9 @@
-import { afterEach, expect, it, vi } from "vitest";
-import { initialPlaybackCapabilities, startInitialPlayback } from "./initial-v2";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  initialPlaybackCapabilities,
+  startInitialPlayback as dispatchStart,
+  offerPendingInitialStart,
+} from "./initial-v2";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 import { buildStartRequestV3 } from "./playback-session-wire-v3";
 import {
@@ -39,8 +43,35 @@ const cap = {
   features: ["sequenced_progress_v1"],
   deliveries: ["direct"],
 };
+const startAborted = {
+  protocol_version: 3,
+  server_features: ["sequenced_progress_v1"],
+  outcome: "adaptation_unavailable",
+  terminal: {
+    reason: "playback_start_aborted",
+    message: "Playback could not start.",
+    retryable: false,
+  },
+};
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+beforeEach(() => vi.useFakeTimers());
+// Advance bounded retry backoff without waiting on wall-clock time. Attach both
+// outcomes before advancing so rejected requests never become unhandled promises.
+async function settle<T>(promise: Promise<T>): Promise<T> {
+  const outcome = promise.then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  );
+  await vi.runAllTimersAsync();
+  const result = await outcome;
+  if ("error" in result) throw result.error;
+  return result.value;
+}
+function startInitialPlayback(...args: Parameters<typeof dispatchStart>) {
+  return settle(dispatchStart(...args));
+}
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   localStorage.clear();
 });
@@ -109,49 +140,49 @@ it("refuses configured start before effects when browser locking is unavailable"
   await expect(startInitialPlayback(config, body)).rejects.toThrow("storage locking");
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
-it("keeps an uncertain start body through reload and blocks a newly minted attempt", async () => {
-  vi.stubGlobal("navigator", {
-    locks: {
-      request: (_key: string, _options: unknown, action: () => Promise<unknown>) => action(),
-    },
-  });
-  const fetcher = vi.fn().mockImplementation(async (url: string) => {
-    if (url.endsWith("capabilities")) return reply(cap);
+it("automatically resolves an uncertain start after reload and never replaces its bytes", async () => {
+  const fetcher = boundTransport(async () => {
     throw new TypeError("lost successful reply");
   });
-  vi.stubGlobal("fetch", fetcher);
-  await expect(startInitialPlayback(config, body)).rejects.toThrow("lost successful reply");
-  const original = fetcher.mock.calls.find((c) => c[0].endsWith("/start"))![1].body;
+  const onPlaybackStartError = vi.fn();
+  const scoped = { ...config, onPlaybackStartError };
+  await expect(startInitialPlayback(scoped, body)).rejects.toThrow("lost successful reply");
+  const starts = () => fetcher.mock.calls.filter(([url]) => url.endsWith("/start"));
+  const original = starts()[0]![1]?.body;
   expect(localStorage.getItem(localStorage.key(0)!)).toBe(original);
+  expect(onPlaybackStartError).toHaveBeenCalledTimes(1);
   await expect(
     startInitialPlayback(config, { ...body, playback_attempt_id: "different-attempt" }),
-  ).rejects.toThrow("earlier playback start");
-  expect(fetcher.mock.calls.filter((c) => c[0].endsWith("/start"))).toHaveLength(1);
+  ).rejects.toThrow("lost successful reply");
+  expect(starts().length).toBeGreaterThan(2);
+  expect(starts().every((call) => call[1]?.body === original)).toBe(true);
   vi.resetModules();
   const reloaded = await import("./initial-v2");
   fetcher.mockImplementation(async (url: string) =>
-    url.endsWith("capabilities")
-      ? reply(cap)
-      : reply({
-          protocol_version: 3,
-          server_features: [],
-          outcome: "terminal",
-          terminal: { code: "unavailable" },
-        }),
+    url.endsWith("capabilities") ? reply(cap) : reply(startAborted, 201),
   );
-  await reloaded.startInitialPlayback(config, body);
-  expect(fetcher.mock.calls.filter((c) => c[0].endsWith("/start"))[1]![1].body).toBe(original);
+  const resolved = vi.fn();
+  await settle(
+    reloaded.offerPendingInitialStart({ ...config, onPlaybackStartResolved: resolved }, cap),
+  );
+  expect(starts().slice(-1)[0]![1]?.body).toBe(original);
   expect(localStorage.length).toBe(0);
+  expect(resolved).toHaveBeenCalledTimes(1);
 });
 it("quarantines an old start recovery action after identity changes", async () => {
-  let current = true;
+  let profile = "profile";
   let retry: (() => void) | undefined;
   const scoped = {
     ...config,
-    capturePlaybackMutationContext: () => ({
-      ...config.capturePlaybackMutationContext!()!,
-      isCurrent: () => current,
-    }),
+    getProfileId: () => profile,
+    capturePlaybackMutationContext: () => {
+      const capturedProfile = profile;
+      return {
+        ...config.capturePlaybackMutationContext!()!,
+        profileId: capturedProfile,
+        isCurrent: () => profile === capturedProfile,
+      };
+    },
     onPlaybackStartError: (_error: Error, action: () => void) => {
       retry = action;
     },
@@ -168,13 +199,22 @@ it("quarantines an old start recovery action after identity changes", async () =
   vi.stubGlobal("fetch", fetcher);
   await expect(startInitialPlayback(scoped, body)).rejects.toThrow("lost");
   expect(retry).toBeTypeOf("function");
-  current = false;
+  const oldKey = Object.keys(localStorage)[0]!;
+  profile = "other-profile";
+  const newKey = oldKey.replace(
+    encodeURIComponent('"profile"'),
+    encodeURIComponent('"other-profile"'),
+  );
+  localStorage.setItem(
+    newKey,
+    localStorage.getItem(oldKey)!.replace('"profile"', '"other-profile"'),
+  );
   fetcher.mockClear();
   retry!();
   await Promise.resolve();
   await Promise.resolve();
   expect(fetcher).not.toHaveBeenCalled();
-  expect(localStorage.length).toBe(1);
+  expect(localStorage.length).toBe(2);
 });
 it("does not fall back to legacy while an earlier start remains uncertain", async () => {
   vi.stubGlobal("navigator", {
@@ -196,44 +236,27 @@ it("does not fall back to legacy while an earlier start remains uncertain", asyn
   );
   expect(localStorage.length).toBe(1);
 });
-it("retains the same attempt after a lost start reply followed by validation_failed", async () => {
-  vi.stubGlobal("navigator", {
-    locks: {
-      request: (_key: string, _options: unknown, action: () => Promise<unknown>) => action(),
-    },
-  });
+it("retains the same attempt after a lost response followed by validation_failed", async () => {
+  let reject = true;
   let starts = 0;
-  const fetcher = vi.fn(async (url: string, _options?: RequestInit) => {
-    if (url.endsWith("capabilities")) return reply(cap);
+  const fetcher = boundTransport(async () => {
     starts++;
-    if (starts === 1) throw new Error("lost successful reply");
-    if (starts === 2) {
-      return reply(
-        { type: "https://siloserver.org/docs/api/v2/problems/validation_failed", status: 422 },
-        422,
-      );
-    }
-    return reply({
-      protocol_version: 3,
-      server_features: [],
-      outcome: "adaptation_unavailable",
-      terminal: { code: "unavailable" },
-    });
+    if (starts === 1) throw new TypeError("lost successful reply");
+    return reject ? reply({ status: 422 }, 422) : reply(startAborted, 201);
   });
-  vi.stubGlobal("fetch", fetcher);
-  await expect(startInitialPlayback(config, body)).rejects.toThrow("lost successful reply");
-  const stored = localStorage.getItem(localStorage.key(0)!);
   await expect(startInitialPlayback(config, body)).rejects.toThrow("Failed to start playback");
-  expect(localStorage.getItem(localStorage.key(0)!)).toBe(stored);
+  const stored = localStorage.getItem(localStorage.key(0)!);
   await expect(
     startInitialPlayback(config, { ...body, playback_attempt_id: "different-attempt" }),
-  ).rejects.toThrow("earlier playback start");
-  expect(starts).toBe(2);
+  ).rejects.toThrow("Failed to start playback");
+  expect(localStorage.getItem(localStorage.key(0)!)).toBe(stored);
+  expect(starts).toBe(3);
+  reject = false;
   await startInitialPlayback(config, body);
   expect(localStorage.length).toBe(0);
-  const requests = fetcher.mock.calls.filter((c) => c[0].endsWith("/start"));
-  expect(requests).toHaveLength(3);
-  for (const request of requests) expect((request[1] as RequestInit).body).toBe(stored);
+  const requests = fetcher.mock.calls.filter(([url]) => url.endsWith("/start"));
+  expect(requests).toHaveLength(4);
+  for (const request of requests) expect(request[1]?.body).toBe(stored);
 });
 it.each([
   {
@@ -267,8 +290,10 @@ it.each([
     expect(localStorage.length).toBe(1);
     await expect(
       startInitialPlayback(config, { ...body, playback_attempt_id: "new-attempt" }),
-    ).rejects.toThrow("earlier playback start");
-    expect(fetcher.mock.calls.filter((c) => c[0].endsWith("/start"))).toHaveLength(1);
+    ).rejects.toThrow();
+    expect(
+      new Set(fetcher.mock.calls.filter((c) => c[0].endsWith("/start")).map((c) => c[1].body)).size,
+    ).toBe(1);
   },
 );
 
@@ -343,7 +368,8 @@ it("retires only the exact retained201 timeline terminal, then permits a new exp
     await reloaded.startInitialPlayback(config, boundBody, "installation", timeline),
   ).toMatchObject(timelineTerminal);
   const starts = () => fetcher.mock.calls.filter(([url]) => url.endsWith("/start"));
-  expect(starts()).toHaveLength(2);
+  const retainedCount = starts().length;
+  expect(retainedCount).toBeGreaterThan(2);
   expect(starts()[1]![1]?.body).toBe(original);
   expect(localStorage.length).toBe(0);
   const fresh = { ...timeline, timeline_id: "b".repeat(64) };
@@ -353,8 +379,8 @@ it("retires only the exact retained201 timeline terminal, then permits a new exp
     "installation",
     fresh,
   );
-  expect(starts()).toHaveLength(3);
-  expect(JSON.parse(String(starts()[2]![1]?.body))).toMatchObject({
+  expect(starts()).toHaveLength(retainedCount + 1);
+  expect(JSON.parse(String(starts().slice(-1)[0]![1]?.body))).toMatchObject({
     playback_attempt_id: "new-explicit-intent",
     timeline_id: fresh.timeline_id,
   });
@@ -395,9 +421,13 @@ it.each([
         "installation",
         timeline,
       ),
-    ).rejects.toThrow("earlier playback start");
+    ).rejects.toThrow();
     expect(localStorage.getItem(key)).toBe(original);
-    expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/start"))).toHaveLength(1);
+    expect(
+      new Set(
+        fetcher.mock.calls.filter(([url]) => url.endsWith("/start")).map((call) => call[1]?.body),
+      ).size,
+    ).toBe(1);
     expect(
       Object.keys(localStorage).some((key) => key.startsWith("silo-playback-mutation-v1:")),
     ).toBe(false);
@@ -442,7 +472,7 @@ const ownerTerminal = {
   },
   recovery: { ...ownerRecovery, state: "aborted" },
 };
-it("retains exact lost START bytes through draining reload, then durably records abandonment", async () => {
+it("automatically retries a lost START through draining and records terminal abandonment", async () => {
   let phase = 0;
   const fetcher = boundTransport(async () => {
     if (phase++ === 0) throw new TypeError("lost response");
@@ -450,18 +480,18 @@ it("retains exact lost START bytes through draining reload, then durably records
       ? reply({ outcome: "draining", recovery: ownerRecovery }, 202)
       : reply(ownerTerminal, 201);
   });
-  await expect(startInitialPlayback(config, body)).rejects.toThrow("lost response");
-  const key = Object.keys(localStorage).find((key) => key.startsWith("silo-playback-start-v1:"))!;
-  const original = localStorage.getItem(key);
-  await expect(startInitialPlayback(config, body)).rejects.toThrow("still draining");
-  expect(localStorage.getItem(key)).toBe(original);
-  vi.resetModules();
-  const restored = await import("./initial-v2");
-  expect(await restored.startInitialPlayback(config, body)).toEqual(ownerTerminal);
+  const onPlaybackStartError = vi.fn();
+  expect(await startInitialPlayback({ ...config, onPlaybackStartError }, body)).toEqual(
+    ownerTerminal,
+  );
   const starts = fetcher.mock.calls.filter(([url]) => url.endsWith("/start"));
+  const original = starts[0]![1]?.body;
   expect(starts).toHaveLength(3);
   expect(starts.every((call) => call[1]?.body === original)).toBe(true);
-  expect(localStorage.getItem(key)).toBeNull();
+  expect(onPlaybackStartError).not.toHaveBeenCalled();
+  expect(Object.keys(localStorage).some((key) => key.startsWith("silo-playback-start-v1:"))).toBe(
+    false,
+  );
   const recoveryKey = Object.keys(localStorage).find((key) =>
     key.startsWith("silo-playback-start-recovery-v1:"),
   )!;
@@ -512,7 +542,7 @@ it("refuses a changed recovery identity after observing the original pending STA
   let receipt: unknown = { outcome: "draining", recovery: ownerRecovery };
   let status = 202;
   boundTransport(async () => reply(receipt, status));
-  await expect(startInitialPlayback(config, body)).rejects.toThrow("still draining");
+  await expect(startInitialPlayback(config, body)).rejects.toThrow("still stopping");
   const snapshot = { ...localStorage };
   receipt = {
     ...ownerTerminal,
@@ -594,8 +624,187 @@ it.each([false, true])(
         "installation",
         mapping,
       ),
-    ).rejects.toThrow("earlier playback start");
+    ).rejects.toThrow();
     expect({ ...localStorage }).toEqual(saved);
-    expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/start"))).toHaveLength(1);
+    expect(
+      new Set(
+        fetcher.mock.calls.filter(([url]) => url.endsWith("/start")).map((call) => call[1]?.body),
+      ).size,
+    ).toBe(1);
   },
 );
+
+it.each(["success", "stop_failure", "owner_loss", "cleanup_crash"])(
+  "finishes the exact undisplayed session before a new Play: %s",
+  async (mode) => {
+    const fetcher = boundTransport(async () => {
+      throw new TypeError("lost response");
+    });
+    await expect(startInitialPlayback(config, body)).rejects.toThrow("lost response");
+    const retained = fetcher.mock.calls.find(([url]) => url.endsWith("/start"))![1]?.body;
+    fetcher.mockClear();
+    const plan = fixturePlanV3();
+    let stopFails = mode === "stop_failure";
+    let stopAttempted = false;
+    fetcher.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith("capabilities")) return reply(cap);
+      if (options?.method === "DELETE") {
+        expect(url).toContain("undisplayed-session");
+        stopAttempted = true;
+        if (stopFails) return reply({}, 503);
+        if (mode === "owner_loss")
+          return reply({
+            outcome: "aborted",
+            recovery: { ...ownerTerminal.recovery, session_id: "undisplayed-session" },
+          });
+        return reply({ outcome: "stopped", stop_id: JSON.parse(String(options.body)).stop_id });
+      }
+      const request = JSON.parse(String(options?.body));
+      if (request.playback_attempt_id !== "attempt") return reply(startAborted, 201);
+      if (stopAttempted) return reply({}, 503); // STOP may already have committed on the server.
+      return reply(
+        {
+          protocol_version: 3,
+          server_features: ["sequenced_progress_v1"],
+          outcome: "play",
+          session_id: "undisplayed-session",
+          playback_plan: {
+            ...plan,
+            requested_media_file_id: "42",
+            effective_media_file_id: "42",
+            source: { ...plan.source, media_file_id: "42" },
+          },
+        },
+        201,
+      );
+    });
+    if (stopFails) {
+      for (let tries = 0; tries < 2; tries++) {
+        await expect(
+          startInitialPlayback(config, { ...body, playback_attempt_id: "new-intent" }),
+        ).rejects.toThrow("stop is still pending");
+        const key = Object.keys(localStorage).find((key) =>
+          key.startsWith("silo-playback-start-v1:"),
+        )!;
+        expect(localStorage.getItem(key)).toBe(retained);
+        const starts = fetcher.mock.calls.filter(([url]) => url.endsWith("/start"));
+        expect(starts).toHaveLength(1);
+        expect(starts.every((call) => call[1]?.body === retained)).toBe(true);
+      }
+      const stops = fetcher.mock.calls.filter((call) => call[1]?.method === "DELETE");
+      expect(new Set(stops.map((call) => call[1]?.body)).size).toBe(1);
+      stopFails = false;
+      // Reload resumes both original operations, including the saved STOP ID.
+      vi.resetModules();
+      const reloaded = await import("./initial-v2");
+      await settle(reloaded.offerPendingInitialStart(config, cap));
+      expect(
+        fetcher.mock.calls.filter((call) => call[1]?.method === "DELETE").slice(-1)[0]![1]?.body,
+      ).toBe(stops[0]![1]?.body);
+      fetcher.mockClear();
+    }
+    if (mode === "cleanup_crash") {
+      const remove = Storage.prototype.removeItem;
+      const spy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (
+        this: Storage,
+        key,
+      ) {
+        if (key.startsWith("silo-playback-start-v1:")) throw new Error("cleanup interrupted");
+        return remove.call(this, key);
+      });
+      try {
+        await expect(
+          startInitialPlayback(config, { ...body, playback_attempt_id: "new-intent" }),
+        ).rejects.toThrow("cleanup interrupted");
+      } finally {
+        spy.mockRestore();
+      }
+    }
+    await startInitialPlayback(config, { ...body, playback_attempt_id: "new-intent" });
+    const effects = fetcher.mock.calls.filter(([url]) => !url.endsWith("capabilities"));
+    if (mode === "stop_failure") {
+      expect(effects).toHaveLength(1);
+      expect(JSON.parse(String(effects[0]![1]?.body))).toMatchObject({
+        playback_attempt_id: "new-intent",
+      });
+      return;
+    }
+    expect(effects.map((call) => call[1]?.method)).toEqual(["POST", "DELETE", "POST"]);
+    expect(effects[0]![1]?.body).toBe(retained);
+    expect(JSON.parse(String(effects[1]![1]?.body))).toMatchObject({
+      installation_id: "installation",
+      stop_id: expect.any(String),
+    });
+    expect(JSON.parse(String(effects[2]![1]?.body))).toMatchObject({
+      playback_attempt_id: "new-intent",
+    });
+    expect(Object.keys(localStorage).some((key) => key.startsWith("silo-playback-start-v1:"))).toBe(
+      false,
+    );
+  },
+);
+
+it("shares one automatic recovery task between video and audiobook hosts", async () => {
+  const fetcher = boundTransport(async () => {
+    throw new TypeError("lost response");
+  });
+  await expect(startInitialPlayback(config, body)).rejects.toThrow("lost response");
+  fetcher.mockClear();
+  fetcher.mockImplementation(async (url: string) =>
+    url.endsWith("capabilities") ? reply(cap) : reply(startAborted, 201),
+  );
+  const resolved = vi.fn();
+  const failed = vi.fn();
+  const scoped = { ...config, onPlaybackStartResolved: resolved, onPlaybackStartError: failed };
+  const video = offerPendingInitialStart(scoped, cap);
+  const audiobook = offerPendingInitialStart(scoped, cap);
+  expect(video).toBe(audiobook);
+  await settle(video);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/start"))).toHaveLength(1);
+  expect(resolved).toHaveBeenCalledTimes(1);
+  expect(failed).not.toHaveBeenCalled();
+});
+
+it("bounds the whole START recovery, including the final network request", async () => {
+  const originalTimeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms);
+    return controller.signal;
+  });
+  let requests = 0;
+  const startAt = Date.now();
+  boundTransport(async () => {
+    throw new Error("unused");
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, options?: RequestInit) => {
+      if (url.endsWith("capabilities")) return reply(cap);
+      if (++requests === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 44000));
+        return reply({}, 503);
+      }
+      return new Promise<Response>((_resolve, reject) =>
+        options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), {
+          once: true,
+        }),
+      );
+    }),
+  );
+  let finishedAt = 0;
+  const result = dispatchStart(config, body).catch((error) => {
+    finishedAt = Date.now();
+    return error;
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(await result).toBeInstanceOf(DOMException);
+    expect(finishedAt - startAt).toBe(60000);
+    expect(requests).toBe(2);
+    expect(Object.keys(localStorage).some((key) => key.startsWith("silo-playback-start-v1:"))).toBe(
+      true,
+    );
+  } finally {
+    originalTimeout.mockRestore();
+  }
+});

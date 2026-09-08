@@ -21,7 +21,7 @@ type initialUnsupportedProvider struct{ userstore.UserStoreProvider }
 
 func TestInitialPlaybackStartupDefaultOff(t *testing.T) {
 	// OFF must not inspect, replace or initialize any existing dependency.
-	deps := api.Dependencies{InitialPlaybackReconcileAccounts: []int{72}}
+	deps := api.Dependencies{}
 	before := deps
 	if err := configureInitialPlaybackStartup(&config.BootstrapConfig{}, &deps); err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestInitialPlaybackStartupDefaultOff(t *testing.T) {
 }
 
 func TestInitialPlaybackStartupRefusesIncompleteAssembly(t *testing.T) {
-	on := &config.BootstrapConfig{InitialPlaybackEnabled: true, Mode: "integrated", InitialPlaybackReconcileAccounts: []int{1}}
+	on := &config.BootstrapConfig{InitialPlaybackEnabled: true, Mode: "integrated"}
 	if err := configureInitialPlaybackStartup(on, nil); err == nil {
 		t.Fatal("missing dependencies accepted")
 	}
