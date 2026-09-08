@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
-import { startInitialPlayback } from "../initial-v2";
-import { PlaybackOwnerLostError } from "../owner-loss-recovery";
-import { durableSessionFor, stopSequencedSession } from "../session-mutations";
+import { startPlaybackV2 } from "../start-v2";
+import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
 import { describePlanTerminal, describePlaybackTransportError } from "../playback-errors";
 import { useCodecDetection } from "./useCodecDetection";
 import {
@@ -13,9 +12,9 @@ import {
   detectMeteredV3,
 } from "../client-context-v3";
 import { buildRouteEventV3 } from "../route-events-v3";
-import { reportDurableRouteEvent } from "../route-events-v2";
-import { replanDurableSession } from "../lifecycle-v2";
-import { buildPlayerStreamUrl, proxySubtitleRequest } from "../stream-url";
+import { reportSessionRouteEventV2 } from "../route-events-v2";
+import { replanV2 } from "../lifecycle-v2";
+import { buildPlayerStreamUrl } from "../stream-url";
 import { randomUUID } from "@/lib/uuid";
 import {
   FEATURE_OUTPUT_CHANGE_V3,
@@ -143,61 +142,24 @@ function mapSubtitleInventory(
   inventory: SubtitleInventoryItemV3[],
   mediaFileId: number,
   config: PlayerConfig,
-  plan: PlanV3,
-  sessionId: string | null,
 ): PlayerSubtitleInfo[] {
-  const authority = sessionId ? durableSessionFor(sessionId)?.context : undefined;
-  const request = (raw: string | undefined, index: number, fonts = false) => {
-    if (!raw) return undefined;
-    // A proxy plan may only release credentials to its validated auxiliary family.
-    // Never turn malformed proxy paths into legacy query-authenticated requests.
-    if (
-      raw.includes("/stream/v3") ||
-      ((/^[a-z][a-z\d+.-]*:/i.test(raw) || raw.startsWith("//")) &&
-        !/^https?:\/\/[^/?#]+\/api\/v[12]\//.test(raw) &&
-        !/^https?:\/\/[^/?#]+\/stream\/subtitles\/[^/?#]+\/\d+(?:\.[a-z]+)?(?:\/fonts)?(?:\?|$)/.test(
-          raw,
-        ))
-    ) {
-      return (
-        proxySubtitleRequest(
-          raw,
-          plan.stream,
-          authority?.isCurrent() ? (authority.mediaRequestHeaders?.() ?? {}) : {},
-          sessionId ?? "",
-          index,
-          [plan.requested_media_file_id, plan.effective_media_file_id],
-          authority?.origin ?? config.apiBaseUrl,
-          fonts,
-        ) ?? undefined
-      );
-    }
-    return {
-      url: buildPlayerStreamUrl(config.apiBaseUrl, raw, config.getAccessToken()),
-      headers: undefined,
-    };
-  };
-  return inventory.map((item) => {
-    const subtitle = request(item.url, item.combined_index);
-    const fonts = request(item.font_bundle_url, item.combined_index, true);
-    return {
-      index: item.combined_index,
-      media_file_id: mediaFileId,
-      track_id: item.track_id,
-      burn_in_only: item.delivery === "burn_in_only",
-      language: item.language ?? "",
-      codec: item.codec,
-      label: item.label ?? item.language ?? `Track ${item.combined_index + 1}`,
-      source: subtitleSourceOf(item.source),
-      forced: item.forced,
-      hearing_impaired: item.hearing_impaired,
-      url: subtitle?.url ?? "",
-      request_headers: subtitle?.headers,
-      request_is_current: subtitle?.headers || fonts?.headers ? authority?.isCurrent : undefined,
-      font_bundle_url: fonts?.url,
-      font_request_headers: fonts?.headers,
-    };
-  });
+  const token = config.getAccessToken();
+  return inventory.map((item) => ({
+    index: item.combined_index,
+    media_file_id: mediaFileId,
+    track_id: item.track_id,
+    burn_in_only: item.delivery === "burn_in_only",
+    language: item.language ?? "",
+    codec: item.codec,
+    label: item.label ?? item.language ?? `Track ${item.combined_index + 1}`,
+    source: subtitleSourceOf(item.source),
+    forced: item.forced,
+    hearing_impaired: item.hearing_impaired,
+    url: item.url ? buildPlayerStreamUrl(config.apiBaseUrl, item.url, token) : "",
+    font_bundle_url: item.font_bundle_url
+      ? buildPlayerStreamUrl(config.apiBaseUrl, item.font_bundle_url, token)
+      : undefined,
+  }));
 }
 
 /**
@@ -230,8 +192,6 @@ function planToSessionState(
       plan.subtitle.inventory,
       plan.effective_media_file_id,
       config,
-      plan,
-      sessionId,
     ),
     qualityPreference,
     shouldAutoPlay,
@@ -468,11 +428,10 @@ export function usePlaybackSession(
         ...extra,
       };
       const sessionId = sessionIdRef.current;
-      if (sessionId && durableSessionFor(sessionId)) {
-        void reportDurableRouteEvent(config, sessionId, buildRouteEventV3(input));
-        return;
+      if (sessionId && hasSequencedProgress(sessionId)) {
+        void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input));
       }
-      // A terminal start without a durable session has no telemetry authority.
+      // A terminal start never produced a session; there is nothing to report it against.
     },
     [config],
   );
@@ -574,34 +533,14 @@ export function usePlaybackSession(
         clientPlaybackContext,
       });
 
-      return await startInitialPlayback(config, body);
+      return await startPlaybackV2(config, body);
     },
     [clientCapabilities, clientPlaybackContext, config, explicitAudioTrackIndex, maxBitrateKbps],
   );
 
   const stopSession = useCallback(
     async (sessionId: string) => {
-      if (durableSessionFor(sessionId)) {
-        try {
-          await stopSequencedSession(config, sessionId);
-        } catch (error) {
-          setState((current) =>
-            current.sessionId === sessionId
-              ? {
-                  ...current,
-                  errorTitle:
-                    error instanceof PlaybackOwnerLostError
-                      ? "Playback ended"
-                      : "Playback stop pending",
-                  error: error instanceof Error ? error.message : "Failed to stop playback",
-                }
-              : current,
-          );
-          throw error;
-        }
-        return;
-      }
-      throw new Error("Playback session has no durable authority");
+      await stopSequencedSession(config, sessionId);
     },
     [config],
   );
@@ -761,11 +700,7 @@ export function usePlaybackSession(
         let decisionToAdopt = decision;
         let initialSubtitleFailure: PlaybackSessionErrorState | null = null;
         const bitmapSubtitleTrackIndex = initialBitmapSubtitleTrackIndexByFileId?.[selectedFileId];
-        if (
-          !decision.playback_plan &&
-          decision.terminal?.reason !== "playback_owner_lost" &&
-          bitmapSubtitleTrackIndex !== undefined
-        ) {
+        if (!decision.playback_plan && bitmapSubtitleTrackIndex !== undefined) {
           initialSubtitleFailure = describeDecisionWithoutPlan(decision);
           if (decision.session_id) {
             void stopSession(decision.session_id).catch(() => {
@@ -901,14 +836,14 @@ export function usePlaybackSession(
   useEffect(() => {
     return () => {
       // A start can finish after unmount, before it has published a session ID.
-      // Let that reply take the stale-start path and stop under its original
-      // durable authority instead of adopting it into an abandoned player.
+      // Let that reply take the stale-start path and stop its own session
+      // instead of adopting it into an abandoned player.
       loadSequenceRef.current += 1;
       const sid = sessionIdRef.current;
       if (!sid) return;
-      if (!durableSessionFor(sid)) return;
-      void stopSequencedSession(config, sid, true).catch((error) => {
-        console.error("Playback stop did not complete", error);
+      // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
+      void stopSequencedSession(config, sid, true).catch(() => {
+        // Best effort: the session expires server-side.
       });
     };
   }, [config]);
@@ -1031,7 +966,7 @@ export function usePlaybackSession(
       }));
 
       try {
-        const decision = await replanDurableSession(config, sessionId, body);
+        const decision = await replanV2(config, sessionId, body);
 
         // A version switch or a fresh start that landed while this was in
         // flight owns the session now; this plan is already superseded.
@@ -1321,13 +1256,7 @@ export function usePlaybackSession(
       setState((current) => ({
         ...current,
         plan: nextPlan,
-        subtitleUrls: mapSubtitleInventory(
-          inventory,
-          nextPlan.effective_media_file_id,
-          config,
-          nextPlan,
-          sessionIdRef.current,
-        ),
+        subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
       }));
     },
     [config],

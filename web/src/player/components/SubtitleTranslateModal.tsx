@@ -104,7 +104,6 @@ export function SubtitleTranslateModal({
     const token = playerConfig.getAccessToken();
     const profile = playerConfig.getProfileId();
     const pin = playerConfig.getProfileToken?.();
-    const authority = playerConfig.capturePlaybackMutationContext?.();
     return () =>
       capturedGeneration === generation.current &&
       currentProps.current.isOpen &&
@@ -113,8 +112,7 @@ export function SubtitleTranslateModal({
       currentProps.current.playerConfig === playerConfig &&
       token === playerConfig.getAccessToken() &&
       profile === playerConfig.getProfileId() &&
-      pin === playerConfig.getProfileToken?.() &&
-      (!authority || authority.isCurrent());
+      pin === playerConfig.getProfileToken?.();
   }, [playerConfig, mediaFileId, sessionId]);
   const handleClose = useCallback(() => {
     generation.current++;

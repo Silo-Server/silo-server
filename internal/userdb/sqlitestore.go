@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -15,10 +14,7 @@ import (
 
 // SQLiteUserStore implements userstore.UserStore using a per-user SQLite database.
 type SQLiteUserStore struct {
-	db           *sql.DB
-	sourceRef    *userstore.PlaybackSourceRef
-	sourceMu     sync.RWMutex
-	sourceClosed bool
+	db *sql.DB
 }
 
 // NewSQLiteUserStore wraps an existing *sql.DB as a UserStore.

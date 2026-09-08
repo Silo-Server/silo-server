@@ -12,7 +12,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
-	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 type fakeAdminPlaybackSessions struct{ calls int }
@@ -42,8 +41,8 @@ func (f *fakeAdminNodeSessions) Read(_ context.Context, node int) (nodesessions.
 	f.calls++
 	f.node = node
 	return nodesessions.ListResult{Undecodable: 1, Sessions: []nodesessions.SessionInfo{
-		{NodeURL: "https://node.invalid", SessionID: "same", AuthUserID: 7, MediaFileID: 42, Executor: &playback.ExecutorNamespaceV3{Incarnation: "inc", Epoch: 2, ExecutorID: "new"}},
-		{NodeURL: "https://node.invalid", SessionID: "same", AuthUserID: 7, MediaFileID: 42, Executor: &playback.ExecutorNamespaceV3{Incarnation: "inc", Epoch: 1, ExecutorID: "old"}},
+		{NodeURL: "https://node.invalid", SessionID: "second", AuthUserID: 7, MediaFileID: 42},
+		{NodeURL: "https://node.invalid", SessionID: "first", AuthUserID: 7, MediaFileID: 42},
 	}}, nil
 }
 func TestAdminPlaybackSessionReadProjection(t *testing.T) {
@@ -104,13 +103,13 @@ func TestAdminNodeSessionObservations(t *testing.T) {
 	if rec.Code != 200 || f.node != 9 || out.Body.Undecodable != 1 || len(out.Body.Items) != 1 || !out.Body.Page.HasMore || out.Body.Items[0].AuthUserID != "7" || out.Body.Items[0].StartedAt != nil {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	first := out.Body.Items[0].Executor.ExecutorID
+	first := out.Body.Items[0].SessionID
 	cursor := url.QueryEscape(out.Body.Page.NextCursor)
 	rec = do(t, h, "GET", path+"?limit=1&node_id=9&cursor="+cursor, "", bearer(adminToken))
 	if err := json.Unmarshal(rec.Body.Bytes(), &out.Body); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(out.Body.Items) != 1 || out.Body.Page.HasMore || out.Body.Items[0].Executor.ExecutorID == first {
+	if rec.Code != 200 || len(out.Body.Items) != 1 || out.Body.Page.HasMore || out.Body.Items[0].SessionID == first {
 		t.Fatal(rec.Body.String())
 	}
 	requireProblem(t, do(t, h, "GET", path+"?limit=1&node_id=8&cursor="+cursor, "", bearer(adminToken)), TypeInvalidCursor)

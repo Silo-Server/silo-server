@@ -19,13 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/userstore"
-
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -748,9 +747,7 @@ func (h *PlaybackHandler) proxyEgressOriginsAvailableV3() bool {
 	if h == nil || h.NodePlanner == nil {
 		return false
 	}
-	// Bound initial routes use the immutable recipe/current-session lookup.
-	// They neither publish nor depend on the legacy mutable grant store.
-	if h.initialFlow == nil && (h.ProxyGrantStore == nil || !h.ProxyGrantStore.Enabled()) {
+	if h.ProxyGrantStore == nil || !h.ProxyGrantStore.Enabled() {
 		return false
 	}
 	enumerator, ok := h.NodePlanner.(proxyNodeEnumeratorV3)
@@ -1230,7 +1227,6 @@ func retryIncompletePlaybackSettingsV3(result playback.PlannerResultV3, settings
 }
 
 func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, input playback.PlannerInputV3) (playback.PlannerResultV3, error) {
-	input.ProgressiveRemuxDisabled = h.initialFlow != nil
 	mode := headerAuthenticatedMediaV3(input.Request.ClientFeatures)
 	proxyAllowed := !mode.headerAuth && h.JWTSecret != "" || mode.proxyEgress && h.proxyEgressOriginsAvailableV3()
 	snapshot := &hlsPlanningSnapshotV3{
@@ -1549,13 +1545,6 @@ func (h *PlaybackHandler) HandlePlaybackCapabilityV3(w http.ResponseWriter, r *h
 
 // handleStartPlaybackV3 validates, plans, and starts a protocol-v3 request.
 func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.Request, body []byte) {
-	var mode struct {
-		ProgressPersistence playback.ProgressPersistenceV3 `json:"progress_persistence"`
-	}
-	if json.Unmarshal(body, &mode) == nil && mode.ProgressPersistence == playback.ProgressPersistenceClientBoundV3 {
-		writePlaybackOperationError(w, playbackOperationError(http.StatusNotImplemented, "capability_unsupported", "Bound client timelines require the v2 playback operation"))
-		return
-	}
 	response, err := h.startPlaybackApplicationV3(r, body)
 	if err != nil {
 		writePlaybackOperationError(w, err)
@@ -1596,18 +1585,16 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		if response.Terminal != nil {
 			return response, nil
 		}
-		if h.initialFlow != nil {
-			recovered, err := h.recoverInitialPublicationV3(r.Context(), existing)
-			if err != nil {
-				return playback.DecisionResponseV3{}, playbackAuthorityOperationError()
-			}
-			return recovered, nil
-		}
 		// The replayed plan is only usable while its session is alive; a dead
 		// session must surface as a retryable terminal so the client mints a
-		// fresh attempt instead of replaying a plan it can never stream.
+		// fresh attempt instead of replaying a plan it can never stream. A
+		// stopped attempt is dead on every replica, whether or not this one
+		// still holds the session.
 		if existing.SessionID == "" {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Stored playback attempt has no replayable decision")
+		}
+		if existing.StoppedAt != nil {
+			return playback.NewTerminalResponseV3("session_expired", "The playback session for this attempt has ended.", true), nil
 		}
 		if _, sessionErr := h.sessionMgr.GetSession(existing.SessionID); sessionErr != nil {
 			return playback.NewTerminalResponseV3("session_expired", "The playback session for this attempt has ended.", true), nil
@@ -1747,14 +1734,6 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	response, statusErr := h.startPlannedPlaybackV3(r, userID, profileID, req, requestDigests, requestedFile, effectiveFile, audioIndex, result, clientInfo)
 	timings.mark("session_transport_commit")
 	if statusErr != nil {
-		if h.initialFlow != nil {
-			if statusErr.reason == "timeline_part_active" {
-				return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, statusErr.reason, statusErr.message)
-			}
-			// A bound intent may have committed in another store. Preserve its
-			// reconciliation state instead of invoking legacy decision persistence.
-			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, statusErr.reason, statusErr.message)
-		}
 		if statusErr.reason == "playback_attempt_reused" {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "playback_attempt_reused", statusErr.message)
 		}
@@ -1887,17 +1866,6 @@ func appendStartWarningsV3(result *playback.PlannerResultV3, warnings []playback
 
 // startPlannedPlaybackV3 creates a session and transport for an accepted plan.
 func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, profileID string, req playback.StartRequestV3, requestDigests playbackStartRequestDigestsV3, requestedFile, effectiveFile *models.MediaFile, audioIndex int, result playback.PlannerResultV3, clientInfo playback.ClientInfo) (playback.DecisionResponseV3, *transportErrorV3) {
-	if h.initialFlow != nil {
-		return h.startInitialPlaybackV3(r, userID, profileID, req, requestDigests, requestedFile, effectiveFile, audioIndex, result, clientInfo)
-	}
-	// Hold admission through transport commit or rollback. Nested persistence
-	// joins this exact lease instead of deadlocking behind a queued transition.
-	legacyCtx, release, admissionErr := userstore.AcquireLegacyPlaybackAdmission(r.Context(), h.StoreProvider, userID)
-	if admissionErr != nil {
-		return playback.DecisionResponseV3{}, sessionStartErrorV3(admissionErr)
-	}
-	defer release()
-	r = r.WithContext(legacyCtx)
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
@@ -4236,10 +4204,27 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	response, err := h.replanPlaybackApplicationV3(r, chiURLParamV3(r, "session_id"), body)
+	if err != nil {
+		writePlaybackOperationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// replanPlaybackApplicationV3 is the replan application shared by the v1
+// handler and the v2 service seam: idempotent on replan_request_id + body
+// digest, serialized per session, and atomic between the durable plan and the
+// live transport. Errors are *PlaybackOperationError.
+func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID string, body []byte) (playback.DecisionResponseV3, error) {
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID == 0 || profileID == "" {
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusUnauthorized, "unauthorized", "Authentication and profile are required")
+	}
 	var req playback.ReplanRequestV3
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid replan request")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
 	}
 	// Reject malformed identity/bounds before doing any session lookup. When
 	// client_features is omitted, temporarily allow the only validation rule
@@ -4250,22 +4235,18 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		preflightReq.ClientFeatures = []string{playback.FeatureClientVideoTransforms}
 	}
 	if err := preflightReq.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid replan request")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
 	}
-	sessionID := chiURLParamV3(r, "session_id")
 	releaseSlot, err := h.acquireReplanSlotV3(r.Context())
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "replan_capacity_exhausted", "The server is replanning too many sessions; retry shortly")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, "replan_capacity_exhausted", "The server is replanning too many sessions; retry shortly")
 	}
 	defer releaseSlot()
 	unlockReplan := h.lockReplanV3(sessionID)
 	defer unlockReplan()
 	unlockStore, err := h.PlanStoreV3.AcquireSessionLock(r.Context(), sessionID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serialize the replan request")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to serialize the replan request")
 	}
 	defer unlockStore()
 	record, err := h.PlanStoreV3.GetAttempt(r.Context(), sessionID)
@@ -4273,19 +4254,15 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		// A store outage must read as retryable, not as the session being
 		// gone: clients tear playback down on session_not_found.
 		if !errors.Is(err, playback.ErrSessionNotFound) {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load the playback attempt")
-			return
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to load the playback attempt")
 		}
-		writePlaybackSessionNotFound(w)
-		return
+		return playback.DecisionResponseV3{}, replanSessionNotFoundV3()
 	}
 	if record.UserID != userID || record.ProfileID != profileID {
-		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another profile")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 	}
 	if record.PlaybackAttemptID != req.PlaybackAttemptID {
-		writeError(w, http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
 	}
 	// Replan feature advertisement is optional. Validate transformations against
 	// the durable start-time features when the client omits the unchanged list;
@@ -4307,12 +4284,10 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	// mode, the planner's evidence tiers — reads the pinned list.
 	req.ClientFeatures = playback.PinAttemptStickyFeaturesV3(req.ClientFeatures, record.NormalizedRequest.ClientFeatures)
 	if err := req.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid replan request")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
 	}
 	if _, err := h.sessionMgr.GetSession(sessionID); err != nil {
-		writePlaybackSessionNotFound(w)
-		return
+		return playback.DecisionResponseV3{}, replanSessionNotFoundV3()
 	}
 	digestBytes := sha256.Sum256(body)
 	digest := hex.EncodeToString(digestBytes[:])
@@ -4325,34 +4300,29 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		time.Now().Add(replanLeaseDurationV3),
 	)
 	if errors.Is(err, playback.ErrIdempotencyKeyReusedV3) {
-		writeError(w, http.StatusConflict, "idempotency_key_reused", "The replan request ID was reused with different input")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "idempotency_key_reused", "The replan request ID was reused with different input")
 	}
 	if errors.Is(err, playback.ErrStaleReplanLeaseV3) {
-		writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reserve the replan request")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to reserve the replan request")
 	}
 	if lease.State == playback.ReplanLeaseInFlightV3 {
-		writeError(w, http.StatusConflict, "replan_in_progress", "An identical replan is still in progress")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "replan_in_progress", "An identical replan is still in progress")
 	}
 	if lease.State == playback.ReplanLeaseCompletedV3 {
 		if record.CurrentReplanRequestID != req.ReplanRequestID || !completedReplanResponseMatchesAttemptV3(lease.Response, record) {
-			writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
-			return
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
 		}
 		if _, err := h.sessionMgr.GetSession(sessionID); err != nil {
-			writePlaybackSessionNotFound(w)
-			return
+			return playback.DecisionResponseV3{}, replanSessionNotFoundV3()
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(lease.Response)
-		return
+		var replay playback.DecisionResponseV3
+		if err := json.Unmarshal(lease.Response, &replay); err != nil {
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to decode the completed replan decision")
+		}
+		return replay, nil
 	}
 	leaseCompleted := false
 	defer func() {
@@ -4366,8 +4336,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		}
 	}()
 	if record.CurrentPlanID != req.FailedPlanID {
-		writeError(w, http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
 	}
 	response, updated, transport, replanErr := h.executeReplanV3(r, record, req)
 	if replanErr != nil {
@@ -4380,15 +4349,12 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		terminalRecord.CurrentReplanRequestID = req.ReplanRequestID
 		if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, lease.LeaseToken, record.CurrentReplanRequestID, encoded, terminalRecord); err != nil {
 			if errors.Is(err, playback.ErrReplanSupersededV3) {
-				writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
-				return
+				return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
 			}
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to persist the terminal replan decision")
-			return
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to persist the terminal replan decision")
 		}
 		leaseCompleted = true
-		writeJSON(w, http.StatusOK, response)
-		return
+		return response, nil
 	}
 	updated.CurrentReplanRequestID = req.ReplanRequestID
 	encoded, _ := json.Marshal(response)
@@ -4399,44 +4365,44 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		if err != nil {
 			if rollbackErr, _ := rollbackFailedReplanV3(transport, nil); rollbackErr != nil {
 				slog.ErrorContext(r.Context(), "protocol v3 unapplied replacement transport cancellation failed", "session", sessionID, "error", rollbackErr)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel the unapplied replacement transport")
-				return
+				return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to cancel the unapplied replacement transport")
 			}
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit the live replacement session")
-			return
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to commit the live replacement session")
 		}
 	}
 	if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, lease.LeaseToken, record.CurrentReplanRequestID, encoded, updated); err != nil {
 		transportRollbackErr, sessionRollbackErr := rollbackFailedReplanV3(transport, rollbackSession)
 		if transportRollbackErr != nil {
 			slog.ErrorContext(r.Context(), "protocol v3 replacement transport cancellation failed", "session", sessionID, "error", transportRollbackErr)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel the replacement transport")
-			return
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to cancel the replacement transport")
 		}
 		if sessionRollbackErr != nil {
 			slog.ErrorContext(r.Context(), "protocol v3 replacement rollback failed", "session", sessionID, "error", sessionRollbackErr)
 			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, false)
 		}
 		if errors.Is(err, playback.ErrReplanSupersededV3) {
-			writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
-			return
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit the replacement plan")
-		return
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to commit the replacement plan")
 	}
 	leaseCompleted = true
 	if transport != nil {
 		if commitErr := transport.commit(); commitErr != nil {
 			_ = h.abortPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID)
-			writeError(w, http.StatusServiceUnavailable, commitErr.reason, commitErr.message)
-			return
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, commitErr.reason, commitErr.message)
 		}
 		if transport.afterDurableCommit != nil {
 			transport.afterDurableCommit()
 		}
 	}
 	h.raceCopySafetyV3(updated.EffectiveMediaFileID, response.PlaybackPlan)
-	writeJSON(w, http.StatusOK, response)
+	return response, nil
+}
+
+// replanSessionNotFoundV3 is the v1 playback_session_not_found body; the v2
+// adapter maps its status to the not-found problem.
+func replanSessionNotFoundV3() *PlaybackOperationError {
+	return playbackOperationError(http.StatusNotFound, playbackSessionNotFoundErrorCode, "Playback session not found")
 }
 
 // rollbackFailedReplanV3 cancels a remotely admitted replacement before it
@@ -5992,7 +5958,11 @@ func (h *PlaybackHandler) startFailureDecisionV3(ctx context.Context, userID int
 }
 
 func writeStartAttemptPersistenceErrorV3(w http.ResponseWriter, err error) {
-	writePlaybackOperationError(w, playbackPersistenceOperationError(err))
+	if errors.Is(err, playback.ErrIdempotencyKeyReusedV3) {
+		writeError(w, http.StatusConflict, "playback_attempt_reused", "The playback attempt ID belongs to a different request")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to persist the playback decision")
 }
 
 func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.DecisionResponseV3 {
@@ -6084,7 +6054,11 @@ func appliedQuirkRevisionV3(plan *playback.PlanV3) string {
 }
 
 func writeV3FileError(w http.ResponseWriter, err error) {
-	writePlaybackOperationError(w, playbackFileOperationError(err))
+	if errors.Is(err, catalog.ErrItemNotFound) || errors.Is(err, catalog.ErrEpisodeNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize media file")
 }
 func readBoundedV3Body(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
 	return ioReadAllV3(http.MaxBytesReader(w, r.Body, limit))

@@ -99,7 +99,6 @@ func TestPlaybackV2ReplanUsesTypedServiceAndDigest(t *testing.T) {
 		err  *handlers.PlaybackOperationError
 		want ProblemType
 	}{
-		{&handlers.PlaybackOperationError{Status: 501, Code: "capability_unsupported", Message: "no"}, TypeCapabilityUnsupported},
 		{&handlers.PlaybackOperationError{Status: 404, Code: "session_not_found", Message: "no"}, TypeNotFound},
 		{&handlers.PlaybackOperationError{Status: 409, Code: "stale_playback_plan", Message: "no"}, TypeConflict},
 		{&handlers.PlaybackOperationError{Status: 409, Code: "idempotency_key_reused", Message: "no"}, TypeConflict},
@@ -127,6 +126,6 @@ func playbackReplanFixtureCases() []fixtureCase {
 	}
 	session := "11111111-1111-4111-8111-111111111111"
 	return []fixtureCase{
-		{name: "playback_replan_reanchored", operationID: "replanPlayback", method: http.MethodPost, path: Prefix + "/playback/" + session + "/replan", body: fixturePlaybackJSON(replan), schema: "#/components/schemas/PlaybackDecision", scenario: "A position re-anchor of the current initial route answers a whole replacement plan with opaque identifiers.", status: 200, headers: viewerHeaders(), assertHeaders: []string{"Content-Type", "Cache-Control"}},
+		{name: "playback_replan_reanchored", operationID: "replanPlayback", method: http.MethodPost, path: Prefix + "/playback/" + session + "/replan", body: fixturePlaybackJSON(replan), schema: "#/components/schemas/PlaybackDecision", scenario: "A seek re-anchor answers a whole replacement plan with opaque identifiers; track, quality and output changes use the same operation.", status: 200, headers: viewerHeaders(), assertHeaders: []string{"Content-Type", "Cache-Control"}},
 	}
 }

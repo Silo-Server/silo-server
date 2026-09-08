@@ -7,12 +7,11 @@ media types. Binary payloads use their actual media type and a binary string
 schema. JSON success responses use the structured `Register` API.
 
 Raw operations use the declared account/profile/administrator authorization
-class. Missing gate dependencies return a problem before the transport runs.
-The adapter transfers the authorized context into the HTTP request, including
+class. Missing gate dependencies return a problem before the transport runs. The
+adapter transfers the authorized context into the HTTP request, including
 account and acting-profile identity. The owning transport remains responsible
-for its resource ownership, media grants, executor namespace, and declared
-path/query/header validation. Registering an authenticated stream does not
-replace these resource checks.
+for its resource ownership and declared path/query/header validation.
+Registering an authenticated stream does not replace these resource checks.
 
 The shared structured-response buffer runs only on Huma operations. Raw handlers
 receive the streaming writer, including `http.ResponseController` access to flush

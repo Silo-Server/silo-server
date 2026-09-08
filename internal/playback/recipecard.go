@@ -20,14 +20,13 @@ import (
 // context, channels, log sink). Those are re-wired on reconstruct from the
 // live config and request.
 type RecipeCard struct {
-	Executor             *ExecutorNamespaceV3 `json:"executor,omitempty"`
-	SessionID            string               `json:"session_id"`
-	UserID               int                  `json:"user_id"`
-	ProfileID            string               `json:"profile_id"`
-	MediaFileID          int                  `json:"media_file_id"`
-	TranscodeNodeURL     string               `json:"transcode_node_url,omitempty"`
-	TranscodeTransportID string               `json:"transcode_transport_id,omitempty"`
-	OriginalStartedAt    time.Time            `json:"original_started_at,omitempty"`
+	SessionID            string    `json:"session_id"`
+	UserID               int       `json:"user_id"`
+	ProfileID            string    `json:"profile_id"`
+	MediaFileID          int       `json:"media_file_id"`
+	TranscodeNodeURL     string    `json:"transcode_node_url,omitempty"`
+	TranscodeTransportID string    `json:"transcode_transport_id,omitempty"`
+	OriginalStartedAt    time.Time `json:"original_started_at,omitempty"`
 	// Routing fields freeze the committed media-serving boundary so a token or
 	// stored card cannot lose a proxy-only assignment when it reconstructs a
 	// session on another process. Stable execution and egress identities bind
@@ -131,11 +130,6 @@ func (c RecipeCard) IsTranscodeRecipe() bool {
 // marker to another recipe. Identity-only node-hop cards may carry the marker
 // with no target codec; the complete recipe is then loaded from the store.
 func ValidateCopyFMP4RecipeCard(c RecipeCard) error {
-	if c.Executor != nil {
-		if err := c.Executor.Validate(); err != nil {
-			return err
-		}
-	}
 	copyTarget := strings.EqualFold(strings.TrimSpace(c.TargetCodecVideo), "copy")
 	marked := c.PlayMethod == playMethodCopyFMP4V1
 	versioned := c.CopyFMP4RecipeVersion != ""
@@ -162,7 +156,6 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		copyFMP4RecipeVersion = CopyFMP4RecipeVersion
 	}
 	return RecipeCard{
-		Executor:                   cloneExecutorNamespace(opts.Executor),
 		SessionID:                  opts.SessionID,
 		UserID:                     userID,
 		ProfileID:                  profileID,
@@ -269,7 +262,6 @@ func (c RecipeCard) VideoStreamCopy() bool {
 // data before the transcode starts.
 func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLogSink) TranscodeOpts {
 	return TranscodeOpts{
-		Executor:                   cloneExecutorNamespace(c.Executor),
 		InputPath:                  c.InputPath,
 		OutputSubdir:               c.OutputSubdir,
 		OutputDir:                  outputDir,
@@ -356,12 +348,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		// output without the required recipe.
 		playMethod = streamtoken.PlayMethodToneMapTranscode
 	}
-	executor := ExecutorNamespaceV3{}
-	if c.Executor != nil {
-		executor = *c.Executor
-	}
 	return streamtoken.Claims{
-		ExecutorBound: c.Executor != nil, ExecutorIncarnation: executor.Incarnation, ExecutorEpoch: executor.Epoch, ExecutorID: executor.ExecutorID,
 		SessionID:              c.SessionID,
 		MediaPath:              c.InputPath,
 		OutputSubdir:           c.OutputSubdir,
@@ -453,15 +440,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		// silently becoming an unfrozen legacy recipe.
 		sourceRevision = tonemap.SourceRevision{MediaFileID: -1}
 	}
-	var executor *ExecutorNamespaceV3
-	if c.ExecutorBound || c.ExecutorIncarnation != "" || c.ExecutorEpoch != 0 || c.ExecutorID != "" {
-		executor = &ExecutorNamespaceV3{Incarnation: c.ExecutorIncarnation, Epoch: c.ExecutorEpoch, ExecutorID: c.ExecutorID}
-		if !c.ExecutorBound {
-			executor.Epoch = 0
-		} // present but unbound claims must fail validation
-	}
 	card := RecipeCard{
-		Executor:                   executor,
 		SessionID:                  c.SessionID,
 		UserID:                     c.UserID,
 		ProfileID:                  c.ProfileID,

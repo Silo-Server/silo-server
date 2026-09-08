@@ -1,4 +1,3 @@
-import type { AudiobookChapterIntent } from "@/player/bound-client-timeline";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import type { ItemDetail, LeafItemUserData } from "@/api/types";
@@ -105,7 +104,7 @@ export default function AudiobookContent({
     activePlayback?.currentTime != null ? activePlayback.currentTime : null;
 
   const openPlayer = useCallback(
-    (atSeconds: number, initialChapter?: AudiobookChapterIntent) => {
+    (atSeconds: number) => {
       audiobookPlayback?.startPlayback({
         contentId: item.content_id,
         title: item.title,
@@ -114,7 +113,6 @@ export default function AudiobookContent({
         posterUrl: item.poster_url,
         files,
         initialPositionSeconds: atSeconds,
-        ...(initialChapter ? { initialChapter } : {}),
       });
     },
     [audiobookPlayback, author, files, item.content_id, item.poster_url, item.title, narrator],
@@ -303,7 +301,7 @@ export default function AudiobookContent({
         <ChaptersSection
           files={files}
           currentPositionSeconds={currentPlayerSeconds ?? (resumeSeconds || null)}
-          onSelect={(chapter) => openPlayer(0, chapter)}
+          onSelect={(seconds) => openPlayer(seconds)}
         />
       </div>
     </div>

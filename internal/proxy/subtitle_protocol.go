@@ -1,9 +1,7 @@
 package proxy
 
 import (
-	"maps"
 	"net/http"
-	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
@@ -58,33 +56,5 @@ func ProtocolSubtitles(schemas huma.Registry) []workerprotocol.Operation {
 	for _, name := range []string{rangeHeader, ifRange, ifMatch, ifNoneMatch, ifModifiedSince, ifUnmodifiedSince} {
 		subtitle.Parameters = append(subtitle.Parameters, &huma.Param{Name: name, In: "header", Schema: &huma.Schema{Type: huma.TypeString}, Description: "Conditional/range semantics apply only to cached full SUP."})
 	}
-	for _, name := range []string{"file_id", playback.EmbeddedSubtitleStreamIndexParamV3, playback.ExternalSubtitleKeyParamV3, playback.DownloadedSubtitleIDParamV3} {
-		p := &huma.Param{Name: name, In: "query", Schema: &huma.Schema{Type: huma.TypeString}, Description: "Executor-bound API producer validates the captured source file and exact subtitle identity."}
-		subtitle.Parameters = append(subtitle.Parameters, p)
-		fonts.Parameters = append(fonts.Parameters, p)
-	}
-	subtitle.Responses["502"] = &huma.Response{Description: "Auxiliary producer redirect or transfer failure"}
-	head := subtitle
-	head.Method = http.MethodHead
-	head.Responses = maps.Clone(subtitle.Responses)
-	for key, response := range head.Responses {
-		copy := *response
-		copy.Content = nil
-		head.Responses[key] = &copy
-	}
-	out := []workerprotocol.Operation{subtitle, head, fonts}
-	for _, op := range []workerprotocol.Operation{subtitle, head, fonts} {
-		op.Path = "/stream/v3/{session_id}/subtitles/{track}"
-		op.Handler = "(*internal/proxy.Server).handleGrantSubtitle"
-		if op.Method == http.MethodGet && op.Description == fonts.Description {
-			op.Path += "/fonts"
-			op.Handler = "(*internal/proxy.Server).handleGrantSubtitleFonts"
-		}
-		op.Parameters = slices.Clone(op.Parameters)
-		op.Parameters[0] = &huma.Param{Name: "session_id", In: "path", Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Committed session identity; viewer login and matching profile are required."}
-		op.Parameters = append(op.Parameters, &huma.Param{Name: "X-Profile-Id", In: "header", Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Selector must equal the immutable recipe profile; it is not proof of profile authority. Viewer login authentication is separate."})
-		op.Description += " Executor-bound requests retain proxy serve and independent API auxiliary grants through the body; no redirects or local extraction fallback."
-		out = append(out, op)
-	}
-	return out
+	return []workerprotocol.Operation{subtitle, fonts}
 }

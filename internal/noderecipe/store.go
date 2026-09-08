@@ -230,9 +230,6 @@ func nodeAuthorityRecordDigest(data []byte) string {
 // Put stores the reconstruction recipe for a remote transcode session. Best
 // effort: a write error is returned for the caller to log, never fatal.
 func (s *Store) Put(ctx context.Context, sessionID string, card playback.RecipeCard) error {
-	if card.Executor != nil {
-		return errors.New("executor-bound recipe requires immutable storage")
-	}
 	if s == nil || s.rdb == nil || sessionID == "" {
 		return nil
 	}
@@ -388,12 +385,12 @@ func unmarshalCard(data []byte) (playback.RecipeCard, bool) {
 		default:
 			return playback.RecipeCard{}, false
 		}
-		return card, card.Executor == nil
+		return card, true
 	}
 	if err := json.Unmarshal(data, &card); err != nil {
 		return playback.RecipeCard{}, false
 	}
-	return card, card.Executor == nil
+	return card, true
 }
 
 func toneMapCard(card playback.RecipeCard) bool {

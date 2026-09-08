@@ -79,9 +79,7 @@ function describeTerminateReceipt(receipt: {
   const notified = receipt.client_notified
     ? "the player was told to stop"
     : "the player could not be reached and will stop when it next contacts the server";
-  const draining =
-    receipt.durable_state === "draining" ? " Media already buffered may finish playing." : "";
-  return `${revoked}; ${notified}.${draining}`;
+  return `${revoked}; ${notified}.`;
 }
 
 function describeCommandFailure(

@@ -145,7 +145,6 @@ export function SubtitleSearchModal({
       const token = playerConfig.getAccessToken(),
         profile = playerConfig.getProfileId(),
         pin = playerConfig.getProfileToken?.();
-      const authority = playerConfig.capturePlaybackMutationContext?.();
       const generation = downloadGeneration.current;
       await playerV2(playerConfig, "POST /api/v2/subtitles/upload", {
         form: {
@@ -160,8 +159,7 @@ export function SubtitleSearchModal({
         generation !== downloadGeneration.current ||
         token !== playerConfig.getAccessToken() ||
         profile !== playerConfig.getProfileId() ||
-        pin !== playerConfig.getProfileToken?.() ||
-        (authority && !authority.isCurrent())
+        pin !== playerConfig.getProfileToken?.()
       )
         throw new DOMException("Subtitle upload context changed", "AbortError");
     },
@@ -200,13 +198,11 @@ export function SubtitleSearchModal({
       const token = playerConfig.getAccessToken();
       const profile = playerConfig.getProfileId();
       const pin = playerConfig.getProfileToken?.();
-      const authority = playerConfig.capturePlaybackMutationContext?.();
       const current = () =>
         generation === downloadGeneration.current &&
         token === playerConfig.getAccessToken() &&
         profile === playerConfig.getProfileId() &&
-        pin === playerConfig.getProfileToken?.() &&
-        (!authority || authority.isCurrent());
+        pin === playerConfig.getProfileToken?.();
       const key = `${result.provider}:${result.id}`;
       setDownloading(key);
       setError(null);

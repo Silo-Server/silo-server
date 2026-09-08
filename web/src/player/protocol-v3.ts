@@ -95,7 +95,7 @@ export type SubtitleModeV3 = "off" | "render" | "convert" | "burn_in";
 export type SubtitleFidelityV3 = "preserve" | "compatible";
 
 /** Which side owns durable item resume/history persistence. */
-export type ProgressPersistenceV3 = "server" | "client" | "client_bound";
+export type ProgressPersistenceV3 = "server" | "client";
 
 /** Presence and kind of a Dolby Vision enhancement layer on the source. */
 export type EnhancementLayerV3 = "none" | "mel" | "fel" | "unknown";
@@ -301,7 +301,6 @@ export interface StartRequestV3 {
   subtitle_fidelity_preference: SubtitleFidelityV3;
   start_position?: number;
   progress_persistence?: ProgressPersistenceV3;
-  timeline_id?: string;
   audio_track_id?: string;
   audio_track_index?: number;
   subtitle_track_id?: string;
@@ -567,22 +566,12 @@ export interface TerminalV3 {
   retryable: boolean;
 }
 
-export interface ProgressTimelineV3 {
-  timeline_id: string;
-  media_item_id: string;
-  file_id: string;
-  part_offset_seconds: number;
-  part_duration_seconds: number;
-  duration_seconds: number;
-}
-
 export interface DecisionResponseV3 {
   protocol_version: number;
   server_features: string[];
   outcome: DecisionOutcomeV3;
   session_id?: string;
   playback_plan?: PlanV3;
-  progress_timeline?: ProgressTimelineV3;
   terminal?: TerminalV3;
 }
 

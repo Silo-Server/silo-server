@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // ABSProgressStore implements abs.ProgressStore directly against the
@@ -154,7 +153,7 @@ func (s *ABSProgressStore) UpsertProgress(ctx context.Context, row abs.ProgressR
 	if row.IsFinished {
 		position = 0
 	}
-	_, err = s.execProgress(ctx, uid, `
+	_, err = s.Pool.Exec(ctx, `
 		INSERT INTO user_watch_progress
 		  (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -186,7 +185,7 @@ func (s *ABSProgressStore) UpdateProgressPosition(ctx context.Context, userID, p
 	if err != nil {
 		return fmt.Errorf("abs_progress_store: invalid user_id %q: %w", userID, err)
 	}
-	_, err = s.execProgress(userstore.WithLegacyPlaybackWrite(ctx), uid, `
+	_, err = s.Pool.Exec(ctx, `
 		UPDATE user_watch_progress
 		SET position_seconds = GREATEST(position_seconds, $4),
 		    updated_at       = now()

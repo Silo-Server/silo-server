@@ -59,14 +59,6 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, release, err := h.legacyAdmission(r.Context(), a.UserID)
-	if err != nil {
-		http.Error(w, "unbound playback unavailable", http.StatusConflict)
-		return
-	}
-	defer release()
-	r = r.WithContext(ctx)
-	w = &admissionMediaWriter{ResponseWriter: w, release: release}
 	contentID := chi.URLParam(r, "libraryItemId")
 	inoStr := chi.URLParam(r, "ino")
 
@@ -183,14 +175,6 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session expired", http.StatusGone)
 		return
 	}
-	ctx, release, err := h.legacyAdmission(r.Context(), sess.UserID)
-	if err != nil {
-		http.Error(w, "unbound playback unavailable", http.StatusConflict)
-		return
-	}
-	defer release()
-	r = r.WithContext(ctx)
-	w = &admissionMediaWriter{ResponseWriter: w, release: release}
 	if h.beginNativePlaybackTransport(sid) {
 		defer h.endNativePlaybackTransport(sid)
 	}

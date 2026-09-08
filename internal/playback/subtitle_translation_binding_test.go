@@ -26,17 +26,13 @@ func TestSubtitleTranslationBindingRejectsForeignViewer(t *testing.T) {
 }
 
 func TestSubtitleTranslationBindingDoesNotFollowRuntimeChanges(t *testing.T) {
-	for _, change := range []string{"account", "profile", "file", "requested-file", "start", "executor", "activation", "stopped"} {
+	for _, change := range []string{"account", "profile", "file", "requested-file", "start", "stopped"} {
 		t.Run(change, func(t *testing.T) {
 			sessions := NewSessionManager(0, 0)
 			session, err := sessions.StartSession(7, "viewer", 42, PlayDirect, false)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sessions.mu.Lock()
-			sessions.sessions[session.ID].Executor = &ExecutorNamespaceV3{Incarnation: "incarnation", Epoch: 1, ExecutorID: "executor"}
-			sessions.sessions[session.ID].initialActivation = &InitialActivationBindingV3{IntentID: "captured-intent"}
-			sessions.mu.Unlock()
 			hub := NewRealtimeHub()
 			conn := &dispatchTestConn{}
 			reg := hub.Register(session.ID, conn)
@@ -63,10 +59,6 @@ func TestSubtitleTranslationBindingDoesNotFollowRuntimeChanges(t *testing.T) {
 				current.RequestedMediaFileID++
 			case "start":
 				current.StartedAt = current.StartedAt.Add(time.Second)
-			case "executor":
-				current.Executor.Epoch++
-			case "activation":
-				current.initialActivation.IntentID = "successor"
 			case "stopped":
 				delete(sessions.sessions, session.ID)
 			}

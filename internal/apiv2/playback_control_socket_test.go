@@ -107,7 +107,7 @@ func TestPlaybackControlSocketCapabilityAndRawRoute(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	h := NewHandler(deps)
 	rec := do(t, h, http.MethodGet, capability, "", profileOwner())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":false`) || !strings.Contains(rec.Body.String(), `"owner_lease_admission":false`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":false`) || strings.Contains(rec.Body.String(), "owner_lease") {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	// Absent service: the ticket operation answers 503 and the raw route
@@ -121,7 +121,7 @@ func TestPlaybackControlSocketCapabilityAndRawRoute(t *testing.T) {
 	f := &fakeControlSocket{available: true}
 	h = NewHandler(controlSocketDeps(f))
 	rec = do(t, h, http.MethodGet, capability, "", profileOwner())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":true`) || !strings.Contains(rec.Body.String(), `"protocol":"silo.playback-control.v2"`) || !strings.Contains(rec.Body.String(), `"owner_lease_admission":true`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":true`) || !strings.Contains(rec.Body.String(), `"protocol":"silo.playback-control.v2"`) || strings.Contains(rec.Body.String(), "owner_lease") {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	// The raw route delegates to the service without JSON negotiation.

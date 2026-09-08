@@ -7458,36 +7458,6 @@
         ],
         "type": "object"
       },
-      "AdminNodeExecutorObservation": {
-        "additionalProperties": false,
-        "properties": {
-          "epoch": {
-            "type": "string"
-          },
-          "executor_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "incarnation": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "incarnation",
-          "epoch",
-          "executor_id"
-        ],
-        "type": "object"
-      },
       "AdminNodeHealth": {
         "additionalProperties": false,
         "properties": {
@@ -7623,10 +7593,6 @@
           },
           "codec_video": {
             "type": "string"
-          },
-          "executor": {
-            "$ref": "#/components/schemas/AdminNodeExecutorObservation",
-            "description": "Observed generation, not current playback authority."
           },
           "hw_accel": {
             "type": "string"
@@ -8739,11 +8705,9 @@
             "type": "string"
           },
           "durable_state": {
-            "description": "draining: the revocation is recorded and new grants are refused while grants already issued expire; stopped: the terminal receipt is committed; none: the session left no durable playback row",
+            "description": "stopped: the session is stopped and its stream tokens are denied everywhere",
             "enum": [
-              "draining",
-              "stopped",
-              "none"
+              "stopped"
             ],
             "type": "string"
           },
@@ -29004,10 +28968,6 @@
           "is_paused": {
             "type": "boolean"
           },
-          "item_position": {
-            "format": "double",
-            "type": "number"
-          },
           "position": {
             "format": "double",
             "type": "number"
@@ -29015,9 +28975,6 @@
           "sequence": {
             "format": "int64",
             "type": "integer"
-          },
-          "timeline_id": {
-            "type": "string"
           }
         },
         "required": [
@@ -29083,17 +29040,13 @@
           "available": {
             "type": "boolean"
           },
-          "owner_lease_admission": {
-            "type": "boolean"
-          },
           "protocol": {
             "type": "string"
           }
         },
         "required": [
           "available",
-          "protocol",
-          "owner_lease_admission"
+          "protocol"
         ],
         "type": "object"
       },
@@ -29134,7 +29087,7 @@
         "additionalProperties": false,
         "properties": {
           "installation_id": {
-            "description": "Installation identifier from playback capabilities; required for a session started through the v2 initial flow, absent for a bridge-started session",
+            "description": "Installation identifier from playback capabilities; required for a session started through v2, absent for a bridge-started session",
             "examples": [
               "1"
             ],
@@ -29146,11 +29099,6 @@
       },
       "PlaybackDecision": {
         "additionalProperties": false,
-        "if": {
-          "required": [
-            "recovery"
-          ]
-        },
         "properties": {
           "outcome": {
             "type": "string"
@@ -29158,15 +29106,9 @@
           "playback_plan": {
             "$ref": "#/components/schemas/PlaybackPlan"
           },
-          "progress_timeline": {
-            "$ref": "#/components/schemas/PlaybackProgressTimeline"
-          },
           "protocol_version": {
             "format": "int64",
             "type": "integer"
-          },
-          "recovery": {
-            "$ref": "#/components/schemas/PlaybackRecoveryAbortedReceipt"
           },
           "server_features": {
             "items": {
@@ -29186,92 +29128,10 @@
           "server_features",
           "outcome"
         ],
-        "then": {
-          "$ref": "#/components/schemas/PlaybackRecoveryStart"
-        },
-        "type": "object"
-      },
-      "PlaybackManifest": {
-        "additionalProperties": false,
-        "properties": {
-          "duration_seconds": {
-            "format": "double",
-            "type": "number"
-          },
-          "edition_id": {
-            "type": "string"
-          },
-          "installation_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "media_item_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "parts": {
-            "items": {
-              "$ref": "#/components/schemas/PlaybackManifestPart"
-            },
-            "maxItems": 4096,
-            "type": "array"
-          },
-          "timeline_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "installation_id",
-          "timeline_id",
-          "media_item_id",
-          "edition_id",
-          "duration_seconds",
-          "parts"
-        ],
-        "type": "object"
-      },
-      "PlaybackManifestPart": {
-        "additionalProperties": false,
-        "properties": {
-          "duration_seconds": {
-            "format": "double",
-            "type": "number"
-          },
-          "file_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "offset_seconds": {
-            "format": "double",
-            "type": "number"
-          }
-        },
-        "required": [
-          "file_id",
-          "offset_seconds",
-          "duration_seconds"
-        ],
         "type": "object"
       },
       "PlaybackMutation": {
         "additionalProperties": false,
-        "if": {
-          "required": [
-            "recovery"
-          ]
-        },
         "properties": {
           "accepted": {
             "$ref": "#/components/schemas/PlaybackAccepted"
@@ -29287,9 +29147,6 @@
           "outcome": {
             "type": "string"
           },
-          "recovery": {
-            "$ref": "#/components/schemas/PlaybackRecoveryReceipt"
-          },
           "stop_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -29302,16 +29159,6 @@
         "required": [
           "outcome"
         ],
-        "then": {
-          "oneOf": [
-            {
-              "$ref": "#/components/schemas/PlaybackRecoveryPending"
-            },
-            {
-              "$ref": "#/components/schemas/PlaybackRecoveryStop"
-            }
-          ]
-        },
         "type": "object"
       },
       "PlaybackPlan": {
@@ -29457,13 +29304,6 @@
             "format": "int64",
             "minimum": 1,
             "type": "integer"
-          },
-          "timeline_id": {
-            "description": "Captured bound client timeline identity; required only for client_bound sessions",
-            "maxLength": 64,
-            "minLength": 64,
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
           }
         },
         "required": [
@@ -29471,303 +29311,6 @@
           "sequence",
           "position",
           "is_paused"
-        ],
-        "type": "object"
-      },
-      "PlaybackProgressTimeline": {
-        "additionalProperties": false,
-        "properties": {
-          "duration_seconds": {
-            "format": "double",
-            "type": "number"
-          },
-          "file_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "media_item_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "part_duration_seconds": {
-            "format": "double",
-            "type": "number"
-          },
-          "part_offset_seconds": {
-            "format": "double",
-            "type": "number"
-          },
-          "timeline_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "timeline_id",
-          "media_item_id",
-          "file_id",
-          "part_offset_seconds",
-          "part_duration_seconds",
-          "duration_seconds"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryAbortedReceipt": {
-        "additionalProperties": false,
-        "properties": {
-          "accepted": {
-            "$ref": "#/components/schemas/PlaybackRecoveryAccepted"
-          },
-          "playback_attempt_id": {
-            "type": "string"
-          },
-          "reason": {
-            "enum": [
-              "owner_lost"
-            ],
-            "type": "string"
-          },
-          "recovery_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "session_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "aborted"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "recovery_id",
-          "playback_attempt_id",
-          "session_id",
-          "reason"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryAccepted": {
-        "additionalProperties": false,
-        "properties": {
-          "is_paused": {
-            "type": "boolean"
-          },
-          "item_position": {
-            "format": "double",
-            "minimum": 0,
-            "type": "number"
-          },
-          "position": {
-            "format": "double",
-            "minimum": 0,
-            "type": "number"
-          },
-          "sequence": {
-            "format": "int64",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "timeline_id": {
-            "maxLength": 64,
-            "minLength": 64,
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "sequence",
-          "position",
-          "is_paused"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryDrainingReceipt": {
-        "additionalProperties": false,
-        "properties": {
-          "playback_attempt_id": {
-            "type": "string"
-          },
-          "reason": {
-            "enum": [
-              "owner_lost"
-            ],
-            "type": "string"
-          },
-          "recovery_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "session_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "draining"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "recovery_id",
-          "playback_attempt_id",
-          "session_id",
-          "reason"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryPending": {
-        "additionalProperties": false,
-        "properties": {
-          "outcome": {
-            "enum": [
-              "draining"
-            ],
-            "type": "string"
-          },
-          "recovery": {
-            "$ref": "#/components/schemas/PlaybackRecoveryDrainingReceipt"
-          }
-        },
-        "required": [
-          "outcome",
-          "recovery"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryReceipt": {
-        "additionalProperties": false,
-        "properties": {
-          "accepted": {
-            "$ref": "#/components/schemas/PlaybackRecoveryAccepted"
-          },
-          "playback_attempt_id": {
-            "type": "string"
-          },
-          "reason": {
-            "enum": [
-              "owner_lost"
-            ],
-            "type": "string"
-          },
-          "recovery_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "session_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "draining",
-              "aborted"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "recovery_id",
-          "playback_attempt_id",
-          "session_id",
-          "reason"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryStart": {
-        "additionalProperties": false,
-        "properties": {
-          "outcome": {
-            "enum": [
-              "adaptation_unavailable"
-            ],
-            "type": "string"
-          },
-          "protocol_version": {
-            "enum": [
-              3
-            ],
-            "format": "int64",
-            "type": "integer"
-          },
-          "recovery": {
-            "$ref": "#/components/schemas/PlaybackRecoveryAbortedReceipt"
-          },
-          "server_features": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "terminal": {
-            "$ref": "#/components/schemas/PlaybackRecoveryTerminal"
-          }
-        },
-        "required": [
-          "protocol_version",
-          "server_features",
-          "outcome",
-          "terminal",
-          "recovery"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryStop": {
-        "additionalProperties": false,
-        "properties": {
-          "outcome": {
-            "enum": [
-              "aborted"
-            ],
-            "type": "string"
-          },
-          "recovery": {
-            "$ref": "#/components/schemas/PlaybackRecoveryAbortedReceipt"
-          }
-        },
-        "required": [
-          "outcome",
-          "recovery"
-        ],
-        "type": "object"
-      },
-      "PlaybackRecoveryTerminal": {
-        "additionalProperties": false,
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "reason": {
-            "enum": [
-              "playback_owner_lost"
-            ],
-            "type": "string"
-          },
-          "retryable": {
-            "enum": [
-              false
-            ],
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "reason",
-          "message",
-          "retryable"
         ],
         "type": "object"
       },
@@ -30773,8 +30316,7 @@
           "progress_persistence": {
             "enum": [
               "server",
-              "client",
-              "client_bound"
+              "client"
             ],
             "type": "string"
           },
@@ -30798,12 +30340,6 @@
           "subtitle_track_index": {
             "format": "int64",
             "type": "integer"
-          },
-          "timeline_id": {
-            "maxLength": 64,
-            "minLength": 64,
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
           }
         },
         "required": [
@@ -30851,13 +30387,6 @@
               "1"
             ],
             "minLength": 1,
-            "type": "string"
-          },
-          "timeline_id": {
-            "description": "Captured bound client timeline identity; required only for client_bound sessions",
-            "maxLength": 64,
-            "minLength": 64,
-            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           }
         },
@@ -142859,16 +142388,6 @@
             },
             "description": "Not Acceptable"
           },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -142915,7 +142434,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Use the installed playback authority and exact selected progress source.",
+        "summary": "Discover the playback installation, protocol versions, features and deliveries this server offers the viewer.",
         "tags": [
           "playback"
         ],
@@ -143312,7 +142831,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Discover whether the owner-bound playback control handshake is served.",
+        "summary": "Discover whether the session-bound playback control handshake is served.",
         "tags": [
           "playback"
         ],
@@ -143442,13 +142961,13 @@
             "description": "Control handshake refused."
           }
         },
-        "summary": "Connect the owner's playback control lane using a single-use session-bound credential.",
+        "summary": "Connect the session owner's playback control lane using a single-use session-bound credential.",
         "tags": [
           "playback"
         ],
         "x-silo-class": "public",
         "x-silo-raw-protocol": "websocket",
-        "x-silo-raw-reason": "Owner-bound single-use session proof, Origin and subprotocol checks precede the upgrade; the fence and owner lease are re-admitted at upgrade and while connected.",
+        "x-silo-raw-reason": "Single-use session proof, Origin and subprotocol checks precede the upgrade; account, profile and installation ownership are re-checked at upgrade.",
         "x-silo-service-backed": true
       }
     },
@@ -143773,17 +143292,7 @@
                 }
               }
             },
-            "description": "Ordinary decision or retained owner-loss terminal recovery."
-          },
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlaybackRecoveryPending"
-                }
-              }
-            },
-            "description": "The original attempt remains unresolved while owner-loss grants drain."
+            "description": "Created"
           },
           "400": {
             "content": {
@@ -143905,16 +143414,6 @@
             },
             "description": "Internal Server Error"
           },
-          "501": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Implemented"
-          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -143931,274 +143430,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Use the installed playback authority and exact selected progress source.",
+        "summary": "Start a playback attempt and receive the protocol-v3 decision. Replaying the same attempt id with the same request returns the stored decision.",
         "tags": [
           "playback"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-retry-safety": "domain_identity",
-        "x-silo-service-backed": true
-      }
-    },
-    "/api/v2/playback/timelines/{file_id}": {
-      "get": {
-        "operationId": "getPlaybackClientTimeline",
-        "parameters": [
-          {
-            "description": "The household profile acting for this request; it must belong to the authenticated account.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "required": true,
-            "schema": {
-              "examples": [
-                "1"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked",
-            "in": "header",
-            "name": "X-Profile-Token",
-            "schema": {
-              "examples": [
-                "pvt_5f3a9c1e7b2d4e8fa0c6"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "User-Agent",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Device-ID",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Client-Name",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Client-Version",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Client-Build",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Client-Channel",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Client-Model",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Client-Platform",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Client-OS-Version",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Opaque identifier",
-            "in": "path",
-            "name": "file_id",
-            "required": true,
-            "schema": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          {
-            "description": "Opaque identifier",
-            "explode": false,
-            "in": "query",
-            "name": "installation_id",
-            "required": true,
-            "schema": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlaybackManifest"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "429": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "501": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Implemented"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Use the installed playback authority and exact selected progress source.",
-        "tags": [
-          "playback"
-        ],
-        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },
@@ -144216,7 +143453,7 @@
             }
           },
           {
-            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector.",
+            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -144224,7 +143461,7 @@
             }
           },
           {
-            "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -144330,6 +143567,16 @@
             },
             "description": "Conflict"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -144381,7 +143628,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-raw-protocol": "hls",
-        "x-silo-raw-reason": "Grant-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
+        "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
       }
     },
@@ -144399,7 +143646,7 @@
             }
           },
           {
-            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector.",
+            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -144407,7 +143654,7 @@
             }
           },
           {
-            "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -144643,6 +143890,16 @@
             },
             "description": "Conflict"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -144721,7 +143978,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-raw-protocol": "hls",
-        "x-silo-raw-reason": "Grant-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
+        "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
       }
     },
@@ -144845,37 +144102,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlaybackMutation",
-                  "if": {
-                    "required": [
-                      "recovery"
-                    ]
-                  },
-                  "then": {
-                    "$ref": "#/components/schemas/PlaybackRecoveryStop"
-                  }
+                  "$ref": "#/components/schemas/PlaybackMutation"
                 }
               }
             },
-            "description": "Ordinary stop receipt or retained owner-loss terminal recovery."
-          },
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlaybackMutation",
-                  "if": {
-                    "required": [
-                      "recovery"
-                    ]
-                  },
-                  "then": {
-                    "$ref": "#/components/schemas/PlaybackRecoveryPending"
-                  }
-                }
-              }
-            },
-            "description": "Retry the exact original STOP while grants drain; owner-loss recovery does not acknowledge a client stop ID."
+            "description": "OK"
           },
           "400": {
             "content": {
@@ -144997,16 +144228,6 @@
             },
             "description": "Internal Server Error"
           },
-          "501": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Implemented"
-          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -145023,7 +144244,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Use the installed playback authority and exact selected progress source.",
+        "summary": "Stop the session with a client-minted stop id and an optional final sample. Every later stop for the session replays the stored receipt.",
         "tags": [
           "playback"
         ],
@@ -145152,16 +144373,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlaybackMutation",
-                  "not": {
-                    "required": [
-                      "recovery"
-                    ]
-                  }
+                  "$ref": "#/components/schemas/PlaybackMutation"
                 }
               }
             },
-            "description": "Accepted playback progress; owner-loss recovery belongs to START and STOP."
+            "description": "OK"
           },
           "400": {
             "content": {
@@ -145283,16 +144499,6 @@
             },
             "description": "Internal Server Error"
           },
-          "501": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Implemented"
-          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -145309,7 +144515,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Use the installed playback authority and exact selected progress source.",
+        "summary": "Report a sequenced progress sample. A lower sequence is stale; an equal sequence with a different payload conflicts.",
         "tags": [
           "playback"
         ],
@@ -145438,16 +144644,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlaybackDecision",
-                  "not": {
-                    "required": [
-                      "recovery"
-                    ]
-                  }
+                  "$ref": "#/components/schemas/PlaybackDecision"
                 }
               }
             },
-            "description": "Playback replan decision; owner-loss recovery belongs to START and STOP."
+            "description": "OK"
           },
           "400": {
             "content": {
@@ -145569,16 +144770,6 @@
             },
             "description": "Internal Server Error"
           },
-          "501": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Implemented"
-          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -145595,7 +144786,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Re-anchor the current initial route at a new position under the installed authority. Track, quality and output changes are not served by the initial flow.",
+        "summary": "Replan the session after a route failure, a seek, or a track, quality or output change. The reply is a whole replacement plan.",
         "tags": [
           "playback"
         ],
@@ -158408,7 +157599,7 @@
             }
           },
           {
-            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector.",
+            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -158416,7 +157607,7 @@
             }
           },
           {
-            "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -158811,6 +158002,16 @@
             },
             "description": "Conflict"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -158889,7 +158090,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-raw-protocol": "media-bytes",
-        "x-silo-raw-reason": "Grant-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
+        "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
       },
       "head": {
@@ -158905,7 +158106,7 @@
             }
           },
           {
-            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector.",
+            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -158913,7 +158114,7 @@
             }
           },
           {
-            "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -159080,6 +158281,16 @@
             },
             "description": "Conflict"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -159158,7 +158369,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-raw-protocol": "media-bytes",
-        "x-silo-raw-reason": "Grant-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
+        "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
       }
     },
@@ -159176,7 +158387,7 @@
             }
           },
           {
-            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector.",
+            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -159184,7 +158395,7 @@
             }
           },
           {
-            "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -159361,6 +158572,16 @@
             },
             "description": "Conflict"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
           "415": {
             "content": {
               "application/problem+json": {
@@ -159422,7 +158643,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-raw-protocol": "subtitle-sidecar",
-        "x-silo-raw-reason": "Grant-authorized sidecar text, bitmap and font bytes are streamed as extracted; the font bundle is a bare JSON array the web renderer consumes as-is.",
+        "x-silo-raw-reason": "Token-authorized sidecar text and bitmap bytes are streamed as extracted.",
         "x-silo-service-backed": true
       },
       "head": {
@@ -159438,7 +158659,7 @@
             }
           },
           {
-            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector.",
+            "description": "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -159446,7 +158667,7 @@
             }
           },
           {
-            "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -159593,6 +158814,16 @@
             },
             "description": "Conflict"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
+          },
           "415": {
             "content": {
               "application/problem+json": {
@@ -159654,7 +158885,7 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-raw-protocol": "subtitle-sidecar",
-        "x-silo-raw-reason": "Grant-authorized sidecar text, bitmap and font bytes are streamed as extracted; the font bundle is a bare JSON array the web renderer consumes as-is.",
+        "x-silo-raw-reason": "Token-authorized sidecar text and bitmap bytes are streamed as extracted.",
         "x-silo-service-backed": true
       }
     },
@@ -159730,12 +158961,12 @@
             }
           },
           {
-            "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required",
+            "description": "Signed stream reference the plan's font bundle URL carries; account authentication and viewer authorization are always required",
             "explode": false,
             "in": "query",
             "name": "st",
             "schema": {
-              "description": "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required",
+              "description": "Signed stream reference the plan's font bundle URL carries; account authentication and viewer authorization are always required",
               "type": "string"
             }
           },
@@ -159821,7 +159052,7 @@
             },
             "description": "Not Acceptable"
           },
-          "409": {
+          "410": {
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -159829,7 +159060,7 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Gone"
           },
           "422": {
             "content": {
@@ -159877,7 +159108,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read the attached-font bundle of a bound session's embedded ASS/SSA subtitle track. Admission is the sidecar's: account authentication, viewer authorization, either a signed executor reference or negotiated header-authenticated current bound session, and a live serving grant.",
+        "summary": "Read the attached-font bundle of a session's embedded ASS/SSA subtitle track. Admission is the sidecar's: account authentication, viewer authorization and the session the plan named.",
         "tags": [
           "playback"
         ],
@@ -172971,38 +172202,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "file_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "embedded_stream_index",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "external_subtitle_key",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "downloaded_subtitle_id",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "description": "Signed playback auxiliary authority is required. ASS/VTT are buffered; SUP may stream before extraction completes. A cold or windowed SUP request does not promise ranges; cached full SUP uses ServeContent conditions/ranges. A committed 200 can truncate on extraction failure.",
@@ -173109,9 +172308,6 @@
             },
             "description": "Internal Server Error"
           },
-          "502": {
-            "description": "Auxiliary producer redirect or transfer failure"
-          },
           "503": {
             "content": {
               "text/plain": {
@@ -173140,205 +172336,6 @@
             "in": "path",
             "name": "track",
             "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "windowed",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "position",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "duration",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "Range",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Range",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-None-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Modified-Since",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Unmodified-Since",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "file_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "embedded_stream_index",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "external_subtitle_key",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "downloaded_subtitle_id",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "description": "Signed playback auxiliary authority is required. ASS/VTT are buffered; SUP may stream before extraction completes. A cold or windowed SUP request does not promise ranges; cached full SUP uses ServeContent conditions/ranges. A committed 200 can truncate on extraction failure.",
-        "listener": "proxy",
-        "method": "HEAD",
-        "path": "/stream/subtitles/{token}/{track}",
-        "handler": "(*internal/proxy.Server).handleSubtitle",
-        "auth_class": "public",
-        "responses": {
-          "200": {
-            "description": "Subtitle bytes"
-          },
-          "206": {
-            "description": "Cached full SUP byte ranges"
-          },
-          "304": {
-            "description": "Cached full SUP not modified"
-          },
-          "400": {
-            "description": "Bad Request"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "412": {
-            "description": "Cached full SUP precondition failed"
-          },
-          "416": {
-            "description": "Cached full SUP range not satisfiable"
-          },
-          "500": {
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "description": "Auxiliary producer redirect or transfer failure"
-          },
-          "503": {
-            "description": "Service Unavailable"
-          }
-        }
-      },
-      {
-        "parameters": [
-          {
-            "description": "Signed playback stream token; routed tuples must select this proxy and an allowed playback recipe. Download tokens are not authority.",
-            "in": "path",
-            "name": "token",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Nonnegative stream index with optional format suffix. ASS preserves styling; SUP selects binary PGS; other suffixes use WebVTT.",
-            "in": "path",
-            "name": "track",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "file_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "embedded_stream_index",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "external_subtitle_key",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "downloaded_subtitle_id",
             "schema": {
               "type": "string"
             }
@@ -173419,570 +172416,7 @@
       {
         "parameters": [
           {
-            "description": "Committed session identity; viewer login and matching profile are required.",
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Nonnegative stream index with optional format suffix. ASS preserves styling; SUP selects binary PGS; other suffixes use WebVTT.",
-            "in": "path",
-            "name": "track",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "windowed",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "position",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "duration",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "Range",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Range",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-None-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Modified-Since",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Unmodified-Since",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "file_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "embedded_stream_index",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "external_subtitle_key",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "downloaded_subtitle_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Selector must equal the immutable recipe profile; it is not proof of profile authority. Viewer login authentication is separate.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "description": "Signed playback auxiliary authority is required. ASS/VTT are buffered; SUP may stream before extraction completes. A cold or windowed SUP request does not promise ranges; cached full SUP uses ServeContent conditions/ranges. A committed 200 can truncate on extraction failure. Executor-bound requests retain proxy serve and independent API auxiliary grants through the body; no redirects or local extraction fallback.",
-        "listener": "proxy",
-        "method": "GET",
-        "path": "/stream/v3/{session_id}/subtitles/{track}",
-        "handler": "(*internal/proxy.Server).handleGrantSubtitle",
-        "auth_class": "public",
-        "responses": {
-          "200": {
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "contentMediaType": "application/octet-stream",
-                  "format": "binary",
-                  "type": "string"
-                }
-              },
-              "text/vtt": {
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "text/x-ssa": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Subtitle bytes"
-          },
-          "206": {
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "contentMediaType": "application/octet-stream",
-                  "format": "binary",
-                  "type": "string"
-                }
-              },
-              "multipart/byteranges": {
-                "schema": {
-                  "contentMediaType": "application/octet-stream",
-                  "format": "binary",
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Cached full SUP byte ranges"
-          },
-          "304": {
-            "description": "Cached full SUP not modified"
-          },
-          "400": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "409": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "412": {
-            "description": "Cached full SUP precondition failed"
-          },
-          "416": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Cached full SUP range not satisfiable"
-          },
-          "500": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "description": "Auxiliary producer redirect or transfer failure"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        }
-      },
-      {
-        "parameters": [
-          {
-            "description": "Committed session identity; viewer login and matching profile are required.",
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Nonnegative stream index with optional format suffix. ASS preserves styling; SUP selects binary PGS; other suffixes use WebVTT.",
-            "in": "path",
-            "name": "track",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "windowed",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "position",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Existing PGS window option; interpreted only for SUP.",
-            "in": "query",
-            "name": "duration",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "Range",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Range",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-None-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Modified-Since",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Conditional/range semantics apply only to cached full SUP.",
-            "in": "header",
-            "name": "If-Unmodified-Since",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "file_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "embedded_stream_index",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "external_subtitle_key",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "downloaded_subtitle_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Selector must equal the immutable recipe profile; it is not proof of profile authority. Viewer login authentication is separate.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "description": "Signed playback auxiliary authority is required. ASS/VTT are buffered; SUP may stream before extraction completes. A cold or windowed SUP request does not promise ranges; cached full SUP uses ServeContent conditions/ranges. A committed 200 can truncate on extraction failure. Executor-bound requests retain proxy serve and independent API auxiliary grants through the body; no redirects or local extraction fallback.",
-        "listener": "proxy",
-        "method": "HEAD",
-        "path": "/stream/v3/{session_id}/subtitles/{track}",
-        "handler": "(*internal/proxy.Server).handleGrantSubtitle",
-        "auth_class": "public",
-        "responses": {
-          "200": {
-            "description": "Subtitle bytes"
-          },
-          "206": {
-            "description": "Cached full SUP byte ranges"
-          },
-          "304": {
-            "description": "Cached full SUP not modified"
-          },
-          "400": {
-            "description": "Bad Request"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "412": {
-            "description": "Cached full SUP precondition failed"
-          },
-          "416": {
-            "description": "Cached full SUP range not satisfiable"
-          },
-          "500": {
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "description": "Auxiliary producer redirect or transfer failure"
-          },
-          "503": {
-            "description": "Service Unavailable"
-          }
-        }
-      },
-      {
-        "parameters": [
-          {
-            "description": "Committed session identity; viewer login and matching profile are required.",
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Nonnegative stream index with optional format suffix. ASS preserves styling; SUP selects binary PGS; other suffixes use WebVTT.",
-            "in": "path",
-            "name": "track",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "file_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "embedded_stream_index",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "external_subtitle_key",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Executor-bound API producer validates the captured source file and exact subtitle identity.",
-            "in": "query",
-            "name": "downloaded_subtitle_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Selector must equal the immutable recipe profile; it is not proof of profile authority. Viewer login authentication is separate.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "description": "Signed playback auxiliary authority is required before extracting attached fonts. JSON items contain name and base64 data; empty results are an array. Response is no-store. Executor-bound requests retain proxy serve and independent API auxiliary grants through the body; no redirects or local extraction fallback.",
-        "listener": "proxy",
-        "method": "GET",
-        "path": "/stream/v3/{session_id}/subtitles/{track}/fonts",
-        "handler": "(*internal/proxy.Server).handleGrantSubtitleFonts",
-        "auth_class": "public",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/x-silo-worker-protocols/schemas/playback_SubtitleFontBundleItem"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "409": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "500": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        }
-      },
-      {
-        "parameters": [
-          {
-            "description": "Existing transport session; not authority for a replacement executor.",
+            "description": "Existing transport session.",
             "in": "path",
             "name": "session_id",
             "required": true,
@@ -174007,17 +172441,9 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "description": "Signed executor namespace reference when the session is bound. Missing/mismatched bound references fail closed.",
-            "in": "header",
-            "name": "X-Silo-Stream-Token",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
-        "description": "Record downstream completion only for the exact session incarnation and timeline, after executor namespace and serving-grant checks. A stale nonempty generation is ignored with 204; no reconstruction, durable receipt or client-visible generation is implied.",
+        "description": "Record downstream completion only for the exact session incarnation and timeline. A stale nonempty generation is ignored with 204; no reconstruction, durable receipt or client-visible generation is implied.",
         "retry_safety": "natural_idempotent",
         "listener": "transcode_node",
         "method": "POST",
@@ -174057,16 +172483,6 @@
               }
             },
             "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Conflict"
           },
           "503": {
             "content": {
@@ -174686,7 +173102,7 @@
       {
         "parameters": [
           {
-            "description": "Legacy transport identifier; not a bound executor namespace or durable stop receipt.",
+            "description": "Transport identifier; not a durable stop receipt.",
             "in": "path",
             "name": "session_id",
             "required": true,
@@ -174695,7 +173111,7 @@
             }
           }
         ],
-        "description": "Stop a legacy transport under its lifecycle lock. Bound in-memory or stored executor namespaces are refused with 409; node bearer alone is not executor stop authority. Progressive cancellation installs a process-local token-lifetime fence; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Progressive cancellation installs a process-local token-lifetime fence; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -174726,16 +173142,6 @@
             },
             "description": "Not Found"
           },
-          "409": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
           "503": {
             "content": {
               "text/plain": {
@@ -174759,7 +173165,7 @@
           },
           "required": true
         },
-        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. Bound starts require an authoritative immutable recipe matching every submitted option and the full recipe digest, the selected node, execution grants and RequireReady. Their response echoes the exact namespace and recipe digest after readiness; no hardware retry occurs. Existing bound sessions cannot be replaced even by the same namespace. Legacy same-ID starts can tear down and replace an earlier session before failing, and legacy RequireReady may retry early hardware startup failure in software. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied.",
+        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may retry early hardware startup failure in software. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -174800,16 +173206,6 @@
               }
             },
             "description": "Unauthorized"
-          },
-          "409": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -174856,97 +173252,6 @@
                 }
               }
             }
-          }
-        }
-      },
-      {
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/x-silo-worker-protocols/schemas/transcodenode_ExecutorPreparation"
-              }
-            }
-          },
-          "required": true
-        },
-        "description": "Prepare one selected worker's initial video HLS recipe without launching playback or claiming output. Disabled unless executor callbacks are configured. A bounded JSON body must carry the exact executor and selected execution node. Catalog path authority and current configuration are required. Hardware probes and source validation resolve only local execution policy. The reply is input-only: central must publish it immutably before its one bound start. A lost or changed reply grants no authority and must not trigger another route or playback start.",
-        "retry_safety": "non_retryable",
-        "listener": "transcode_node",
-        "method": "POST",
-        "path": "/transcode/prepare",
-        "handler": "(*internal/transcodenode.Server).handlePrepareExecutor",
-        "auth_class": "node_bearer",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/x-silo-worker-protocols/schemas/transcodenode_ExecutorPreparation"
-                }
-              }
-            },
-            "description": "Prepared recipe; no execution authority"
-          },
-          "400": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         }
       },
@@ -177096,7 +175401,7 @@
             }
           },
           {
-            "description": "Signed recipe/executor reference for node-side validation; not a native user access token.",
+            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "required": true,
@@ -177113,7 +175418,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Bound executor recipes return409 because progressive executor authority is not configured. Audio-downmix recipes require the exact stereo shape; input authority and current configuration are checked. Revoked/stopped authority returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape; input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/remux/{session_id}",
@@ -177222,7 +175527,7 @@
             }
           },
           {
-            "description": "Signed recipe/executor reference for node-side validation; not a native user access token.",
+            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "required": true,
@@ -177239,7 +175544,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Bound executor recipes return409 because progressive executor authority is not configured. Audio-downmix recipes require the exact stereo shape; input authority and current configuration are checked. Revoked/stopped authority returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape; input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "HEAD",
         "path": "/remux/{session_id}",
@@ -177283,7 +175588,7 @@
             }
           },
           {
-            "description": "Signed recipe/executor reference for node-side validation; not a native user access token.",
+            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "schema": {
@@ -177299,7 +175604,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. Existing bound sessions require the exact signed executor namespace and current serving grant. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Serving-grant failure returns503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest under its current serving grant; unavailable manifest returns503. No-store response contains relative segment links.",
+        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/master.m3u8",
@@ -177336,7 +175641,7 @@
             },
             "description": "Not Found"
           },
-          "409": {
+          "410": {
             "content": {
               "text/plain": {
                 "schema": {
@@ -177344,7 +175649,7 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Gone"
           },
           "422": {
             "content": {
@@ -177395,7 +175700,7 @@
             }
           },
           {
-            "description": "Signed recipe/executor reference for node-side validation; not a native user access token.",
+            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "schema": {
@@ -177461,7 +175766,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. Existing bound sessions require the exact signed executor namespace and current serving grant. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Serving-grant failure returns503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
+        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/segment/{name}",
@@ -177531,7 +175836,7 @@
             },
             "description": "Not Found"
           },
-          "409": {
+          "410": {
             "content": {
               "text/plain": {
                 "schema": {
@@ -177539,7 +175844,7 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Gone"
           },
           "412": {
             "description": "Precondition Failed"
@@ -177924,27 +176229,6 @@
         ],
         "type": "object"
       },
-      "playback_ExecutorNamespaceV3": {
-        "additionalProperties": false,
-        "properties": {
-          "epoch": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "executor_id": {
-            "type": "string"
-          },
-          "incarnation": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "incarnation",
-          "epoch",
-          "executor_id"
-        ],
-        "type": "object"
-      },
       "playback_HWAccelInfo": {
         "additionalProperties": false,
         "properties": {
@@ -178019,242 +176303,6 @@
           "render_device_details",
           "intel_detected",
           "source"
-        ],
-        "type": "object"
-      },
-      "playback_RecipeCard": {
-        "additionalProperties": false,
-        "properties": {
-          "audio_only": {
-            "type": "boolean"
-          },
-          "audio_track_index": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "client_build": {
-            "type": "string"
-          },
-          "client_channel": {
-            "type": "string"
-          },
-          "client_name": {
-            "type": "string"
-          },
-          "client_user_agent": {
-            "type": "string"
-          },
-          "client_version": {
-            "type": "string"
-          },
-          "copy_fmp4_recipe_version": {
-            "type": "string"
-          },
-          "copy_seek_anchor_resolved": {
-            "type": "boolean"
-          },
-          "copy_video_mpegts": {
-            "type": "boolean"
-          },
-          "dv_profile": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "executor": {
-            "$ref": "#/x-silo-worker-protocols/schemas/playback_ExecutorNamespaceV3"
-          },
-          "fast_start": {
-            "type": "boolean"
-          },
-          "hw_accel": {
-            "type": "string"
-          },
-          "hw_device": {
-            "type": "string"
-          },
-          "input_path": {
-            "type": "string"
-          },
-          "is_jellyfin_compat": {
-            "type": "boolean"
-          },
-          "media_file_id": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "original_started_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "output_subdir": {
-            "type": "string"
-          },
-          "play_method": {
-            "type": "string"
-          },
-          "profile_id": {
-            "type": "string"
-          },
-          "remux_dv_mode": {
-            "type": "string"
-          },
-          "routing_egress": {
-            "type": "string"
-          },
-          "routing_egress_node_id": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "routing_execution": {
-            "type": "string"
-          },
-          "routing_execution_node_id": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "routing_workload": {
-            "type": "string"
-          },
-          "seek_seconds": {
-            "format": "double",
-            "type": "number"
-          },
-          "segment_duration": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "software_video_decode": {
-            "type": "boolean"
-          },
-          "source_audio_channels": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "source_video_bit_depth": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "source_video_codec": {
-            "type": "string"
-          },
-          "source_video_profile": {
-            "type": "string"
-          },
-          "start_segment_number": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "stream_origin_seconds": {
-            "format": "double",
-            "type": "number"
-          },
-          "subtitle_burn_in": {
-            "type": "boolean"
-          },
-          "subtitle_codec": {
-            "type": "string"
-          },
-          "subtitle_track_index": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "target_audio_bitrate_kbps": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "target_audio_channels": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "target_bitrate_kbps": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "target_codec_audio": {
-            "type": "string"
-          },
-          "target_codec_video": {
-            "type": "string"
-          },
-          "target_resolution": {
-            "type": "string"
-          },
-          "throttle_seconds": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "tone_map_dv_bl_compat_id_present": {
-            "type": "boolean"
-          },
-          "tone_map_dv_bl_present": {
-            "type": "boolean"
-          },
-          "tone_map_dv_config_present": {
-            "type": "boolean"
-          },
-          "tone_map_dv_rpu_present": {
-            "type": "boolean"
-          },
-          "tone_map_filter": {
-            "type": "string"
-          },
-          "tone_map_mode": {
-            "type": "string"
-          },
-          "tone_map_policy": {
-            "type": "string"
-          },
-          "tone_map_preflight_required": {
-            "type": "boolean"
-          },
-          "tone_map_recipe_version": {
-            "type": "string"
-          },
-          "tone_map_source_kind": {
-            "type": "string"
-          },
-          "tone_map_source_revision": {
-            "$ref": "#/x-silo-worker-protocols/schemas/tonemap_SourceRevision"
-          },
-          "total_duration": {
-            "format": "double",
-            "type": "number"
-          },
-          "transcode_audio": {
-            "type": "boolean"
-          },
-          "transcode_node_url": {
-            "type": "string"
-          },
-          "transcode_transport_id": {
-            "type": "string"
-          },
-          "user_id": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "video_bitstream_filter": {
-            "type": "string"
-          },
-          "video_sample_entry": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "session_id",
-          "user_id",
-          "profile_id",
-          "media_file_id",
-          "input_path",
-          "seek_seconds",
-          "segment_duration",
-          "start_segment_number",
-          "subtitle_track_index",
-          "audio_track_index",
-          "total_duration"
         ],
         "type": "object"
       },
@@ -178426,18 +176474,6 @@
         ],
         "type": "object"
       },
-      "transcodenode_ExecutorPreparation": {
-        "additionalProperties": false,
-        "properties": {
-          "recipe": {
-            "$ref": "#/x-silo-worker-protocols/schemas/playback_RecipeCard"
-          }
-        },
-        "required": [
-          "recipe"
-        ],
-        "type": "object"
-      },
       "transcodenode_ReprobeCapabilitiesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -178505,12 +176541,6 @@
           },
           "copy_video_mpegts": {
             "type": "boolean"
-          },
-          "executor": {
-            "$ref": "#/x-silo-worker-protocols/schemas/playback_ExecutorNamespaceV3"
-          },
-          "executor_recipe_digest": {
-            "type": "string"
           },
           "hw_accel": {
             "type": "string"
@@ -178646,12 +176676,6 @@
             "type": "string"
           },
           "copy_fmp4_recipe_version": {
-            "type": "string"
-          },
-          "executor": {
-            "$ref": "#/x-silo-worker-protocols/schemas/playback_ExecutorNamespaceV3"
-          },
-          "executor_recipe_digest": {
             "type": "string"
           },
           "hw_accel": {

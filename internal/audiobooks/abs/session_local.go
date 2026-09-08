@@ -162,12 +162,6 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 		return res
 	}
 
-	ctx, release, err := h.legacyAdmission(ctx, a.UserID)
-	if err != nil {
-		res.Error = "unbound playback unavailable"
-		return res
-	}
-	defer release()
 	res.Success = true
 
 	// Persist the offline resume position into user_watch_progress.
@@ -203,8 +197,6 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 		if syncErr != nil {
 			slog.WarnContext(ctx, "abs local session sync: persist progress position failed", "component", "audiobooks",
 				"library_item_id", sess.LibraryItemID, "error", syncErr)
-			res.Success = false
-			res.Error = "progress persistence failed"
 		} else {
 			res.ProgressSynced = true
 			// Realtime push so other connected clients see the caught-up

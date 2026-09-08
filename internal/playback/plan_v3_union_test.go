@@ -163,13 +163,6 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 	if preserved.Plan == nil || preserved.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("local capable = %s", ExplainPlannerResultV3(preserved))
 	}
-	// The bound runtime has HLS authority, but no progressive producer. Client
-	// support cannot make that server transport executable, even with local AAC.
-	constrained := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: localCapable, HLSRegistry: staticHLSRegistryV3(localCapable), ProgressiveRemuxDisabled: true})
-	if constrained.Plan == nil || constrained.Plan.Delivery != DeliveryRemuxHLSV3 || !constrained.TranscodeAudio {
-		t.Fatalf("bound runtime = %s", ExplainPlannerResultV3(constrained))
-	}
-
 }
 
 func TestPlanPlaybackV3AudioAdaptationUsesProgressiveProxyToolchain(t *testing.T) {

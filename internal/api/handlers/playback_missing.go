@@ -56,13 +56,36 @@ func isPlaybackFileLookupMissing(err error) bool {
 }
 
 func writePlaybackFilePreflightError(w http.ResponseWriter, err error) {
-	writePlaybackOperationError(w, playbackPreflightOperationError(err))
+	if isPlaybackFileMissing(err) {
+		writeError(w, http.StatusNotFound, "not_found", "Source media file is missing")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access source media file")
 }
 
 const playbackSessionNotFoundErrorCode = "playback_session_not_found"
 
 func writePlaybackSessionNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, playbackSessionNotFoundErrorCode, "Playback session not found")
+}
+
+// playbackSessionEndedErrorCode is the answer for a session whose stream deny
+// marker is set: it has been stopped, expired, or terminated, and no token
+// may serve or reconstruct it.
+const playbackSessionEndedErrorCode = "playback_session_ended"
+
+var errPlaybackSessionEnded = errors.New("playback session has ended")
+
+func writePlaybackSessionEnded(w http.ResponseWriter) {
+	writeError(w, http.StatusGone, playbackSessionEndedErrorCode, "Playback session has ended")
+}
+
+func writePlaybackSessionEndedError(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, errPlaybackSessionEnded) {
+		return false
+	}
+	writePlaybackSessionEnded(w)
+	return true
 }
 
 func preflightPlaybackFile(

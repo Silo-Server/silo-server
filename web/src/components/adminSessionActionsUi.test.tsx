@@ -235,7 +235,7 @@ describe("AdminSessionActions", () => {
       session_id: "session-1",
       authority_revoked: true,
       already_revoked: false,
-      durable_state: "draining",
+      durable_state: "stopped",
       client_notified: false,
       delivery: "unavailable",
     });
@@ -246,7 +246,7 @@ describe("AdminSessionActions", () => {
     expect(mocks.terminate).toHaveBeenCalledWith("session-1", undefined, { profileId: "owner" });
     expect(mocks.sendCommand).not.toHaveBeenCalled();
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      "Playback authority revoked; the player could not be reached and will stop when it next contacts the server. Media already buffered may finish playing.",
+      "Playback authority revoked; the player could not be reached and will stop when it next contacts the server.",
     );
   });
 

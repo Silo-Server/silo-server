@@ -50,7 +50,6 @@ func DefaultConfig(root string) Config {
 	return Config{
 		Root: root,
 		Listeners: []ListenerSpec{
-			{ID: "auxiliary_producer", Description: "Internal auxiliary media producer mounted under the main API listener.", Dir: "internal/api/handlers", Recv: "StreamHandler", Func: "AuxiliaryProducer", Constructor: "newAuxiliaryProducerRouter"},
 			{
 				ID:   ListenerRoot,
 				Kind: ListenerKindServeMux,

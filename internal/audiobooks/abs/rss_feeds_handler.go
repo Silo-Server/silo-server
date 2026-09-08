@@ -224,14 +224,6 @@ func (h *Handler) handlePublicFeedFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed get failed", http.StatusInternalServerError)
 		return
 	}
-	ctx, release, err := h.legacyAdmission(r.Context(), f.UserID)
-	if err != nil {
-		http.Error(w, "unbound playback unavailable", http.StatusConflict)
-		return
-	}
-	defer release()
-	r = r.WithContext(ctx)
-	w = &admissionMediaWriter{ResponseWriter: w, release: release}
 	inoStr := chi.URLParam(r, "ino")
 	ino, parseErr := strconv.Atoi(inoStr)
 	if parseErr != nil {

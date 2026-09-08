@@ -7,27 +7,21 @@ import { usePlaybackRealtime } from "./usePlaybackRealtime";
 const mocks = vi.hoisted(() => ({
   capture: vi.fn(),
   current: vi.fn(),
-  durable: vi.fn(),
+  installation: vi.fn(),
   mint: vi.fn(),
-  terminated: vi.fn(() => false),
-  terminate: vi.fn(),
 }));
 vi.mock("@/api/client", () => ({
   captureProfileRequestContext: mocks.capture,
   isCapturedProfileAuthorityActive: mocks.current,
   StaleApiRequestContextError: class extends Error {},
 }));
-vi.mock("../durable-session-mutations", () => ({
-  hasDurableTermination: mocks.terminated,
-  recordDurableTermination: mocks.terminate,
-}));
-vi.mock("../session-mutations", () => ({ durableSessionFor: mocks.durable }));
+vi.mock("../session-mutations", () => ({ sessionInstallation: mocks.installation }));
 vi.mock("@/api/v2/playbackControlSocket", async (original) => ({
   ...(await original<object>()),
   mintPlaybackControlSocketTicket: mocks.mint,
 }));
 const config: PlayerConfig = {
-  apiBaseUrl: "/api/v1",
+  apiBaseUrl: "https://silo.example.test/api/v1",
   getAccessToken: () => "private-token",
   getProfileId: () => "profile",
   getDeviceId: () => "device",
@@ -58,10 +52,7 @@ beforeEach(() => {
   Socket.instances = [];
   mocks.capture.mockReturnValue(authority);
   mocks.current.mockReturnValue(true);
-  mocks.durable.mockReturnValue({
-    identity: { installationId: "install", origin: "https://silo.example.test" },
-    context: { isCurrent: () => mocks.current() },
-  });
+  mocks.installation.mockReturnValue("install");
   mocks.mint.mockResolvedValue({ ticket: "ticket", protocol: "silo.playback-control.v2" });
   vi.stubGlobal("WebSocket", Socket);
 });
@@ -133,13 +124,13 @@ it.each(["stop", "terminate"])(
     expect(onCommand).toHaveBeenCalledTimes(1);
   },
 );
-it("does not mint for missing durable or profile authority", () => {
-  mocks.durable.mockReturnValue(undefined);
-  const first = renderHook(
-    () => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }),
-    { wrapper },
-  );
-  first.unmount();
+it("mints without an installation for a bridge-started session", async () => {
+  mocks.installation.mockReturnValue(undefined);
+  renderHook(() => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }), { wrapper });
+  await waitFor(() => expect(Socket.instances).toHaveLength(1));
+  expect(mocks.mint).toHaveBeenCalledWith("session", undefined, authority);
+});
+it("does not mint without profile authority", () => {
   mocks.capture.mockReturnValue(null);
   renderHook(() => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }), { wrapper });
   expect(mocks.mint).not.toHaveBeenCalled();
@@ -162,16 +153,21 @@ it("does not reconnect an old session under a replacement account", async () => 
   expect(Socket.instances).toHaveLength(1);
 });
 
-it("records administrator revocation before exit cleanup but never records an ordinary stop", async () => {
-  const onCommand = vi.fn((command) => {
-    expect(mocks.terminate).toHaveBeenCalledTimes(command.name === "terminate" ? 1 : 0);
-  });
-  renderHook(() => usePlaybackRealtime({ sessionId: "session", onCommand }), { wrapper });
-  await waitFor(() => expect(Socket.instances).toHaveLength(1));
-  const socket = Socket.instances[0]!;
-  socket.readyState = Socket.OPEN;
-  act(() => socket.dispatchEvent(new Event("open")));
+it("stops reconnecting after an administrator terminate but not after a stop", async () => {
+  vi.useFakeTimers();
   for (const name of ["stop", "terminate"]) {
+    Socket.instances = [];
+    mocks.mint.mockClear();
+    const { unmount } = renderHook(
+      () => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }),
+      { wrapper },
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const socket = Socket.instances[0]!;
+    socket.readyState = Socket.OPEN;
+    act(() => socket.dispatchEvent(new Event("open")));
     await act(async () =>
       socket.dispatchEvent(
         new MessageEvent("message", {
@@ -185,10 +181,11 @@ it("records administrator revocation before exit cleanup but never records an or
         }),
       ),
     );
+    await act(async () => {
+      socket.close();
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    expect(mocks.mint).toHaveBeenCalledTimes(name === "terminate" ? 1 : 2);
+    unmount();
   }
-  expect(mocks.terminate).toHaveBeenCalledExactlyOnceWith(
-    config,
-    mocks.durable.mock.results[mocks.durable.mock.results.length - 1]!.value,
-    "terminate",
-  );
 });

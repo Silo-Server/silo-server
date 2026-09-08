@@ -59,12 +59,6 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 			continue
 		}
 
-		// Authority-owned output and consumed executor claims require explicit
-		// retirement; absence from the legacy session map cannot establish it.
-		if entry.Name() == "_authority" {
-			continue
-		}
-
 		dir := filepath.Join(root, entry.Name())
 		if minAge > 0 {
 			info, statErr := entry.Info()

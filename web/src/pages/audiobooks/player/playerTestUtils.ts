@@ -22,7 +22,6 @@ export function makePlayback(over: Partial<AudiobookPlayback> = {}): AudiobookPl
     volume: 1,
     muted: false,
     togglePlay: vi.fn(),
-    stopForReplacement: vi.fn().mockResolvedValue(undefined),
     seekTo: vi.fn(),
     skip: vi.fn(),
     setRate: vi.fn(),

@@ -7556,7 +7556,7 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Use the installed playback authority and exact selected progress source. */
+    /** Stop the session with a client-minted stop id and an optional final sample. Every later stop for the session replays the stored receipt. */
     delete: operations["stopPlayback"];
     options?: never;
     head?: never;
@@ -7572,7 +7572,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Use the installed playback authority and exact selected progress source. */
+    /** Report a sequenced progress sample. A lower sequence is stale; an equal sequence with a different payload conflicts. */
     post: operations["updatePlaybackProgress"];
     delete?: never;
     options?: never;
@@ -7589,7 +7589,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Re-anchor the current initial route at a new position under the installed authority. Track, quality and output changes are not served by the initial flow. */
+    /** Replan the session after a route failure, a seek, or a track, quality or output change. The reply is a whole replacement plan. */
     post: operations["replanPlayback"];
     delete?: never;
     options?: never;
@@ -7604,7 +7604,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Use the installed playback authority and exact selected progress source. */
+    /** Discover the playback installation, protocol versions, features and deliveries this server offers the viewer. */
     get: operations["getPlaybackCapabilities"];
     put?: never;
     post?: never;
@@ -7638,7 +7638,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Connect the owner's playback control lane using a single-use session-bound credential. */
+    /** Connect the session owner's playback control lane using a single-use session-bound credential. */
     get: operations["connectPlaybackControlSocket"];
     put?: never;
     post?: never;
@@ -7672,7 +7672,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Discover whether the owner-bound playback control handshake is served. */
+    /** Discover whether the session-bound playback control handshake is served. */
     get: operations["getPlaybackControlSocketCapabilities"];
     put?: never;
     post?: never;
@@ -7691,25 +7691,8 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Use the installed playback authority and exact selected progress source. */
+    /** Start a playback attempt and receive the protocol-v3 decision. Replaying the same attempt id with the same request returns the stored decision. */
     post: operations["startPlayback"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/playback/timelines/{file_id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Use the installed playback authority and exact selected progress source. */
-    get: operations["getPlaybackClientTimeline"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -8785,7 +8768,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read the attached-font bundle of a bound session's embedded ASS/SSA subtitle track. Admission is the sidecar's: account authentication, viewer authorization, either a signed executor reference or negotiated header-authenticated current bound session, and a live serving grant. */
+    /** Read the attached-font bundle of a session's embedded ASS/SSA subtitle track. Admission is the sidecar's: account authentication, viewer authorization and the session the plan named. */
     get: operations["getPlaybackSubtitleFonts"];
     put?: never;
     post?: never;
@@ -12377,19 +12360,6 @@ export interface components {
       type: "proxy" | "transcode";
       url: string;
     };
-    AdminNodeExecutorObservation: {
-      epoch: string;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      executor_id: string;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      incarnation: string;
-    };
     AdminNodeHealth: {
       /** Format: int64 */
       active_jobs: number;
@@ -12436,8 +12406,6 @@ export interface components {
       auth_user_id: string;
       codec_audio?: string;
       codec_video?: string;
-      /** @description Observed generation, not current playback authority. */
-      executor?: components["schemas"]["AdminNodeExecutorObservation"];
       hw_accel?: string;
       /**
        * @description Opaque identifier
@@ -12848,10 +12816,10 @@ export interface components {
        */
       delivery: "dispatched" | "unavailable" | "failed" | "none";
       /**
-       * @description draining: the revocation is recorded and new grants are refused while grants already issued expire; stopped: the terminal receipt is committed; none: the session left no durable playback row
+       * @description stopped: the session is stopped and its stream tokens are denied everywhere
        * @enum {string}
        */
-      durable_state: "draining" | "stopped" | "none";
+      durable_state: "stopped";
       /** @description The terminated playback session */
       session_id: string;
     };
@@ -20425,12 +20393,9 @@ export interface components {
     PlaybackAccepted: {
       is_paused: boolean;
       /** Format: double */
-      item_position?: number;
-      /** Format: double */
       position: number;
       /** Format: int64 */
       sequence: number;
-      timeline_id?: string;
     };
     PlaybackCapabilities: {
       allowed: boolean;
@@ -20447,7 +20412,6 @@ export interface components {
     };
     PlaybackControlSocketCapabilitiesOutputBody: {
       available: boolean;
-      owner_lease_admission: boolean;
       protocol: string;
     };
     PlaybackControlSocketTicket: {
@@ -20471,7 +20435,7 @@ export interface components {
     };
     PlaybackControlSocketTicketInputBody: {
       /**
-       * @description Installation identifier from playback capabilities; required for a session started through the v2 initial flow, absent for a bridge-started session
+       * @description Installation identifier from playback capabilities; required for a session started through v2, absent for a bridge-started session
        * @example 1
        */
       installation_id?: string;
@@ -20479,41 +20443,11 @@ export interface components {
     PlaybackDecision: {
       outcome: string;
       playback_plan?: components["schemas"]["PlaybackPlan"];
-      progress_timeline?: components["schemas"]["PlaybackProgressTimeline"];
       /** Format: int64 */
       protocol_version: number;
-      recovery?: components["schemas"]["PlaybackRecoveryAbortedReceipt"];
       server_features: string[];
       session_id?: string;
       terminal?: components["schemas"]["TerminalV3"];
-    };
-    PlaybackManifest: {
-      /** Format: double */
-      duration_seconds: number;
-      edition_id: string;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      installation_id: string;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      media_item_id: string;
-      parts: components["schemas"]["PlaybackManifestPart"][];
-      timeline_id: string;
-    };
-    PlaybackManifestPart: {
-      /** Format: double */
-      duration_seconds: number;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      file_id: string;
-      /** Format: double */
-      offset_seconds: number;
     };
     PlaybackMutation: {
       accepted?: components["schemas"]["PlaybackAccepted"];
@@ -20523,7 +20457,6 @@ export interface components {
        */
       history_id?: string;
       outcome: string;
-      recovery?: components["schemas"]["PlaybackRecoveryReceipt"];
       /**
        * @description Opaque identifier
        * @example 1
@@ -20574,101 +20507,6 @@ export interface components {
       position: number;
       /** Format: int64 */
       sequence: number;
-      /** @description Captured bound client timeline identity; required only for client_bound sessions */
-      timeline_id?: string;
-    };
-    PlaybackProgressTimeline: {
-      /** Format: double */
-      duration_seconds: number;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      file_id: string;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      media_item_id: string;
-      /** Format: double */
-      part_duration_seconds: number;
-      /** Format: double */
-      part_offset_seconds: number;
-      timeline_id: string;
-    };
-    PlaybackRecoveryAbortedReceipt: {
-      accepted?: components["schemas"]["PlaybackRecoveryAccepted"];
-      playback_attempt_id: string;
-      /** @enum {string} */
-      reason: "owner_lost";
-      /** Format: uuid */
-      recovery_id: string;
-      /** Format: uuid */
-      session_id: string;
-      /** @enum {string} */
-      state: "aborted";
-    };
-    PlaybackRecoveryAccepted: {
-      is_paused: boolean;
-      /** Format: double */
-      item_position?: number;
-      /** Format: double */
-      position: number;
-      /** Format: int64 */
-      sequence: number;
-      timeline_id?: string;
-    };
-    PlaybackRecoveryDrainingReceipt: {
-      playback_attempt_id: string;
-      /** @enum {string} */
-      reason: "owner_lost";
-      /** Format: uuid */
-      recovery_id: string;
-      /** Format: uuid */
-      session_id: string;
-      /** @enum {string} */
-      state: "draining";
-    };
-    PlaybackRecoveryPending: {
-      /** @enum {string} */
-      outcome: "draining";
-      recovery: components["schemas"]["PlaybackRecoveryDrainingReceipt"];
-    };
-    PlaybackRecoveryReceipt: {
-      accepted?: components["schemas"]["PlaybackRecoveryAccepted"];
-      playback_attempt_id: string;
-      /** @enum {string} */
-      reason: "owner_lost";
-      /** Format: uuid */
-      recovery_id: string;
-      /** Format: uuid */
-      session_id: string;
-      /** @enum {string} */
-      state: "draining" | "aborted";
-    };
-    PlaybackRecoveryStart: {
-      /** @enum {string} */
-      outcome: "adaptation_unavailable";
-      /**
-       * Format: int64
-       * @enum {integer}
-       */
-      protocol_version: 3;
-      recovery: components["schemas"]["PlaybackRecoveryAbortedReceipt"];
-      server_features: string[];
-      terminal: components["schemas"]["PlaybackRecoveryTerminal"];
-    };
-    PlaybackRecoveryStop: {
-      /** @enum {string} */
-      outcome: "aborted";
-      recovery: components["schemas"]["PlaybackRecoveryAbortedReceipt"];
-    };
-    PlaybackRecoveryTerminal: {
-      message: string;
-      /** @enum {string} */
-      reason: "playback_owner_lost";
-      /** @enum {boolean} */
-      retryable: false;
     };
     PlaybackReplanBody: {
       /** Format: int64 */
@@ -21151,7 +20989,7 @@ export interface components {
        */
       profile_id: string;
       /** @enum {string} */
-      progress_persistence?: "server" | "client" | "client_bound";
+      progress_persistence?: "server" | "client";
       /** Format: int64 */
       protocol_version: number;
       quality_preference: string;
@@ -21161,7 +20999,6 @@ export interface components {
       subtitle_track_id?: string;
       /** Format: int64 */
       subtitle_track_index?: number;
-      timeline_id?: string;
     };
     PlaybackStopBody: {
       /**
@@ -21179,8 +21016,6 @@ export interface components {
        * @example 1
        */
       stop_id: string;
-      /** @description Captured bound client timeline identity; required only for client_bound sessions */
-      timeline_id?: string;
     };
     PlaybackSubtitleFont: {
       /** @description Base64-encoded font bytes */
@@ -93699,17 +93534,8 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Ordinary stop receipt or retained owner-loss terminal recovery. */
+      /** @description OK */
       200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PlaybackMutation"];
-        };
-      };
-      /** @description Retry the exact original STOP while grants drain; owner-loss recovery does not acknowledge a client stop ID. */
-      202: {
         headers: {
           [name: string]: unknown;
         };
@@ -93818,15 +93644,6 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Implemented */
-      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -93875,7 +93692,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Accepted playback progress; owner-loss recovery belongs to START and STOP. */
+      /** @description OK */
       200: {
         headers: {
           [name: string]: unknown;
@@ -93992,15 +93809,6 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
-      /** @description Not Implemented */
-      501: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -94042,7 +93850,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Playback replan decision; owner-loss recovery belongs to START and STOP. */
+      /** @description OK */
       200: {
         headers: {
           [name: string]: unknown;
@@ -94159,15 +93967,6 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
-      /** @description Not Implemented */
-      501: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -94241,15 +94040,6 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Conflict */
-      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -94812,22 +94602,13 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Ordinary decision or retained owner-loss terminal recovery. */
+      /** @description Created */
       201: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["PlaybackDecision"];
-        };
-      };
-      /** @description The original attempt remains unresolved while owner-loss grants drain. */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PlaybackRecoveryPending"];
         };
       };
       /** @description Bad Request */
@@ -94938,155 +94719,6 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
-      /** @description Not Implemented */
-      501: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getPlaybackClientTimeline: {
-    parameters: {
-      query: {
-        /** @description Opaque identifier */
-        installation_id: string;
-      };
-      header: {
-        "User-Agent"?: string;
-        "X-Client-Build"?: string;
-        "X-Client-Channel"?: string;
-        "X-Client-Model"?: string;
-        "X-Client-Name"?: string;
-        "X-Client-OS-Version"?: string;
-        "X-Client-Platform"?: string;
-        "X-Client-Version"?: string;
-        "X-Device-ID"?: string;
-        /** @description The household profile acting for this request; it must belong to the authenticated account. */
-        "X-Profile-Id": string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v1/profiles/{id}/verify-pin until that operation moves to v2; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path: {
-        /** @description Opaque identifier */
-        file_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          "Cache-Control"?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PlaybackManifest"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Implemented */
-      501: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -95101,9 +94733,9 @@ export interface operations {
   getPlaybackManifest: {
     parameters: {
       query?: {
-        /** @description Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
-        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector. */
+        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
       };
       header?: {
@@ -95175,6 +94807,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -95216,9 +94857,9 @@ export interface operations {
   getPlaybackSegment: {
     parameters: {
       query?: {
-        /** @description Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
-        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector. */
+        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
       };
       header?: {
@@ -95316,6 +94957,15 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -103771,9 +103421,9 @@ export interface operations {
   getPlaybackMedia: {
     parameters: {
       query?: {
-        /** @description Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
-        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector. */
+        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
       };
       header?: {
@@ -103894,6 +103544,15 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -103961,9 +103620,9 @@ export interface operations {
   headPlaybackMedia: {
     parameters: {
       query?: {
-        /** @description Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
-        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector. */
+        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
       };
       header?: {
@@ -104050,6 +103709,15 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -104125,9 +103793,9 @@ export interface operations {
         file_id?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
-        /** @description Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
-        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector. */
+        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
         /** @description PGS: opt into a positioned window instead of the whole track. */
         windowed?: string;
@@ -104206,6 +103874,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unsupported Media Type */
       415: {
         headers: {
@@ -104264,9 +103941,9 @@ export interface operations {
         file_id?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
-        /** @description Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
-        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector. */
+        /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
         /** @description PGS: opt into a positioned window instead of the whole track. */
         windowed?: string;
@@ -104340,6 +104017,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unsupported Media Type */
       415: {
         headers: {
@@ -104394,7 +104080,7 @@ export interface operations {
         embedded_stream_index?: string;
         /** @description Source media file the inventory URL names; must be the plan's effective or requested file */
         file_id?: string;
-        /** @description Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required */
+        /** @description Signed stream reference the plan's font bundle URL carries; account authentication and viewer authorization are always required */
         st?: string;
         /** @description Media-element fallback for the account bearer token */
         token?: string;
@@ -104470,8 +104156,8 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
-      /** @description Conflict */
-      409: {
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };

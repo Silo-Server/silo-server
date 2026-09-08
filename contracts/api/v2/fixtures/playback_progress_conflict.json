@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/progress_conflict",
+  "title": "Playback progress conflict",
+  "status": 409,
+  "detail": "The sequence already has different progress",
+  "instance": "urn:silo:request:000000000000000000000275"
+}

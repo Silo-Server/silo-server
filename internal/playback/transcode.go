@@ -2,7 +2,6 @@ package playback
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -34,10 +33,8 @@ func init() {
 
 // TranscodeOpts holds configuration for an HLS transcode session.
 type TranscodeOpts struct {
-	Executor      *ExecutorNamespaceV3 // OutputDir must be the exact namespace path.
-	ExecuteGrants ExecutorGrantProviderV3
-	InputPath     string
-	OutputDir     string // e.g., /tmp/silo-transcode/{session_id}/
+	InputPath string
+	OutputDir string // e.g., /tmp/silo-transcode/{session_id}/
 	// subtitleFilterInputPath is a parser-safe local alias used only by the
 	// libass subtitles filter. FFmpeg still opens InputPath as the media input.
 	subtitleFilterInputPath string
@@ -316,56 +313,6 @@ const (
 
 // StartTranscode launches an ffmpeg process that produces HLS segments.
 func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-	frozenPolicy := opts
-	opts.Executor = cloneExecutorNamespace(opts.Executor)
-	if opts.Executor != nil {
-		if _, err := executorOutputRoot(opts.OutputDir, *opts.Executor); err != nil {
-			return nil, err
-		}
-	}
-	var grant *RuntimeGrantV3
-	grantTransportID := cmp.Or(opts.TranscodeTransportID, opts.SessionID)
-	var cancelGrantLifetime context.CancelFunc
-	startupContext := ctx
-	if opts.Executor != nil {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if opts.ExecuteGrants == nil {
-			return nil, errors.New("executor grant provider required")
-		}
-		// Execution outlives the initiating HTTP request, but never its grant.
-		lifetime, cancelLifetime := context.WithCancel(context.WithoutCancel(ctx))
-		cancelGrantLifetime = cancelLifetime
-		stopStartupCancellation := context.AfterFunc(ctx, cancelLifetime)
-		defer stopStartupCancellation()
-		var err error
-		grant, err = opts.ExecuteGrants(lifetime, grantTransportID, *opts.Executor, AttemptGrantExecuteV3)
-		if err == nil && grant == nil {
-			err = errors.New("executor grant provider returned no grant")
-		}
-		if err == nil {
-			err = grant.CheckBinding(*opts.Executor, AttemptGrantExecuteV3, grantTransportID)
-		}
-		if err != nil {
-			cancelLifetime()
-			if grant != nil {
-				grant.Close()
-			}
-			return nil, err
-		}
-	}
-	adoptedGrant := false
-	defer func() {
-		if grant != nil && !adoptedGrant {
-			grant.Close()
-			cancelGrantLifetime()
-		}
-	}()
-
-	if grant != nil {
-		ctx = grant.Context()
-	}
 	if !validVideoSampleEntry(opts.VideoSampleEntry) ||
 		opts.VideoSampleEntry != "" && !strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		return nil, fmt.Errorf("unsupported video sample-entry recipe")
@@ -391,27 +338,13 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	hwDevice, hwWorkloadDevice, releaseHWDevice := acquireHWDevice(opts.HWDevice, opts.HWAccel, opts.AvoidHWDevice)
 	opts.HWDevice = hwDevice
 	opts.AvoidHWDevice = ""
-	if err := checkFrozenTranscodePolicy(frozenPolicy, opts); err != nil {
-		releaseHWDevice()
-		return nil, err
-	}
 	if err := validateToneMapSource(ctx, opts); err != nil {
 		releaseHWDevice()
 		return nil, err
 	}
 
 	// Ensure output directory exists.
-	var outputErr error
-	if opts.Executor != nil {
-		if err := grant.Check(); err != nil {
-			releaseHWDevice()
-			return nil, err
-		}
-		outputErr = claimExecutorOutput(opts.OutputDir, *opts.Executor)
-	} else {
-		outputErr = os.MkdirAll(opts.OutputDir, 0o755)
-	}
-	if err := outputErr; err != nil {
+	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		releaseHWDevice()
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
@@ -423,11 +356,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// The synchronous source guard above is bounded by the caller's startup
 	// context. Once it succeeds, keep the established behavior where the
 	// transcode process outlives a disconnected manifest request.
-	processParent := context.WithoutCancel(ctx)
-	if grant != nil {
-		processParent = grant.Context()
-	}
-	ctx, cancel := context.WithCancel(processParent)
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s := &TranscodeSession{
 		cancel:               cancel,
 		opts:                 opts,
@@ -466,18 +395,6 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// Stamp the generation before the process can write anything, so every file
 	// this ffmpeg produces is strictly newer than the stamp.
 	startedAt := time.Now()
-	if grant != nil {
-		if err := startupContext.Err(); err != nil {
-			cancel()
-			releaseHWDevice()
-			return nil, err
-		}
-		if err := grant.Check(); err != nil {
-			cancel()
-			releaseHWDevice()
-			return nil, err
-		}
-	}
 	if err := cmd.Start(); err != nil {
 		cancel()
 		releaseHWDevice()
@@ -491,14 +408,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 
 	// Monitor ffmpeg in background. The process-specific reservation is released
 	// before done closes, so waiters can safely launch a replacement process.
-	adoptedGrant = true
-	go s.monitorFFmpeg(ctx, cmd, s.done, func() {
-		releaseHWDevice()
-		if grant != nil {
-			grant.Close()
-			cancelGrantLifetime()
-		}
-	})
+	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
 
 	return s, nil
 }
@@ -2765,13 +2675,7 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 
 	// Clean up temporary directory.
 	if removeOutput && s.outputDir != "" {
-		var cleanupErr error
-		if s.opts.Executor != nil {
-			cleanupErr = removeExecutorOutput(s.outputDir, *s.opts.Executor)
-		} else {
-			cleanupErr = os.RemoveAll(s.outputDir)
-		}
-		if err := cleanupErr; err != nil {
+		if err := os.RemoveAll(s.outputDir); err != nil {
 			return fmt.Errorf("remove output dir: %w", err)
 		}
 	}
@@ -2805,9 +2709,7 @@ func (s *TranscodeSession) WaitError() error {
 func (s *TranscodeSession) Opts() TranscodeOpts {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	opts := s.opts
-	opts.Executor = cloneExecutorNamespace(opts.Executor)
-	return opts
+	return s.opts
 }
 
 // SetAudioTrackIndex updates the audio track index in the session's opts.
@@ -2967,10 +2869,6 @@ func (s *TranscodeSession) restart(
 	copySeekAnchorResolved bool,
 ) error {
 	s.mu.Lock()
-	if s.opts.Executor != nil {
-		s.mu.Unlock()
-		return ErrExecutorReplacementRequired
-	}
 	// Single-flight: a second caller arriving while a restart is in
 	// progress must not kill the process the first restart just started.
 	// It waits for the in-flight restart's outcome and returns it, so a

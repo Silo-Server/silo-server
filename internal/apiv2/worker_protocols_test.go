@@ -402,22 +402,20 @@ func TestWorkerSegmentAcknowledgementRefusals(t *testing.T) {
 	handler := transcodenode.NewServer(watcher, nil).Handler()
 	op := transcodenode.ProtocolSegmentAcknowledgement()
 	for _, tc := range []struct {
-		name, generation, token string
-		auth                    bool
-		status                  int
+		name, generation string
+		auth             bool
+		status           int
 	}{
-		{"seg_00001.ts", "generation", "", false, 401},
-		{"invalid", "generation", "", true, 400},
-		{"seg_00001.ts", "", "", true, 400},
-		{"seg_00001.ts", "generation", "", true, 404},
-		{"seg_00001.ts", "generation", "invalid", true, 409},
+		{"seg_00001.ts", "generation", false, 401},
+		{"invalid", "generation", true, 400},
+		{"seg_00001.ts", "", true, 400},
+		{"seg_00001.ts", "generation", true, 404},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/transcode/missing/segment/"+tc.name+"/downloaded", nil)
 		if tc.auth {
 			req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
 		}
 		req.Header.Set(transcodeproxy.GenerationHeader, tc.generation)
-		req.Header.Set("X-Silo-Stream-Token", tc.token)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, req)
 		if response.Code != tc.status {

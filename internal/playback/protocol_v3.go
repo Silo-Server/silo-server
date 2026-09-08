@@ -508,7 +508,6 @@ type ClientPlaybackContextV3 struct {
 }
 
 type StartRequestV3 struct {
-	TimelineID                 string                    `json:"timeline_id,omitempty"`
 	ProtocolVersion            int                       `json:"protocol_version"`
 	ClientFeatures             []string                  `json:"client_features"`
 	FileID                     int                       `json:"file_id"`
@@ -535,9 +534,8 @@ type StartRequestV3 struct {
 type ProgressPersistenceV3 string
 
 const (
-	ProgressPersistenceServerV3      ProgressPersistenceV3 = "server"
-	ProgressPersistenceClientV3      ProgressPersistenceV3 = "client"
-	ProgressPersistenceClientBoundV3 ProgressPersistenceV3 = "client_bound"
+	ProgressPersistenceServerV3 ProgressPersistenceV3 = "server"
+	ProgressPersistenceClientV3 ProgressPersistenceV3 = "client"
 )
 
 type TrackIdentityV3 struct {
@@ -896,13 +894,12 @@ type TerminalV3 struct {
 }
 
 type DecisionResponseV3 struct {
-	ProgressTimeline *ClientPlaybackTimelineV3 `json:"progress_timeline,omitempty"`
-	ProtocolVersion  int                       `json:"protocol_version"`
-	ServerFeatures   []string                  `json:"server_features"`
-	Outcome          DecisionOutcomeV3         `json:"outcome"`
-	SessionID        string                    `json:"session_id,omitempty"`
-	PlaybackPlan     *PlanV3                   `json:"playback_plan,omitempty"`
-	Terminal         *TerminalV3               `json:"terminal,omitempty"`
+	ProtocolVersion int               `json:"protocol_version"`
+	ServerFeatures  []string          `json:"server_features"`
+	Outcome         DecisionOutcomeV3 `json:"outcome"`
+	SessionID       string            `json:"session_id,omitempty"`
+	PlaybackPlan    *PlanV3           `json:"playback_plan,omitempty"`
+	Terminal        *TerminalV3       `json:"terminal,omitempty"`
 }
 
 type CapabilityResponseV3 struct {
@@ -935,24 +932,11 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 	if r.ProgressPersistence == "" {
 		r.ProgressPersistence = ProgressPersistenceServerV3
 	}
-	if r.ProgressPersistence != ProgressPersistenceServerV3 && r.ProgressPersistence != ProgressPersistenceClientV3 && r.ProgressPersistence != ProgressPersistenceClientBoundV3 {
+	if r.ProgressPersistence != ProgressPersistenceServerV3 && r.ProgressPersistence != ProgressPersistenceClientV3 {
 		return nil, errors.New("progress_persistence is invalid")
-	}
-	if r.ProgressPersistence == ProgressPersistenceClientBoundV3 {
-		if !ValidClientPlaybackTimelineIDV3(r.TimelineID) {
-			return nil, errors.New("client_bound requires a captured timeline_id")
-		}
-	} else if r.TimelineID != "" {
-		return nil, errors.New("timeline_id requires client_bound progress persistence")
-	}
-	if r.ProgressPersistence == ProgressPersistenceClientBoundV3 && !slices.Contains(r.ClientFeatures, FeatureBoundClientTimelineV3) {
-		return nil, errors.New("client_bound progress requires bound_client_timeline feature")
 	}
 	if r.ProgressPersistence == ProgressPersistenceClientV3 && r.StartPosition == nil {
 		return nil, errors.New("start_position is required when progress_persistence is client")
-	}
-	if r.ProgressPersistence == ProgressPersistenceClientBoundV3 && r.StartPosition == nil {
-		return nil, errors.New("start_position is required when progress_persistence is client_bound")
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
 		return nil, err

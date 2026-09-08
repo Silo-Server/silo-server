@@ -20,34 +20,36 @@ func (f *fixturePlaybackService) PlaybackCapabilities(ctx context.Context, userI
 	view.Features = fixtureInitialPlaybackFeatures()
 	return view, err
 }
-func (f *fixturePlaybackService) StartInitialPlayback(ctx context.Context, caller handlers.PlaybackCaller, request playback.StartRequestV3) (playback.DecisionResponseV3, error) {
+func (f *fixturePlaybackService) StartPlaybackV2(ctx context.Context, caller handlers.PlaybackCaller, request playback.StartRequestV3) (playback.DecisionResponseV3, error) {
 	if caller.InstallationID != playbackTestInstallation {
 		return playback.DecisionResponseV3{}, &handlers.PlaybackOperationError{Status: 409, Code: "installation_changed", Message: "Playback installation changed; refresh capabilities"}
 	}
-	return f.fakePlaybackService.StartInitialPlayback(ctx, caller, request)
+	return f.fakePlaybackService.StartPlaybackV2(ctx, caller, request)
 }
-func (f *fixturePlaybackService) ApplyInitialProgress(_ context.Context, _ handlers.PlaybackCaller, _ string, command handlers.PlaybackProgressCommand) (handlers.PlaybackMutationView, error) {
+func (f *fixturePlaybackService) ApplyProgressV2(_ context.Context, _ handlers.PlaybackCaller, _ string, command handlers.PlaybackProgressCommand) (handlers.PlaybackMutationView, error) {
+	if command.Sequence == 42 && command.Position != 120 {
+		return handlers.PlaybackMutationView{}, &handlers.PlaybackOperationError{Status: 409, Code: "progress_conflict", Message: "The sequence already has different progress"}
+	}
 	outcome := "applied"
 	if command.Sequence < 42 {
 		outcome = "stale_sample"
 	}
 	return handlers.PlaybackMutationView{Outcome: outcome, Accepted: &handlers.PlaybackAcceptedProgress{Sequence: 42, Position: 120, IsPaused: false}}, nil
 }
-func (f *fixturePlaybackService) StopInitialPlayback(_ context.Context, _ handlers.PlaybackCaller, _ string, command handlers.PlaybackStopCommand) (handlers.PlaybackMutationView, error) {
-	draining := command.StopID == playbackTestStop
+func (f *fixturePlaybackService) StopPlaybackV2(_ context.Context, _ handlers.PlaybackCaller, _ string, command handlers.PlaybackStopCommand) (handlers.PlaybackMutationView, error) {
 	outcome := "stopped"
-	if draining {
-		outcome = "draining"
+	if command.StopID == playbackTestStop {
+		outcome = "replayed"
 	}
-	return handlers.PlaybackMutationView{Outcome: outcome, Accepted: &handlers.PlaybackAcceptedProgress{Sequence: 42, Position: 120, IsPaused: false}, StopID: command.StopID, HistoryID: "33333333-3333-4333-8333-333333333333", Draining: draining}, nil
+	return handlers.PlaybackMutationView{Outcome: outcome, Accepted: &handlers.PlaybackAcceptedProgress{Sequence: 42, Position: 120, IsPaused: false}, StopID: command.StopID, HistoryID: "33333333-3333-4333-8333-333333333333"}, nil
 }
-func (f *fixturePlaybackService) ReplanInitialPlayback(ctx context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackReplanCommand) (playback.DecisionResponseV3, error) {
+func (f *fixturePlaybackService) ReplanPlaybackV2(ctx context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackReplanCommand) (playback.DecisionResponseV3, error) {
 	if caller.InstallationID != playbackTestInstallation {
 		return playback.DecisionResponseV3{}, &handlers.PlaybackOperationError{Status: 409, Code: "installation_changed", Message: "Playback installation changed; refresh capabilities"}
 	}
-	return f.fakePlaybackService.ReplanInitialPlayback(ctx, caller, session, command)
+	return f.fakePlaybackService.ReplanPlaybackV2(ctx, caller, session, command)
 }
-func (f *fixturePlaybackService) ReportInitialRouteEvent(_ context.Context, _ handlers.PlaybackCaller, _ handlers.PlaybackRouteEventCommand) error {
+func (f *fixturePlaybackService) ReportRouteEventV2(_ context.Context, _ handlers.PlaybackCaller, _ handlers.PlaybackRouteEventCommand) error {
 	return nil
 }
 func fixturePlayback() PlaybackService {
@@ -90,7 +92,7 @@ func playbackFixtureCases() []fixtureCase {
 		cases = append(cases, fixtureCase{name: name, operationID: id, method: method, path: Prefix + "/playback" + path, body: body, schema: "#/components/schemas/" + schema, scenario: scenario, status: status, headers: headers, assertHeaders: []string{"Content-Type", "Cache-Control"}})
 	}
 	add("playback_capability_unconfigured", "getPlaybackCapabilities", http.MethodGet, "/capabilities", "", "PlaybackCapabilities", "Playback remains discoverable while its runtime is not configured.", 200, with(bearer(adminToken), "X-Profile-Id", "p-primary"))
-	add("playback_capability_available", "getPlaybackCapabilities", http.MethodGet, "/capabilities", "", "PlaybackCapabilities", "The admitted viewer receives a durable installation identifier and supported routes.", 200, viewerHeaders())
+	add("playback_capability_available", "getPlaybackCapabilities", http.MethodGet, "/capabilities", "", "PlaybackCapabilities", "The viewer receives the installation identifier, protocol versions, features and deliveries.", 200, viewerHeaders())
 	add("playback_start_opaque_ids", "startPlayback", http.MethodPost, "/start", startBody, "PlaybackDecision", "A synthetic protocol-v3 plan represents every media file identifier as an opaque string.", 201, viewerHeaders())
 	for _, sequence := range []int{42, 41} {
 		name := "playback_progress_applied"
@@ -100,18 +102,21 @@ func playbackFixtureCases() []fixtureCase {
 		add(name, "updatePlaybackProgress", http.MethodPost, "/"+session+"/progress", fixturePlaybackJSON(map[string]any{"installation_id": playbackTestInstallation, "sequence": sequence, "position": 120, "is_paused": false}), "PlaybackMutation", "Sequenced progress returns the committed accepted tuple, including after a stale sample.", 200, viewerHeaders())
 	}
 	for _, stop := range []struct {
-		name, id string
-		status   int
-	}{{"playback_stop_draining", playbackTestStop, 202}, {"playback_stop_completed", "44444444-4444-4444-8444-444444444444", 200}} {
-		add(stop.name, "stopPlayback", http.MethodDelete, "/"+session, fixturePlaybackJSON(map[string]any{"installation_id": playbackTestInstallation, "stop_id": stop.id}), "PlaybackMutation", "An exact stop returns its durable receipt while grants drain or after completion.", stop.status, viewerHeaders())
+		name, id, scenario string
+	}{
+		{"playback_stop_completed", "44444444-4444-4444-8444-444444444444", "The first stop of a session applies the optional final sample and returns the stored receipt."},
+		{"playback_stop_replayed", playbackTestStop, "Every later stop of the same session replays the stored receipt, whatever stop id it carries."},
+	} {
+		add(stop.name, "stopPlayback", http.MethodDelete, "/"+session, fixturePlaybackJSON(map[string]any{"installation_id": playbackTestInstallation, "stop_id": stop.id}), "PlaybackMutation", stop.scenario, 200, viewerHeaders())
 	}
+	add("playback_progress_conflict", "updatePlaybackProgress", http.MethodPost, "/"+session+"/progress", fixturePlaybackJSON(map[string]any{"installation_id": playbackTestInstallation, "sequence": 42, "position": 121, "is_paused": false}), "Problem", "An equal sequence with a different sample is a conflict the client must not retry.", 409, viewerHeaders())
 	add("playback_installation_changed", "startPlayback", http.MethodPost, "/start", mismatchBody, "Problem", "A different installation requires capability discovery before starting a new attempt.", 409, viewerHeaders())
 	add("playback_invalid_protocol", "startPlayback", http.MethodPost, "/start", invalidBody, "Problem", "Protocol-version validation uses the v2 422 status.", 422, viewerHeaders())
 	return cases
 }
 
-// Match the initial direct/local-HLS feature contract rather than the broader
-// historical v3 golden, which also describes replacement lifecycle operations.
+// A fixed feature list keeps the fixture bodies stable across feature
+// additions in internal/playback; the real list is playback.ServerFeaturesV3.
 func fixtureInitialPlaybackFeatures() []string {
 	return []string{playback.FeaturePlaybackPlanV3, playback.FeatureNeutralContractV3,
 		playback.FeatureLayoutPassthrough, playback.FeatureDeviceQuirksV3,

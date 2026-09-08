@@ -84,24 +84,17 @@ Jellyfin-compatible browsing and existing progress uploads retain their behavior
 Storage and transaction invariants are described in
 [progress bootstrap storage](architecture/progress-bootstrap.md).
 
-## Playback-origin uploads after source admission
+## Playback-origin uploads
 
-`POST /api/v2/sync/progress` and its v1 counterpart upload unbound playback
-positions, including client-owned audiobook timelines and offline queues.
-Neither `force_overwrite` nor `updated_at` carries playback authority. Once the
-account has a playback source marker, these writes return per-item failures and
-leave personal progress unchanged. Genuine manual watch-state edits and trusted
-imports use separate operations and retain their existing behavior.
+`POST /api/v2/sync/progress` and its v1 counterpart upload playback positions,
+including client-owned audiobook timelines and offline queues. Neither
+`force_overwrite` nor `updated_at` carries playback authority. Genuine manual
+watch-state edits and trusted imports use separate operations and retain their
+existing behavior.
 
-Fresh client-owned timelines require a coordinated bound source/sink contract
-and client adoption before that account can be operationally admitted. The
-current upload body cannot distinguish a delayed pre-admission queue from a
-fresh report. Do not replay that queue through another attempt or relabel it as
-an import. See [first playback admission](architecture/playback-first-admission.md)
-for the transition boundary and operational prerequisites.
-
-The additive `client_bound` playback contract supplies authoritative audiobook
-manifest discovery, an exact start digest pin, and global resume persistence
-through the existing session progress/stop sequence. It does not change the sync
-upload body. See [bound client timelines](architecture/playback-client-timeline.md)
-for wire fields, clock units, terminal part transitions and runtime gates.
+A multi-part audiobook starts with `progress_persistence: "client"`, so the
+playback session records no resume position of its own. The client owns the
+timeline and reports the global book position through
+`POST /api/v2/sync/progress`. Session progress and stop
+([playback API](playback-api.md)) still sequence the session itself; they do not
+carry the book position for these attempts.

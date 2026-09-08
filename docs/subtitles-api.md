@@ -234,14 +234,14 @@ durable worker queue. Missing engine/live-delivery dependencies return `503`,
 hidden files or foreign/missing playback sessions return `404`, and transcription
 quota rejection returns a `429` `rate_limited` Problem.
 
-Live notifications capture account, profile, effective/requested file, session
-start, executor namespace and initial activation binding. A check before sending
-suppresses events when the local runtime no longer matches. This check does not
-hold session-manager locks over socket writes, validate a new media grant, or
-revoke cues already queued or written. Socket delivery remains best effort;
-reconnect does not replay missed cues. Finished-track notification retains the
-existing file broadcast. Atomic publication, cancellation races, worker adoption
-and uncertain commit behavior retain the limits described above.
+Live notifications capture account, profile, effective/requested file and
+session start. A check before sending suppresses events when the local runtime
+no longer matches. This check does not hold session-manager locks over socket
+writes, validate a new media grant, or revoke cues already queued or written.
+Socket delivery remains best effort; reconnect does not replay missed cues.
+Finished-track notification retains the existing file broadcast. Atomic
+publication, cancellation races, worker adoption and uncertain commit behavior
+retain the limits described above.
 
 The player sends the typed request once, rejects stale decoded responses after
 modal/media/session/config/account/profile/PIN changes, checks returned job/file

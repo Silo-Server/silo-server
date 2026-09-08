@@ -98,9 +98,7 @@ The retained transcode POST
 `/transcode/{session_id}/segment/{name}/downloaded` acknowledges downstream
 completion, not the proxy-to-node read. It requires node bearer authentication,
 a media segment name and the private `X-Silo-Transcode-Segment-Generation` value
-from the completed response. Bound sessions also require the matching signed
-executor reference through `X-Silo-Stream-Token` and serving-grant authority.
-A namespace mismatch returns 409; missing sessions return 404, without
+from the completed response. Missing sessions return 404, without
 reconstruction. A stale nonempty generation is ignored with empty 204, so a
 delayed acknowledgement cannot advance a reconstructed session or new timeline.
 Repeating the exact acknowledgement is naturally idempotent; this is not a
@@ -146,26 +144,24 @@ new error status. Neither method prepares an artifact or promises a durable
 transfer, retry receipt or cross-node reconstruction.
 
 The transcode listener's legacy `DELETE /transcode/{session_id}` holds the same
-lifecycle lock as start and reconstruction. Node bearer authentication does not
-confer bound-executor stop authority: a bound in-memory session or stored recipe
-returns 409. For legacy progressive remux, cancellation installs a process-local
-fence lasting the maximum token lifetime. Configured recipe deletion must succeed
-and progressive shutdown must finish before 204; either can return 503 after
-local teardown has already occurred. Session-close and file-removal errors are
-logged. A missing session and recipe returns 404 after cleanup attempts.
+lifecycle lock as start and reconstruction. For legacy progressive remux,
+cancellation installs a process-local fence lasting the maximum token lifetime.
+Configured recipe deletion must succeed and progressive shutdown must finish
+before 204; either can return 503 after local teardown has already occurred.
+Session-close and file-removal errors are logged. A missing session and recipe
+returns 404 after cleanup attempts.
 
 This ID-addressed operation has no durable stop identity. Repeating it against a
-reused transport ID could affect a successor, so its description is non-retryable.
-It is not an alias for the native stop protocol and does not supply missing bound
-executor authority. No process-survival guarantee is attached to the local fence.
+reused transport ID could affect a successor, so its description is
+non-retryable. It is not an alias for the native stop protocol. No
+process-survival guarantee is attached to the local fence.
 
 The retained transcode `POST /transcode/start` decodes the owning
 `TranscodeStartRequest` with ordinary JSON defaults and unknown-key tolerance;
 it does not impose a decoder body bound. Input authority, audio/copy/tone-map
 recipe checks, GPU admission and the configuration reload guard run before
-execution. A supplied executor namespace must validate and acquire its execution
-grant; an existing bound session refuses replacement, including the same identity.
-Legacy same-ID replacement may remove the predecessor before a later start fails.
+execution. Same-ID replacement may remove the predecessor before a later start
+fails.
 
 Success is 202 with JSON-encoded `TranscodeStartResponse`, including available
 recipe attestations. The current handler does not set Content-Type: the HTTP
@@ -197,12 +193,12 @@ Proxy token remux routes keep the legacy and audio-v2 suffixes distinct. The
 legacy route refuses boosted recipes; the versioned route requires the exact
 stereo AAC shape. Both enforce signed recipe/egress authority. Local execution
 streams video or audio MP4; query seek parse failures retain the legacy zero
-fallback and there is no byte-range resume promise. Local proxy HEAD still starts
-and drains remux work. A transcode-node remux HEAD instead validates authority
-without starting an encoder or checking actual file existence. Node progressive
-execution requires its independently verified recipe, exact transport/node route
-and approved input; bound executor recipes fail 409. Stopped authority returns
-410 and concurrent requests return 409. Cancellation and reload fences remain
+fallback and there is no byte-range resume promise. Local proxy HEAD still
+starts and drains remux work. A transcode-node remux HEAD instead validates
+authority without starting an encoder or checking actual file existence. Node
+progressive execution requires its independently verified recipe, exact
+transport/node route and approved input. Stopped authority returns 410 and
+concurrent requests return 409. Cancellation and reload fences remain
 process-local, and a committed 200 can truncate on failure.
 
 Proxy HLS routes forward the transport ID (legacy fallback: session ID), raw
@@ -228,16 +224,18 @@ other accepted non-transcode methods fall through to direct-file serving. Booste
 remux grant compatibility is not established here. Grant relays mint a separate
 node-facing recipe token; viewer credentials are not forwarded to the node.
 
-Node HLS serving checks exact bound executor namespaces and serving grants, with
-existing guarded token/stored-recipe reconstruction when process-local state is
-missing. A 404 can represent unavailable/refused reconstruction. Manifests retain
-source-aligned timeline selection, relative segment links, forwarded query and
-no-store caching. Segment leases can wait or undergo guarded seek/restart recovery;
-init data also has a bounded wait. ServeContent handles conditions/ranges and
-extension/sniffed media. Private generation is returned only to marked proxy hops.
-Direct full reads report exact-generation completion; proxied reads defer that
-accounting to acknowledgment. No new durable availability, runtime execution,
-reconstruction authority, generic retry contract or native v2 alias is introduced.
+Node HLS serving verifies the presented stream token and then checks the session
+deny marker (`silo:streamauth:<session_id>`), answering `410` with no bytes when
+the marker is present; existing guarded token/stored-recipe reconstruction
+covers missing process-local state. A 404 can represent unavailable/refused
+reconstruction. Manifests retain source-aligned timeline selection, relative
+segment links, forwarded query and no-store caching. Segment leases can wait or
+undergo guarded seek/restart recovery; init data also has a bounded wait.
+ServeContent handles conditions/ranges and extension/sniffed media. Private
+generation is returned only to marked proxy hops. Direct full reads report
+exact-generation completion; proxied reads defer that accounting to
+acknowledgment. No new durable availability, runtime execution, reconstruction
+authority, generic retry contract or native v2 alias is introduced.
 
 The forty described worker registrations exclude health, readiness, metrics and
 the legacy health alias on each worker listener. Those eight probe registrations

@@ -35,16 +35,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
 
+// proxyRangeHeader is the HTTP Range header the media routes accept.
+const proxyRangeHeader = "Range"
+
 // Server is the HTTP handler for proxy mode.
 type Server struct {
-	auxiliaryHTTPClient     *http.Client
-	auxiliaryAPIOrigin      string
-	auxiliaryTransfers      playback.ExecutorAuxiliaryTransferProviderV3
-	executorGrants          playback.ExecutorGrantProviderV3
-	executorRecipeResolver  func(context.Context, string, playback.ExecutorNamespaceV3) (*playback.RecipeCard, error)
-	executorOutputTransfers playback.ExecutorOutputTransferProviderV3
-	watcher                 *nodeconfig.Watcher
-	tracker                 *nodesessions.Tracker
+	watcher *nodeconfig.Watcher
+	tracker *nodesessions.Tracker
 	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
 	// uses the config watcher; tests replace it to model sibling proxies.
 	nodeRowID            func() (int, bool)
@@ -56,9 +53,13 @@ type Server struct {
 	// mode, which is why those routes answer 503 rather than assuming either.
 	grants        proxyGrantLookup
 	loginSessions loginSessionValidator
-	egress        *egressMeter
-	clientIP      *clientip.Resolver
-	telemetry     *streamtelemetry.Registry
+	// streamDeny revokes a session's still-valid stream tokens once central
+	// stopped, expired, or terminated it. Nil disables the check, which is the
+	// pre-marker behavior for a proxy without Redis.
+	streamDeny *playback.StreamDeny
+	egress     *egressMeter
+	clientIP   *clientip.Resolver
+	telemetry  *streamtelemetry.Registry
 	// subCache stores complete embedded subtitle extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
@@ -149,6 +150,37 @@ func (s *Server) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	s.telemetry = registry
 }
 
+// SetStreamDeny installs the session-deny marker store this proxy consults
+// before serving media for a session. It must be called during construction,
+// before the server begins handling requests. A nil store disables the check.
+func (s *Server) SetStreamDeny(deny *playback.StreamDeny) {
+	s.streamDeny = deny
+}
+
+// sessionDenied reports whether the deny marker revokes the session a request
+// serves. Stream tokens are self-contained and live for MaxTokenTTL, so a
+// session central stopped, expired, or terminated would otherwise keep serving
+// from here until its tokens expire. Both identities are checked: the playback
+// session is what central denies, and the transcode transport can carry a
+// different id on a compat session.
+func (s *Server) sessionDenied(ctx context.Context, claims *streamtoken.Claims) bool {
+	if s.streamDeny == nil || claims == nil {
+		return false
+	}
+	if claims.SessionID != "" && s.streamDeny.Denied(ctx, claims.SessionID) {
+		return true
+	}
+	transport := transcodeTransportIDFromClaims(claims)
+	return transport != "" && transport != claims.SessionID && s.streamDeny.Denied(ctx, transport)
+}
+
+// writeStreamDenied answers a denied session: 410 with no media bytes. The
+// session is over; a client that retries keeps hitting this wall until its
+// tokens expire.
+func writeStreamDenied(w http.ResponseWriter) {
+	http.Error(w, "playback session ended", http.StatusGone)
+}
+
 // newStreamTransport tunes the proxy→transcode-node connection pool. Many
 // concurrent viewers fan their segment fetches through one proxy→node pair,
 // and Go's default of 2 idle connections per host causes constant connection
@@ -199,7 +231,7 @@ func (s *Server) router() chi.Router {
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "HEAD", "OPTIONS"},
 		AllowedHeaders: []string{
-			"Accept", "Authorization", "X-Profile-Id", "Content-Type", "Range",
+			"Accept", "Authorization", "Content-Type", proxyRangeHeader,
 			"If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since",
 		},
 		// direct_stream_resume_v1 has the client re-request a byte range with
@@ -240,10 +272,6 @@ func (s *Server) router() chi.Router {
 		r.Head("/stream/v3/{session_id}/master.m3u8", observeProxy(s.telemetry, http.MethodHead, "/stream/v3/{session_id}/master.m3u8", s.handleGrantTranscodeManifest))
 		r.Get("/stream/v3/{session_id}/master.m3u8", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/master.m3u8", s.handleGrantTranscodeManifest))
 		r.Get("/stream/v3/{session_id}/segment/{name}", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/segment/{name}", s.handleGrantTranscodeSegment))
-		r.Get("/stream/v3/{session_id}/subtitles/{track}", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/subtitles/{track}", s.handleGrantSubtitle))
-		r.Head("/stream/v3/{session_id}/subtitles/{track}", observeProxy(s.telemetry, http.MethodHead, "/stream/v3/{session_id}/subtitles/{track}", s.handleGrantSubtitle))
-		r.Get("/stream/v3/{session_id}/subtitles/{track}/fonts", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/subtitles/{track}/fonts", s.handleGrantSubtitleFonts))
-		r.Head("/stream/subtitles/{token}/{track}", observeProxy(s.telemetry, http.MethodHead, "/stream/subtitles/{token}/{track}", s.handleSubtitle))
 		r.Get("/stream/subtitles/{token}/{track}/fonts", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts))
 		r.Get("/stream/subtitles/{token}/{track}", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}", s.handleSubtitle))
 		r.Head("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodHead, "/downloads/file/{token}", s.handleDownloadFile))
@@ -527,6 +555,10 @@ func (s *Server) verifyPlaybackToken(w http.ResponseWriter, r *http.Request) *st
 		writeProxyRouteStatusV3(w, status)
 		return nil
 	}
+	if s.sessionDenied(r.Context(), claims) {
+		writeStreamDenied(w)
+		return nil
+	}
 	return claims
 }
 
@@ -584,10 +616,6 @@ func proxyPlaybackEndpointStatusV3(claims *streamtoken.Claims, endpoint proxyPla
 	if claims == nil {
 		return http.StatusServiceUnavailable
 	}
-	if claims.ExecutorBound && (endpoint == proxyPlaybackEndpointRemuxV3 || endpoint == proxyPlaybackEndpointAuxiliaryV3) {
-		return http.StatusServiceUnavailable
-	}
-
 	direct := claims.RoutingWorkload == string(noderouting.WorkloadDirectPlay) &&
 		claims.RoutingExecution == string(noderouting.ExecutionNone) &&
 		claims.RoutingEgress == string(noderouting.EgressProxy) &&
@@ -678,12 +706,6 @@ func (s *Server) handleDirectPlay(w http.ResponseWriter, r *http.Request) {
 // reach it with the same claims projected from a grant they authorized against
 // the caller's login session — the serving behavior must not differ.
 func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) {
-	w, r, cleanup, ok := s.guardExecutorDelivery(w, r, claims)
-	if !ok {
-		return
-	}
-	defer cleanup()
-
 	// Attach here rather than at the call sites so both the token routes and the
 	// grant routes attribute their bytes to the viewer.
 	attachStream(r.Context(), claims)
@@ -991,10 +1013,6 @@ func sessionInfo(tr *nodesessions.Tracker, claims *streamtoken.Claims, kind stri
 
 func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	claims := s.verifyPlaybackToken(w, r)
-	if claims != nil && claims.ExecutorBound {
-		s.relayAuxiliary(w, r, claims, chi.URLParam(r, "token"), false)
-		return
-	}
 	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointAuxiliaryV3) {
 		return
 	}
@@ -1038,10 +1056,6 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 	claims := s.verifyPlaybackToken(w, r)
-	if claims != nil && claims.ExecutorBound {
-		s.relayAuxiliary(w, r, claims, chi.URLParam(r, "token"), true)
-		return
-	}
 	if claims == nil || !requireProxyPlaybackEndpointV3(w, claims, proxyPlaybackEndpointAuxiliaryV3) {
 		return
 	}
@@ -1073,32 +1087,6 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 // (never to the client): the client's own token on a token route, a
 // proxy-minted one on a grant route.
 func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, path, forwardToken string) {
-	w, r, cleanup, ok := s.guardExecutorDelivery(w, r, claims)
-	if !ok {
-		return
-	}
-	defer cleanup()
-	var permit string
-	client := s.httpClient
-	if claims.ExecutorBound {
-		if s.executorOutputTransfers == nil || forwardToken == "" {
-			http.Error(w, "output transfer unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		card := playback.RecipeCardFromClaims(claims)
-		var closePermit func()
-		var err error
-		permit, closePermit, err = s.executorOutputTransfers(r.Context(), transcodeTransportIDFromClaims(claims), *card.Executor)
-		if err != nil || permit == "" || closePermit == nil {
-			http.Error(w, "output transfer unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		defer closePermit()
-		boundedClient := *client
-		boundedClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		client = &boundedClient
-	}
-
 	cfg := s.watcher.Config()
 	if claims.TranscodeNode == "" {
 		http.Error(w, "no transcode node in token", http.StatusBadRequest)
@@ -1119,9 +1107,6 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
-	if permit != "" {
-		req.Header.Set(playback.OutputTransferHeaderV3, permit)
-	}
 	if isSegmentRoute {
 		transcodeproxy.PrepareRequest(req, r)
 	}
@@ -1134,17 +1119,13 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		req.Header.Set("X-Silo-Stream-Token", forwardToken)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if permit != "" && resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest && resp.StatusCode != http.StatusNotModified {
-		http.Error(w, "selected worker redirected output", http.StatusBadGateway)
-		return
-	}
 
 	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
 	transcodeproxy.CopyResponseHeaders(w.Header(), resp.Header)
@@ -1155,13 +1136,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		var ackErr error
-		if permit != "" {
-			ackErr = transcodeproxy.AcknowledgeExecutor(r.Context(), client, claims.TranscodeNode+path, cfg.Auth.JWTSecret, generation, forwardToken, permit)
-		} else {
-			ackErr = transcodeproxy.Acknowledge(r.Context(), client, claims.TranscodeNode+path, cfg.Auth.JWTSecret, generation)
-		}
-		if ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode+path, cfg.Auth.JWTSecret, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "proxy", "error", ackErr, "playback_session_id", claims.SessionID)
 		}
 	}

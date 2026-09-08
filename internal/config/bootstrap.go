@@ -2,9 +2,7 @@ package config
 
 import (
 	"fmt"
-	"net/url"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -16,13 +14,11 @@ const minSecretKeyLen = 32
 
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
-	InitialPlaybackAPIOrigin string
-	InitialPlaybackEnabled   bool
-	DatabaseURL              string
-	RedisURL                 string // optional override; empty means use DB setting
-	Listen                   string
-	JFListen                 string
-	Mode                     string
+	DatabaseURL string
+	RedisURL    string // optional override; empty means use DB setting
+	Listen      string
+	JFListen    string
+	Mode        string
 	// SecretKey is the master key (raw SECRET_KEY env value) from which the
 	// at-rest credential cipher derives its data key. It lives outside Postgres
 	// so encrypted secrets survive a full database compromise/dump.
@@ -65,35 +61,14 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 		mode = "integrated"
 	}
 
-	// API v2 playback is part of this branch's default runtime. Admission is
-	// durable state checked per request; it is not deployment configuration.
-	initialEnabled := mode == "integrated" || mode == "api" || mode == "proxy" || mode == "transcode"
-	initialAPIOrigin, err := initialPlaybackAPIOrigin(os.Getenv("SILO_INITIAL_PLAYBACK_API_ORIGIN"))
-	if err != nil {
-		return nil, err
-	}
 	redisURL := os.Getenv("REDIS_URL")
 
 	return &BootstrapConfig{
-		InitialPlaybackAPIOrigin: initialAPIOrigin,
-		InitialPlaybackEnabled:   initialEnabled,
-		DatabaseURL:              dbURL,
-		RedisURL:                 redisURL,
-		Listen:                   ":" + port,
-		JFListen:                 ":" + jfPort,
-		Mode:                     mode,
-		SecretKey:                []byte(secretKey),
+		DatabaseURL: dbURL,
+		RedisURL:    redisURL,
+		Listen:      ":" + port,
+		JFListen:    ":" + jfPort,
+		Mode:        mode,
+		SecretKey:   []byte(secretKey),
 	}, nil
-}
-
-// Initial auxiliary routing is restart-required operator configuration.
-func initialPlaybackAPIOrigin(raw string) (string, error) {
-	if raw == "" {
-		return "", nil
-	}
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
-		return "", fmt.Errorf("SILO_INITIAL_PLAYBACK_API_ORIGIN must be an explicit HTTP(S) origin")
-	}
-	return strings.TrimSuffix(raw, "/"), nil
 }

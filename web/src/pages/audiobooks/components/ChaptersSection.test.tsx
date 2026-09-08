@@ -57,40 +57,11 @@ describe("ChaptersSection", () => {
     expect(within(rowsAfter[0]!).getByText("Memory")).toBeInTheDocument();
   });
 
-  it("calls onSelect with exact file and local start seconds when a chapter is clicked", async () => {
+  it("calls onSelect with absolute start seconds when a chapter is clicked", async () => {
     const onSelect = vi.fn();
     render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={onSelect} />);
     await expandChapters();
     await userEvent.click(screen.getByRole("button", { name: /Memory/ }));
-    expect(onSelect).toHaveBeenCalledWith({ fileId: "1", positionSeconds: 200 });
+    expect(onSelect).toHaveBeenCalledWith(200);
   });
-});
-
-it("keeps the selected file/local chapter coordinates when earlier detail durations are stale", async () => {
-  const onSelect = vi.fn();
-  render(
-    <ChaptersSection
-      files={[
-        { ...files[0]!, duration_seconds: 99999 },
-        {
-          id: 2,
-          duration_seconds: 300,
-          chapters: [
-            {
-              index: 0,
-              title: "Second part",
-              source: "embedded",
-              start_seconds: 30,
-              end_seconds: 100,
-            },
-          ],
-        },
-      ]}
-      currentPositionSeconds={null}
-      onSelect={onSelect}
-    />,
-  );
-  await expandChapters();
-  await userEvent.click(screen.getByRole("button", { name: /Second part/ }));
-  expect(onSelect).toHaveBeenCalledWith({ fileId: "2", positionSeconds: 30 });
 });

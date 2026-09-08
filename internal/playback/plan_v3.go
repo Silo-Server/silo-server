@@ -35,14 +35,11 @@ const (
 )
 
 type PlannerInputV3 struct {
-	// ProgressiveRemuxDisabled excludes a transport the active runtime cannot
-	// execute, independently of the unchanged client capability document.
-	ProgressiveRemuxDisabled bool
-	Request                  StartRequestV3
-	RequestedFile            *models.MediaFile
-	EffectiveFile            *models.MediaFile
-	AudioTrackIndex          int
-	Settings                 PlannerSettingsV3
+	Request         StartRequestV3
+	RequestedFile   *models.MediaFile
+	EffectiveFile   *models.MediaFile
+	AudioTrackIndex int
+	Settings        PlannerSettingsV3
 	// Registry holds the transformations the local binary can execute.
 	Registry *TransformationRegistryV3
 	// ProgressiveRemuxRegistry, HLSRemuxRegistry, and HLSVideoRegistry report
@@ -265,7 +262,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		clientSupportsHDR10V3(input.Request, source) &&
 		(source.DVProfile == 7 || source.DVProfile == 8 && source.DVBLCompatID == 1)
 	if dvStripPlausible {
-		if !input.ProgressiveRemuxDisabled && deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
+		if deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
 			dvStripEligibleProgressive = canStripDolbyVisionToHDR10V3(source, input.Request, input.progressiveRemuxRegistry())
 		}
 		if hlsDeliveryOK {
@@ -520,7 +517,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		hlsTranscodeAudio := !hlsAudioOK || normalizeMatroskaAAC
 		hlsAudioQuirk, hlsAudioQuirkOK := hlsEAC3AudioCorrectionV3(source, input.Request)
 		progressiveAudioConvertOK := false
-		if !input.ProgressiveRemuxDisabled && progressiveTranscodeAudio && deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
+		if progressiveTranscodeAudio && deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
 			progressiveAudioConvertOK = input.progressiveRemuxRegistry().Available(TransformationAudioToAACV3)
 		}
 		if progressiveTranscodeAudio && hlsTranscodeAudio {
@@ -565,7 +562,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 		progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
 		tryProgressive := func() (PlannerResultV3, bool) {
-			if input.ProgressiveRemuxDisabled || !remuxSubtitleOK || !progressiveExecutable {
+			if !remuxSubtitleOK || !progressiveExecutable {
 				return PlannerResultV3{}, false
 			}
 			candidate := cloneRemuxPlanCandidateV3(progressivePlan)
@@ -793,7 +790,7 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 			return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
 		}
 	}
-	if input.ProgressiveRemuxDisabled || !deliveryAvailableV3(request, DeliveryClassProgressiveV3) {
+	if !deliveryAvailableV3(request, DeliveryClassProgressiveV3) {
 		return terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this audio source.", false)
 	}
 	transcodeAudio := !audioOK || bandwidthCapExceeded

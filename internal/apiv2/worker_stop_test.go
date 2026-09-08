@@ -14,7 +14,7 @@ import (
 
 func TestWorkerLegacyStopProtocol(t *testing.T) {
 	op := transcodenode.ProtocolLegacyStop()
-	if op.Method != http.MethodDelete || op.RetrySafety != "non_retryable" || op.RequestBody != nil || len(op.Responses["204"].Content) != 0 || op.Responses["409"] == nil {
+	if op.Method != http.MethodDelete || op.RetrySafety != "non_retryable" || op.RequestBody != nil || len(op.Responses["204"].Content) != 0 || op.Responses["409"] != nil {
 		t.Fatal("stop authority description changed")
 	}
 	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})

@@ -340,7 +340,6 @@ export const v2Operations = {
   "GET /api/v2/playback/capabilities": "getPlaybackCapabilities",
   "GET /api/v2/playback/sessions/control/capabilities": "getPlaybackControlSocketCapabilities",
   "GET /api/v2/playback/sessions/{session_id}/control/ws": "connectPlaybackControlSocket",
-  "GET /api/v2/playback/timelines/{file_id}": "getPlaybackClientTimeline",
   "GET /api/v2/playback/transcode/{session_id}/master.m3u8": "getPlaybackManifest",
   "GET /api/v2/playback/transcode/{session_id}/segment/{name}": "getPlaybackSegment",
   "GET /api/v2/plugin-content/capabilities": "getPluginContentCapabilities",

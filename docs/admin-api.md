@@ -1580,36 +1580,37 @@ These reads require an acting administrator and remain restricted in demo mode.
 `GET /api/v2/admin/node-sessions` returns `{items, page, undecodable}` using the
 owning node-session reader. Optional positive string `node_id` filters by the
 registered node URL; invalid IDs fail validation and unknown nodes return 404.
-The typed projection preserves separate executor generations and reports
+The typed projection carries one observation per node and session and reports
 unreadable records from the source enumeration before filtering. Missing or
-unparseable start timestamps are null, and original nanosecond precision and
-executor epochs are decimal strings. Unknown numeric ownership keys remain
-`"0"`; the older `user_id` is a display label, while `auth_user_id` identifies
-the account when reported. The frozen v1 raw-record response is unchanged.
+unparseable start timestamps are null, and the original nanosecond precision is
+the decimal string `started_at_unix_nano` (`"0"` when absent). Unknown numeric
+ownership keys remain `"0"`; the older `user_id` is a display label, while
+`auth_user_id` identifies the account when reported. The frozen v1 raw-record
+response is unchanged.
 
-Both lists accept `limit` (default 50, maximum 100) and an opaque `cursor` bound to
-the acting account/profile, filter and page size. The playback list applies its session-ID keyset and limit in SQL, fetching one
-extra row to determine continuation. The frozen v1 loader retains its newest-200
-cap. The node list bounds response size but rereads the live source on each
-page. The node reader
+Both lists accept `limit` (default 50, maximum 100) and an opaque `cursor` bound
+to the acting account/profile, filter and page size. The playback list applies
+its session-ID keyset and limit in SQL, fetching one extra row to determine
+continuation. The frozen v1 loader retains its newest-200 cap. The node list
+bounds response size but rereads the live source on each page. The node reader
 refuses a truncated 50,000-record enumeration with 503 instead of claiming a
 complete list. Expired keys and failed GETs can be absent under the existing
-best-effort reader semantics. Redis observations may include multiple executor
-generations until cleanup or TTL expiry. These are not snapshot listings;
-refresh to discover new records behind a cursor. The web drains all pages under
-one captured authority, rejects broken continuation, and publishes no partial
-list on failure.
+best-effort reader semantics. Redis observations may include records for
+sessions that have already ended, until cleanup or TTL expiry. These are not
+snapshot listings; refresh to discover new records behind a cursor. The web
+drains all pages under one captured authority, rejects broken continuation, and
+publishes no partial list on failure.
 
 These projections do not grant playback-control authority. In particular,
 `has_playback_control` describes the existing live control connection, not a
 sequenced administrator stop capability. The five administrator mutations need
-a playback-owned adapter that authorizes the administrator separately, retains
-the exact target binding and durable stop identity, and waits for the source
-receipt and grant drain. Caller-bound `StopInitialPlayback` cannot be used by
-forging the target account/profile context. No legacy cleanup fallback is
-introduced by these reads. No Apple or Android HTTP caller for these three
-administrator reads was found; neither platform gains a new caller. Jellyfin
-has no equivalent administrator diagnostic contract to migrate.
+a playback-owned adapter that authorizes the administrator separately and
+retains the exact target binding and durable stop identity. The caller-bound
+user stop cannot be reused by forging the target account/profile context. No
+legacy cleanup fallback is introduced by these reads. No Apple or Android HTTP
+caller for these three administrator reads was found; neither platform gains a
+new caller. Jellyfin has no equivalent administrator diagnostic contract to
+migrate.
 
 `GET /api/v2/admin/stats` exposes the existing dashboard statistics provider,
 including cached aggregates, explicit refresh, PostgreSQL fallback and the
@@ -1680,30 +1681,28 @@ session's playback authority durably, then dispatches the dismissal as best
 effort, and reports the two facts separately. It never promises that media
 already buffered stops instantly, and it never waits for the player.
 
-Revocation reuses the integrated session store. For a session started through
-the v2 initial flow it is the owner's bound stop under one administrator stop
-identity derived from the session: the attempt row moves to `draining` (new
-grants and progress writes are refused from that moment), the owner lease and
-runtime are closed, the sink stop is written, and the terminal receipt is
-committed once grants already issued have expired. For a bridge-started session
-it is the ordinary stop, which revokes proxy grants, node recipes and the synced
-session row. Media tokens for the session are refused after either path.
+Revocation is the ordinary user stop plus the stream deny marker. The server
+stops the live session and its transcode, runs the stop and history writer, and
+writes the Redis key `silo:streamauth:<session_id>` so no replica serves or
+reconstructs the session from a stream token that is still inside its TTL
+([restart-resilient playback](architecture/restart-resilient-playback.md)). Only
+then is the dismissal dispatched on the session's realtime control lane, without
+waiting for an acknowledgement. Terminates for one session are serialized, so a
+repeat observes the first outcome instead of racing it.
 
 The optional JSON body carries `reason`. The `200` receipt carries
-`session_id`, `authority_revoked`, `already_revoked`, `durable_state`
-(`draining`, `stopped` or `none`), `client_notified`, `delivery`
-(`dispatched`, `unavailable`, `failed`, `none`) and `command_id` when a
-dismissal was issued. A player that is offline yields `authority_revoked: true`
-with `client_notified: false` and `200`. Repeating terminate on a terminated
-session converges: the same durable state is reported, `already_revoked` is
-true, and nothing is dispatched; once the drain has elapsed a repeat commits
-the terminal receipt and reports `stopped`. The ledger row keeps
-`natural_idempotent`. An unknown session, including a bridge session that has
-already ended and left no durable row, is `404`; a bound session whose durable
-state cannot be revoked in its current phase is `409`. The operation requires
-an acting administrator, is restricted in demo mode, and is registered
-unconditionally: it answers `503` and the shared command capability lists
-`terminate` with `terminate_revokes_authority: true` only when the durable
+`session_id`, `authority_revoked`, `already_revoked`, `durable_state`,
+`client_notified`, `delivery` (`dispatched`, `unavailable`, `failed`, `none`)
+and `command_id` when a dismissal was issued. `durable_state` reports `stopped`:
+a terminate that succeeds always commits the terminal stop. `already_revoked`
+stays `false`, because a repeat against a session this server no longer holds is
+`404` rather than a converged receipt. A player that is offline yields
+`authority_revoked: true` with `client_notified: false` and `200`. The ledger
+row keeps `natural_idempotent`. An unknown or already-ended session is `404`; a
+session whose stop cannot be committed in its current state is `409`. The
+operation requires an acting administrator, is restricted in demo mode, and is
+registered unconditionally: it answers `503` and the shared command capability
+lists `terminate` with `terminate_revokes_authority: true` only when the durable
 revocation seam is wired. The bridge terminate route is unchanged. The web
 session actions send terminate through this operation under captured
 administrator authority and show both facts.

@@ -40,14 +40,6 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, release, err := h.legacyAdmission(r.Context(), a.UserID)
-	if err != nil {
-		http.Error(w, "unbound playback unavailable", http.StatusConflict)
-		return
-	}
-	defer release()
-	r = r.WithContext(ctx)
-
 	contentID := chi.URLParam(r, "libraryItemId")
 
 	access, err := h.accessFilterForAuth(r.Context(), a)

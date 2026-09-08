@@ -13,8 +13,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-// PlaybackControlSocketService mints one owner-bound handshake credential and
-// serves the documented plain-WebSocket control handshake.
+// PlaybackControlSocketService mints one session-bound handshake credential
+// and serves the documented plain-WebSocket control handshake.
 type PlaybackControlSocketService interface {
 	Available() bool
 	Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string) (string, time.Time, error)
@@ -28,7 +28,7 @@ type PlaybackControlSocketTicketInput struct {
 	Body      struct {
 		// InstallationID is the playback installation from getPlaybackCapabilities
 		// that started the session; omitted for a session the bridge started.
-		InstallationID ID `json:"installation_id,omitempty" doc:"Installation identifier from playback capabilities; required for a session started through the v2 initial flow, absent for a bridge-started session"`
+		InstallationID ID `json:"installation_id,omitempty" doc:"Installation identifier from playback capabilities; required for a session started through v2, absent for a bridge-started session"`
 	}
 }
 
@@ -50,10 +50,6 @@ type PlaybackControlSocketCapabilitiesOutput struct {
 	Body         struct {
 		Available bool   `json:"available"`
 		Protocol  string `json:"protocol"`
-		// OwnerLeaseAdmission marks the contract: the credential and the
-		// upgrade are admitted only for the session's original account,
-		// profile, installation and live control fence.
-		OwnerLeaseAdmission bool `json:"owner_lease_admission"`
 	}
 }
 
@@ -65,12 +61,11 @@ const (
 
 func registerPlaybackControlSocket(reg *Registry) {
 	const root = Prefix + "/playback/sessions"
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, root+"/control/capabilities", "getPlaybackControlSocketCapabilities", "playback", "Discover whether the owner-bound playback control handshake is served."), Class: ClassProfileScoped, ServiceBacked: true}, func(_ context.Context, _ *struct{}) (*PlaybackControlSocketCapabilitiesOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, root+"/control/capabilities", "getPlaybackControlSocketCapabilities", "playback", "Discover whether the session-bound playback control handshake is served."), Class: ClassProfileScoped, ServiceBacked: true}, func(_ context.Context, _ *struct{}) (*PlaybackControlSocketCapabilitiesOutput, error) {
 		out := &PlaybackControlSocketCapabilitiesOutput{CacheControl: playbackCacheControl}
 		out.Body.Available = reg.deps.PlaybackControlSocket != nil && reg.deps.PlaybackControlSocket.Available()
 		if out.Body.Available {
 			out.Body.Protocol = handlers.PlaybackControlSocketProtocol
-			out.Body.OwnerLeaseAdmission = true
 		}
 		return out, nil
 	})
@@ -108,13 +103,13 @@ func registerPlaybackControlSocket(reg *Registry) {
 	for _, header := range []string{eventsConnectionHeader, eventsUpgradeHeader, eventsAcceptHeader, eventsProtocolHeader} {
 		responses["101"].Headers[header] = &huma.Param{Schema: &huma.Schema{Type: huma.TypeString}, Description: adminLogsHandshakeHeaderDoc}
 	}
-	raw := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: root + playbackControlSocketProtocolPath, OperationID: "connectPlaybackControlSocket", Tags: []string{playbackTag}, Summary: "Connect the owner's playback control lane using a single-use session-bound credential.", Responses: responses}, Class: ClassPublic, ServiceBacked: true}
+	raw := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: root + playbackControlSocketProtocolPath, OperationID: "connectPlaybackControlSocket", Tags: []string{playbackTag}, Summary: "Connect the session owner's playback control lane using a single-use session-bound credential.", Responses: responses}, Class: ClassPublic, ServiceBacked: true}
 	raw.Parameters = []*huma.Param{
 		{Name: adminLogsQuerySessionID, In: roomSocketPathParameter, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Playback session the credential was minted for."},
 		{Name: eventsProtocolHeader, In: paramInHeader, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Offer silo.playback-control.v2 followed by silo.ticket.<single-use-ticket>."},
 		{Name: eventsOriginHeader, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}, Description: socketOriginHeaderDoc},
 	}
-	RegisterRaw(reg, RawOperation{Operation: raw, Protocol: eventsRawProtocol, Reason: "Owner-bound single-use session proof, Origin and subprotocol checks precede the upgrade; the fence and owner lease are re-admitted at upgrade and while connected."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	RegisterRaw(reg, RawOperation{Operation: raw, Protocol: eventsRawProtocol, Reason: "Single-use session proof, Origin and subprotocol checks precede the upgrade; account, profile and installation ownership are re-checked at upgrade."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		if reg.deps.PlaybackControlSocket == nil {
@@ -137,7 +132,7 @@ func playbackControlSocketProblem(err error) *Problem {
 	case errors.Is(err, handlers.ErrPlaybackControlSocketInstallation):
 		return NewProblem(TypeConflict, "The installation does not match the session; refresh capabilities.")
 	case errors.Is(err, handlers.ErrPlaybackControlSocketStale):
-		return NewProblem(TypeConflict, "The session's control authority is stale; start playback again.")
+		return NewProblem(TypeConflict, "The session's control credential is stale; request a new ticket.")
 	case errors.Is(err, handlers.ErrPlaybackControlSocketLaneHeld):
 		return NewProblem(TypeConflict, "The control lane is held by another installation.")
 	case errors.Is(err, evt.ErrSocketTicket):

@@ -30,7 +30,7 @@ type AdminPlaybackTerminateReceipt struct {
 	SessionID        string `json:"session_id" doc:"The terminated playback session"`
 	AuthorityRevoked bool   `json:"authority_revoked" doc:"The session's playback authority is durably revoked: media tokens and progress writes for it are refused from now on. Buffered media already delivered may still play out"`
 	AlreadyRevoked   bool   `json:"already_revoked" doc:"The session was already terminated before this request; the call converged without dispatching another command"`
-	DurableState     string `json:"durable_state" enum:"draining,stopped,none" doc:"draining: the revocation is recorded and new grants are refused while grants already issued expire; stopped: the terminal receipt is committed; none: the session left no durable playback row"`
+	DurableState     string `json:"durable_state" enum:"stopped" doc:"stopped: the session is stopped and its stream tokens are denied everywhere"`
 	ClientNotified   bool   `json:"client_notified" doc:"A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open or the write failed"`
 	Delivery         string `json:"delivery" enum:"dispatched,unavailable,failed,none" doc:"dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)"`
 	CommandID        string `json:"command_id,omitempty" doc:"The dismissal command identity when one was issued"`

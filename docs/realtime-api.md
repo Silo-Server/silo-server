@@ -72,16 +72,15 @@ these two migration rows can be ratified. No bridge socket or ticket was removed
 `POST /api/v2/playback/sessions/{session_id}/control/ws-ticket`
 (`createPlaybackControlSocketTicket`) delegates the caller's current access-token
 login session and verified profile proof to one control handshake for one
-playback session. The body carries `installation_id` from
-`getPlaybackCapabilities` for a session started through the v2 initial flow and
-is empty for a session the bridge started. Minting checks, in order: a bounded
+playback session. The body's `installation_id` is optional: send the value
+`getPlaybackCapabilities` returned, and it must equal this server's installation;
+omit it for a session the bridge started. Minting checks, in order: a bounded
 login session; the current session, enabled account, role and viewer/PIN proof;
-that the account and profile own the playback session (`403 permission_denied`
-otherwise); that the installation matches the session (`409 conflict`); and,
-for a bound session, that this server holds the live owner lease for the
-session's control fence (attempt, incarnation, owner, epoch), refused as
-`409 conflict` when stale. A lane already held by a different installation is
-also `409`. The response carries `ticket`, `expires_in` (at most 30 seconds),
+that the playback session exists in the session manager and belongs to the
+caller's account and profile (`403 permission_denied` otherwise); and that a
+presented `installation_id` matches the server's (`409 conflict`). A lane
+already held by a different account, profile or installation is also `409`. The
+response carries `ticket`, `expires_in` (at most 30 seconds),
 `max_connection_seconds` (14400) and `protocol` (`silo.playback-control.v2`).
 It is not cached. Minting is naturally idempotent in effect: extra credentials
 expire unused.
@@ -93,8 +92,8 @@ bearer tokens nor tickets belong in the URL, request bodies are refused, and an
 Origin, when present, must equal the configured public origin. Malformed
 upgrades and rejected origins do not consume the credential. At upgrade the
 credential is consumed atomically (Redis `GETDEL`; process-local without
-Redis), login authority is re-validated, and ownership, installation and fence
-are re-admitted against the credential's captured binding: a fence that moved
+Redis), login authority is re-validated, and ownership and installation are
+re-admitted against the credential's captured binding: a binding that moved
 since minting is `409` and the credential is spent. A credential presented for
 another session is `403`; an ended session is `404`.
 
@@ -103,17 +102,17 @@ lane only for the same account, profile and installation: it takes the lane
 over and the superseded connection is closed, so its later ack and result
 frames are never routed. Ack and result frames are applied only while the
 receiving registration still owns the lane, through the existing command
-tracker and stop-completion paths. Login authority and the owner lease are
+tracker and stop-completion paths. Login authority and session ownership are
 re-checked every 15 seconds and the connection ends when either is lost, at
 access-token expiry, or after four hours. The frames (`hello`, command, `ack`,
 `result`, event) are unchanged from the bridge socket.
 
-`GET /api/v2/playback/sessions/control/capabilities` reports `available`,
-`protocol` and `owner_lease_admission: true` only when this server serves the
-handshake. The web player mints under captured profile authority for every
-connection, offers the protocol pair, discards frames once that authority
-changes, and uses the bridge socket only when the handshake is not served
-(`404`/`503`), never after an owner or lease refusal. The bridge socket route is
+`GET /api/v2/playback/sessions/control/capabilities` reports `available`, plus
+`protocol` only when this server serves the handshake. The web player mints
+under captured profile authority for every connection, offers the protocol pair,
+discards frames once that authority changes, and uses the bridge socket only
+when the handshake is not served (`404`/`503`), never after an ownership
+refusal. The bridge socket route is
 unchanged.
 
 

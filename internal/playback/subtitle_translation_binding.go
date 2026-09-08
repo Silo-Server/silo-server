@@ -13,12 +13,6 @@ func (n *SubtitleReadyNotifier) BindTranslation(accountID int, profileID, sessio
 		}
 		bound := *n
 		captured := *session
-		if session.Executor != nil {
-			captured.Executor = new(*session.Executor)
-		}
-		if session.initialActivation != nil {
-			captured.initialActivation = new(*session.initialActivation)
-		}
 		bound.translationSession = &captured
 		return &bound, nil
 	}
@@ -41,12 +35,6 @@ func (n *SubtitleReadyNotifier) translationSessionMatches(sessionID string, file
 			continue
 		}
 		if current.UserID != captured.UserID || current.ProfileID != captured.ProfileID || current.MediaFileID != captured.MediaFileID || current.RequestedMediaFileID != captured.RequestedMediaFileID || !current.StartedAt.Equal(captured.StartedAt) {
-			return false
-		}
-		if (current.Executor == nil) != (captured.Executor == nil) || current.Executor != nil && *current.Executor != *captured.Executor {
-			return false
-		}
-		if (current.initialActivation == nil) != (captured.initialActivation == nil) || current.initialActivation != nil && *current.initialActivation != *captured.initialActivation {
 			return false
 		}
 		return true

@@ -5,31 +5,15 @@ import type { ReactNode } from "react";
  * PlayerConfig is the portability contract — the host app provides these
  * values so the player module never imports app-specific code.
  */
-export interface PlaybackMutationContext {
-  accountId: string;
-  profileId: string;
-  origin: string;
-  isCurrent: () => boolean;
-  /** Ephemeral credentials captured with this authority; never serialized. */
-  mediaRequestHeaders?: () => Readonly<Record<string, string>> | null;
-}
-
 export interface PlayerConfig {
-  onPlaybackStartResolved?: () => void;
-  onPlaybackStartError?: (error: Error, retry: () => void) => void;
-  capturePlaybackMutationContext?: () => PlaybackMutationContext | null;
   /** Base URL for API calls, e.g. "/api/v1" */
   apiBaseUrl: string;
-  /** Origin for v2 socket handshakes; defaults to the page origin. */
-  socketOrigin?: string;
   /** Sync getter for the current JWT access token. */
   getAccessToken: () => string | null;
   /** Sync getter for the current profile ID. */
   getProfileId: () => string | null;
   /** Sync getter for the current verified profile token, when one exists. */
   getProfileToken?: () => string | null;
-  /** Reports an unconfirmed stop, including after the player has unmounted. */
-  onPlaybackStopError?: (sessionId: string, error: Error, retry: () => void) => void;
   /** Stable device identity used for device-scoped playback settings. */
   getDeviceId: () => string;
   /** Optional async token refresh callback on 401 response. */

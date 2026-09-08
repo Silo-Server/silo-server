@@ -1,8 +1,9 @@
 package apiv2
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -40,24 +40,18 @@ const (
 	playbackContentEncoding    = "Content-Encoding"
 )
 
-// PlaybackMediaHandlers are the existing grant-aware transports, wrapped by
-// the application to admit only the configured initial playback flow.
+// PlaybackMediaHandlers are the v1 delivery handlers the v2 routes wrap:
+// StreamHandler.HandleStream, HandleSubtitle and HandleSubtitleFonts, and
+// PlaybackHandler.HandleGetTranscodeManifest and HandleGetTranscodeSegment.
+// Token-carried session reconstruction and the deny marker live in those
+// handlers; the v2 listener adds only the problem envelope for pre-body
+// failures and, for fonts, the typed JSON operation.
 type PlaybackMediaHandlers struct {
-	Original http.Handler
-	Manifest http.Handler
-	Segment  http.Handler
-	// Subtitle and SubtitleFonts are the bound sidecar producer: the same
-	// signed executor reference, viewer checks and serving grant as Original,
-	// applied to one subtitle track and its attached-font bundle.
+	Original      http.Handler
+	Manifest      http.Handler
+	Segment       http.Handler
 	Subtitle      http.Handler
-	SubtitleFonts PlaybackSubtitleFontService
-}
-
-// PlaybackSubtitleFontService is the bound font-bundle producer: the same
-// admission as the sidecar bytes, returning the JSON items a typed operation
-// encodes. It is *handlers.StreamHandler in production.
-type PlaybackSubtitleFontService interface {
-	BoundSubtitleFontBundle(http.ResponseWriter, *http.Request) ([]playback.SubtitleFontBundleItem, error)
+	SubtitleFonts http.Handler
 }
 
 type PlaybackSubtitleFont struct {
@@ -69,18 +63,14 @@ type PlaybackSubtitleFontsInput struct {
 	Track               string `path:"track" minLength:"1" doc:"Combined subtitle ordinal from the plan inventory"`
 	FileID              string `query:"file_id" doc:"Source media file the inventory URL names; must be the plan's effective or requested file"`
 	EmbeddedStreamIndex string `query:"embedded_stream_index" doc:"Stable embedded subtitle stream index from the issued inventory URL; resolves the track independently of its combined ordinal"`
-	Reference           string `query:"st" doc:"Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required"`
+	Reference           string `query:"st" doc:"Signed stream reference the plan's font bundle URL carries; account authentication and viewer authorization are always required"`
 	Token               string `query:"token" doc:"Media-element fallback for the account bearer token"`
 	request             *http.Request
-	writer              http.ResponseWriter
 }
 
 func (in *PlaybackSubtitleFontsInput) Resolve(ctx huma.Context) []error {
-	r, w := humachi.Unwrap(ctx)
-	in.request, in.writer = r.WithContext(ctx.Context()), w
-	if lifetime, ok := ctx.Context().Value(subtitleFontLifetimeKey{}).(*subtitleFontLifetime); ok {
-		in.writer = lifetime
-	}
+	r, _ := humachi.Unwrap(ctx)
+	in.request = r.WithContext(ctx.Context())
 	return nil
 }
 
@@ -109,8 +99,8 @@ func registerPlaybackDelivery(reg *Registry) {
 	} {
 		params := []*huma.Param{
 			{Name: "session_id", In: playbackParamPath, Required: true, Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}},
-			{Name: playbackAccountToken, In: playbackParamQuery, Description: "Media-element fallback for the account bearer token when an Authorization header cannot be set. For signed media mode only; header-authenticated media requires the Authorization header and captured profile selector.", Schema: &huma.Schema{Type: huma.TypeString}},
-			{Name: "st", In: playbackParamQuery, Description: "Signed executor reference for signed media mode; omitted for negotiated header-authenticated current bound-session delivery. Account and viewer authorization and a live serving grant are always required.", Schema: &huma.Schema{Type: huma.TypeString}},
+			{Name: playbackAccountToken, In: playbackParamQuery, Description: "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.", Schema: &huma.Schema{Type: huma.TypeString}},
+			{Name: "st", In: playbackParamQuery, Description: "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.", Schema: &huma.Schema{Type: huma.TypeString}},
 		}
 		if route.id == playbackSegmentOperation {
 			params = append(params, &huma.Param{Name: playbackSegmentName, In: playbackParamPath, Required: true, Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}})
@@ -139,7 +129,7 @@ func registerPlaybackDelivery(reg *Registry) {
 			responses["304"] = &huma.Response{Description: "The authorized representation has not changed"}
 			params = append(params, &huma.Param{Name: ifMatchField, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}}, &huma.Param{Name: "If-Unmodified-Since", In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}}, &huma.Param{Name: "Range", In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}}, &huma.Param{Name: "If-Range", In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}}, &huma.Param{Name: ifNoneMatchField, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}}, &huma.Param{Name: "If-Modified-Since", In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}})
 		}
-		statuses := []int{400, 404, 409, 422, 500, 503}
+		statuses := []int{400, 404, 409, 410, 422, 500, 503}
 		if route.ranges {
 			statuses = append(statuses, 412, 416)
 		}
@@ -152,9 +142,9 @@ func registerPlaybackDelivery(reg *Registry) {
 		if route.ranges {
 			responses["416"].Headers = map[string]*huma.Param{"Content-Range": {Schema: &huma.Schema{Type: huma.TypeString}}}
 		}
-		reason := "Grant-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering."
+		reason := "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering."
 		if subtitle {
-			reason = "Grant-authorized sidecar text, bitmap and font bytes are streamed as extracted; the font bundle is a bare JSON array the web renderer consumes as-is."
+			reason = "Token-authorized sidecar text and bitmap bytes are streamed as extracted."
 		}
 		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason}
 		RegisterRaw(reg, raw, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,9 +160,8 @@ func registerPlaybackDelivery(reg *Registry) {
 		}))
 	}
 	fonts := humaOp(http.MethodGet, Prefix+"/stream/{session_id}/subtitles/{track}/fonts", "getPlaybackSubtitleFonts", playbackTag,
-		"Read the attached-font bundle of a bound session's embedded ASS/SSA subtitle track. Admission is the sidecar's: account authentication, viewer authorization, either a signed executor reference or negotiated header-authenticated current bound session, and a live serving grant.")
-	fonts.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	fonts.Middlewares = huma.Middlewares{holdSubtitleFontResponse}
+		"Read the attached-font bundle of a session's embedded ASS/SSA subtitle track. Admission is the sidecar's: account authentication, viewer authorization and the session the plan named.")
+	fonts.Errors = []int{http.StatusNotFound, http.StatusGone}
 	Register(reg, Operation{Operation: fonts, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, func(_ context.Context, in *PlaybackSubtitleFontsInput) (*PlaybackSubtitleFontsOutput, error) {
 		if !playbackUUID(string(in.SessionID)) {
 			return nil, validationProblem("path.session_id", "invalid", "Expected a canonical UUID.")
@@ -180,9 +169,9 @@ func registerPlaybackDelivery(reg *Registry) {
 		if reg.deps.PlaybackMedia == nil || reg.deps.PlaybackMedia.SubtitleFonts == nil {
 			return nil, NewProblem(TypeDependencyUnavailable, "Playback delivery is not configured.")
 		}
-		items, err := reg.deps.PlaybackMedia.SubtitleFonts.BoundSubtitleFontBundle(in.writer, in.request)
-		if err != nil {
-			return nil, playbackSubtitleFontProblem(err)
+		items, p := playbackSubtitleFontBundle(reg.deps.PlaybackMedia.SubtitleFonts, in.request)
+		if p != nil {
+			return nil, p
 		}
 		out := &PlaybackSubtitleFontsOutput{CacheControl: playbackCacheControl, Body: make([]PlaybackSubtitleFont, 0, len(items))}
 		for _, item := range items {
@@ -192,57 +181,63 @@ func registerPlaybackDelivery(reg *Registry) {
 	})
 }
 
-// Huma's structured buffer flushes after the typed handler returns. Keep the
-// font serving grant until that actual flush, not merely until extraction ends.
-// This operation-local middleware uses the existing buffer and leaves its wire
-// encoding, validation and error mapping intact.
-type subtitleFontLifetimeKey struct{}
-type subtitleFontLifetime struct {
-	http.ResponseWriter
-	buffer  *bufferedWriter
-	cleanup func()
-}
-
-func (l *subtitleFontLifetime) Unwrap() http.ResponseWriter { return l.ResponseWriter }
-func (l *subtitleFontLifetime) RetainSubtitleFontResponse(w http.ResponseWriter, r *http.Request, cleanup func()) {
-	l.buffer.w, l.buffer.ctx = w, r.Context()
-	l.cleanup = cleanup
-}
-
-func holdSubtitleFontResponse(ctx huma.Context, next func(huma.Context)) {
-	r, w := humachi.Unwrap(ctx)
-	buffer, ok := w.(*bufferedWriter)
-	if !ok {
-		panic("subtitle font response requires structured buffering")
+// playbackSubtitleFontBundle runs the v1 font handler against a recorder and
+// lifts its answer into the typed operation: the JSON array on success, a
+// problem built from the v1 {error, message} body otherwise. The bundle is
+// small (font attachments, already base64) so buffering it is the same cost
+// the structured listener pays for every JSON body.
+func playbackSubtitleFontBundle(handler http.Handler, r *http.Request) ([]playback.SubtitleFontBundleItem, *Problem) {
+	recorder := &playbackJSONRecorder{header: http.Header{}}
+	handler.ServeHTTP(recorder, r)
+	status := recorder.status
+	if status == 0 {
+		status = http.StatusOK
 	}
-	lifetime := &subtitleFontLifetime{ResponseWriter: buffer.w, buffer: buffer}
-	defer func() {
-		if lifetime.cleanup != nil {
-			lifetime.cleanup()
+	if status >= 200 && status < 300 {
+		var items []playback.SubtitleFontBundleItem
+		if err := json.Unmarshal(recorder.body.Bytes(), &items); err != nil {
+			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
-	}()
-	r = r.WithContext(context.WithValue(ctx.Context(), subtitleFontLifetimeKey{}, lifetime))
-	next(humachi.NewContext(ctx.Operation(), r, w))
-	// flush is idempotent: the outer buffer middleware will not write again.
-	buffer.flush()
+		return items, nil
+	}
+	var failure struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(recorder.body.Bytes(), &failure)
+	if status >= 500 && status != http.StatusServiceUnavailable {
+		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	}
+	kind := playbackProblemType(status, failure.Error)
+	if status == http.StatusGone {
+		kind = TypePlaybackSessionEnded
+	}
+	detail := failure.Message
+	if detail == "" {
+		detail = kind.Title
+	}
+	return nil, NewProblem(kind, detail)
 }
 
-// playbackSubtitleFontProblem maps the producer's *APIError: the shared route
-// refusals (unbound authority, route mismatch) stay 503 problems; a 400 is a
-// validation failure in v2.
-func playbackSubtitleFontProblem(err error) *Problem {
-	var apiErr *handlers.APIError
-	if !errors.As(err, &apiErr) {
-		return NewProblem(TypeDependencyUnavailable, "Playback delivery is temporarily unavailable.")
+// playbackJSONRecorder captures one small JSON answer from a v1 handler so
+// the typed operation can re-encode it. It never reaches the connection.
+type playbackJSONRecorder struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (r *playbackJSONRecorder) Header() http.Header { return r.header }
+func (r *playbackJSONRecorder) WriteHeader(status int) {
+	if r.status == 0 {
+		r.status = status
 	}
-	status := apiErr.Status
-	if status == http.StatusBadRequest {
-		status = http.StatusUnprocessableEntity
+}
+func (r *playbackJSONRecorder) Write(data []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
 	}
-	if status >= 500 && status != http.StatusServiceUnavailable {
-		return NewProblem(TypeInternalError, "An unexpected error occurred.")
-	}
-	return NewProblem(TypeForStatus(status), apiErr.Message)
+	return r.body.Write(data)
 }
 
 // Playback success bytes pass through immediately. A pre-body transport error
@@ -276,8 +271,18 @@ func (w *playbackDeliveryWriter) WriteHeader(status int) {
 	for _, header := range []string{playbackContentLength, playbackContentEncoding, "Content-Disposition", jobLocationHeader, etagField, playbackLastModified} {
 		w.Header().Del(header)
 	}
-	kind := TypeForStatus(status)
+	kind := playbackDeliveryProblemType(status)
 	writeProblem(w.ResponseWriter, w.request, NewProblem(kind, kind.Title))
+}
+
+// playbackDeliveryProblemType maps a pre-body failure status of a v1 media
+// handler onto the catalog. A 410 is the stream deny marker (the session was
+// stopped or expired), which has its own corrective action: start again.
+func playbackDeliveryProblemType(status int) ProblemType {
+	if status == http.StatusGone {
+		return TypePlaybackSessionEnded
+	}
+	return TypeForStatus(status)
 }
 func (w *playbackDeliveryWriter) Write(data []byte) (int, error) {
 	if w.status == 0 {

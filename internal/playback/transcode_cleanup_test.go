@@ -1,50 +1,10 @@
 package playback
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
-
-func TestCleanupOrphanedTranscodeDirsPreservesExecutorNamespace(t *testing.T) {
-	root := t.TempDir()
-	namespace := executorFixture()
-	output, err := namespace.OutputDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := claimExecutorOutput(output, namespace); err != nil {
-		t.Fatal(err)
-	}
-	segment := filepath.Join(output, "seg_00000.m4s")
-	if err := os.WriteFile(segment, []byte("live output"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	orphan := filepath.Join(root, "legacy-orphan")
-	if err := os.Mkdir(orphan, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	removed, err := CleanupOrphanedTranscodeDirs(root, nil, 0)
-	if err != nil || removed != 1 {
-		t.Fatalf("cleanup = %d, %v; want one legacy orphan", removed, err)
-	}
-	if data, err := os.ReadFile(segment); err != nil || string(data) != "live output" {
-		t.Fatalf("authority output changed: %q, %v", data, err)
-	}
-	if _, err := os.Stat(orphan); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy orphan remains: %v", err)
-	}
-	if err := removeExecutorOutput(output, namespace); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := CleanupOrphanedTranscodeDirs(root, nil, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := claimExecutorOutput(output, namespace); !errors.Is(err, ErrExecutorReplacementRequired) {
-		t.Fatalf("cleanup lost consumed executor claim: %v", err)
-	}
-}
 
 func TestCleanupOrphanedTranscodeDirsPreservesPlanScopedActiveDirectory(t *testing.T) {
 	root := t.TempDir()

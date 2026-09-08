@@ -28,13 +28,11 @@ import (
 // account that owns the session and lets a later registration replace the
 // lane unconditionally. The v2 handshake is a documented plain-WebSocket path
 // admitted by a single-use ticket that binds the original login session,
-// profile proof, playback session, installation and the session's control
-// fence (attempt, incarnation, owner, epoch) at mint time and again at
+// profile proof, playback session and installation at mint time and again at
 // upgrade:
 //
 //   - a caller that is not the session's account and profile is refused (403);
-//   - a bound session whose fence or live owner lease no longer matches the
-//     ticket is refused as stale (409);
+//   - the session must exist in this replica's manager (404 otherwise);
 //   - a reconnect resumes the lane only for the same owner and installation;
 //     a different installation is refused while the lane is held (409);
 //   - ack and result frames are routed only while the registration that
@@ -67,18 +65,12 @@ var (
 	ErrPlaybackControlSocketInvalidTicket = evt.ErrSocketTicket
 )
 
-// PlaybackControlBinding is the exact runtime identity a ticket captures.
+// PlaybackControlBinding is the identity a ticket captures: the playback
+// session and, for a session started through v2, the installation the client
+// presented. A bridge-started session carries no installation.
 type PlaybackControlBinding struct {
 	PlaybackSessionID string `json:"playback_session_id"`
 	InstallationID    string `json:"installation_id"`
-	AttemptID         string `json:"attempt_id,omitempty"`
-	Incarnation       string `json:"incarnation,omitempty"`
-	OwnerID           string `json:"owner_id,omitempty"`
-	Epoch             int64  `json:"epoch"`
-	// Bound reports a session started through the initial (v2) flow, whose
-	// fence and owner lease are re-checked at upgrade. A bridge-started
-	// session has no fence; only account, profile and installation bind it.
-	Bound bool `json:"bound"`
 }
 
 // PlaybackControlTicket is the single-use handshake credential payload.
@@ -174,11 +166,6 @@ func (s *PlaybackControlTicketStore) Consume(ctx context.Context, value string) 
 	return ticket, nil
 }
 
-// PlaybackControlFenceResolver reports the session's current control fence.
-// bound is false for a session with no initial-flow binding; live is false
-// when the fence exists but its owner lease is not held by this process.
-type PlaybackControlFenceResolver func(ctx context.Context, session *playback.Session) (binding PlaybackControlBinding, live bool, err error)
-
 type playbackControlLane struct {
 	registration   *playback.RealtimeRegistration
 	userID         int
@@ -196,9 +183,7 @@ type PlaybackControlSocketV2 struct {
 	Tickets  *PlaybackControlTicketStore
 	Validate EventsSocketValidator
 	// PublicOrigin is the configured external origin, never a forwarded header.
-	PublicOrigin string
-	// Fence defaults to the initial-flow lookup; tests substitute it.
-	Fence         PlaybackControlFenceResolver
+	PublicOrigin  string
 	checkInterval time.Duration
 
 	laneMu sync.Mutex
@@ -208,17 +193,16 @@ type PlaybackControlSocketV2 struct {
 func NewPlaybackControlSocketV2(playbackHandler *PlaybackHandler, client *redis.Client, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *PlaybackControlSocketV2 {
 	h := &PlaybackControlSocketV2{Playback: playbackHandler, Tickets: NewPlaybackControlTicketStore(client), PublicOrigin: publicURL, lanes: map[string]*playbackControlLane{}}
 	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, primary)
-	h.Fence = h.initialFlowFence
 	return h
 }
 
 // Available reports whether the handshake can be served from this process.
 func (h *PlaybackControlSocketV2) Available() bool {
-	return h != nil && h.Playback != nil && h.Playback.RealtimeHub != nil && h.Playback.sessionMgr != nil && h.Tickets != nil && h.Validate != nil && h.Fence != nil
+	return h != nil && h.Playback != nil && h.Playback.RealtimeHub != nil && h.Playback.sessionMgr != nil && h.Tickets != nil && h.Validate != nil
 }
 
-// Mint validates the caller's login authority and owner lease against the
-// playback session and issues one single-use credential bound to both.
+// Mint validates the caller's login authority and ownership of the playback
+// session and issues one single-use credential bound to both.
 func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string) (string, time.Time, error) {
 	if !h.Available() {
 		return "", time.Time{}, ErrPlaybackControlSocketUnavailable
@@ -248,10 +232,11 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 	return ticket, expiry, nil
 }
 
-// admit checks owner, installation and fence for the session. When expected
-// is non-nil (upgrade), the current fence must equal the one the ticket
-// captured, so an epoch that moved between mint and upgrade is stale.
-func (h *PlaybackControlSocketV2) admit(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string, expected *PlaybackControlBinding) (PlaybackControlBinding, error) {
+// admit checks that the session exists here and belongs to the caller's
+// account and profile, and that the presented installation matches the
+// server's. When expected is non-nil (upgrade), the current binding must
+// equal the one the ticket captured.
+func (h *PlaybackControlSocketV2) admit(_ context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string, expected *PlaybackControlBinding) (PlaybackControlBinding, error) {
 	session, err := h.Playback.sessionMgr.GetSession(playbackSessionID)
 	if err != nil {
 		return PlaybackControlBinding{}, err
@@ -259,26 +244,12 @@ func (h *PlaybackControlSocketV2) admit(ctx context.Context, identity evt.Socket
 	if session == nil || session.UserID != identity.UserID || session.ProfileID == "" || session.ProfileID != identity.ProfileID {
 		return PlaybackControlBinding{}, ErrPlaybackControlSocketNotOwner
 	}
-	binding, live, err := h.Fence(ctx, session)
-	if err != nil {
-		return PlaybackControlBinding{}, err
+	// A claimed installation must be this server's; a bridge-started client
+	// presents none.
+	if installationID != "" && installationID != h.Playback.InstallationID {
+		return PlaybackControlBinding{}, ErrPlaybackControlSocketInstallation
 	}
-	binding.PlaybackSessionID = session.ID
-	if binding.Bound {
-		if installationID == "" || installationID != binding.InstallationID {
-			return PlaybackControlBinding{}, ErrPlaybackControlSocketInstallation
-		}
-		if !live {
-			return PlaybackControlBinding{}, ErrPlaybackControlSocketStale
-		}
-	} else {
-		// A bridge-started session carries no installation; a claim of one
-		// names a runtime the session does not have.
-		if installationID != "" {
-			return PlaybackControlBinding{}, ErrPlaybackControlSocketInstallation
-		}
-		binding.InstallationID = ""
-	}
+	binding := PlaybackControlBinding{PlaybackSessionID: session.ID, InstallationID: installationID}
 	if expected != nil && *expected != binding {
 		return PlaybackControlBinding{}, ErrPlaybackControlSocketStale
 	}
@@ -289,35 +260,6 @@ func (h *PlaybackControlSocketV2) admit(ctx context.Context, identity evt.Socket
 		return PlaybackControlBinding{}, ErrPlaybackControlSocketLaneHeld
 	}
 	return binding, nil
-}
-
-// initialFlowFence reads the session's initial-activation binding and whether
-// this process holds its live owner lease.
-func (h *PlaybackControlSocketV2) initialFlowFence(ctx context.Context, session *playback.Session) (PlaybackControlBinding, bool, error) {
-	activation, ok := session.InitialActivationBinding()
-	if !ok {
-		return PlaybackControlBinding{PlaybackSessionID: session.ID}, false, nil
-	}
-	flow := h.Playback.initialFlow
-	if flow == nil || flow.InstallationID == "" || flow.Control == nil {
-		return PlaybackControlBinding{PlaybackSessionID: session.ID, Bound: true}, false, nil
-	}
-	binding := PlaybackControlBinding{PlaybackSessionID: session.ID, InstallationID: flow.InstallationID, AttemptID: activation.Fence.AttemptID, Incarnation: activation.Fence.Incarnation, OwnerID: activation.Fence.OwnerID, Epoch: activation.Fence.Epoch, Bound: true}
-	checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-	defer stop()
-	active, err := flow.Control.GetActivatedPlaybackAuthority(checkCtx, session.UserID, session.ProfileID, session.ID)
-	if err != nil || active.Activation.Phase != playback.InitialActivationActivatedV3 || active.Binding.Fence != activation.Fence {
-		return binding, false, nil
-	}
-	value, ok := flow.owners.Load(session.ID)
-	if !ok {
-		return binding, false, nil
-	}
-	owner, ok := value.(*playback.RuntimeOwnerLeaseV3)
-	if !ok || owner.Authority().OwnerID != activation.Fence.OwnerID || owner.Check() != nil {
-		return binding, false, nil
-	}
-	return binding, true, nil
 }
 
 // ServeHTTP performs the documented handshake for GET .../control/ws.
@@ -426,7 +368,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	readCtx, cancelRead := context.WithCancel(ctx)
 	defer cancelRead()
 	startWebSocketPingLoop(readCtx, realtimeConn.WritePing)
-	// Re-check login authority and the owner lease without extending the
+	// Re-check login authority and session ownership without extending the
 	// deadline; loss of either closes an otherwise healthy socket.
 	go func() {
 		interval := h.checkInterval

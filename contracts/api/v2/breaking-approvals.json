@@ -1,3 +1,116 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "getPlaybackClientTimeline",
+      "change_id": "api-path-removed-without-deprecation",
+      "fingerprint": "a71ddee7b7cfb6dbbb1e49e42fa19b5df4a67427f95c1b43eb225aebc68c4b8f",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "getPlaybackControlSocketCapabilities",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "c19e23ebd0311e9dbbd075539428518861ee26a38f5d1a2c4dc14b062fb10721",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "replanPlayback",
+      "change_id": "response-body-if-removed",
+      "fingerprint": "24fe6c1ee00bd7b8795be44a63858bf048681c2e51b8055546c41583037b94b2",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "replanPlayback",
+      "change_id": "response-body-then-removed",
+      "fingerprint": "5fc55b39c578837b7f901fddc17af55de6fd3211aff64e192d0e3f364ff96e42",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "startPlayback",
+      "change_id": "request-property-enum-value-removed",
+      "fingerprint": "7d3a097e3467bb473090be4c9bdbc213caf789b0cc4aade45ea4ef44ef9a4db5",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "startPlayback",
+      "change_id": "request-property-removed",
+      "fingerprint": "83de091e2b1335a62fe13f297331c58a1cf2460ec1998c185886bd648064a4d9",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "startPlayback",
+      "change_id": "response-body-if-removed",
+      "fingerprint": "cb085f8d850d344f9f1ecc64dce70ef08a7a6710131248bab99b507ccb87af09",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "startPlayback",
+      "change_id": "response-body-then-removed",
+      "fingerprint": "96679b208265e14c15c2ee223149256f12e7095a52bf13881ca58538d88ef157",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "startPlayback",
+      "change_id": "response-success-status-removed",
+      "fingerprint": "c5e9e858566522b0c92bb1bb4ad4f58163d713a246f5ad54f09f30b8ac871416",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "stopPlayback",
+      "change_id": "request-property-removed",
+      "fingerprint": "5af5d8f21e4a09402d40e2665efdcb83b6f8d6e0076b1bd3ed3b6b8fd51a04fa",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "stopPlayback",
+      "change_id": "response-body-if-removed",
+      "fingerprint": "9462949c8eb35af77be54fd0c9e7bfca04f125a3f5a00e8c746fbd5f35742f19",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "stopPlayback",
+      "change_id": "response-body-then-removed",
+      "fingerprint": "a262bb9a1dd129856017b753920d66aa69665934af3fec93a754052989b82e4a",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "stopPlayback",
+      "change_id": "response-success-status-removed",
+      "fingerprint": "55d7cb65c2a01659cb2c9c61617e4f80d84119c6395603aed5ec29bf7abec15a",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "updatePlaybackProgress",
+      "change_id": "request-property-removed",
+      "fingerprint": "56bf69bf4f6caca59a0039b89d3d84dabd6887a0b744452a75aa6f245e16eef3",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "updatePlaybackProgress",
+      "change_id": "response-body-if-removed",
+      "fingerprint": "eef39bf2f7c46335aba5c3e41076dc1a38b75c7e663487086e9da74f5c70b5d9",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    },
+    {
+      "operation_id": "updatePlaybackProgress",
+      "change_id": "response-body-then-removed",
+      "fingerprint": "cdd29e3cf6586f06e0b81d0c4c2e0956ca54a9b58ae7f064ee19167704900424",
+      "reason": "playback simplification: authority protocol removed before 1.0 lock",
+      "approved_in": "#135"
+    }
+  ]
 }

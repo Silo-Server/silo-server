@@ -38,59 +38,55 @@ import (
 
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
-	Executor                   *playback.ExecutorNamespaceV3 `json:"executor,omitempty"`
-	ExecutorRecipeDigest       string                        `json:"executor_recipe_digest,omitempty"`
-	SessionID                  string                        `json:"session_id"`
-	InputPath                  string                        `json:"input_path"`
-	SourceVideoCodec           string                        `json:"source_video_codec"`
-	SourceVideoProfile         string                        `json:"source_video_profile,omitempty"`
-	SourceVideoBitDepth        int                           `json:"source_video_bit_depth,omitempty"`
-	SourceAudioChannels        int                           `json:"source_audio_channels,omitempty"`
-	AudioRecipeVersion         string                        `json:"audio_recipe_version,omitempty"`
-	CopyFMP4RecipeVersion      string                        `json:"copy_fmp4_recipe_version,omitempty"`
-	SoftwareVideoDecode        bool                          `json:"software_video_decode,omitempty"`
-	ToneMapPolicy              tonemap.Policy                `json:"tone_map_policy,omitempty"`
-	ToneMapMode                tonemap.Mode                  `json:"tone_map_mode,omitempty"`
-	ToneMapSourceKind          tonemap.SourceKind            `json:"tone_map_source_kind,omitempty"`
-	ToneMapRecipeVersion       string                        `json:"tone_map_recipe_version,omitempty"`
-	ToneMapPreflightRequired   bool                          `json:"tone_map_preflight_required,omitempty"`
-	ToneMapSourceRevision      tonemap.SourceRevision        `json:"tone_map_source_revision,omitzero"`
-	ToneMapDVConfigPresent     bool                          `json:"tone_map_dv_config_present,omitempty"`
-	ToneMapDVBLCompatIDPresent bool                          `json:"tone_map_dv_bl_compat_id_present,omitempty"`
-	ToneMapDVBLPresent         bool                          `json:"tone_map_dv_bl_present,omitempty"`
-	ToneMapDVRPUPresent        bool                          `json:"tone_map_dv_rpu_present,omitempty"`
-	VideoBitstreamFilter       string                        `json:"video_bitstream_filter,omitempty"`
-	VideoSampleEntry           string                        `json:"video_sample_entry,omitempty"`
-	CopyVideoMPEGTS            bool                          `json:"copy_video_mpegts,omitempty"`
-	SeekSeconds                float64                       `json:"seek_seconds"`
-	StreamOriginSeconds        float64                       `json:"stream_origin_seconds,omitempty"`
-	CopySeekAnchorResolved     bool                          `json:"copy_seek_anchor_resolved,omitempty"`
-	StartSegmentNumber         int                           `json:"start_segment_number"`
-	TargetResolution           string                        `json:"target_resolution"`
-	TargetCodecVideo           string                        `json:"target_codec_video"`
-	TargetCodecAudio           string                        `json:"target_codec_audio"`
-	TargetAudioChannels        int                           `json:"target_audio_channels,omitempty"`
-	TargetAudioBitrateKbps     int                           `json:"target_audio_bitrate_kbps,omitempty"`
-	TargetBitrateKbps          int                           `json:"target_bitrate_kbps"`
-	SegmentDuration            int                           `json:"segment_duration"`
-	HWAccel                    string                        `json:"hw_accel"`
-	AudioTrackIndex            int                           `json:"audio_track_index"`
-	SubtitleTrackIndex         int                           `json:"subtitle_track_index"`
-	SubtitleBurnIn             bool                          `json:"subtitle_burn_in"`
-	SubtitleCodec              string                        `json:"subtitle_codec,omitempty"`
-	TotalDuration              float64                       `json:"total_duration"`
-	RequireReady               bool                          `json:"require_ready,omitempty"`
-	ThrottleSeconds            int                           `json:"throttle_seconds,omitempty"`
+	SessionID                  string                 `json:"session_id"`
+	InputPath                  string                 `json:"input_path"`
+	SourceVideoCodec           string                 `json:"source_video_codec"`
+	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
+	SourceVideoBitDepth        int                    `json:"source_video_bit_depth,omitempty"`
+	SourceAudioChannels        int                    `json:"source_audio_channels,omitempty"`
+	AudioRecipeVersion         string                 `json:"audio_recipe_version,omitempty"`
+	CopyFMP4RecipeVersion      string                 `json:"copy_fmp4_recipe_version,omitempty"`
+	SoftwareVideoDecode        bool                   `json:"software_video_decode,omitempty"`
+	ToneMapPolicy              tonemap.Policy         `json:"tone_map_policy,omitempty"`
+	ToneMapMode                tonemap.Mode           `json:"tone_map_mode,omitempty"`
+	ToneMapSourceKind          tonemap.SourceKind     `json:"tone_map_source_kind,omitempty"`
+	ToneMapRecipeVersion       string                 `json:"tone_map_recipe_version,omitempty"`
+	ToneMapPreflightRequired   bool                   `json:"tone_map_preflight_required,omitempty"`
+	ToneMapSourceRevision      tonemap.SourceRevision `json:"tone_map_source_revision,omitzero"`
+	ToneMapDVConfigPresent     bool                   `json:"tone_map_dv_config_present,omitempty"`
+	ToneMapDVBLCompatIDPresent bool                   `json:"tone_map_dv_bl_compat_id_present,omitempty"`
+	ToneMapDVBLPresent         bool                   `json:"tone_map_dv_bl_present,omitempty"`
+	ToneMapDVRPUPresent        bool                   `json:"tone_map_dv_rpu_present,omitempty"`
+	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
+	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
+	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
+	SeekSeconds                float64                `json:"seek_seconds"`
+	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
+	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
+	StartSegmentNumber         int                    `json:"start_segment_number"`
+	TargetResolution           string                 `json:"target_resolution"`
+	TargetCodecVideo           string                 `json:"target_codec_video"`
+	TargetCodecAudio           string                 `json:"target_codec_audio"`
+	TargetAudioChannels        int                    `json:"target_audio_channels,omitempty"`
+	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
+	TargetBitrateKbps          int                    `json:"target_bitrate_kbps"`
+	SegmentDuration            int                    `json:"segment_duration"`
+	HWAccel                    string                 `json:"hw_accel"`
+	AudioTrackIndex            int                    `json:"audio_track_index"`
+	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
+	SubtitleBurnIn             bool                   `json:"subtitle_burn_in"`
+	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
+	TotalDuration              float64                `json:"total_duration"`
+	RequireReady               bool                   `json:"require_ready,omitempty"`
+	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
 }
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
 type TranscodeStartResponse struct {
-	Executor             *playback.ExecutorNamespaceV3 `json:"executor,omitempty"`
-	ExecutorRecipeDigest string                        `json:"executor_recipe_digest,omitempty"`
-	SessionID            string                        `json:"session_id"`
-	Status               string                        `json:"status"`
-	HWAccel              string                        `json:"hw_accel,omitempty"`
-	ToneMapMode          tonemap.Mode                  `json:"tone_map_mode,omitempty"`
+	SessionID   string       `json:"session_id"`
+	Status      string       `json:"status"`
+	HWAccel     string       `json:"hw_accel,omitempty"`
+	ToneMapMode tonemap.Mode `json:"tone_map_mode,omitempty"`
 	// AudioRecipeVersion attests the exact byte-affecting audio recipe the node
 	// understood. An old node omits it, allowing current callers to stop the job
 	// before publishing bytes from a silently ignored SourceAudioChannels field.
@@ -230,15 +226,10 @@ type progressiveRemuxRequest struct {
 	done              <-chan struct{}
 }
 
-// ExecutorRecipeResolver resolves a current recipe for an exact executor reference.
-type ExecutorRecipeResolver func(context.Context, string, playback.ExecutorNamespaceV3) (*playback.RecipeCard, error)
-
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	executorGrants            playback.ExecutorGrantProviderV3
-	executorOutputTransfers   playback.ExecutorOutputTransferGrantProviderV3
-	executorRecipeResolver    ExecutorRecipeResolver
 	watcher                   *nodeconfig.Watcher
+	streamDeny                *playback.StreamDeny
 	nodeRowID                 func() (int, bool)
 	registeredNodeURL         func() (string, bool)
 	tracker                   sessionTracker
@@ -693,7 +684,7 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 		slog.Error("close idle transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 	}
 	if s.tracker != nil {
-		s.removeTrackedExecutor(context.Background(), sessionID, session.ExecutorNamespace())
+		s.tracker.Remove(context.Background(), sessionID)
 	}
 	slog.Info("transcode node reaped idle session", "component", "transcodenode",
 		"session", sessionID, "playback_session_id", sessionID, "idle_ms", time.Since(last).Milliseconds())
@@ -768,6 +759,50 @@ func (s *Server) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	s.telemetry = registry
 }
 
+// SetStreamDeny installs the session-deny marker store this node consults
+// before serving or reconstructing a session. A nil store disables the check,
+// which is the pre-marker behavior for a node without Redis.
+func (s *Server) SetStreamDeny(deny *playback.StreamDeny) {
+	s.streamDeny = deny
+}
+
+// sessionDenied reports whether the deny marker revokes the session a request
+// serves. The URL names the transcode transport; a forwarded stream token names
+// the playback session, which is what stop, expiry, and admin terminate deny.
+// Both are checked so a compat transport whose id differs from its playback
+// session is still cut. A missing or invalid token only removes the second
+// lookup; the token was never this route's authorization.
+func (s *Server) sessionDenied(r *http.Request, transportID string) bool {
+	if s.streamDeny == nil {
+		return false
+	}
+	if s.streamDeny.Denied(r.Context(), transportID) {
+		return true
+	}
+	if _, claims := s.canonicalSessionID(r, transportID); claims != nil && claims.SessionID != transportID {
+		return s.streamDeny.Denied(r.Context(), claims.SessionID)
+	}
+	return false
+}
+
+// claimsDenied is sessionDenied for a path that has already verified its token.
+func (s *Server) claimsDenied(ctx context.Context, claims *streamtoken.Claims, transportID string) bool {
+	if s.streamDeny == nil {
+		return false
+	}
+	if s.streamDeny.Denied(ctx, transportID) {
+		return true
+	}
+	return claims != nil && claims.SessionID != "" && claims.SessionID != transportID && s.streamDeny.Denied(ctx, claims.SessionID)
+}
+
+// writeStreamDenied answers a denied session: 410 with no media bytes. The
+// session is over; a client that retries keeps hitting this wall until its
+// tokens expire.
+func writeStreamDenied(w http.ResponseWriter) {
+	http.Error(w, "playback session ended", http.StatusGone)
+}
+
 // sealedHandler is what Handler hands out: the finished router behind an
 // unexported field and a ServeHTTP method, nothing else, so no assertion or
 // type switch recovers a registration surface from it, and the route
@@ -811,7 +846,6 @@ func (s *Server) router() chi.Router {
 		r.Get("/downloads/artifacts/{artifact_id}", observeNode(s.telemetry, http.MethodGet, "/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact))
 		r.Delete("/downloads/artifacts/{artifact_id}", s.handleDeleteDownloadArtifact)
 		r.Post("/transcode/start", s.handleStart)
-		r.Post("/transcode/prepare", s.handlePrepareExecutor)
 		r.Delete("/transcode/{session_id}", s.handleStop)
 		r.Head("/remux/{session_id}", observeNode(s.telemetry, http.MethodHead, "/remux/{session_id}", s.handleRemux))
 		r.Get("/remux/{session_id}", observeNode(s.telemetry, http.MethodGet, "/remux/{session_id}", s.handleRemux))
@@ -1421,23 +1455,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Executor != nil {
-		if err := req.Executor.Validate(); err != nil {
-			http.Error(w, "invalid executor namespace", http.StatusBadRequest)
-			return
-		}
-	}
-	var boundRecipe *playback.RecipeCard
-	if req.Executor != nil {
-		var ok bool
-		boundRecipe, ok = s.authorizeExecutorStart(w, r, req)
-		if !ok {
-			return
-		}
-	} else if req.ExecutorRecipeDigest != "" {
-		http.Error(w, "recipe digest requires executor", http.StatusBadRequest)
-		return
-	}
 	if req.SessionID == "" || req.InputPath == "" {
 		http.Error(w, "session_id and input_path are required", http.StatusBadRequest)
 		return
@@ -1472,18 +1489,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.gpu.endWork()
 	outputDir := s.sessionOutputDir(req.SessionID)
-	if req.Executor != nil {
-		var err error
-		outputDir, err = req.Executor.OutputDir(cfg.Playback.TranscodeDir)
-		if err != nil {
-			http.Error(w, "invalid executor namespace", http.StatusBadRequest)
-			return
-		}
-	}
 
 	opts := playback.TranscodeOpts{
-		Executor:                   req.Executor,
-		ExecuteGrants:              s.executorGrants,
 		InputPath:                  req.InputPath,
 		OutputDir:                  outputDir,
 		SessionID:                  req.SessionID,
@@ -1534,17 +1541,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		FFmpegLogSink:      s.ffmpegSink,
 	}
 
-	if boundRecipe != nil {
-		opts = boundRecipe.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
-		opts.ExecuteGrants = s.executorGrants
-		opts.SegmentRetentionSeconds = cfg.Playback.SegmentRetentionSeconds
-		opts.NodeType = "transcode"
-		opts.ExecutionMode = "transcode_node"
-	}
-	if boundRecipe == nil && opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
+	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel
 	}
-	if boundRecipe == nil && toneMapRecipeRequested(opts) {
+	if toneMapRecipeRequested(opts) {
 		if err := s.resolveToneMapRecipe(r.Context(), &opts); err != nil {
 			writeToneMapRecipeError(w, err)
 			return
@@ -1570,12 +1570,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	// switch doesn't orphan the old ffmpeg process or leave stale segments.
 	s.mu.Lock()
 	if old, ok := s.sessions[req.SessionID]; ok {
-		if old.CheckExecutorNamespace(req.Executor) != nil || old.ExecutorNamespace() != nil {
-			s.mu.Unlock()
-			unlock()
-			http.Error(w, "executor replacement requires a new identity", http.StatusConflict)
-			return
-		}
 		delete(s.sessions, req.SessionID)
 		delete(s.lastAccess, req.SessionID)
 		s.mu.Unlock()
@@ -1615,7 +1609,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			// session this Mac cannot create does not fail clustered
 			// playback while CPU encoding was available.
 			retryAccel := playback.StartupRetryHWAccel(opts)
-			if req.Executor != nil || wasRunning || retryAccel == opts.HWAccel {
+			if wasRunning || retryAccel == opts.HWAccel {
 				unlock()
 				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
 				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
@@ -1656,7 +1650,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	effectiveHWAccel := session.Opts().HWAccel
 	trackCtx := context.WithoutCancel(r.Context())
 	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
-		Executor:    session.ExecutorNamespace(),
 		SessionID:   req.SessionID,
 		NodeURL:     s.tracker.NodeURL(),
 		NodeName:    s.tracker.NodeName(),
@@ -1671,8 +1664,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(TranscodeStartResponse{
-		Executor:              req.Executor,
-		ExecutorRecipeDigest:  req.ExecutorRecipeDigest,
 		SessionID:             req.SessionID,
 		Status:                "started",
 		HWAccel:               effectiveHWAccel,
@@ -1739,11 +1730,6 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 			return nil, nil
 		}
 		card = playback.RecipeCardFromClaims(claims)
-		if card.Executor != nil {
-			// A bound namespace is single use. A signed recipe is input, never
-			// successor authority, even if its immutable descriptor still resolves.
-			return nil, playback.ErrExecutorReplacementRequired
-		}
 		// A presented token's recipe must be a transcode card for the session id in
 		// the URL: a mismatch is a forged or stale request, and direct/remux cards
 		// carry no encode parameters to rebuild. An empty PlayMethod is a transcode
@@ -1755,7 +1741,7 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	}
 	// Without a complete token recipe the store is the only remaining source; with
 	// no store wired there is nothing to rebuild from, so 404.
-	if card.Executor == nil && !tokenComplete && s.recipeStore == nil {
+	if !tokenComplete && s.recipeStore == nil {
 		return nil, nil
 	}
 
@@ -1766,9 +1752,6 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 		existing, ok := s.sessions[sessionID]
 		s.mu.RUnlock()
 		if ok {
-			if err := existing.CheckExecutorNamespace(card.Executor); err != nil {
-				return nil, err
-			}
 			return existing, nil
 		}
 		resolved := card
@@ -1779,7 +1762,7 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 			// a recipe for another transport, or an incomplete one is a genuine
 			// not-found (404), never a spawn from a bad recipe.
 			fetched, ok := s.recipeStore.Get(r.Context(), sessionID)
-			if !ok || fetched == nil || fetched.Executor != nil || !recipeServesTransport(*fetched, sessionID) || !recipeIsComplete(*fetched) {
+			if !ok || fetched == nil || !recipeServesTransport(*fetched, sessionID) || !recipeIsComplete(*fetched) {
 				return (*playback.TranscodeSession)(nil), nil
 			}
 			resolved = *fetched
@@ -1787,9 +1770,6 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 		return s.spawnReconstruct(r, sessionID, requestedSegment, resolved)
 	})
 	if session, _ := v.(*playback.TranscodeSession); session != nil {
-		if err := session.CheckExecutorNamespace(card.Executor); err != nil {
-			return nil, err
-		}
 		return session, nil
 	}
 	return nil, err
@@ -1825,9 +1805,6 @@ func recipeIsComplete(card playback.RecipeCard) bool {
 // single-flight in reconstructFromToken, so it is the sole writer racing to
 // register sessionID. Returns nil if the spawn fails or the slot wait is canceled.
 func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSegment int, card playback.RecipeCard) (*playback.TranscodeSession, error) {
-	if card.Executor != nil {
-		return nil, playback.ErrExecutorReplacementRequired
-	}
 	if s.inputPaths == nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct input authority unavailable", "component", "transcodenode", "session", sessionID)
 		return nil, nil
@@ -1841,9 +1818,6 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	existing, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if ok {
-		if err := existing.CheckExecutorNamespace(card.Executor); err != nil {
-			return nil, err
-		}
 		return existing, nil
 	}
 	cfg := s.watcher.Config()
@@ -1860,14 +1834,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	}
 	defer s.gpu.endWork()
 	outputDir := s.sessionOutputDir(sessionID)
-	if card.Executor != nil {
-		outputDir, err = card.Executor.OutputDir(cfg.Playback.TranscodeDir)
-		if err != nil {
-			return nil, err
-		}
-	}
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
-	opts.ExecuteGrants = s.executorGrants
 	opts.SessionID = sessionID
 	// Recipe cards preserve the original launch tuning, but reconstruction must
 	// retain the normal manifest cushion rather than the fresh-start fast path.
@@ -1907,9 +1874,6 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	existing, ok = s.sessions[sessionID]
 	s.mu.RUnlock()
 	if ok {
-		if err := existing.CheckExecutorNamespace(card.Executor); err != nil {
-			return nil, err
-		}
 		return existing, nil
 	}
 
@@ -1986,14 +1950,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	s.mu.Lock()
 	if existing, ok := s.sessions[sessionID]; ok {
 		s.mu.Unlock()
-		if session.ExecutorNamespace() != nil {
-			_ = session.Close()
-		} else {
-			_ = session.CloseProcess()
-		}
-		if err := existing.CheckExecutorNamespace(card.Executor); err != nil {
-			return nil, err
-		}
+		_ = session.CloseProcess()
 		return existing, nil
 	}
 	s.sessions[sessionID] = session
@@ -2004,7 +1961,6 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	trackCtx := context.WithoutCancel(r.Context())
 	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
-		Executor:    session.ExecutorNamespace(),
 		SessionID:   sessionID,
 		NodeURL:     s.tracker.NodeURL(),
 		NodeName:    s.tracker.NodeName(),
@@ -2110,13 +2066,13 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid stream token", http.StatusUnauthorized)
 		return
 	}
-	if playback.RecipeCardFromClaims(claims).Executor != nil {
-		http.Error(w, "executor remux authority is not configured", http.StatusConflict)
-		return
-	}
 	transportID := claims.TranscodeTransportID
 	if transportID == "" {
 		transportID = claims.SessionID
+	}
+	if s.claimsDenied(r.Context(), claims, transportID) {
+		writeStreamDenied(w)
+		return
 	}
 	if transportID == "" || transportID != chi.URLParam(r, "session_id") ||
 		claims.TranscodeNode == "" ||
@@ -2320,23 +2276,12 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// miss into a normal teardown.
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
-	s.mu.RLock()
-	current := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if current != nil && current.ExecutorNamespace() != nil {
-		http.Error(w, "executor stop authority is not configured", http.StatusConflict)
-		return
-	}
 
 	durableProgressive := false
 	authorityFound := false
 	playbackSessionID := sessionID
 	if s.recipeStore != nil {
 		card, ok := s.recipeStore.Get(r.Context(), sessionID)
-		if card != nil && card.Executor != nil {
-			http.Error(w, "executor stop authority is not configured", http.StatusConflict)
-			return
-		}
 		authorityFound = ok && card != nil
 		durableProgressive = authorityFound && card.PlayMethod == playback.PlayRemux
 		if authorityFound && card.SessionID != "" {
@@ -2420,15 +2365,16 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	// A denied session is neither served from memory nor reconstructed.
+	if s.sessionDenied(r, sessionID) {
+		writeStreamDenied(w)
+		return
+	}
 
 	// Lookup and liveness refresh happen atomically so the idle reaper can
 	// never unregister the job between them and tear down a session this
 	// request is about to serve from.
-	session, ok, accessErr := s.acquireExecutorSession(r, sessionID)
-	if accessErr != nil {
-		http.Error(w, "executor reference mismatch", http.StatusConflict)
-		return
-	}
+	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
 		// stream token the proxy forwarded. The manifest path carries no segment
@@ -2447,13 +2393,6 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		// not recorded this hit; count it so the reaper sees the liveness.
 		s.touchSession(sessionID)
 	}
-	grantedWriter, grantedRequest, closeGrant, grantErr := s.grantExecutorResponse(w, r, sessionID, session)
-	if grantErr != nil {
-		http.Error(w, "executor serving authority unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer closeGrant()
-	w, r = grantedWriter, grantedRequest
 	s.attachTelemetrySession(r, sessionID)
 
 	var manifest []byte
@@ -2478,15 +2417,16 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 	name := chi.URLParam(r, "name")
+	// A denied session is neither served from memory nor reconstructed.
+	if s.sessionDenied(r, sessionID) {
+		writeStreamDenied(w)
+		return
+	}
 
 	// Lookup and liveness refresh happen atomically so the idle reaper can
 	// never unregister the job between them and tear down a session this
 	// request is about to serve from.
-	session, ok, accessErr := s.acquireExecutorSession(r, sessionID)
-	if accessErr != nil {
-		http.Error(w, "executor reference mismatch", http.StatusConflict)
-		return
-	}
+	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
 		// forwarded stream token, seeked to the segment the client is requesting so
@@ -2509,13 +2449,6 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		// not recorded this hit; count it so the reaper sees the liveness.
 		s.touchSession(sessionID)
 	}
-	grantedWriter, grantedRequest, closeGrant, grantErr := s.grantExecutorResponse(w, r, sessionID, session)
-	if grantErr != nil {
-		http.Error(w, "executor serving authority unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer closeGrant()
-	w, r = grantedWriter, grantedRequest
 	s.attachTelemetrySession(r, sessionID)
 
 	segmentLease, err := session.OpenSegment(name)
@@ -2656,22 +2589,11 @@ func (s *Server) handleSegmentDownloaded(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	session, ok, accessErr := s.acquireExecutorSession(r, sessionID)
-	if accessErr != nil {
-		http.Error(w, "executor reference mismatch", http.StatusConflict)
-		return
-	}
+	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	grantedWriter, _, closeGrant, grantErr := s.grantExecutorResponse(w, r, sessionID, session)
-	if grantErr != nil {
-		http.Error(w, "executor serving authority unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer closeGrant()
-	w = grantedWriter
 	session.ReportSegmentDownloadedForGenerationToken(segmentNumber, generationToken)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2809,17 +2731,15 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 		s.mu.Unlock()
 
 		_ = s.closeSessionOffGPU(victim.session)
-		if victim.session.ExecutorNamespace() == nil {
-			if err := os.RemoveAll(s.sessionOutputDir(victim.id)); err != nil {
-				slog.WarnContext(ctx, "remove transcode session directory during reload", "component", "transcodenode", "session", victim.id, "error", err)
-			}
+		if err := os.RemoveAll(s.sessionOutputDir(victim.id)); err != nil {
+			slog.WarnContext(ctx, "remove transcode session directory during reload", "component", "transcodenode", "session", victim.id, "error", err)
 		}
 
 		// A force-reload tears this session down for good, so drop its recipe too:
 		// otherwise a buffered/retrying request could reconstruct a session this
 		// reload deliberately killed. Keep the lifecycle lock through deletion so a
 		// concurrent same-ID start cannot have its newly written recipe removed.
-		if s.recipeStore != nil && victim.session.ExecutorNamespace() == nil {
+		if s.recipeStore != nil {
 			id := victim.id
 			if err := s.recipeStore.Delete(ctx, id); err != nil {
 				slog.WarnContext(ctx, "delete transcode recipe on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
@@ -2830,7 +2750,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 		// also wipe unrelated tracker-only work, such as an active download
 		// preparation, even though force reload does not stop that job.
 		if s.tracker != nil {
-			s.removeTrackedExecutor(ctx, victim.id, victim.session.ExecutorNamespace())
+			s.tracker.Remove(ctx, victim.id)
 		}
 		unlock()
 	}
@@ -2908,56 +2828,4 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		System:     snapshot.System,
 		GPU:        snapshot.GPU,
 	})
-}
-
-// WithExecutorRecipeResolver installs only a current-recipe lookup. Runtime
-// execution/serving grant enforcement is a separate, unwired boundary.
-func (s *Server) WithExecutorRecipeResolver(resolve ExecutorRecipeResolver) *Server {
-	s.executorRecipeResolver = resolve
-	return s
-}
-
-func (s *Server) acquireExecutorSession(r *http.Request, sessionID string) (*playback.TranscodeSession, bool, error) {
-	var expected *playback.ExecutorNamespaceV3
-	if token := r.Header.Get("X-Silo-Stream-Token"); token != "" {
-		cfg := s.watcher.Config()
-		if cfg == nil {
-			return nil, false, errors.New("node not configured")
-		}
-		claims, err := streamtoken.Verify(token, cfg.Auth.JWTSecret)
-		if err != nil {
-			return nil, false, err
-		}
-		card := playback.RecipeCardFromClaims(claims)
-		expected = card.Executor
-		if expected != nil && (!recipeServesTransport(card, sessionID) || expected.Validate() != nil) {
-			return nil, false, errors.New("invalid executor reference")
-		}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	session, ok := s.sessions[sessionID]
-	if !ok {
-		return nil, false, nil
-	}
-	if err := session.CheckExecutorNamespace(expected); err != nil {
-		return nil, false, err
-	}
-	s.noteSessionAccessLocked(sessionID)
-	return session, true, nil
-}
-
-// removeTrackedExecutor uses the retired object, never the latest session map.
-// A legacy-only tracker cannot address bound records; skipping removal is safer
-// than falling back to a logical ID that might identify a successor.
-func (s *Server) removeTrackedExecutor(ctx context.Context, sessionID string, executor *playback.ExecutorNamespaceV3) {
-	if executor == nil {
-		s.tracker.Remove(ctx, sessionID)
-		return
-	}
-	if tracker, ok := s.tracker.(interface {
-		RemoveExecutor(context.Context, string, playback.ExecutorNamespaceV3)
-	}); ok {
-		tracker.RemoveExecutor(ctx, sessionID, *executor)
-	}
 }

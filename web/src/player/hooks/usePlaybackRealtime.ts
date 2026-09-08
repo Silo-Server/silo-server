@@ -1,4 +1,3 @@
-import { hasDurableTermination, recordDurableTermination } from "../durable-session-mutations";
 import { useEffect, useRef, useState } from "react";
 import {
   captureProfileRequestContext,
@@ -11,7 +10,8 @@ import {
   playbackControlSocketURL,
 } from "@/api/v2/playbackControlSocket";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { durableSessionFor } from "../session-mutations";
+import { playerV2Origin } from "../player-v2";
+import { sessionInstallation } from "../session-mutations";
 import {
   buildPlaybackRealtimeAck,
   buildPlaybackRealtimeHello,
@@ -73,19 +73,23 @@ export function usePlaybackRealtime({
       return;
     }
 
-    const durable = durableSessionFor(sessionId);
+    // The control socket is owner-bound: the ticket is minted under the
+    // account and profile captured here, and frames after either changes
+    // belong to a session this browser no longer owns.
     const authority = captureProfileRequestContext();
-    if (!durable || !durable.context.isCurrent() || !authority) return;
-    const authorityActive = () =>
-      durable.context.isCurrent() && isCapturedProfileAuthorityActive(authority);
+    if (!authority) return;
+    const authorityActive = () => isCapturedProfileAuthorityActive(authority);
+    const installationId = sessionInstallation(sessionId);
+    const origin = playerV2Origin(config) || window.location.origin;
 
     let disposed = false;
     let attempt = 0;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
 
+    let terminated = false;
     const scheduleReconnect = () => {
-      if (disposed || hasDurableTermination(durable)) return;
+      if (disposed || terminated) return;
       const delay = reconnectDelays[Math.min(attempt, reconnectDelays.length - 1)];
       attempt += 1;
       reconnectTimer = window.setTimeout(connect, delay);
@@ -130,7 +134,8 @@ export function usePlaybackRealtime({
         }
         seenCommandsRef.current.add(command.command_id);
         if (command.name === "terminate" && command.issued_by?.kind === "admin") {
-          recordDurableTermination(config, durable, command.command_id);
+          // An administrator ended the session; there is nothing to reconnect to.
+          terminated = true;
         }
 
         if (socket.readyState === WebSocket.OPEN) {
@@ -169,7 +174,7 @@ export function usePlaybackRealtime({
     };
 
     const connect = () => {
-      if (disposed || hasDurableTermination(durable)) return;
+      if (disposed || terminated) return;
       setConnectionState("connecting");
 
       if (!authorityActive()) {
@@ -177,13 +182,13 @@ export function usePlaybackRealtime({
         return;
       }
 
-      void mintPlaybackControlSocketTicket(sessionId, durable.identity.installationId, authority)
+      void mintPlaybackControlSocketTicket(sessionId, installationId, authority)
         .then((ticket) => {
           if (disposed || !authorityActive()) return;
           try {
             attach(
               new WebSocket(
-                playbackControlSocketURL(sessionId, durable.identity.origin),
+                playbackControlSocketURL(sessionId, origin),
                 playbackControlSocketProtocols(ticket.ticket),
               ),
             );
@@ -192,14 +197,14 @@ export function usePlaybackRealtime({
           }
         })
         .catch((error: unknown) => {
-          if (disposed || hasDurableTermination(durable)) return;
+          if (disposed || terminated) return;
           if (error instanceof StaleApiRequestContextError) {
             // The account or profile changed underneath this player; nothing
             // this browser can mint is valid for the session any more.
             setConnectionState("disconnected");
             return;
           }
-          // A refused mint (403 non-owner, 409 stale lease or held lane) is
+          // A refused mint (403 non-owner, 409 installation mismatch) is
           // retried only under the original authority with bounded backoff.
           setConnectionState("disconnected");
           scheduleReconnect();

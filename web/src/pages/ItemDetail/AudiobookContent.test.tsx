@@ -31,17 +31,7 @@ vi.mock("@/pages/audiobooks/player/audiobookPlaybackContext", () => ({
 vi.mock("@/components/AddToCollectionDialog", () => ({
   default: () => null,
 }));
-vi.mock("@/pages/audiobooks/components/ChaptersSection", () => ({
-  ChaptersSection: ({
-    onSelect,
-  }: {
-    onSelect: (chapter: { fileId: string; positionSeconds: number }) => void;
-  }) => (
-    <button onClick={() => onSelect({ fileId: "2", positionSeconds: 30 })}>
-      Select chapter fixture
-    </button>
-  ),
-}));
+vi.mock("@/pages/audiobooks/components/ChaptersSection", () => ({ ChaptersSection: () => null }));
 vi.mock("@/pages/audiobooks/components/NarratorCard", () => ({ NarratorCard: () => null }));
 vi.mock("@/pages/audiobooks/components/NarratorPicker", () => ({ NarratorPicker: () => null }));
 vi.mock("@/pages/audiobooks/components/RelatedRail", () => ({ RelatedRail: () => null }));
@@ -131,21 +121,6 @@ describe("AudiobookContent playback actions", () => {
       stopPlayback: vi.fn(),
       toggleActivePlayback: mocks.toggleActivePlayback,
     };
-  });
-
-  it("forwards exact chapter coordinates without constructing a detail-based global target", async () => {
-    render(
-      <MemoryRouter>
-        <AudiobookContent item={bookWithProgress(5000)} />
-      </MemoryRouter>,
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Select chapter fixture" }));
-    expect(mocks.startPlayback).toHaveBeenCalledWith(
-      expect.objectContaining({
-        initialPositionSeconds: 0,
-        initialChapter: { fileId: "2", positionSeconds: 30 },
-      }),
-    );
   });
 
   it("sends every Play-from-Start click to the shared audiobook player", async () => {

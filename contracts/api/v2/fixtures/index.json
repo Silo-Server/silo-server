@@ -10148,7 +10148,7 @@
     {
       "name": "playback_capability_available",
       "operation_id": "getPlaybackCapabilities",
-      "scenario": "The admitted viewer receives a durable installation identifier and supported routes.",
+      "scenario": "The viewer receives the installation identifier, protocol versions, features and deliveries.",
       "request": {
         "method": "GET",
         "path": "/api/v2/playback/capabilities",
@@ -10254,6 +10254,28 @@
       "body_file": "playback_progress_applied.json"
     },
     {
+      "name": "playback_progress_conflict",
+      "operation_id": "updatePlaybackProgress",
+      "scenario": "An equal sequence with a different sample is a conflict the client must not retry.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/playback/11111111-1111-4111-8111-111111111111/progress",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"installation_id\":\"11111111-1111-4111-8111-111111111111\",\"is_paused\":false,\"position\":121,\"sequence\":42}"
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "playback_progress_conflict.json"
+    },
+    {
       "name": "playback_progress_stale",
       "operation_id": "updatePlaybackProgress",
       "scenario": "Sequenced progress returns the committed accepted tuple, including after a stale sample.",
@@ -10278,7 +10300,7 @@
     {
       "name": "playback_replan_reanchored",
       "operation_id": "replanPlayback",
-      "scenario": "A position re-anchor of the current initial route answers a whole replacement plan with opaque identifiers.",
+      "scenario": "A seek re-anchor answers a whole replacement plan with opaque identifiers; track, quality and output changes use the same operation.",
       "request": {
         "method": "POST",
         "path": "/api/v2/playback/11111111-1111-4111-8111-111111111111/replan",
@@ -10344,7 +10366,7 @@
     {
       "name": "playback_stop_completed",
       "operation_id": "stopPlayback",
-      "scenario": "An exact stop returns its durable receipt while grants drain or after completion.",
+      "scenario": "The first stop of a session applies the optional final sample and returns the stored receipt.",
       "request": {
         "method": "DELETE",
         "path": "/api/v2/playback/11111111-1111-4111-8111-111111111111",
@@ -10364,9 +10386,9 @@
       "body_file": "playback_stop_completed.json"
     },
     {
-      "name": "playback_stop_draining",
+      "name": "playback_stop_replayed",
       "operation_id": "stopPlayback",
-      "scenario": "An exact stop returns its durable receipt while grants drain or after completion.",
+      "scenario": "Every later stop of the same session replays the stored receipt, whatever stop id it carries.",
       "request": {
         "method": "DELETE",
         "path": "/api/v2/playback/11111111-1111-4111-8111-111111111111",
@@ -10376,14 +10398,14 @@
         },
         "body": "{\"installation_id\":\"11111111-1111-4111-8111-111111111111\",\"stop_id\":\"22222222-2222-4222-8222-222222222222\"}"
       },
-      "expected_status": 202,
+      "expected_status": 200,
       "response_headers": {
         "Cache-Control": "no-store",
         "Content-Type": "application/json"
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PlaybackMutation",
-      "body_file": "playback_stop_draining.json"
+      "body_file": "playback_stop_replayed.json"
     },
     {
       "name": "poll_device_login_device_code_required",

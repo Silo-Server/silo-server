@@ -17,8 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/userstore"
-
 	"encoding/json"
 
 	"github.com/go-chi/chi/v5"
@@ -90,7 +88,7 @@ func compatWorkerHLSRouteAllowed(workload noderouting.Workload, policy config.Pl
 // change later (for example, during an audio switch), so the current recipe is
 // authoritative for its local-versus-worker executor.
 func compatChildHLSRouteMatches(source PlaybackMediaSource, recipe *playback.RecipeCard, assignment *playback.NodeRoutingAssignment) bool {
-	if recipe == nil || recipe.Executor != nil || assignment == nil {
+	if recipe == nil || assignment == nil {
 		return false
 	}
 	workload := noderouting.WorkloadRemux
@@ -102,40 +100,7 @@ func compatChildHLSRouteMatches(source PlaybackMediaSource, recipe *playback.Rec
 		assignment.Egress == string(noderouting.EgressAPI)
 }
 
-// Progressive and remux delivery still use legacy routing and cannot serve bound executors.
-func requireCompatLegacyExecutor(w http.ResponseWriter, session *PlaybackSession) bool {
-	if session != nil && session.Recipe != nil && session.Recipe.Executor != nil {
-		writeError(w, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "Executor-bound delivery is not available on this origin")
-		return false
-	}
-	return true
-}
-
-// compatHasBoundMetadata prevents a stripped recipe from entering legacy startup.
-func (h *PlaybackHandler) compatHasBoundMetadata(ps *PlaybackSession) bool {
-	if ps == nil {
-		return false
-	}
-	if ps.Recipe != nil && ps.Recipe.Executor != nil {
-		return true
-	}
-	if h.tm != nil {
-		if live := h.tm.GetTranscodeSession(ps.UpstreamSessionID); live != nil && live.ExecutorNamespace() != nil {
-			return true
-		}
-	}
-	if h.sessionMgr != nil && ps.UpstreamSessionID != "" {
-		if metadata, err := h.sessionMgr.GetSession(ps.UpstreamSessionID); err == nil && metadata != nil && metadata.Executor != nil {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *PlaybackHandler) requireCompatChildHLSRoute(w http.ResponseWriter, playSession *PlaybackSession, source PlaybackMediaSource) bool {
-	if !requireCompatLegacyExecutor(w, playSession) {
-		return false
-	}
 	if playSession == nil || playSession.Recipe == nil || playSession.RoutingAssignment == nil {
 		writeError(w, http.StatusConflict, compatPlaybackRouteUnboundCode, "Request the master manifest before child HLS resources")
 		return false
@@ -148,94 +113,6 @@ func (h *PlaybackHandler) requireCompatChildHLSRoute(w http.ResponseWriter, play
 	if !compatChildHLSRouteMatches(source, playSession.Recipe, playSession.RoutingAssignment) {
 		writeError(w, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "The child HLS request does not match the route bound by the master manifest")
 		return false
-	}
-	return true
-}
-
-const (
-	compatBoundHLSSegment = "segment"
-	compatBoundHLSMaster  = "master"
-)
-
-// serveBoundCompatHLS handles only an already-running local executor. The
-// authoritative resolver and response grant must both agree with its frozen
-// namespace; no legacy session lookup, route selection, or restart is permitted.
-func (h *PlaybackHandler) serveBoundCompatHLS(w http.ResponseWriter, r *http.Request, ps *PlaybackSession, source PlaybackMediaSource, resource string) bool {
-	if ps == nil {
-		return false
-	}
-	var live *playback.TranscodeSession
-	if h.tm != nil {
-		live = h.tm.GetTranscodeSession(ps.UpstreamSessionID)
-	}
-	bound := ps.Recipe != nil && ps.Recipe.Executor != nil
-	if !bound && !h.compatHasBoundMetadata(ps) {
-		return false
-	}
-	refuse := func() {
-		writeError(w, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "Executor-bound HLS authority is unavailable")
-	}
-	if !bound || h.tm == nil || h.tm.ResolveExecutorRecipe == nil || live == nil ||
-		live.CheckExecutorNamespace(ps.Recipe.Executor) != nil || ps.UpstreamSessionID == "" ||
-		ps.Recipe.SessionID != ps.UpstreamSessionID || ps.UpstreamPlayMethod != string(playback.PlayTranscode) ||
-		ps.RoutingAssignment == nil || ps.RoutingAssignment.Execution != string(noderouting.ExecutionAPI) ||
-		ps.RoutingAssignment.Egress != string(noderouting.EgressAPI) ||
-		ps.RoutingAssignment.Workload != string(noderouting.WorkloadVideoTranscode) || compatHLSCopiesVideo(source) {
-		refuse()
-		return true
-	}
-	transportID := firstNonEmpty(ps.Recipe.TranscodeTransportID, ps.UpstreamSessionID)
-	guarded, request, cleanup, err := playback.GuardExecutorResponseV3(w, r, h.tm.ExecuteGrants, transportID, ps.Recipe.Executor)
-	if err != nil {
-		refuse()
-		return true
-	}
-	defer cleanup()
-	card, err := h.tm.ResolveExecutorRecipe(request.Context(), transportID, *ps.Recipe.Executor)
-	if err != nil || card == nil || card.SessionID != ps.UpstreamSessionID ||
-		firstNonEmpty(card.TranscodeTransportID, card.SessionID) != transportID ||
-		playback.MatchExecutorNamespace(card.Executor, ps.Recipe.Executor) != nil ||
-		card.TranscodeNodeURL != "" || card.PlayMethod != playback.PlayTranscode ||
-		card.RoutingExecution != string(noderouting.ExecutionAPI) || card.RoutingEgress != string(noderouting.EgressAPI) ||
-		card.RoutingWorkload != string(noderouting.WorkloadVideoTranscode) ||
-		SessionFromContext(request.Context()) == nil || card.UserID != SessionFromContext(request.Context()).StreamAppUserID ||
-		card.ProfileID != SessionFromContext(request.Context()).ProfileID ||
-		firstNonEmpty(live.Opts().TranscodeTransportID, live.Opts().SessionID) != transportID ||
-		live.Opts().SessionID != card.SessionID || live.Opts().InputPath != card.InputPath ||
-		!compatRecipeMatchesSource(card, source) ||
-		!compatLiveTranscodeMatchesAudioSource(live, source) {
-		writeError(guarded, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "Executor-bound HLS metadata does not match")
-		return true
-	}
-	if resource == compatBoundHLSSegment {
-		name := chiURLParam(request, "segmentId") + "." + chiURLParam(request, "segmentContainer")
-		lease, err := live.OpenSegment(name)
-		if err != nil {
-			status, code, message := hlsSegmentErrorResponse(err)
-			writeError(guarded, status, code, message)
-			return true
-		}
-		defer func() { _ = lease.Close() }()
-		sw := httpstream.NewRollingDeadlineWriter(guarded)
-		http.ServeContent(sw, request, lease.Info.Name(), lease.Info.ModTime(), lease.File)
-		if request.Context().Err() == nil && request.Method == http.MethodGet && sw.CompletedFullResponse(lease.Info.Size()) {
-			if segment, err := playback.ParseSegmentNumber(chiURLParam(request, "segmentId")); err == nil {
-				live.ReportSegmentDownloadedForGeneration(segment, lease.Generation)
-			}
-		}
-		return true
-	}
-	manifest, err := live.GetManifest()
-	if err != nil {
-		writeCompatTranscodeError(guarded, err)
-		return true
-	}
-	frozen := *ps
-	frozen.Recipe = card
-	if resource == compatBoundHLSMaster {
-		writeCompatMasterManifest(guarded, manifest, &frozen, source, h.compatSegmentDuration())
-	} else {
-		writeCompatManifest(guarded, manifest, &frozen, source, h.compatSegmentDuration())
 	}
 	return true
 }
@@ -557,20 +434,6 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
 	}
-	if h.compatHasBoundMetadata(playSession) {
-		writeError(w, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "Executor-bound progressive delivery is unavailable")
-		return
-	}
-	// Hold the legacy source gate through this request's launch/reconstruction
-	// until response publication, without pinning a DB connection for media bytes.
-	legacyCtx, release, admissionErr := userstore.AcquireLegacyPlaybackAdmission(r.Context(), h.storeProvider, session.StreamAppUserID)
-	if admissionErr != nil {
-		writeCompatUpstreamError(w, admissionErr)
-		return
-	}
-	defer release()
-	r = r.WithContext(legacyCtx)
-	w = &legacyAdmissionResponseWriter{ResponseWriter: w, release: release}
 	if source == nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Media source is required")
 		return
@@ -802,19 +665,6 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS) {
 		return
 	}
-	if h.serveBoundCompatHLS(w, r, playSession, *source, compatBoundHLSMaster) {
-		return
-	}
-	// Hold the legacy source gate through this request's launch/reconstruction
-	// until response publication, without pinning a DB connection for media bytes.
-	legacyCtx, release, admissionErr := userstore.AcquireLegacyPlaybackAdmission(r.Context(), h.storeProvider, session.StreamAppUserID)
-	if admissionErr != nil {
-		writeCompatUpstreamError(w, admissionErr)
-		return
-	}
-	defer release()
-	r = r.WithContext(legacyCtx)
-	w = &legacyAdmissionResponseWriter{ResponseWriter: w, release: release}
 	// Attach BEFORE ensureUpstreamPlayback below: this route can start a
 	// transcode before it writes a byte, which is the whole reason §4.2 enrolls
 	// manifest routes. A cut has to be able to act here, not after the side
@@ -1092,19 +942,6 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS) {
 		return
 	}
-	if h.serveBoundCompatHLS(w, r, playSession, *source, "manifest") {
-		return
-	}
-	// Hold the legacy source gate through this request's launch/reconstruction
-	// until response publication, without pinning a DB connection for media bytes.
-	legacyCtx, release, admissionErr := userstore.AcquireLegacyPlaybackAdmission(r.Context(), h.storeProvider, session.StreamAppUserID)
-	if admissionErr != nil {
-		writeCompatUpstreamError(w, admissionErr)
-		return
-	}
-	defer release()
-	r = r.WithContext(legacyCtx)
-	w = &legacyAdmissionResponseWriter{ResponseWriter: w, release: release}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
 		return
 	}
@@ -1173,19 +1010,6 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS) {
 		return
 	}
-	if h.serveBoundCompatHLS(w, r, playSession, *source, compatBoundHLSSegment) {
-		return
-	}
-	// Hold the legacy source gate through this request's launch/reconstruction
-	// until response publication, without pinning a DB connection for media bytes.
-	legacyCtx, release, admissionErr := userstore.AcquireLegacyPlaybackAdmission(r.Context(), h.storeProvider, session.StreamAppUserID)
-	if admissionErr != nil {
-		writeCompatUpstreamError(w, admissionErr)
-		return
-	}
-	defer release()
-	r = r.WithContext(legacyCtx)
-	w = &legacyAdmissionResponseWriter{ResponseWriter: w, release: release}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
 		return
 	}
@@ -1536,12 +1360,6 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Subtitle lookup, conversion, extraction, and S3 reads do not yet carry
-	// executor grants for their complete lifetime.
-	if h.compatHasBoundMetadata(playSession) {
-		writeError(w, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "Executor-bound subtitle delivery is unavailable")
-		return
-	}
 	if h.fileResolver == nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
 		return
@@ -1845,11 +1663,6 @@ func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *
 		return
 	}
 
-	if h.compatHasBoundMetadata(playSession) {
-		writeError(w, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "Executor-bound playback lifecycle is unavailable")
-		return
-	}
-
 	fallback := compatScrobbleFallbackSession(session, playSession, nil, 0, false, false)
 	upstreamSession, transcodeNodeURL := h.compatStopSnapshot(playSession, fallback)
 	if event, ok := h.compatScrobbleEvent(
@@ -1883,10 +1696,6 @@ func (h *PlaybackHandler) teardownPlaySession(
 	fallbackSession *playback.Session,
 	positionOverride *float64,
 ) {
-	if h.compatHasBoundMetadata(playSession) || (fallbackSession != nil && fallbackSession.Executor != nil) {
-		return
-	}
-
 	upstreamSession, transcodeNodeURL := h.compatStopSnapshot(playSession, fallbackSession)
 	if event, ok := h.compatScrobbleEvent(
 		ctx, compatScrobbleStop, playSession, upstreamSession, nil, positionOverride,
@@ -1946,10 +1755,6 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	upstreamSession *playback.Session,
 	transcodeNodeURL string,
 ) {
-	if h.compatHasBoundMetadata(playSession) || (upstreamSession != nil && upstreamSession.Executor != nil) {
-		return
-	}
-
 	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
 	if h.sessionMgr != nil {
 		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
@@ -2028,10 +1833,6 @@ func (h *PlaybackHandler) stageCompatTerminal(
 	cleanupDone bool,
 	attempt int,
 ) {
-	if h.compatHasBoundMetadata(playSession) || (upstreamSession != nil && upstreamSession.Executor != nil) {
-		return
-	}
-
 	staged, err := h.playbackStore.StageTerminal(playSession.ID, playSession.CompatToken, event, authoritative)
 	if err != nil {
 		// Production durable staging installs its local marker before I/O. Keep
@@ -2076,9 +1877,6 @@ func (h *PlaybackHandler) scheduleCompatTerminalHide(
 ) {
 	time.AfterFunc(compatTerminalRetryDelay(attempt), func() {
 		if !expiresAt.IsZero() && !time.Now().Before(expiresAt) {
-			return
-		}
-		if pending, ok := h.playbackStore.GetFinalizable(playSessionID, compatToken); ok && h.compatHasBoundMetadata(pending) {
 			return
 		}
 		err := h.playbackStore.HideFromRouting(playSessionID, compatToken)
@@ -2145,9 +1943,6 @@ func (h *PlaybackHandler) deliverCompatTerminal(
 	if !expiresAt.IsZero() && !time.Now().Before(expiresAt) {
 		return
 	}
-	if pending, ok := h.playbackStore.GetFinalizable(playSessionID, compatToken); ok && h.compatHasBoundMetadata(pending) {
-		return
-	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	claimUntil := now.Add(compatTerminalClaimLease)
 	playSession, err := h.playbackStore.ClaimTerminal(playSessionID, compatToken, claimUntil)
@@ -2164,9 +1959,6 @@ func (h *PlaybackHandler) deliverCompatTerminal(
 				compatTerminalRetryDelay(attempt), attempt+1,
 			)
 		}
-		return
-	}
-	if h.compatHasBoundMetadata(playSession) {
 		return
 	}
 	ownedClaimUntil := playSession.TerminalClaimUntil
@@ -2309,11 +2101,6 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if h.compatHasBoundMetadata(playSession) {
-		writeError(w, http.StatusServiceUnavailable, compatRoutingPolicyUnsatisfiedCode, "Executor-bound playback lifecycle is unavailable")
-		return
-	}
-
 	positionSeconds := 0.0
 	positionReported := req.PositionTicks != nil
 	if positionReported {
@@ -2401,7 +2188,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 					break
 				}
 			}
-			if err := store.UpdateProgress(userstore.WithLegacyPlaybackWrite(r.Context()), session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context())); err == nil {
+			if err := store.UpdateProgress(r.Context(), session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context())); err == nil {
 				triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 			}
 		}
@@ -2506,13 +2293,6 @@ func (h *PlaybackHandler) refreshPlaySession(current *PlaybackSession) *Playback
 }
 
 func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource, method string) (*PlaybackSession, error) {
-	// Includes cold reconstruction and replacement of legacy upstream sessions.
-	guardedCtx, release, err := userstore.AcquireLegacyPlaybackAdmission(ctx, h.storeProvider, compatSession.StreamAppUserID)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	ctx = guardedCtx
 	playSession, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
 		return nil, ErrSessionNotFound
@@ -2613,6 +2393,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 
 	var session *playback.Session
+	var err error
 	if starter, ok := h.sessionMgr.(sessionStarterContext); ok {
 		session, err = starter.StartSessionWithContext(ctx, compatSession.StreamAppUserID, compatSession.ProfileID, source.FileID, playMethod, transcodeAudio)
 	} else {
@@ -2689,12 +2470,6 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 	source PlaybackMediaSource,
 	requiredToneMapMode tonemap.Mode,
 ) ([]byte, error) {
-	guardedCtx, release, admissionErr := userstore.AcquireLegacyPlaybackAdmission(ctx, h.storeProvider, compatSession.StreamAppUserID)
-	if admissionErr != nil {
-		return nil, admissionErr
-	}
-	defer release()
-	ctx = guardedCtx
 	playSession, err := h.ensureUpstreamPlayback(ctx, compatSession, playSessionID, source, "transcode")
 	if err != nil {
 		return nil, err

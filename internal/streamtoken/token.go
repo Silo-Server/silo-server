@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 const (
@@ -41,10 +40,6 @@ const (
 // (uid/pid/mfid) are lookup keys re-resolved against the authority on
 // reconstruct; they are never trusted on their own.
 type Claims struct {
-	ExecutorBound          bool   `json:"executor_bound,omitzero"`
-	ExecutorIncarnation    string `json:"executor_incarnation,omitempty"`
-	ExecutorEpoch          int64  `json:"executor_epoch,omitzero"`
-	ExecutorID             string `json:"executor_id,omitempty"`
 	SessionID              string `json:"sid"`
 	MediaPath              string `json:"path"`
 	PlayMethod             string `json:"method"`
@@ -164,9 +159,6 @@ func (c *Claims) StartedAt() (time.Time, StartedAtSource) {
 
 // Sign creates a signed JWT string from the given claims.
 func Sign(c Claims, secret string, ttl time.Duration) (string, error) {
-	if err := c.ValidateExecutorBinding(); err != nil {
-		return "", err
-	}
 	now := time.Now()
 	c.RegisteredClaims = jwt.RegisteredClaims{
 		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
@@ -191,29 +183,5 @@ func Verify(tokenString, secret string) (*Claims, error) {
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid stream token claims")
 	}
-	if err := claims.ValidateExecutorBinding(); err != nil {
-		return nil, err
-	}
 	return claims, nil
-}
-
-// ValidateExecutorBinding prevents partial or invalid bound claims from being
-// interpreted as a legacy token. Legacy tokens have all executor fields absent.
-func (c Claims) ValidateExecutorBinding() error {
-	if !c.ExecutorBound {
-		if c.ExecutorIncarnation != "" || c.ExecutorEpoch != 0 || c.ExecutorID != "" {
-			return fmt.Errorf("executor fields require executor_bound")
-		}
-		return nil
-	}
-	if c.ExecutorEpoch <= 0 {
-		return fmt.Errorf("executor epoch must be positive")
-	}
-	for _, value := range []string{c.ExecutorIncarnation, c.ExecutorID} {
-		id, err := uuid.Parse(value)
-		if err != nil || id == uuid.Nil || id.String() != value {
-			return fmt.Errorf("executor binding requires canonical nonzero UUIDs")
-		}
-	}
-	return nil
 }

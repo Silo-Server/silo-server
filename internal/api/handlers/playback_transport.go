@@ -43,13 +43,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-	client := http.DefaultClient
-	if request.Executor != nil {
-		boundClient := *client
-		boundClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		client = &boundClient
-	}
-	response, err := client.Do(httpRequest)
+	response, err := http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
@@ -73,16 +67,11 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		// Older nodes returned an empty 202 response; accept that for ordinary
 		// transcodes while treating any other malformed 202 body as a failed
 		// start instead of fabricating a success from a zero-value response.
-		if errors.Is(err, io.EOF) && request.ToneMapMode == "" && request.Executor == nil {
+		if errors.Is(err, io.EOF) && request.ToneMapMode == "" {
 			return transcodenode.TranscodeStartResponse{}, response.StatusCode, nil
 		}
 		slog.WarnContext(ctx, "remote transcode start response decode failed", "component", "api", "node", logredact.SanitizeURL(nodeURL), "error", err)
 		return transcodenode.TranscodeStartResponse{}, response.StatusCode, fmt.Errorf("decode remote transcode start response: %w", err)
-	}
-	if request.Executor != nil {
-		if err := transcodenode.ValidateBoundTranscodeStartResponse(request, result); err != nil {
-			return transcodenode.TranscodeStartResponse{}, response.StatusCode, err
-		}
 	}
 	return result, response.StatusCode, nil
 }

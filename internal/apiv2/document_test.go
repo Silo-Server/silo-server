@@ -379,10 +379,13 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	expect["voteWatchTogetherSuggestion"] = map[int]bool{204: true, 409: true}
 	expect["unvoteWatchTogetherSuggestion"] = map[int]bool{204: true, 409: true}
 
-	for _, id := range []string{"getPlaybackCapabilities", "getPlaybackClientTimeline", "startPlayback", "updatePlaybackProgress", "stopPlayback", "reportPlaybackRouteEvent", "replanPlayback"} {
+	for _, id := range []string{"getPlaybackCapabilities", "startPlayback", "updatePlaybackProgress", "stopPlayback", "reportPlaybackRouteEvent", "replanPlayback"} {
 		profileToken[id] = true
 	}
-	expect["replanPlayback"] = map[int]bool{http.StatusOK: true, http.StatusNotFound: true, http.StatusConflict: true, http.StatusNotImplemented: true}
+	expect["startPlayback"] = map[int]bool{http.StatusCreated: true, http.StatusAccepted: false, http.StatusConflict: true, http.StatusNotImplemented: false}
+	expect["stopPlayback"] = map[int]bool{http.StatusOK: true, http.StatusAccepted: false, http.StatusConflict: true, http.StatusNotImplemented: false}
+	expect["updatePlaybackProgress"] = map[int]bool{http.StatusOK: true, http.StatusConflict: true, http.StatusNotImplemented: false}
+	expect["replanPlayback"] = map[int]bool{http.StatusOK: true, http.StatusNotFound: true, http.StatusConflict: true, http.StatusNotImplemented: false}
 	expect["reportPlaybackRouteEvent"] = map[int]bool{http.StatusAccepted: true, http.StatusForbidden: true, http.StatusTooManyRequests: true, http.StatusConflict: false}
 	seen := map[string]bool{}
 	for path, item := range doc["paths"].(map[string]any) {

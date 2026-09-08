@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -32,33 +33,33 @@ type fakePlaybackService struct {
 func (f *fakePlaybackService) PlaybackCapabilities(context.Context, int, string) (handlers.PlaybackCapabilitiesView, error) {
 	return handlers.PlaybackCapabilitiesView{InstallationID: playbackTestInstallation, Revision: "cap-1", State: "available", Allowed: true, ProtocolVersions: []int{3}, Features: []string{"sequenced_progress_v1"}, Deliveries: []playback.DeliveryV3{playback.DeliveryOriginalHTTPV3, playback.DeliveryTranscodeHLSV3}}, f.err
 }
-func (f *fakePlaybackService) StartInitialPlayback(_ context.Context, caller handlers.PlaybackCaller, request playback.StartRequestV3) (playback.DecisionResponseV3, error) {
+func (f *fakePlaybackService) StartPlaybackV2(_ context.Context, caller handlers.PlaybackCaller, request playback.StartRequestV3) (playback.DecisionResponseV3, error) {
 	f.calls++
 	f.caller = caller
 	f.request = request
 	return f.response, f.err
 }
-func (f *fakePlaybackService) ApplyInitialProgress(_ context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackProgressCommand) (handlers.PlaybackMutationView, error) {
+func (f *fakePlaybackService) ApplyProgressV2(_ context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackProgressCommand) (handlers.PlaybackMutationView, error) {
 	f.calls++
 	f.caller = caller
 	f.session = session
 	f.progress = command
 	return f.mutation, f.err
 }
-func (f *fakePlaybackService) ReplanInitialPlayback(_ context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackReplanCommand) (playback.DecisionResponseV3, error) {
+func (f *fakePlaybackService) ReplanPlaybackV2(_ context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackReplanCommand) (playback.DecisionResponseV3, error) {
 	f.calls++
 	f.caller = caller
 	f.session = session
 	f.replan = command
 	return f.response, f.err
 }
-func (f *fakePlaybackService) ReportInitialRouteEvent(_ context.Context, caller handlers.PlaybackCaller, command handlers.PlaybackRouteEventCommand) error {
+func (f *fakePlaybackService) ReportRouteEventV2(_ context.Context, caller handlers.PlaybackCaller, command handlers.PlaybackRouteEventCommand) error {
 	f.calls++
 	f.caller = caller
 	f.event = command
 	return f.err
 }
-func (f *fakePlaybackService) StopInitialPlayback(_ context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackStopCommand) (handlers.PlaybackMutationView, error) {
+func (f *fakePlaybackService) StopPlaybackV2(_ context.Context, caller handlers.PlaybackCaller, session string, command handlers.PlaybackStopCommand) (handlers.PlaybackMutationView, error) {
 	f.calls++
 	f.caller = caller
 	f.session = session
@@ -178,27 +179,50 @@ func TestPlaybackV2ProgressAndStop(t *testing.T) {
 	if response.Code != 200 || fake.progress.Sequence != 42 || fake.progress.Position != 0 || !fake.progress.IsPaused {
 		t.Fatalf("progress: %d %s %+v", response.Code, response.Body.String(), fake.progress)
 	}
-	fake.mutation = handlers.PlaybackMutationView{Outcome: "draining", StopID: playbackTestStop, Draining: true}
+	fake.mutation = handlers.PlaybackMutationView{Outcome: "stopped", StopID: playbackTestStop}
 	stopBody := map[string]any{"installation_id": playbackTestInstallation, "stop_id": playbackTestStop}
 	response = do(t, h, http.MethodDelete, Prefix+"/playback/session-1", playbackJSON(t, stopBody), viewerHeaders())
-	if response.Code != 202 || fake.stop.Position != nil || fake.stop.Sequence != 0 || !strings.Contains(response.Body.String(), `"stop_id":"`+playbackTestStop+`"`) {
+	if response.Code != 200 || fake.stop.Position != nil || fake.stop.Sequence != 0 || !strings.Contains(response.Body.String(), `"stop_id":"`+playbackTestStop+`"`) {
 		t.Fatalf("stop: %d %s %+v", response.Code, response.Body.String(), fake.stop)
 	}
 	stopBody["sequence"] = 43
 	stopBody["position"] = 0
-	fake.mutation.Draining = false
-	fake.mutation.Outcome = "stopped"
+	fake.mutation.Outcome = "replayed"
 	response = do(t, h, http.MethodDelete, Prefix+"/playback/session-1", playbackJSON(t, stopBody), viewerHeaders())
-	if response.Code != 200 || fake.stop.Position == nil || *fake.stop.Position != 0 || fake.stop.Sequence != 43 {
+	if response.Code != 200 || fake.stop.Position == nil || *fake.stop.Position != 0 || fake.stop.Sequence != 43 || !strings.Contains(response.Body.String(), `"outcome":"replayed"`) {
 		t.Fatalf("final zero: %d %s %+v", response.Code, response.Body.String(), fake.stop)
+	}
+	// A final sample needs both members; sequence alone or position alone is refused before the service.
+	calls := fake.calls
+	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/playback/session-1", playbackJSON(t, map[string]any{"installation_id": playbackTestInstallation, "stop_id": playbackTestStop, "sequence": 44}), viewerHeaders()), TypeValidationFailed)
+	if fake.calls != calls {
+		t.Fatal("half sample reached the service")
 	}
 	fake.err = &handlers.PlaybackOperationError{Status: 400, Code: "bad_request", Message: "Invalid playback sample"}
 	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/playback/session-1", playbackJSON(t, stopBody), viewerHeaders()), TypeValidationFailed)
 }
 
-func TestPlaybackV2CapabilityDisabledProblem(t *testing.T) {
-	problem := playbackProblem(&handlers.PlaybackOperationError{Status: http.StatusConflict, Code: "capability_disabled", Message: "Playback source is not admitted"})
-	if problem.Status != 409 || problem.Type != TypeCapabilityDisabled.URI() {
-		t.Fatalf("capability problem: %+v", problem)
+func TestPlaybackV2ProblemMapping(t *testing.T) {
+	for _, tc := range []struct {
+		err  *handlers.PlaybackOperationError
+		want ProblemType
+	}{
+		{&handlers.PlaybackOperationError{Status: http.StatusConflict, Code: "installation_changed", Message: "refresh capabilities"}, TypePlaybackInstallationChanged},
+		{&handlers.PlaybackOperationError{Status: http.StatusConflict, Code: "capability_not_configured", Message: "no installation"}, TypeCapabilityNotConfigured},
+		{&handlers.PlaybackOperationError{Status: http.StatusConflict, Code: "playback_attempt_reused", Message: "different request"}, TypeIdempotencyConflict},
+		{&handlers.PlaybackOperationError{Status: http.StatusConflict, Code: "progress_conflict", Message: "same sequence, different sample"}, TypePlaybackProgressConflict},
+		{&handlers.PlaybackOperationError{Status: http.StatusNotFound, Code: "session_not_found", Message: "gone"}, TypeNotFound},
+		{&handlers.PlaybackOperationError{Status: http.StatusTooManyRequests, Code: "event_rate_limited", Message: "drop"}, TypeRateLimited},
+		{&handlers.PlaybackOperationError{Status: http.StatusBadRequest, Code: "bad_request", Message: "invalid"}, TypeValidationFailed},
+		{&handlers.PlaybackOperationError{Status: http.StatusUpgradeRequired, Code: "protocol_version_unsupported", Message: "v3 only"}, TypeValidationFailed},
+		{&handlers.PlaybackOperationError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "store"}, TypeDependencyUnavailable},
+	} {
+		problem := playbackProblem(tc.err)
+		if problem.Status != tc.want.Status || problem.Type != tc.want.URI() {
+			t.Fatalf("%s: %+v", tc.err.Code, problem)
+		}
+	}
+	if problem := playbackProblem(errors.New("opaque")); problem.Type != TypeDependencyUnavailable.URI() {
+		t.Fatalf("opaque error: %+v", problem)
 	}
 }

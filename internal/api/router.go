@@ -88,9 +88,6 @@ import (
 
 // Dependencies holds all shared dependencies that handlers need.
 type Dependencies struct {
-	// InitialPlayback supplies the default durable runtime and its recovery worker.
-	InitialPlayback *handlers.InitialPlaybackFlowV3
-
 	Config *config.Config
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
@@ -1068,23 +1065,24 @@ func newChiRouter(deps Dependencies) chi.Router {
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
-		}
-		if deps.InitialPlayback != nil {
-			if err := playbackHandler.ConfigureInitialPlaybackV3(deps.InitialPlayback); err != nil {
-				panic("invalid explicit initial playback dependencies: " + err.Error())
+			// The v2 playback contract binds every mutation to this server's
+			// installation identity; a client that read capabilities from a
+			// different installation is refused. Nothing else depends on it, so a
+			// failure to read it only leaves the v2 playback surface unconfigured.
+			installationCtx := deps.AppContext
+			if installationCtx == nil {
+				installationCtx = context.Background()
 			}
-			if deps.RegisterShutdownWork != nil {
-				deps.RegisterShutdownWork(playbackHandler.InitialPlaybackShutdownDone())
-			}
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				playbackHandler.RunInitialPlaybackReconciliation(deps.InitialPlayback.Context, time.Second)
-			}()
-			if deps.RegisterShutdownWork != nil {
-				deps.RegisterShutdownWork(done)
+			if installationID, err := diagnostics.ServerInstanceID(installationCtx, catalog.NewServerSettingsRepo(deps.DB)); err != nil {
+				slog.Warn("playback installation identity unavailable; v2 playback stays unconfigured", "component", "api", "error", err)
+			} else {
+				playbackHandler.InstallationID = installationID
 			}
 		}
+		// The stream deny marker revokes a stopped session's tokens on every
+		// replica. Nil-safe: without Redis a stopped session serves from a valid
+		// token until the token expires, as before.
+		playbackHandler.StreamDeny = playback.NewStreamDeny(deps.RedisClient)
 		// Maintenance also bounds the in-memory fallback store: without it a
 		// DB-less deployment accumulates attempts and replans forever.
 		playbackHandler.StartV3Maintenance(deps.AppContext)
@@ -1111,6 +1109,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// direct/remux stream can rebuild its session from the token recipe
 			// after a restart (same manager, same SessionManager).
 			streamHandler.TM = playbackHandler.TranscodeManager()
+			streamHandler.StreamDeny = playbackHandler.StreamDeny
+			streamHandler.PlanStoreV3 = playbackHandler.PlanStoreV3
 			if deps.Config != nil {
 				streamHandler.JWTSecret = deps.Config.Auth.JWTSecret
 			}
@@ -1271,10 +1271,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		streamHandler.SubtitleCache = playback.NewSubtitleCache(func() string {
 			return deps.CurrentConfig().Playback.TranscodeDir
 		})
-	}
-
-	if streamHandler != nil && deps.InitialPlayback != nil && deps.InitialPlayback.AuxiliaryEnabled {
-		r.Handle("/internal/playback/auxiliary/*", streamHandler.AuxiliaryProducer(deps.InitialPlayback.ResolveAuxiliary, deps.InitialPlayback.AcquireAuxiliary))
 	}
 
 	restartStatus := deps.ServerRestartStatus
@@ -2115,18 +2111,20 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if sessionRepo != nil && userRepo != nil {
 			v2deps.PlaybackControlSocket = handlers.NewPlaybackControlSocketV2(playbackHandler, deps.RedisClient, sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
 		}
+		// The v2 delivery routes are thin wrappers over the v1 handlers:
+		// token-carried reconstruction and the deny marker live in the handlers.
 		v2deps.PlaybackMedia = &apiv2.PlaybackMediaHandlers{
-			Manifest: playbackHandler.InitialPlaybackDelivery(observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest)),
-			Segment:  playbackHandler.InitialPlaybackDelivery(observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment)),
+			Manifest: observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest),
+			Segment:  observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment),
 		}
 		if streamHandler != nil {
-			v2deps.PlaybackMedia.Original = playbackHandler.InitialPlaybackDelivery(func(w http.ResponseWriter, r *http.Request) {
+			v2deps.PlaybackMedia.Original = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}", streamHandler.HandleStream)(w, r)
 			})
-			v2deps.PlaybackMedia.Subtitle = streamHandler.InitialSubtitleDelivery(func(w http.ResponseWriter, r *http.Request) {
-				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleInitialSubtitle)(w, r)
+			v2deps.PlaybackMedia.Subtitle = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r)
 			})
-			v2deps.PlaybackMedia.SubtitleFonts = streamHandler
+			v2deps.PlaybackMedia.SubtitleFonts = http.HandlerFunc(streamHandler.HandleSubtitleFonts)
 		}
 	}
 	if progressHandler != nil {

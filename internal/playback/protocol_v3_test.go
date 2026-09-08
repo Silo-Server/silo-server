@@ -3951,21 +3951,3 @@ func TestPlanPlaybackV3AudioOnlyHonorsAttemptedKeys(t *testing.T) {
 		t.Fatalf("third = %s", ExplainPlannerResultV3(third))
 	}
 }
-
-func TestStartRequestV3BoundTimelinePin(t *testing.T) {
-	req := validStartRequestV3()
-	req.ProgressPersistence = ProgressPersistenceClientBoundV3
-	req.StartPosition = new(float64(0))
-	req.ClientFeatures = append(req.ClientFeatures, FeatureBoundClientTimelineV3)
-	if _, err := req.NormalizeAndValidate(); err == nil {
-		t.Fatal("bound start without discovered manifest pin accepted")
-	}
-	req.TimelineID = strings.Repeat("a", 64)
-	if _, err := req.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	req.ProgressPersistence = ProgressPersistenceClientV3
-	if _, err := req.NormalizeAndValidate(); err == nil {
-		t.Fatal("unbound mode silently ignored timeline pin")
-	}
-}

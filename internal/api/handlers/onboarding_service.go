@@ -28,7 +28,7 @@ func (h *OnboardingHandler) progressStore(ctx context.Context, userID int) (user
 	if err != nil {
 		return nil, err
 	}
-	progress, ok := userstore.Capability[userstore.OnboardingProgressStore](store)
+	progress, ok := store.(userstore.OnboardingProgressStore)
 	if !ok {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Onboarding progress is unavailable")
 	}

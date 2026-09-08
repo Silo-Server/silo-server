@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -981,24 +980,10 @@ func main() {
 			}
 		}()
 
-		configuredNodeID, _ := watcher.NodeRowID()
-		initialNode, initialNodeErr := configureInitialNodePlayback(appCtx, bc, pool, redisClient, configuredNodeID, watcher.Config().Auth.JWTSecret)
-		if initialNodeErr != nil {
-			log.Fatalf("initial worker playback: %v", initialNodeErr)
-		}
-
 		var handler http.Handler
 		var shutdownStandalone func(context.Context) error
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
-			if initialNode != nil {
-				srv.WithExecutorRuntime(initialNode.Acquire, initialNode.runtime.Resolve, initialNode.OpenTransfer)
-				if bc.InitialPlaybackAPIOrigin != "" {
-					if _, err := srv.WithAuxiliaryProducer(bc.InitialPlaybackAPIOrigin, initialNode.OpenAuxiliary); err != nil {
-						log.Fatalf("initial proxy auxiliary playback: %v", err)
-					}
-				}
-			}
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
 			if resolverErr != nil {
 				log.Fatalf("load trusted CIDRs: %v", resolverErr)
@@ -1010,12 +995,11 @@ func main() {
 			// shared grant store central wrote at plan time, and the caller's
 			// own access token is re-checked against the live login session in
 			// Postgres, so a revoked login stops streaming here immediately.
-			legacyGrants := noderecipe.NewProxyGrantStore(redisClient, 0)
-			if initialNode != nil {
-				srv.SetMediaGrantAuthority(initialNodeGrantLookup{runtime: initialNode.runtime, legacy: legacyGrants}, auth.NewSessionRepository(pool))
-			} else {
-				srv.SetMediaGrantAuthority(legacyGrants, auth.NewSessionRepository(pool))
-			}
+			srv.SetMediaGrantAuthority(noderecipe.NewProxyGrantStore(redisClient, 0), auth.NewSessionRepository(pool))
+			// Consult the session-deny marker central writes on stop, expiry,
+			// and admin terminate before serving media, so a revoked stream
+			// token or grant stops here instead of at its 24h TTL.
+			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
 			srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(pool),
 				downloads.NewRepository(pool),
@@ -1034,10 +1018,11 @@ func main() {
 			handler = srv.Handler()
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
-			if initialNode != nil {
-				srv.WithExecutorGrantProvider(initialNode.Acquire).WithExecutorRecipeResolver(initialNode.runtime.Resolve).WithExecutorOutputTransferProvider(initialNode.AcquireTransfer)
-			}
 			srv.SetInputPathAuthorizer(transcodenode.NewCatalogPathAuthorizer(scanner.NewFileRepository(pool)))
+			// Consult the session-deny marker central writes on stop, expiry,
+			// and admin terminate before serving or reconstructing a session,
+			// so a revoked stream token stops here instead of at its 24h TTL.
+			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
 			// Read jellycompat reconstruction recipes central wrote at transcode
 			// start, so this node can rebuild a Jellyfin transcode after its own
@@ -1059,19 +1044,7 @@ func main() {
 
 		_ = operationalWriter
 		_ = opsRepo
-		var stopInitialNode func()
-		if initialNode != nil {
-			stopInitialNode = initialNode.cancel
-			previousShutdown := shutdownStandalone
-			shutdownStandalone = func(ctx context.Context) error {
-				err := initialNode.Shutdown(ctx)
-				if previousShutdown != nil {
-					err = errors.Join(err, previousShutdown(ctx))
-				}
-				return err
-			}
-		}
-		startStandaloneServer(cfg.Server.Listen, handler, stopInitialNode, shutdownStandalone)
+		startStandaloneServer(cfg.Server.Listen, handler, shutdownStandalone)
 		return
 	}
 
@@ -2093,9 +2066,6 @@ func main() {
 	var compatTerminalRecoveryReady <-chan struct{}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider
-	}
-	if err := configureInitialPlaybackStartup(bc, &deps); err != nil {
-		log.Fatalf("initial playback startup: %v", err)
 	}
 	if watchProviderService != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
@@ -3295,7 +3265,7 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
 // It listens on the given address, handles graceful shutdown on SIGTERM/SIGINT.
-func startStandaloneServer(addr string, handler http.Handler, stopInitialWork func(), shutdownWork func(context.Context) error) {
+func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(context.Context) error) {
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      handler,
@@ -3320,10 +3290,6 @@ func startStandaloneServer(addr string, handler http.Handler, stopInitialWork fu
 		slog.Info("received signal, shutting down", "signal", sig)
 	case serverErr := <-errCh:
 		slog.Error("server error, shutting down", "error", serverErr)
-	}
-
-	if stopInitialWork != nil {
-		stopInitialWork()
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -13,12 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgsourcegate"
 )
 
 type Postgres struct {
-	db               *pgxpool.Pool
-	grantMaxDuration time.Duration
+	db *pgxpool.Pool
 }
 
 func NewPostgres(db *pgxpool.Pool) *Postgres { return &Postgres{db: db} }
@@ -94,26 +92,14 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 	if err != nil {
 		return err
 	}
-	// Terminal refusals publish no session or executable plan. They remain
-	// persistable for admitted accounts without reopening legacy allocation.
-	var release func()
-	if record.SessionID == "" && record.StartResponse.SessionID == "" && record.StartResponse.PlaybackPlan == nil && record.StartResponse.Outcome == playback.OutcomeAdaptationUnavailableV3 {
-		release, err = pgsourcegate.Shared(ctx, tx, s.db, record.UserID)
-	} else {
-		release, err = lockSourceAdmission(ctx, tx, s.db, record.UserID, "")
-	}
-	defer release()
-	defer rollbackAuthority(tx)
-	if err != nil {
-		return err
-	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	// Expired rows linger for up to an hour until CleanupExpired runs; they
 	// must not wedge a legitimate attempt-ID or session reuse into a
 	// conflict that the recovery lookup (which filters expired rows) can
 	// never resolve.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM playback_v3_attempts
-		WHERE (playback_attempt_id = $1 OR session_id = NULLIF($2, '')::uuid) AND expires_at <= NOW() AND control_activation IS NULL`,
+		WHERE (playback_attempt_id = $1 OR session_id = NULLIF($2, '')::uuid) AND expires_at <= NOW()`,
 		record.PlaybackAttemptID, record.SessionID); err != nil {
 		return err
 	}
@@ -170,7 +156,7 @@ func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, val
 	err := s.db.QueryRow(ctx, `
 		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id
 		FROM playback_v3_attempts
-		WHERE `+predicate+` AND expires_at > NOW() AND control_state IN ('legacy', 'active', 'terminal')`, value).Scan(
+		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -182,29 +168,30 @@ func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, val
 	return &identity, nil
 }
 
-const attemptSelect = `SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
- requested_media_file_id, effective_media_file_id,
- current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
- normalized_request, start_response, request_digest, expires_at
- FROM playback_v3_attempts`
-
 func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) (*playback.AttemptRecordV3, error) {
-	return scanAttempt(s.db.QueryRow(ctx, attemptSelect+` WHERE `+predicate+` AND expires_at > NOW() AND control_state IN ('legacy', 'active', 'terminal')`, value))
-}
-
-func scanAttempt(row pgx.Row) (*playback.AttemptRecordV3, error) {
 	var record playback.AttemptRecordV3
-	var planJSON, recipeJSON, requestJSON, responseJSON []byte
-	err := row.Scan(
+	var planJSON, recipeJSON, requestJSON, responseJSON, sampleJSON []byte
+	err := s.db.QueryRow(ctx, `
+		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
+		       requested_media_file_id, effective_media_file_id,
+		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
+		       normalized_request, start_response, request_digest, expires_at,
+		       last_sequence, last_sample, stopped_at
+		FROM playback_v3_attempts
+		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
 		&record.RequestedMediaFileID, &record.EffectiveMediaFileID,
 		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
 		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt,
+		&record.LastSequence, &sampleJSON, &record.StoppedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	if record.LastSample, err = decodeProgressSample(sampleJSON); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(planJSON, &record.CurrentPlan); err != nil {
@@ -223,24 +210,12 @@ func scanAttempt(row pgx.Row) (*playback.AttemptRecordV3, error) {
 }
 
 func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, error) {
-	return s.beginReplan(ctx, nil, sessionID, requestID, digest, baseReplanRequestID, leaseUntil)
-}
-
-// BeginBoundReplan is the replan lease for an authority-owned attempt. The
-// legacy writer refuses such rows; this one admits exactly the captured
-// owner, epoch and incarnation while the lease is live and the row is active,
-// so a lost owner can neither reserve nor replay a replan.
-func (s *Postgres) BeginBoundReplan(ctx context.Context, authority playback.AttemptAuthorityV3, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, error) {
-	return s.beginReplan(ctx, &authority, sessionID, requestID, digest, baseReplanRequestID, leaseUntil)
-}
-
-func (s *Postgres) beginReplan(ctx context.Context, authority *playback.AttemptAuthorityV3, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, error) {
 	leaseToken := uuid.NewString()
 	// One retry: if a concurrent writer wins the insert race (possible only
 	// when a caller skips the advisory session lock), re-read its row and
 	// resolve to a replay/in-flight lease instead of surfacing a raw 23505.
 	for attempt := 0; ; attempt++ {
-		lease, retry, err := s.beginReplanOnce(ctx, authority, sessionID, requestID, digest, baseReplanRequestID, leaseToken, leaseUntil)
+		lease, retry, err := s.beginReplanOnce(ctx, sessionID, requestID, digest, baseReplanRequestID, leaseToken, leaseUntil)
 		if retry && attempt == 0 {
 			continue
 		}
@@ -248,58 +223,20 @@ func (s *Postgres) beginReplan(ctx context.Context, authority *playback.AttemptA
 	}
 }
 
-// replanRowAdmitted reports whether the attempt row may be replanned by this
-// writer: the legacy writer only touches legacy rows, and a bound writer only
-// its own live active authority generation.
-func replanRowAdmitted(ctx context.Context, tx pgx.Tx, authority *playback.AttemptAuthorityV3, sessionID string) error {
-	if authority == nil {
-		var controlState string
-		if err := tx.QueryRow(ctx, `SELECT control_state FROM playback_v3_attempts WHERE session_id = $1::uuid`, sessionID).Scan(&controlState); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return playback.ErrSessionNotFound
-			}
-			return err
-		}
-		if controlState != "legacy" {
-			return playback.ErrStaleAttemptAuthorityV3
-		}
-		return nil
-	}
-	var admitted bool
-	err := tx.QueryRow(ctx, `SELECT control_state = 'active' AND control_owner = $2::uuid AND control_epoch = $3
-	 AND control_incarnation = NULLIF($4, '')::uuid AND control_lease_expires_at > clock_timestamp() AND expires_at > clock_timestamp()
-	 AND playback_attempt_id = $5
-	 FROM playback_v3_attempts WHERE session_id = $1::uuid`, sessionID, authority.OwnerID, authority.Epoch, authority.Incarnation, authority.PlaybackAttemptID).Scan(&admitted)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return playback.ErrSessionNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if !admitted {
-		return playback.ErrStaleAttemptAuthorityV3
-	}
-	return nil
-}
-
-func (s *Postgres) beginReplanOnce(ctx context.Context, authority *playback.AttemptAuthorityV3, sessionID, requestID, digest, baseReplanRequestID, leaseToken string, leaseUntil time.Time) (playback.ReplanLeaseV3, bool, error) {
+func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID, leaseToken string, leaseUntil time.Time) (playback.ReplanLeaseV3, bool, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return playback.ReplanLeaseV3{}, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := replanRowAdmitted(ctx, tx, authority, sessionID); err != nil {
-		return playback.ReplanLeaseV3{}, false, err
-	}
 	var existingDigest, existingBase, state string
 	var existingLease time.Time
-	var hasReplacement bool
 	var response []byte
 	err = tx.QueryRow(ctx, `
-		SELECT request_digest, base_replan_request_id, state, lease_expires_at, response, route_replacement IS NOT NULL
+		SELECT request_digest, base_replan_request_id, state, lease_expires_at, response
 		FROM playback_v3_replans
 		WHERE session_id = $1::uuid AND replan_request_id = $2
-		FOR UPDATE`, sessionID, requestID).Scan(&existingDigest, &existingBase, &state, &existingLease, &response, &hasReplacement)
+		FOR UPDATE`, sessionID, requestID).Scan(&existingDigest, &existingBase, &state, &existingLease, &response)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO playback_v3_replans (session_id, replan_request_id, request_digest, base_replan_request_id, lease_owner, lease_expires_at)
@@ -328,10 +265,7 @@ func (s *Postgres) beginReplanOnce(ctx context.Context, authority *playback.Atte
 		}
 		return playback.ReplanLeaseV3{State: playback.ReplanLeaseCompletedV3, Response: response}, false, nil
 	}
-	if hasReplacement && existingBase != baseReplanRequestID {
-		return playback.ReplanLeaseV3{}, false, playback.ErrStaleReplanLeaseV3
-	}
-	if hasReplacement || time.Now().Before(existingLease) {
+	if time.Now().Before(existingLease) {
 		if err := tx.Commit(ctx); err != nil {
 			return playback.ReplanLeaseV3{}, false, err
 		}
@@ -354,26 +288,12 @@ func (s *Postgres) ReleaseReplan(ctx context.Context, sessionID, requestID, leas
 	_, err := s.db.Exec(ctx, `
 		DELETE FROM playback_v3_replans
 		WHERE session_id = $1::uuid AND replan_request_id = $2
-		  AND state = 'active' AND lease_owner = $3 AND route_replacement IS NULL`,
+		  AND state = 'active' AND lease_owner = $3`,
 		sessionID, requestID, leaseToken)
 	return err
 }
 
 func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
-	return s.completeReplan(ctx, nil, sessionID, requestID, leaseToken, baseReplanRequestID, response, record)
-}
-
-// CompleteBoundReplan commits a replan on an authority-owned attempt. The
-// attempt CAS additionally requires the captured fence and a live lease, so a
-// replaced or expired owner cannot publish a plan over its successor's.
-func (s *Postgres) CompleteBoundReplan(ctx context.Context, authority playback.AttemptAuthorityV3, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
-	if record.PlaybackAttemptID != authority.PlaybackAttemptID {
-		return playback.ErrStaleAttemptAuthorityV3
-	}
-	return s.completeReplan(ctx, &authority, sessionID, requestID, leaseToken, baseReplanRequestID, response, record)
-}
-
-func (s *Postgres) completeReplan(ctx context.Context, authority *playback.AttemptAuthorityV3, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -399,44 +319,13 @@ func (s *Postgres) completeReplan(ctx context.Context, authority *playback.Attem
 	// under the advisory session lock it never fails, but a skipped or broken
 	// lock must surface as a conflict rather than silently last-writer-win
 	// the durable plan.
-	var attemptResult pgconn.CommandTag
-	if authority == nil {
-		attemptResult, err = tx.Exec(ctx, `
+	attemptResult, err := tx.Exec(ctx, `
 		UPDATE playback_v3_attempts SET
 			effective_media_file_id = $2, current_plan_id = $3,
 			current_replan_request_id = $4, current_plan = $5, frozen_recipe = $6,
 			normalized_request = $7, start_response = $8, expires_at = $9, updated_at = NOW()
-		WHERE session_id = $1::uuid AND current_replan_request_id = $10 AND control_state = 'legacy'`,
-			sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, record.ExpiresAt, baseReplanRequestID)
-	} else {
-		// Lock in a separate statement before inspecting replacement rows. A
-		// staging transaction can hold this attempt without changing its tuple;
-		// an UPDATE started before that transaction commits would otherwise
-		// inspect an old snapshot after waiting for the same row lock.
-		var locked bool
-		if err := tx.QueryRow(ctx, `SELECT true FROM playback_v3_attempts WHERE playback_attempt_id=$1 AND session_id=$2::uuid FOR UPDATE`, authority.PlaybackAttemptID, sessionID).Scan(&locked); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return playback.ErrSessionNotFound
-			}
-			return err
-		}
-		// The following statement sees committed candidates after the lock
-		// wait and checks live authority using the current database clock.
-		// A bound replan never moves the retention deadline or the executor
-		// route: the row stays on its reserved retention and staged executor,
-		// and only the plan projection advances under the fence.
-		attemptResult, err = tx.Exec(ctx, `
-		UPDATE playback_v3_attempts SET
-			effective_media_file_id = $2, current_plan_id = $3,
-			current_replan_request_id = $4, current_plan = $5, frozen_recipe = $6,
-			normalized_request = $7, start_response = $8, updated_at = clock_timestamp()
-		WHERE session_id = $1::uuid AND current_replan_request_id = $9 AND control_state = 'active'
-		  AND playback_attempt_id = $10 AND control_owner = $11::uuid AND control_epoch = $12 AND control_incarnation = NULLIF($13, '')::uuid
-		  AND control_lease_expires_at > clock_timestamp() AND expires_at > clock_timestamp()
-          AND NOT EXISTS (SELECT 1 FROM playback_v3_replans r WHERE r.session_id=playback_v3_attempts.session_id AND r.route_replacement->>'phase' IN ('staged','ready','retiring'))`,
-			sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, baseReplanRequestID,
-			authority.PlaybackAttemptID, authority.OwnerID, authority.Epoch, authority.Incarnation)
-	}
+		WHERE session_id = $1::uuid AND current_replan_request_id = $10`,
+		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, record.ExpiresAt, baseReplanRequestID)
 	if err != nil {
 		return err
 	}
@@ -450,7 +339,7 @@ func (s *Postgres) completeReplan(ctx context.Context, authority *playback.Attem
 	replanResult, err := tx.Exec(ctx, `
 		UPDATE playback_v3_replans SET state = 'completed', response = $4, updated_at = NOW()
 		WHERE session_id = $1::uuid AND replan_request_id = $2
-		  AND state = 'active' AND lease_owner = $3 AND route_replacement IS NULL`, sessionID, requestID, leaseToken, response)
+		  AND state = 'active' AND lease_owner = $3`, sessionID, requestID, leaseToken, response)
 	if err != nil {
 		return err
 	}
@@ -493,11 +382,141 @@ func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEv
 	return err
 }
 
+// Progress and stop sequencing. Both are single-statement compare-and-sets on
+// the attempt row, so they need neither the advisory session lock nor a
+// transaction: concurrent samples for one attempt serialize on the row lock
+// and the losers re-read the committed state to classify themselves.
+
+func decodeProgressSample(data []byte) (*playback.ProgressSampleV3, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var sample playback.ProgressSampleV3
+	if err := json.Unmarshal(data, &sample); err != nil {
+		return nil, err
+	}
+	return &sample, nil
+}
+
+func (s *Postgres) ApplyProgress(ctx context.Context, sessionID string, sample playback.ProgressSampleV3) (playback.ProgressReceiptV3, error) {
+	sampleJSON, err := json.Marshal(sample)
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	result, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET last_sequence = $2, last_sample = $3, updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND last_sequence < $2`,
+		sessionID, sample.Sequence, sampleJSON)
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	if result.RowsAffected() == 1 {
+		return playback.ProgressReceiptV3{Outcome: playback.ProgressAppliedV3, Accepted: &sample}, nil
+	}
+	var lastSequence int64
+	var lastJSON []byte
+	var stoppedAt *time.Time
+	err = s.db.QueryRow(ctx, `
+		SELECT last_sequence, last_sample, stopped_at FROM playback_v3_attempts
+		WHERE session_id = $1::uuid AND expires_at > NOW()`, sessionID).Scan(&lastSequence, &lastJSON, &stoppedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return playback.ProgressReceiptV3{}, playback.ErrSessionNotFound
+	}
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	if stoppedAt != nil {
+		return playback.ProgressReceiptV3{}, playback.ErrAttemptStoppedV3
+	}
+	last, err := decodeProgressSample(lastJSON)
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	return playback.ResolveUnappliedProgressV3(lastSequence, last, sample)
+}
+
+func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, final *playback.ProgressSampleV3) (playback.StopReceiptV3, bool, error) {
+	if _, err := uuid.Parse(stopID); err != nil {
+		return playback.StopReceiptV3{}, false, playback.ErrInvalidStopIDV3
+	}
+	var finalSequence *int64
+	var finalJSON []byte
+	if final != nil {
+		finalSequence = &final.Sequence
+		var err error
+		if finalJSON, err = json.Marshal(final); err != nil {
+			return playback.StopReceiptV3{}, false, err
+		}
+	}
+	// SET expressions all read the pre-update row, so the "final sample is
+	// newer" test repeats verbatim for the sequence, the sample and the
+	// receipt's accepted sample.
+	var receiptJSON []byte
+	err := s.db.QueryRow(ctx, `
+		UPDATE playback_v3_attempts
+		SET stopped_at = NOW(),
+		    stop_id = $2::uuid,
+		    last_sequence = CASE WHEN $3::bigint > last_sequence THEN $3::bigint ELSE last_sequence END,
+		    last_sample = CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END,
+		    stop_receipt = jsonb_strip_nulls(jsonb_build_object(
+		        'stop_id', $2::uuid::text,
+		        'accepted', CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END)),
+		    updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
+		RETURNING stop_receipt`, sessionID, stopID, finalSequence, finalJSON).Scan(&receiptJSON)
+	if err == nil {
+		var receipt playback.StopReceiptV3
+		if err := json.Unmarshal(receiptJSON, &receipt); err != nil {
+			return playback.StopReceiptV3{}, false, err
+		}
+		return receipt, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return playback.StopReceiptV3{}, false, err
+	}
+	err = s.db.QueryRow(ctx, `
+		SELECT stop_receipt FROM playback_v3_attempts
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NOT NULL`, sessionID).Scan(&receiptJSON)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return playback.StopReceiptV3{}, false, playback.ErrSessionNotFound
+	}
+	if err != nil {
+		return playback.StopReceiptV3{}, false, err
+	}
+	var receipt playback.StopReceiptV3
+	if err := json.Unmarshal(receiptJSON, &receipt); err != nil {
+		return playback.StopReceiptV3{}, false, err
+	}
+	return receipt, false, nil
+}
+
+func (s *Postgres) RecordStopReceipt(ctx context.Context, sessionID string, receipt playback.StopReceiptV3) error {
+	if _, err := uuid.Parse(receipt.StopID); err != nil {
+		return playback.ErrInvalidStopIDV3
+	}
+	receiptJSON, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts SET stop_receipt = $2, updated_at = NOW()
+		WHERE session_id = $1::uuid AND stopped_at IS NOT NULL AND stop_id = $3::uuid`,
+		sessionID, receiptJSON, receipt.StopID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return playback.ErrSessionNotFound
+	}
+	return nil
+}
+
 func (s *Postgres) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
 	if _, err := s.db.Exec(ctx, `DELETE FROM playback_route_events WHERE received_at < $1`, now.Add(-30*24*time.Hour)); err != nil {
 		return 0, err
 	}
-	result, err := s.db.Exec(ctx, `DELETE FROM playback_v3_attempts WHERE ((control_state = 'legacy' AND expires_at <= $1) OR (control_state <> 'legacy' AND expires_at <= clock_timestamp())) AND (control_activation IS NULL OR (control_activation->>'phase' IN ('aborted','stopped') AND control_activation->'terminal' IS NOT NULL AND control_activation->'terminal' <> 'null'::jsonb AND control_drain_not_before <= clock_timestamp()))`, now)
+	result, err := s.db.Exec(ctx, `DELETE FROM playback_v3_attempts WHERE expires_at <= $1`, now)
 	if err != nil {
 		return 0, err
 	}

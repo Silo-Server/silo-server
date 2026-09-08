@@ -132,10 +132,6 @@ export interface PlayerSubtitleInfo {
    * extract attachments from the source media file.
    */
   font_bundle_url?: string;
-  /** Captured session credentials, scoped to the validated auxiliary URL. */
-  request_is_current?: () => boolean;
-  request_headers?: Readonly<Record<string, string>>;
-  font_request_headers?: Readonly<Record<string, string>>;
   /**
    * When true, this is an in-progress AI translation whose cues arrive over the
    * realtime websocket rather than from `url`. `useSubtitleTracks` feeds it from

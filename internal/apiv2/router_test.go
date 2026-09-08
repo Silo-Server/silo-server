@@ -805,7 +805,7 @@ func TestReconcileSpecSeeded(t *testing.T) {
 		"POST /api/v2/admin/markers/providers/{provider}/validate",
 		"PUT /api/v2/admin/markers/providers/{provider}",
 	)
-	observed = append(observed, "GET /api/v2/playback/timelines/{file_id}", "GET /api/v2/playback/capabilities", "POST /api/v2/playback/start", "POST /api/v2/playback/{session_id}/progress", "DELETE /api/v2/playback/{session_id}", "POST /api/v2/playback/route-events", "POST /api/v2/playback/{session_id}/replan")
+	observed = append(observed, "GET /api/v2/playback/capabilities", "POST /api/v2/playback/start", "POST /api/v2/playback/{session_id}/progress", "DELETE /api/v2/playback/{session_id}", "POST /api/v2/playback/route-events", "POST /api/v2/playback/{session_id}/replan")
 	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
 	if err != nil || len(unaccounted) != 0 || len(unserved) != 0 {
 		t.Fatalf("baseline: %v %v %v", unaccounted, unserved, err)

@@ -573,7 +573,6 @@ GET /api/v2/playback/sessions/control/capabilities	non-media
 GET /api/v2/playback/sessions/{session_id}/control/ws	non-media
 POST /api/v2/playback/sessions/{session_id}/control/ws-ticket	non-media
 POST /api/v2/playback/start	non-media
-GET /api/v2/playback/timelines/{file_id}	non-media
 GET /api/v2/playback/transcode/{session_id}/master.m3u8	non-media
 GET /api/v2/playback/transcode/{session_id}/segment/{name}	non-media
 DELETE /api/v2/playback/{session_id}	non-media
@@ -1690,7 +1689,6 @@ GET /api/v2/playback/sessions/control/capabilities	non-media
 GET /api/v2/playback/sessions/{session_id}/control/ws	non-media
 POST /api/v2/playback/sessions/{session_id}/control/ws-ticket	non-media
 POST /api/v2/playback/start	non-media
-GET /api/v2/playback/timelines/{file_id}	non-media
 GET /api/v2/playback/transcode/{session_id}/master.m3u8	non-media
 GET /api/v2/playback/transcode/{session_id}/segment/{name}	non-media
 DELETE /api/v2/playback/{session_id}	non-media

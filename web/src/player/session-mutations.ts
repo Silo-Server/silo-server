@@ -1,117 +1,56 @@
-import type { BoundAcceptedProgress, ProgressTimeline } from "./bound-client-timeline";
-import {
-  openDurableSession,
-  durableProgress,
-  durableStop,
-  pendingDurableSessions,
-  type DurableSession,
-} from "./durable-session-mutations";
-import type { PlayerConfig, PlaybackMutationContext } from "./context/PlayerConfigContext";
-import { playerFetch, playerRequestHeaders, PlayerFetchError } from "./player-fetch";
-import { randomUUID } from "@/lib/uuid";
-import { PlaybackOwnerLostError } from "./owner-loss-recovery";
+/**
+ * Sequenced progress and stop for a session started on `/api/v2`.
+ *
+ * The server orders an attempt's samples by `sequence` with a compare-and-set
+ * on the attempt row, so this module allocates one sequence per sample, sends
+ * samples in order, and retries a lost reply with the identical body. A stop
+ * mints one `stop_id`, waits for in-flight progress, and keeps its exact body
+ * across retries; the server answers `stopped` for the first stop and
+ * `replayed` for every later one, and both mean the session is over. There is
+ * no 202, no draining state and nothing to poll.
+ *
+ * A session this module does not know (a bridge session started on v1) keeps
+ * the v1 progress/stop bodies.
+ */
 
-type ProgressSample = { position: number; is_paused: boolean };
+import type { PlayerConfig } from "./context/PlayerConfigContext";
+import { playerFetch, playerRequestHeaders, PlayerFetchError } from "./player-fetch";
+import { playerV2Origin } from "./player-v2";
+import { randomUUID } from "@/lib/uuid";
+
+export type ProgressSample = { position: number; is_paused: boolean };
 
 type Mutations = {
-  durable?: DurableSession;
+  installationId: string;
   readSample?: () => ProgressSample | null;
   latestSample?: ProgressSample;
   sequence: number;
   tail: Promise<unknown>;
   stopBody?: string;
-  stopping?: Promise<BoundAcceptedProgress | void>;
+  stopping?: Promise<void>;
   stopped?: boolean;
 };
 const sessions = new Map<string, Mutations>();
 
-export function registerSessionMutations(sessionId: string, features: readonly string[]) {
-  if (features.includes("sequenced_progress_v1") && !sessions.has(sessionId)) {
-    sessions.set(sessionId, { sequence: 0, tail: Promise.resolve() });
-  }
-}
-export async function registerDurableSessionMutations(
-  config: PlayerConfig,
-  sessionId: string,
-  installationId: string,
-  timeline?: Readonly<ProgressTimeline>,
-  capturedContext?: PlaybackMutationContext,
-  attemptId?: string,
-) {
-  const durable = await openDurableSession(
-    config,
-    sessionId,
-    installationId,
-    timeline,
-    capturedContext,
-    attemptId,
-  );
-  registerSessionMutations(sessionId, ["sequenced_progress_v1"]);
-  const existing = sessions.get(sessionId)!;
-  if (existing.durable && existing.durable.key !== durable.key)
-    throw new Error("Playback session identity conflicts with its saved retry state");
-  existing.durable = durable;
-}
-export function offerPendingPlaybackStops(
-  config: PlayerConfig,
-  installationId: string,
-  includeRegistered = false,
-) {
-  for (const durable of pendingDurableSessions(config, installationId)) {
-    const id = durable.identity.sessionId;
-    const existing = sessions.get(id);
-    if (
-      !includeRegistered &&
-      existing &&
-      (!existing.durable || existing.durable.context.isCurrent())
-    )
-      continue;
-    if (existing?.durable && existing.durable.key !== durable.key) continue;
-    registerSessionMutations(id, ["sequenced_progress_v1"]);
-    sessions.get(id)!.durable = durable;
-    config.onPlaybackStopError?.(
-      id,
-      new Error("A previous playback session still needs confirmation."),
-      () => {
-        void retryDurableStop(config, durable, undefined, false).catch(() => {});
-      },
-    );
+/** Registers a v2 session so its progress and stop are sequenced. */
+export function registerSessionMutations(sessionId: string, installationId: string) {
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, { installationId, sequence: 0, tail: Promise.resolve() });
   }
 }
 
-async function retryDurableStop(
-  config: PlayerConfig,
-  durable: DurableSession,
-  sample: ProgressSample | undefined,
-  keepalive: boolean,
-): Promise<BoundAcceptedProgress | void> {
-  try {
-    return await durableStop(config, durable, sample, keepalive);
-  } catch (error) {
-    if (error instanceof PlaybackOwnerLostError) throw error;
-    config.onPlaybackStopError?.(
-      durable.identity.sessionId,
-      error instanceof Error ? error : new Error("Playback stop not confirmed"),
-      () => {
-        void retryDurableStop(config, durable, sample, keepalive).catch(() => {});
-      },
-    );
-    throw error;
-  }
+/** Forgets every registered session; tests call this between cases. */
+export function resetSessionMutations() {
+  sessions.clear();
 }
 
 export function hasSequencedProgress(sessionId: string) {
   return sessions.has(sessionId);
 }
 
-/** The durable v2 binding of a session started through the initial flow, if any. */
-export function durableSessionFor(sessionId: string): DurableSession | undefined {
-  return sessions.get(sessionId)?.durable;
-}
-
-/** The installation a durable (v2 initial-flow) session was opened with, if any. */
+/** The installation a v2 session was started with, if any. */
 export function sessionInstallation(sessionId: string): string | undefined {
-  return sessions.get(sessionId)?.durable?.identity.installationId;
+  return sessions.get(sessionId)?.installationId;
 }
 
 export function observeSessionProgress(sessionId: string, reader: () => ProgressSample | null) {
@@ -152,41 +91,60 @@ async function mutationFetch(
   keepalive: boolean,
   timeout: number,
 ) {
-  const response = await fetch(`${config.apiBaseUrl}${path}`, {
+  const response = await fetch(`${playerV2Origin(config)}/api/v2${path}`, {
     method,
     body,
     keepalive,
-    headers: playerRequestHeaders(config, undefined, true),
+    headers: playerRequestHeaders(config, { Accept: "application/json" }, true),
     signal: AbortSignal.timeout(timeout),
   });
   if (!response.ok) {
-    throw new PlayerFetchError(response.status, `Playback update failed (${response.status})`);
+    let message = `Playback update failed (${response.status})`;
+    let code: string | undefined;
+    const text = await response.text().catch(() => "");
+    try {
+      const problem = JSON.parse(text) as { detail?: string; type?: string };
+      if (problem.detail) message = problem.detail;
+      code = problem.type?.split("?")[0]?.split("/").pop()?.replace(/#.*$/, "") || undefined;
+    } catch {
+      // A non-problem body keeps the generic message.
+    }
+    throw new PlayerFetchError(response.status, message, code, text);
   }
   return response;
 }
 
+function isTransient(error: unknown) {
+  if (error instanceof PlayerFetchError) return error.status >= 500;
+  return error instanceof TypeError || error instanceof DOMException;
+}
+
+/**
+ * Sends one progress sample. Sequenced sessions serialize samples and retry
+ * a transient failure with the same body; a v1 session posts the v1 body.
+ */
 export function sendSessionProgress(
   config: PlayerConfig,
   sessionId: string,
-  sample: { position: number; is_paused: boolean },
+  sample: ProgressSample,
   keepalive = false,
-): Promise<BoundAcceptedProgress | void> {
+): Promise<void> {
   const state = sessions.get(sessionId);
   if (!state)
-    return playerFetch(config, `/playback/${sessionId}/progress`, {
+    return playerFetch<void>(config, `/playback/${sessionId}/progress`, {
       method: "POST",
       body: JSON.stringify(sample),
       keepalive,
     });
-  if (state.durable) {
-    state.latestSample = sample;
-    return durableProgress(config, state.durable, sample, keepalive);
-  }
   if (state.stopBody) return Promise.resolve();
   if (!Number.isSafeInteger(state.sequence + 1))
     return Promise.reject(new Error("Playback progress sequence exhausted"));
   state.latestSample = sample;
-  const body = JSON.stringify({ ...sample, sequence: ++state.sequence });
+  const body = JSON.stringify({
+    ...sample,
+    sequence: ++state.sequence,
+    installation_id: state.installationId,
+  });
   const pending = state.tail
     .catch(() => {})
     .then(async () => {
@@ -202,8 +160,7 @@ export function sendSessionProgress(
           );
           return;
         } catch (error) {
-          if (attempt >= 2 || (error instanceof PlayerFetchError && error.status < 500))
-            throw error;
+          if (attempt >= 2 || !isTransient(error)) throw error;
           await pause(250);
         }
       }
@@ -212,32 +169,20 @@ export function sendSessionProgress(
   return pending;
 }
 
-// A stop captures one immutable identity and waits for prior progress requests.
-// HTTP 202 means draining, never completion. A later caller retries the same ID.
+/**
+ * Stops a session. A sequenced session mints one stop identity, attaches the
+ * latest sample, waits for prior progress and retries the exact body until a
+ * `stopped` or `replayed` receipt arrives or the 30s budget runs out. A v1
+ * session sends the bodiless v1 DELETE.
+ */
 export function stopSequencedSession(
   config: PlayerConfig,
   sessionId: string,
   keepalive = false,
-): Promise<BoundAcceptedProgress | void> {
+): Promise<void> {
   const state = sessions.get(sessionId);
-  if (!state) return playerFetch(config, `/playback/${sessionId}`, { method: "DELETE", keepalive });
-  if (state.durable) {
-    if (state.stopping) return state.stopping;
-    const stopping = retryDurableStop(
-      config,
-      state.durable,
-      state.readSample?.() ?? state.latestSample,
-      keepalive,
-    );
-    state.stopping = stopping;
-
-    void stopping
-      .finally(() => {
-        state.stopping = undefined;
-      })
-      .catch(() => {});
-    return stopping;
-  }
+  if (!state)
+    return playerFetch<void>(config, `/playback/${sessionId}`, { method: "DELETE", keepalive });
   if (state.stopped) return Promise.resolve();
   if (state.stopping) return state.stopping;
   if (!state.stopBody) {
@@ -245,14 +190,16 @@ export function stopSequencedSession(
     if (sample && !Number.isSafeInteger(state.sequence + 1))
       return Promise.reject(new Error("Playback progress sequence exhausted"));
     state.stopBody = JSON.stringify({
+      installation_id: state.installationId,
       stop_id: randomUUID(),
       ...(sample ? { ...sample, sequence: ++state.sequence } : {}),
     });
   }
   const body = state.stopBody;
+  const stopId = (JSON.parse(body) as { stop_id: string }).stop_id;
   const deadline = Date.now() + 30_000;
   const stopping = waitForProgress(state.tail).then(async () => {
-    while (Date.now() < deadline) {
+    for (;;) {
       try {
         const response = await mutationFetch(
           config,
@@ -263,39 +210,29 @@ export function stopSequencedSession(
           Math.max(1, Math.min(5000, deadline - Date.now())),
         );
         const receipt = (await response.json()) as { outcome?: string; stop_id?: string };
-        if (receipt.stop_id !== undefined && receipt.stop_id !== JSON.parse(body).stop_id)
-          throw new Error("Playback stop returned another receipt");
         if (
-          response.status === 200 &&
-          (receipt.outcome === "stopped" || receipt.outcome === "replayed")
-        ) {
+          receipt.outcome === "stopped" &&
+          receipt.stop_id !== undefined &&
+          receipt.stop_id !== stopId
+        )
+          throw new Error("Playback stop returned another receipt");
+        if (receipt.outcome === "stopped" || receipt.outcome === "replayed") {
           state.stopped = true;
           return;
         }
-        if (response.status !== 202 || receipt.outcome !== "draining")
-          throw new Error(`Unexpected playback stop status (${response.status})`);
+        throw new Error(`Unexpected playback stop outcome (${receipt.outcome ?? "none"})`);
       } catch (error) {
-        if (error instanceof PlayerFetchError && error.status < 500) throw error;
-        if (
-          !(
-            error instanceof PlayerFetchError ||
-            error instanceof TypeError ||
-            error instanceof DOMException
-          )
-        )
-          throw error;
+        if (error instanceof PlayerFetchError && error.status === 404) {
+          // The attempt is gone server-side: expired or never durable. Over.
+          state.stopped = true;
+          return;
+        }
+        if (!isTransient(error) || Date.now() >= deadline) throw error;
       }
       await pause(500);
     }
-    throw new Error("Playback stop is still pending. Please retry.");
   });
   state.stopping = stopping;
-  void stopping.catch((error) => {
-    const failure = error instanceof Error ? error : new Error("Playback stop not confirmed");
-    config.onPlaybackStopError?.(sessionId, failure, () => {
-      void stopSequencedSession(config, sessionId, keepalive).catch(() => {});
-    });
-  });
   void stopping
     .finally(() => {
       state.stopping = undefined;

@@ -8147,7 +8147,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -8211,7 +8211,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -8515,8 +8515,8 @@
         "adminHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -8641,8 +8641,8 @@
         "adminHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -9259,8 +9259,8 @@
         "literaryWorkHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -9313,8 +9313,8 @@
         "literaryWorkHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -9606,7 +9606,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -9627,7 +9627,7 @@
         "path": "/api/v2/admin/markers/files/{fileId}/history",
         "operation_id": "listAdminFileMarkerHistory"
       },
-      "notes": "Typed acting-admin recent marker audit history; bounded limit 1\u2013100, default 25. File selection preserves catalog access authorization; item/global selections retain existing admin scope. Audit identifiers are opaque strings and snapshots use canonical marker fields. Existing web callers adopted; independently reviewed and ratified."
+      "notes": "Typed acting-admin recent marker audit history; bounded limit 1–100, default 25. File selection preserves catalog access authorization; item/global selections retain existing admin scope. Audit identifiers are opaque strings and snapshots use canonical marker fields. Existing web callers adopted; independently reviewed and ratified."
     },
     {
       "listener": "api",
@@ -9689,7 +9689,7 @@
         "path": "/api/v2/admin/markers/history",
         "operation_id": "listAdminMarkerHistory"
       },
-      "notes": "Typed acting-admin recent marker audit history; bounded limit 1\u2013100, default 25. File selection preserves catalog access authorization; item/global selections retain existing admin scope. Audit identifiers are opaque strings and snapshots use canonical marker fields. Existing web callers adopted; independently reviewed and ratified."
+      "notes": "Typed acting-admin recent marker audit history; bounded limit 1–100, default 25. File selection preserves catalog access authorization; item/global selections retain existing admin scope. Audit identifiers are opaque strings and snapshots use canonical marker fields. Existing web callers adopted; independently reviewed and ratified."
     },
     {
       "listener": "api",
@@ -9751,7 +9751,7 @@
         "path": "/api/v2/admin/markers/items/{id}/history",
         "operation_id": "listAdminItemMarkerHistory"
       },
-      "notes": "Typed acting-admin recent marker audit history; bounded limit 1\u2013100, default 25. File selection preserves catalog access authorization; item/global selections retain existing admin scope. Audit identifiers are opaque strings and snapshots use canonical marker fields. Existing web callers adopted; independently reviewed and ratified."
+      "notes": "Typed acting-admin recent marker audit history; bounded limit 1–100, default 25. File selection preserves catalog access authorization; item/global selections retain existing admin scope. Audit identifiers are opaque strings and snapshots use canonical marker fields. Existing web callers adopted; independently reviewed and ratified."
     },
     {
       "listener": "api",
@@ -10584,8 +10584,8 @@
         "deps.Notifications != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -10639,8 +10639,8 @@
         "deps.Notifications != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -15804,8 +15804,8 @@
         "adminPlaybackControlHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/admin/sessions/capabilities",
@@ -15868,8 +15868,8 @@
         "adminPlaybackControlHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/admin/sessions/capabilities",
@@ -15932,8 +15932,8 @@
         "adminPlaybackControlHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/admin/sessions/capabilities",
@@ -15996,8 +15996,8 @@
         "adminPlaybackControlHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/admin/sessions/capabilities",
@@ -18784,7 +18784,7 @@
         "settingValuesHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
+      "request_kind": "json",
       "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
@@ -19193,7 +19193,7 @@
         "path": "/api/v2/audio-prefs/{series_id}",
         "operation_id": "getAudioPreference"
       },
-      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; default is emitted as a bool; instants are UTC ms. The read goes through its own seam entry point, GetAudioPreferenceCanonical: the legacy user_audio_preferences row is the resource (a profile without one is 404 even when a canonical language row exists) and supplies the track identity, and audio_language is overlaid from the canonical profile_series row playback resolves \u2014 a present row replaces the legacy member, an absent row means no language (empty) \u2014 since PUT and DELETE /settings/values never reach the legacy row v1 GET still reads; updated_at is the newer of the two rows."
+      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; default is emitted as a bool; instants are UTC ms. The read goes through its own seam entry point, GetAudioPreferenceCanonical: the legacy user_audio_preferences row is the resource (a profile without one is 404 even when a canonical language row exists) and supplies the track identity, and audio_language is overlaid from the canonical profile_series row playback resolves — a present row replaces the legacy member, an absent row means no language (empty) — since PUT and DELETE /settings/values never reach the legacy row v1 GET still reads; updated_at is the newer of the two rows."
     },
     {
       "listener": "api",
@@ -24852,7 +24852,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -24913,7 +24913,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -25352,7 +25352,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -25409,7 +25409,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -25458,7 +25458,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "redirect",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -25507,7 +25507,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "redirect",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -26033,7 +26033,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -26337,7 +26337,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -26402,7 +26402,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -26469,7 +26469,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -26518,7 +26518,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "redirect",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -26567,7 +26567,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "redirect",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -26675,7 +26675,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/downloads/capability",
@@ -31809,8 +31809,8 @@
         "markersHandler != nil && markerEditAccess != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -31983,8 +31983,8 @@
         "markersHandler != nil && markerEditAccess != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -32650,7 +32650,7 @@
       ],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/notifications/capability",
@@ -34861,7 +34861,7 @@
         "path": "/api/v2/playback/capabilities",
         "operation_id": "getPlaybackCapabilities"
       },
-      "notes": "Typed v2 adapter and shared application service implemented for explicitly configured initial direct/local encoded-HLS playback. Profile-scoped capability carries persisted installation identity; mutations require it. Default startup remains disabled. Web durable retry adoption implemented; native coordination and broader playback operations remain outstanding."
+      "notes": "Typed v2 adapter over the shared v1 application. Capabilities report the server installation identifier (diagnostics.ServerInstanceID), protocol version 3, the server feature list and the configured deliveries; state is always available. Every v2 playback mutation carries installation_id and a mismatch answers 409 installation_changed."
     },
     {
       "listener": "api",
@@ -35016,7 +35016,7 @@
         "path": "/api/v2/playback/sessions/{session_id}/control/ws",
         "operation_id": "connectPlaybackControlSocket"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead. V2 admits the upgrade only for the original account, profile, installation and live owner lease through a single-use ticket; the bridge route is unchanged."
+      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead. V2 admits the upgrade only for the session's account and profile (and, for a session started through v2, its installation) through a single-use ticket; the bridge route is unchanged."
     },
     {
       "listener": "api",
@@ -35115,7 +35115,7 @@
         "path": "/api/v2/playback/start",
         "operation_id": "startPlayback"
       },
-      "notes": "Typed v2 adapter and shared application service implemented for explicitly configured initial direct/local encoded-HLS playback. Profile-scoped capability carries persisted installation identity; mutations require it. Default startup remains disabled. Web durable retry adoption implemented; native coordination and broader playback operations remain outstanding. One attempt ID and identical request are retained across uncertain start replies; conflicting reuse is rejected. Implemented POST /api/v2/playback/start (startPlayback); redesign ratification awaits a named owner."
+      "notes": "Typed v2 adapter over the v1 start application: idempotent on playback_attempt_id plus request digest, so a retry with the same body replays the stored decision and a different body under the same attempt id is refused; replaying a stopped or expired attempt returns the retryable session_expired terminal. Local direct and HLS media URLs are projected into the /api/v2 namespace. Implemented POST /api/v2/playback/start (startPlayback)."
     },
     {
       "listener": "api",
@@ -35204,7 +35204,7 @@
         "path": "/api/v2/playback/transcode/{session_id}/master.m3u8",
         "operation_id": "getPlaybackManifest"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Initial executor-bound direct/HLS delivery implemented; legacy/unbound sessions fail closed. Broader lifecycle support, independent review and native consumer verification remain pending; not ratified."
+      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The v2 route is a thin wrapper over the v1 handler with the v2 problem envelope for pre-body failures: token-carried session reconstruction after a restart is the v1 handler's, and the stream deny marker answers 410 playback_session_ended for a stopped or expired session."
     },
     {
       "listener": "api",
@@ -35286,7 +35286,7 @@
         "path": "/api/v2/playback/transcode/{session_id}/segment/{name}",
         "operation_id": "getPlaybackSegment"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Initial executor-bound direct/HLS delivery implemented; legacy/unbound sessions fail closed. Broader lifecycle support, independent review and native consumer verification remain pending; not ratified."
+      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The v2 route is a thin wrapper over the v1 handler with the v2 problem envelope for pre-body failures: token-carried session reconstruction after a restart is the v1 handler's, and the stream deny marker answers 410 playback_session_ended for a stopped or expired session."
     },
     {
       "listener": "api",
@@ -35385,8 +35385,8 @@
         "path": "/api/v2/playback/{session_id}",
         "operation_id": "stopPlayback"
       },
-      "notes": "Typed v2 adapter and shared application service implemented for explicitly configured initial direct/local encoded-HLS playback. Profile-scoped capability carries persisted installation identity; mutations require it. Default startup remains disabled. Web durable retry adoption implemented; native coordination and broader playback operations remain outstanding.",
-      "retry_safety_note": "Stable stop UUID and identical optional final sample survive uncertain replies and 202 draining. Only a 200 stopped/replayed receipt completes the mutation."
+      "notes": "Typed v2 adapter: the body carries installation_id, a client-minted stop_id and an optional final sample. stopped_at is compare-and-set on the attempt row; the first stop applies the final sample when it is newer than the last progress, runs the v1 stop and history writer, stops the local session and transcode, writes the stream deny marker and stores the receipt on the row. Every later DELETE for the session answers 200 replayed with the stored receipt.",
+      "retry_safety_note": "Stable client-minted stop_id with an optional final sample. The first stop stores its receipt on the attempt row and every later DELETE for the session returns 200 replayed with that receipt, so a retry after a lost reply is safe and never a second stop."
     },
     {
       "listener": "api",
@@ -35502,7 +35502,7 @@
         "path": "/api/v2/playback/{session_id}/progress",
         "operation_id": "updatePlaybackProgress"
       },
-      "notes": "Typed v2 adapter and shared application service implemented for explicitly configured initial direct/local encoded-HLS playback. Profile-scoped capability carries persisted installation identity; mutations require it. Default startup remains disabled. Web durable retry adoption implemented; native coordination and broader playback operations remain outstanding."
+      "notes": "Typed v2 adapter: the body carries installation_id and a per-attempt sequence, compare-and-set on the attempt row (last_sequence). An accepted sample persists through the v1 progress writer, using the in-memory session when this replica holds it and a session synthesized from the attempt row otherwise; progress never requires the in-memory session."
     },
     {
       "listener": "api",
@@ -35594,7 +35594,7 @@
         "path": "/api/v2/playback/{session_id}/replan",
         "operation_id": "replanPlayback"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Conditionally registered: authMiddleware != nil; playbackHandler != nil. v2 registers the operation unconditionally and reports capability state instead. v2 delegates to the same replan application as v1 with its full semantics: failure recovery, seek re-anchor, and track, quality and output changes."
     },
     {
       "listener": "api",
@@ -35723,7 +35723,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -40157,7 +40157,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -40378,7 +40378,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/settings/capability",
@@ -40429,8 +40429,8 @@
         "settingsHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "request_kind": "json",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": "GET /api/v1/settings/capability",
@@ -40513,7 +40513,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -40584,7 +40584,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -40653,7 +40653,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -40724,7 +40724,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -41545,7 +41545,7 @@
         "settingValuesHandler != nil"
       ],
       "delegates_to": null,
-      "request_kind": "unknown",
+      "request_kind": "json",
       "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
@@ -41663,7 +41663,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -41733,7 +41733,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -41801,7 +41801,7 @@
       "tier": 2,
       "disposition": "removed",
       "disposition_rule": "v1_scope_removals_table",
-      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings\u2026\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"String GET/PUT/DELETE /api/v1/settings…\"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).",
       "owner": "pending:#135/execution-input-1",
       "review_state": "proposed",
       "v2": {
@@ -41898,7 +41898,7 @@
         "path": "/api/v2/stream/{session_id}",
         "operation_id": "getPlaybackMedia"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Initial executor-bound direct/HLS delivery implemented; legacy/unbound sessions fail closed. Broader lifecycle support, independent review and native consumer verification remain pending; not ratified."
+      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The v2 route is a thin wrapper over the v1 handler with the v2 problem envelope for pre-body failures: token-carried session reconstruction after a restart is the v1 handler's, and the stream deny marker answers 410 playback_session_ended for a stopped or expired session."
     },
     {
       "listener": "api",
@@ -41987,7 +41987,7 @@
         "path": "/api/v2/stream/{session_id}",
         "operation_id": "headPlaybackMedia"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Initial executor-bound direct/HLS delivery implemented; legacy/unbound sessions fail closed. Broader lifecycle support, independent review and native consumer verification remain pending; not ratified."
+      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The v2 route is a thin wrapper over the v1 handler with the v2 problem envelope for pre-body failures: token-carried session reconstruction after a restart is the v1 handler's, and the stream deny marker answers 410 playback_session_ended for a stopped or expired session."
     },
     {
       "listener": "api",
@@ -42085,7 +42085,7 @@
         "path": "/api/v2/stream/{session_id}/subtitles/{track}",
         "operation_id": "getPlaybackSubtitle"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Initial executor-bound sidecar delivery implemented over the media seam: signed executor reference, viewer checks and a held serving grant admit one inventory track; legacy/unbound sessions fail closed and the legacy handlers keep refusing bound sessions. Missing files never run legacy cleanup. Independent review and native consumer verification pending."
+      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The v2 route is a thin wrapper over the v1 handler with the v2 problem envelope for pre-body failures: token-carried session reconstruction after a restart is the v1 handler's, and the stream deny marker answers 410 playback_session_ended for a stopped or expired session."
     },
     {
       "listener": "api",
@@ -42183,7 +42183,7 @@
         "path": "/api/v2/stream/{session_id}/subtitles/{track}",
         "operation_id": "headPlaybackSubtitle"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Initial executor-bound sidecar delivery implemented over the media seam: signed executor reference, viewer checks and a held serving grant admit one inventory track; legacy/unbound sessions fail closed and the legacy handlers keep refusing bound sessions. Missing files never run legacy cleanup. Independent review and native consumer verification pending."
+      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The v2 route is a thin wrapper over the v1 handler with the v2 problem envelope for pre-body failures: token-carried session reconstruction after a restart is the v1 handler's, and the stream deny marker answers 410 playback_session_ended for a stopped or expired session."
     },
     {
       "listener": "api",
@@ -42265,7 +42265,7 @@
         "path": "/api/v2/stream/{session_id}/subtitles/{track}/fonts",
         "operation_id": "getPlaybackSubtitleFonts"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Initial executor-bound font bundle implemented as a typed JSON operation over the same admission as the sidecar bytes (the v1 route streamed JSON without a contract); legacy/unbound sessions fail closed. Independent review and native consumer verification pending."
+      "notes": "Conditionally registered: authMiddleware != nil; streamHandler != nil. v2 registers the operation unconditionally and reports capability state instead. The v2 route is a typed JSON operation over the v1 font handler (the v1 route streams JSON without a contract); v1 refusals become problems and the stream deny marker answers 410 playback_session_ended for a stopped or expired session."
     },
     {
       "listener": "api",
@@ -42396,7 +42396,7 @@
         "path": "/api/v2/subtitle-prefs/{series_id}",
         "operation_id": "getSubtitlePreference"
       },
-      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; forced and hearing_impaired are emitted as bools; show_forced_subtitles is absent when the profile has no override; instants are UTC ms. The read goes through its own seam entry point, GetSubtitlePreferenceCanonical: the legacy user_subtitle_preferences row is the resource (a profile without one is 404 even when canonical rows exist) and supplies the track identity (index, external path, signature), and subtitle_language, subtitle_mode and show_forced_subtitles are overlaid from the canonical profile_series rows playback resolves \u2014 a present row replaces the legacy member, an absent row means the member is unset (empty language or mode, show_forced_subtitles absent) \u2014 since PUT and DELETE /settings/values never reach the legacy row v1 GET still reads; updated_at is the newest of the legacy row and the canonical rows."
+      "notes": "Section settings-prefs. series_id is the series content id; answers 200 with the preference or 404 not_found; track_signature keeps the store's member names, every member optional; forced and hearing_impaired are emitted as bools; show_forced_subtitles is absent when the profile has no override; instants are UTC ms. The read goes through its own seam entry point, GetSubtitlePreferenceCanonical: the legacy user_subtitle_preferences row is the resource (a profile without one is 404 even when canonical rows exist) and supplies the track identity (index, external path, signature), and subtitle_language, subtitle_mode and show_forced_subtitles are overlaid from the canonical profile_series rows playback resolves — a present row replaces the legacy member, an absent row means the member is unset (empty language or mode, show_forced_subtitles absent) — since PUT and DELETE /settings/values never reach the legacy row v1 GET still reads; updated_at is the newest of the legacy row and the canonical rows."
     },
     {
       "listener": "api",
@@ -43658,7 +43658,7 @@
         "path": "/api/v2/sync/progress",
         "operation_id": "syncProgress"
       },
-      "notes": "Section personal-progress (profile_scoped). Fixed per-item bulk contract: 1\u2013100 unique media_item_id targets, optional unique client_ref (1\u2013128 characters), request-wide preflight before effects, then HTTP 200 ProgressSyncBatchResult with ordered indexed success/failure items and exact summary. Hidden catalog items are item-level 404; store failures are safe typed item failures. Millisecond positions and optional UTC event times preserve the selected store and existing threshold/LWW semantics. Retry safety remains non_retryable: optional event time and repeated side effects do not provide a durable batch receipt. V1 remains unchanged. See docs/architecture/progress-bulk.md."
+      "notes": "Section personal-progress (profile_scoped). Fixed per-item bulk contract: 1–100 unique media_item_id targets, optional unique client_ref (1–128 characters), request-wide preflight before effects, then HTTP 200 ProgressSyncBatchResult with ordered indexed success/failure items and exact summary. Hidden catalog items are item-level 404; store failures are safe typed item failures. Millisecond positions and optional UTC event times preserve the selected store and existing threshold/LWW semantics. Retry safety remains non_retryable: optional event time and repeated side effects do not provide a durable batch receipt. V1 remains unchanged. See docs/architecture/progress-bulk.md."
     },
     {
       "listener": "api",
@@ -45661,7 +45661,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -45747,7 +45747,7 @@
       ],
       "delegates_to": null,
       "request_kind": "unknown",
-      "response_media_kind": "unknown",
+      "response_media_kind": "json",
       "streams": false,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -47770,7 +47770,7 @@
       "conditions": [],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "binary",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -47831,7 +47831,7 @@
       "conditions": [],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "binary",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -47892,7 +47892,7 @@
       "conditions": [],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "binary",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -47953,7 +47953,7 @@
       "conditions": [],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "binary",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -48104,7 +48104,7 @@
       "conditions": [],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "binary",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -48165,7 +48165,7 @@
       "conditions": [],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "binary",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": null,
@@ -48226,7 +48226,7 @@
       "conditions": [],
       "delegates_to": null,
       "request_kind": "none",
-      "response_media_kind": "unknown",
+      "response_media_kind": "binary",
       "streams": true,
       "upgrades_websocket": false,
       "capability_endpoint": null,

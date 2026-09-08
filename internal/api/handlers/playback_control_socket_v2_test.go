@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,8 +26,7 @@ const (
 )
 
 // controlSocketFixture stands up a playback handler with a hub, tracker and
-// dispatcher, one owner-started session, and a substituted fence resolver so
-// owner-lease outcomes are driven directly.
+// dispatcher and one owner-started session.
 type controlSocketFixture struct {
 	handler *PlaybackControlSocketV2
 	pb      *PlaybackHandler
@@ -37,14 +35,6 @@ type controlSocketFixture struct {
 	session *playback.Session
 	server  *httptest.Server
 	invalid *atomic.Bool
-	fence   struct {
-		mu    sync.Mutex
-		bound bool
-		live  bool
-		epoch int64
-		inst  string
-		err   error
-	}
 }
 
 func newControlSocketFixture(t *testing.T) *controlSocketFixture {
@@ -61,26 +51,15 @@ func newControlSocketFixture(t *testing.T) *controlSocketFixture {
 	pb.RealtimeHub = hub
 	pb.CommandTracker = tracker
 	pb.CommandDispatcher = playback.NewCommandDispatcher(manager, hub, tracker)
+	pb.InstallationID = controlInstallation
 
 	f := &controlSocketFixture{pb: pb, manager: manager, hub: hub, session: session, invalid: new(atomic.Bool)}
-	f.fence.bound, f.fence.live, f.fence.epoch, f.fence.inst = true, true, 3, controlInstallation
 	h := &PlaybackControlSocketV2{Playback: pb, Tickets: NewPlaybackControlTicketStore(nil), checkInterval: 10 * time.Millisecond, lanes: map[string]*playbackControlLane{}}
 	h.Validate = func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		if f.invalid.Load() {
 			return ctx, nil, evt.ErrSocketTicket
 		}
 		return access.SetScope(ctx, access.Scope{}), &auth.Claims{UserID: proof.UserID, Role: proof.Role, SessionID: proof.SessionID}, nil
-	}
-	h.Fence = func(_ context.Context, s *playback.Session) (PlaybackControlBinding, bool, error) {
-		f.fence.mu.Lock()
-		defer f.fence.mu.Unlock()
-		if f.fence.err != nil {
-			return PlaybackControlBinding{}, false, f.fence.err
-		}
-		if !f.fence.bound {
-			return PlaybackControlBinding{PlaybackSessionID: s.ID}, false, nil
-		}
-		return PlaybackControlBinding{PlaybackSessionID: s.ID, InstallationID: f.fence.inst, AttemptID: "attempt", Incarnation: "inc", OwnerID: "owner", Epoch: f.fence.epoch, Bound: true}, f.fence.live, nil
 	}
 	f.handler = h
 	router := chi.NewRouter()
@@ -144,11 +123,16 @@ func waitForCondition(t *testing.T, cond func() bool, message string) {
 	t.Fatal(message)
 }
 
-func TestControlSocketMintAdmitsOnlyTheOwnerLease(t *testing.T) {
+func TestControlSocketMintAdmitsOnlyTheOwner(t *testing.T) {
 	f := newControlSocketFixture(t)
 	ctx := t.Context()
 	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation); err != nil {
 		t.Fatal(err)
+	}
+	// A bridge-started client presents no installation and is admitted on
+	// account and profile alone.
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, ""); err != nil {
+		t.Fatalf("bridge mint: %v", err)
 	}
 	for name, tc := range map[string]struct {
 		identity     evt.SocketIdentity
@@ -156,33 +140,21 @@ func TestControlSocketMintAdmitsOnlyTheOwnerLease(t *testing.T) {
 		installation string
 		want         error
 	}{
-		"other account":        {f.identity(8, "profile-7"), f.session.ID, controlInstallation, ErrPlaybackControlSocketNotOwner},
-		"other profile":        {f.identity(7, "profile-8"), f.session.ID, controlInstallation, ErrPlaybackControlSocketNotOwner},
-		"unknown session":      {f.identity(7, "profile-7"), "missing", controlInstallation, playback.ErrSessionNotFound},
-		"wrong installation":   {f.identity(7, "profile-7"), f.session.ID, controlOtherInstallation, ErrPlaybackControlSocketInstallation},
-		"missing installation": {f.identity(7, "profile-7"), f.session.ID, "", ErrPlaybackControlSocketInstallation},
+		"other account":      {f.identity(8, "profile-7"), f.session.ID, controlInstallation, ErrPlaybackControlSocketNotOwner},
+		"other profile":      {f.identity(7, "profile-8"), f.session.ID, controlInstallation, ErrPlaybackControlSocketNotOwner},
+		"unknown session":    {f.identity(7, "profile-7"), "missing", controlInstallation, playback.ErrSessionNotFound},
+		"wrong installation": {f.identity(7, "profile-7"), f.session.ID, controlOtherInstallation, ErrPlaybackControlSocketInstallation},
 	} {
 		if _, _, err := f.handler.Mint(ctx, tc.identity, tc.session, tc.installation); !errors.Is(err, tc.want) {
 			t.Fatalf("%s: err = %v, want %v", name, err, tc.want)
 		}
 	}
-	// A bound session whose owner lease is not live is stale.
-	f.fence.mu.Lock()
-	f.fence.live = false
-	f.fence.mu.Unlock()
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation); !errors.Is(err, ErrPlaybackControlSocketStale) {
-		t.Fatalf("expired lease err = %v", err)
+	// A stopped session is unknown to the handshake.
+	if err := f.manager.StopSession(f.session.ID); err != nil {
+		t.Fatal(err)
 	}
-	// A bridge-started session binds account and profile only; an installation
-	// claim names a runtime it does not have.
-	f.fence.mu.Lock()
-	f.fence.bound = false
-	f.fence.mu.Unlock()
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, ""); err != nil {
-		t.Fatalf("bridge session mint: %v", err)
-	}
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation); !errors.Is(err, ErrPlaybackControlSocketInstallation) {
-		t.Fatalf("bridge session with installation err = %v", err)
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("stopped session err = %v", err)
 	}
 	// Login authority is validated before any session lookup.
 	f.invalid.Store(true)
@@ -191,7 +163,7 @@ func TestControlSocketMintAdmitsOnlyTheOwnerLease(t *testing.T) {
 	}
 }
 
-func TestControlSocketHandshakeProofOriginReplayAndStaleEpoch(t *testing.T) {
+func TestControlSocketHandshakeProofOriginReplayAndStaleBinding(t *testing.T) {
 	f := newControlSocketFixture(t)
 	ticket := f.mint(t, controlInstallation)
 
@@ -208,20 +180,20 @@ func TestControlSocketHandshakeProofOriginReplayAndStaleEpoch(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	// The epoch moved between mint and upgrade: stale, and the credential is spent.
-	f.fence.mu.Lock()
-	f.fence.epoch = 4
-	f.fence.mu.Unlock()
+	// The installation changed between mint and upgrade: stale, and the
+	// credential is spent.
+	f.pb.InstallationID = controlOtherInstallation
 	conn, resp, err = f.dial(t, ticket, nil) //nolint:bodyclose // dial registers t.Cleanup to close the response body
 	if err == nil || conn != nil || resp.StatusCode != http.StatusConflict {
-		t.Fatalf("stale epoch accepted: %v %v", err, resp)
+		t.Fatalf("stale installation accepted: %v %v", err, resp)
 	}
+	f.pb.InstallationID = controlInstallation
 	if _, resp, err = f.dial(t, ticket, nil); err == nil || resp.StatusCode != http.StatusUnauthorized { //nolint:bodyclose // dial registers t.Cleanup to close the response body
 		t.Fatal("consumed credential replayed")
 	}
 
-	// A fresh credential under the current fence connects, selects only the
-	// protocol, and the hello makes the session control-ready.
+	// A fresh credential connects, selects only the protocol, and the hello
+	// makes the session control-ready.
 	ticket = f.mint(t, controlInstallation)
 	conn, _, err = f.dial(t, ticket, nil) //nolint:bodyclose // dial registers t.Cleanup to close the response body
 	if err != nil {
@@ -257,7 +229,7 @@ func TestControlSocketNonOwnerAndForeignSessionRefused(t *testing.T) {
 
 	// Ownership changes between mint and upgrade are refused at upgrade too:
 	// simulate by a credential whose identity no longer matches the session.
-	stored := PlaybackControlTicket{Identity: f.identity(8, "profile-7"), Binding: PlaybackControlBinding{PlaybackSessionID: f.session.ID, InstallationID: controlInstallation, AttemptID: "attempt", Incarnation: "inc", OwnerID: "owner", Epoch: 3, Bound: true}}
+	stored := PlaybackControlTicket{Identity: f.identity(8, "profile-7"), Binding: PlaybackControlBinding{PlaybackSessionID: f.session.ID, InstallationID: controlInstallation}}
 	stored.Identity.AccessFingerprint = "scope"
 	forged, err := f.handler.Tickets.Mint(t.Context(), stored)
 	if err != nil {
@@ -277,16 +249,11 @@ func TestControlSocketReconnectResumesOnlySameOwnerAndInstallation(t *testing.T)
 	}
 	f.hello(t, first)
 
-	// While the lane is held, another installation cannot even mint.
-	f.fence.mu.Lock()
-	f.fence.inst = controlOtherInstallation
-	f.fence.mu.Unlock()
-	if _, _, err := f.handler.Mint(t.Context(), f.identity(7, "profile-7"), f.session.ID, controlOtherInstallation); !errors.Is(err, ErrPlaybackControlSocketLaneHeld) {
+	// While the lane is held by an installation-bound client, a bridge client
+	// (no installation) cannot even mint.
+	if _, _, err := f.handler.Mint(t.Context(), f.identity(7, "profile-7"), f.session.ID, ""); !errors.Is(err, ErrPlaybackControlSocketLaneHeld) {
 		t.Fatalf("other installation err = %v", err)
 	}
-	f.fence.mu.Lock()
-	f.fence.inst = controlInstallation
-	f.fence.mu.Unlock()
 
 	// The same owner and installation reconnects and takes over the lane; the
 	// old connection's frames are no longer routed and it is closed.
@@ -371,8 +338,8 @@ func TestControlSocketAckAndResultRouteToRegistrationOwner(t *testing.T) {
 	}
 }
 
-func TestControlSocketClosesOnAuthorityOrLeaseLoss(t *testing.T) {
-	for _, loss := range []string{"login", "lease"} {
+func TestControlSocketClosesOnAuthorityOrSessionLoss(t *testing.T) {
+	for _, loss := range []string{"login", "session"} {
 		t.Run(loss, func(t *testing.T) {
 			f := newControlSocketFixture(t)
 			conn, _, err := f.dial(t, f.mint(t, controlInstallation), nil) //nolint:bodyclose // dial registers t.Cleanup to close the response body
@@ -382,10 +349,8 @@ func TestControlSocketClosesOnAuthorityOrLeaseLoss(t *testing.T) {
 			f.hello(t, conn)
 			if loss == "login" {
 				f.invalid.Store(true)
-			} else {
-				f.fence.mu.Lock()
-				f.fence.live = false
-				f.fence.mu.Unlock()
+			} else if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
 			}
 			if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
@@ -393,10 +358,12 @@ func TestControlSocketClosesOnAuthorityOrLeaseLoss(t *testing.T) {
 			if _, _, err := conn.ReadMessage(); err == nil {
 				t.Fatal("connection survived authority loss")
 			}
-			waitForCondition(t, func() bool {
-				s, err := f.manager.GetSession(f.session.ID)
-				return err == nil && !s.HasRealtimeConnection
-			}, "session stayed control-ready after the socket closed")
+			if loss == "login" {
+				waitForCondition(t, func() bool {
+					s, err := f.manager.GetSession(f.session.ID)
+					return err == nil && !s.HasRealtimeConnection
+				}, "session stayed control-ready after the socket closed")
+			}
 		})
 	}
 }

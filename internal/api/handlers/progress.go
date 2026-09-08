@@ -420,12 +420,6 @@ type ProgressSyncResultView = syncProgressResultItem
 // never a failed batch; only a store that cannot be opened fails the whole
 // call. The v1 handler and the v2 operation share it.
 func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileID string, updates []ProgressSyncUpdate) ([]ProgressSyncResultView, error) {
-	// Sync carries an unbound playback timeline, including client-owned books
-	// and offline queues. Force/timestamp flags do not turn it into a manual
-	// edit or authorize it under a newly admitted source. Manual edits/imports
-	// use their separate store operations. Bound client timelines require a
-	// captured source/sink contract before admission can support those clients.
-	ctx = userstore.WithLegacyPlaybackWrite(ctx)
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")

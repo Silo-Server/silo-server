@@ -1,4 +1,3 @@
-import type { AudiobookChapterIntent } from "@/player/bound-client-timeline";
 import { useEffect, useRef, useState } from "react";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { useAudiobookKeyboardShortcuts } from "./useAudiobookKeyboardShortcuts";
@@ -17,7 +16,6 @@ export interface AudiobookPlayerStatus {
 
 export interface AudiobookPlayerControls {
   togglePlay: () => void;
-  stopForReplacement: () => Promise<void>;
 }
 
 export interface AudiobookPlayerProps {
@@ -28,7 +26,6 @@ export interface AudiobookPlayerProps {
   posterUrl?: string;
   files: AudiobookFile[];
   initialPositionSeconds?: number;
-  initialChapter?: AudiobookChapterIntent;
   autoPlay?: boolean;
   onClose?: () => void;
   onPlaybackStateChange?: (status: AudiobookPlayerStatus) => void;
@@ -43,7 +40,6 @@ export default function AudiobookPlayer({
   posterUrl,
   files,
   initialPositionSeconds = 0,
-  initialChapter,
   autoPlay = true,
   onClose,
   onPlaybackStateChange,
@@ -54,7 +50,6 @@ export default function AudiobookPlayer({
     contentId,
     files,
     initialPositionSeconds,
-    initialChapter,
     autoPlay,
     smartRewindEnabled: prefs.smartRewind,
     onStopRequested: onClose,
@@ -78,12 +73,9 @@ export default function AudiobookPlayer({
   const playbackStateTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    onControlsChange?.({
-      togglePlay: playback.togglePlay,
-      stopForReplacement: playback.stopForReplacement,
-    });
+    onControlsChange?.({ togglePlay: playback.togglePlay });
     return () => onControlsChange?.(null);
-  }, [onControlsChange, playback.togglePlay, playback.stopForReplacement]);
+  }, [onControlsChange, playback.togglePlay]);
 
   useEffect(() => {
     return () => {

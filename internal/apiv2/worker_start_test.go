@@ -80,7 +80,6 @@ func TestWorkerStartProtocol(t *testing.T) {
 		status int
 	}{
 		{"{}", false, 401}, {"{", true, 400}, {"{}", true, 400},
-		{`{"session_id":"fixture","input_path":"/synthetic/input.mkv","executor":{}}`, true, 400},
 		{`{"session_id":"fixture","input_path":"/synthetic/input.mkv"}`, true, 503},
 	} {
 		req := httptest.NewRequest(http.MethodPost, op.Path, strings.NewReader(tc.body))
