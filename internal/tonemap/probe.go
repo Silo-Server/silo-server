@@ -37,16 +37,24 @@ const (
 	probeRequestSlack  = 5 * time.Second
 )
 
-// One deterministic 256x256 Main 10 HEVC frame. Keeping the compressed fixture
+// One deterministic 256x256 HEVC Main 10 frame. Keeping the compressed fixture
 // in the binary lets production probes exercise the real decoder without
 // depending on a media mount or generating source files with an encoder whose
 // availability is itself under test. The dimensions deliberately exceed the
-// 144x144 minimum reported by Pascal-generation NVIDIA NVDEC; the old 64x64
-// fixture produced a false negative on otherwise capable GPUs such as the
-// GeForce GTX 1050 Ti.
+// 144x144 minimum reported by Pascal-generation NVIDIA NVDEC; a 64x64 fixture
+// produced a false negative on otherwise capable GPUs such as the GeForce GTX
+// 1050 Ti.
+//
+// The SPS must signal general_profile_idc 2 (Main 10). The 256x256 fixture
+// that replaced the 64x64 one was encoded as profile_idc 4 (Rext, format
+// range extensions) even though its pixel format was yuv420p10le, and every
+// Intel VAAPI/QSV hardware decoder refused it with "No support for codec hevc
+// profile 4", so no Intel node advertised hardware tone mapping. Software
+// decoding accepts Rext and hid the regression from the software smoke.
+// TestDecodeProbeFixtureIsMain10 pins the profile.
 const decodeProbeFixtureBitDepth = 10
 
-const decodeProbeFixtureBase64 = "AAAAAUABDAH//wQIAAADAJ2oAAADAAD/ugJAAAAAAUIBAQQIAAADAJ2oAAADAAD/oAgIBATZbpKTC8BaAgAAAwACAAADAAIQAAAAAUQBwHGJEgAAASgBrBbgS3G0f////Pv////tVP2ox2hZslSupK6krqSupK7frt+u367frt+u367frszYCj///9yP+45+4B9sj2WPZY9lj2WPZf9l/2X/Zf9l/2X/Zf9lkAQv///uR/3HP3APtkeyx7LHsseyx7L/sv+y/7L/sv+y/7L/ssgjv///WO/rDXqy3UjtJ+0n7SftJ+0p/Sn9Kf0p/Sn9Kf0p/SgZv///Eg/iKnhzHCIL8wvzC/ML8wv1+/X79fv1+/X79fv1+/Md5///rbv1r11jtqm6mXqZepl6mXqafpp+mn6afpp+mn6afpmJf///pN/0kv0bvoTect5y3nLect5z/nP+c/5z/nP+c/5z/nM6P//9VI+qTmpQFOSEXYRdhF2EXYRl9GX0ZfRl9GX0ZfRl9GBz///piP0u50mBooieGJ4YnhieGJ5fnl+eX55fnl+eX55fniHX//+u//XX/W3+rv6e/p7+nv6e/p/+n/6f/p/+n/6f/p/+n13///yyj5X+ZSwSQoGbgZuBm4GbgaXxpfGl8aXxpfGl8aXxn3n//9oH+z0+y49iB1qHWodah1qHWv9a/1r/Wv9a/1r/Wv9anf///kJ/yCPx3PjCeGp4anhqeGp4b/hv+G/4b/hv+G/4b/hrwf//5od8zmsxFpYHEP8Q/xD/EP8RT5FPkU+RT5FPkU+RT5EQH//+r1fVybVRKodSRNJE0kTSRNJI+kj6SPpI+kj6SPpI+kVZ////y3n5ag5VUyV5GxkbGRsZGxkbvxu/G78bvxu/G78bvxtmA7EMv/IDBiETjInjAOXAAAADAAADAAADAAADAAADAAADAAADAAADAAADAAADAAADAAADAAADAKOA"
+const decodeProbeFixtureBase64 = "AAAAAUABDAH//wIgAAADALAAAAMAAAMAPAjAkAAAAAFCAQECIAAAAwCwAAADAAADADygCAgEBNiAjuRZFL/y5/E/rAWoEBAQBAAAAAFEAcBy8FMkAAAAAU4BBTJHVkrcXExDP5TvxRE80UOoAQAAAwABAwAAAwABAgADX/8LAAADAAADAAErEAwDkSsBDf////+AAAAAASgBrxAgmwzKq+iGPv/9kz4R2XADPFSQkYVLvPxAuVCAAuhvgvlhUQRRzuAARkAHHgAADpgAAAMAATcAAAMADvgAAAMAY0A="
 
 // CommandRunner executes a bounded external command and returns its combined
 // output. Tests inject it to model individual FFmpeg capabilities and failures.
