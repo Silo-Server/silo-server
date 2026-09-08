@@ -4,11 +4,16 @@ import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+/**
+ * CollapsibleDiagnosticsSection renders an expandable administrative diagnostics panel
+ * displaying a severity icon, title, description, and status count, error indicator, or loading placeholder.
+ */
 export function CollapsibleDiagnosticsSection({
   title,
   description,
   count,
   isLoading,
+  isError,
   icon,
   iconClassName,
   open,
@@ -19,6 +24,7 @@ export function CollapsibleDiagnosticsSection({
   description: string;
   count: number;
   isLoading?: boolean;
+  isError?: boolean;
   icon: ReactNode;
   iconClassName?: string;
   open: boolean;
@@ -56,6 +62,19 @@ export function CollapsibleDiagnosticsSection({
               aria-label="Loading count"
             >
               &mdash;
+            </div>
+          )
+        ) : isError ? (
+          open ? (
+            <Badge variant="destructive" className="text-[11px] tabular-nums">
+              !
+            </Badge>
+          ) : (
+            <div
+              className="text-destructive text-2xl leading-none font-bold tabular-nums"
+              aria-label="Error loading count"
+            >
+              !
             </div>
           )
         ) : open ? (

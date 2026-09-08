@@ -1406,13 +1406,21 @@ function useSort<K extends string>(defaultField: K, defaultDir: SortDir = "desc"
 
 /* ─── Skipped Roots (Troubleshooting) ───────────────────────────── */
 
+/**
+ * AmbiguousRootsSection displays scanner roots that require manual resolution,
+ * handling loading, confirmed empty, populated warning, and error states.
+ */
 function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
   const [editingRoot, setEditingRoot] = useState<LibraryRoot | null>(null);
   const effectiveSelectedLibraryId = selectedLibraryId ?? libraries[0]?.id;
-  const { data: roots = [], isLoading } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous");
+  const {
+    data: roots = [],
+    isLoading,
+    isError,
+  } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous");
 
   const filteredRoots = useMemo(() => {
     if (!search) return roots;
@@ -1431,7 +1439,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
     return null;
   }
 
-  const isWarning = !isLoading && roots.length > 0;
+  const isWarning = !isLoading && !isError && roots.length > 0;
 
   return (
     <CollapsibleDiagnosticsSection
@@ -1439,12 +1447,17 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
       description="Scanner roots that stay visible but do not enter unattended metadata matching."
       count={roots.length}
       isLoading={isLoading}
+      isError={isError}
       icon={
-        <FolderOpen
-          className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
-        />
+        isError ? (
+          <AlertTriangle className="text-destructive h-4 w-4" />
+        ) : (
+          <FolderOpen
+            className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
+          />
+        )
       }
-      iconClassName={isWarning ? "bg-amber-500/10" : "bg-muted/50"}
+      iconClassName={isError ? "bg-destructive/10" : isWarning ? "bg-amber-500/10" : "bg-muted/50"}
       open={open}
       onOpenChange={setOpen}
     >
@@ -1495,7 +1508,13 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredRoots.length === 0 ? (
+            {isError ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-destructive text-center text-sm">
+                  Failed to load ambiguous roots for this library.
+                </TableCell>
+              </TableRow>
+            ) : filteredRoots.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
                   {search

@@ -359,6 +359,20 @@ describe("AdminLibraries", () => {
     expect(mocks.useLibraryRoots).toHaveBeenCalledWith(42, "ambiguous");
   });
 
+  it("renders an error indicator for Ambiguous Roots when query fails", () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: true,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Ambiguous Roots");
+    expect(markup).toContain('aria-label="Error loading count"');
+    expect(markup).toContain("bg-destructive/10");
+  });
+
   it("renders Stale External IDs collapsed by default", () => {
     mocks.useStaleMediaIDs.mockReturnValue({
       data: [

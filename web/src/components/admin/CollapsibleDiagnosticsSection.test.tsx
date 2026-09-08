@@ -61,6 +61,24 @@ describe("CollapsibleDiagnosticsSection", () => {
     expect(countElem.className).toContain("text-muted-foreground");
   });
 
+  it("renders an error indicator when isError is true", () => {
+    render(
+      <CollapsibleDiagnosticsSection
+        title="Test Diagnostics"
+        description="A test section description"
+        count={0}
+        isError={true}
+        icon={<span>Icon</span>}
+        open={false}
+        onOpenChange={vi.fn()}
+      >
+        <div>Child content</div>
+      </CollapsibleDiagnosticsSection>,
+    );
+
+    expect(screen.getByLabelText("Error loading count")).toHaveTextContent("!");
+  });
+
   it("toggles and renders child content when open", async () => {
     const onOpenChange = vi.fn();
     const { rerender } = render(
