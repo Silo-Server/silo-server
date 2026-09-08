@@ -90,7 +90,7 @@ func TestDebugLoggerOmitsUnsafeBodiesWithoutTruncatingRequests(t *testing.T) {
 		`Pw=form-secret`,
 		strings.Repeat(" ", debugMaxBodyCapture) + `{"Pw":"oversize-secret"}`,
 	} {
-		t.Run(string(body[:8]), func(t *testing.T) {
+		t.Run(body[:8], func(t *testing.T) {
 			var logs bytes.Buffer
 			h := newDebugLogMiddleware(&logs, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				got, err := io.ReadAll(r.Body)

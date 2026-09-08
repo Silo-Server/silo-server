@@ -232,7 +232,7 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 			fmt.Fprintf(logFile, "Status: %d\n", status)
 
 			if requestCapture != nil && requestCapture.body.Len() > 0 {
-				fmt.Fprintf(logFile, "Request Body (%d bytes captured):\n", requestCapture.body.Len())
+				_, _ = fmt.Fprintf(logFile, "Request Body (%d bytes captured):\n", requestCapture.body.Len())
 				writeIndentedJSON(logFile, requestCapture.body.Bytes())
 			}
 
@@ -254,7 +254,7 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 }
 
 // debugRequestBody observes reads without consuming ahead of the handler or
-// changing the request's length, read errors or Close behaviour.
+// changing the request's length, read errors or Close result.
 type debugRequestBody struct {
 	io.ReadCloser
 	body bytes.Buffer
@@ -268,7 +268,7 @@ func (b *debugRequestBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// writeIndentedJSON writes only sanitised structured bodies, never a raw-text
+// writeIndentedJSON writes only redacted structured bodies, never a raw-text
 // fallback that could contain passwords, form credentials or stream URLs.
 func writeIndentedJSON(w io.Writer, b []byte) {
 	_, _ = w.Write(logredact.SanitizeJSON(b))
