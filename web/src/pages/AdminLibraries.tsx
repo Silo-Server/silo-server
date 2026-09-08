@@ -1514,6 +1514,12 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                   Failed to load ambiguous roots for this library.
                 </TableCell>
               </TableRow>
+            ) : isLoading ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
+                  Loading ambiguous roots for this library.
+                </TableCell>
+              </TableRow>
             ) : filteredRoots.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
