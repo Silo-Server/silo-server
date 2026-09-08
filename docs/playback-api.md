@@ -191,23 +191,40 @@ The web client persists the exact start request before dispatch, then persists
 sequence allocation, pending progress and stop bodies in browser storage.
 Web Locks serialize mutations across tabs. Records bind the installation,
 account, profile, origin and session; credentials are not stored. Identity changes
-quarantine old requests. Reload exposes an explicit Retry action: recovering an
-uncertain start confirms the original attempt and offers to stop it, without
-autoplay. An unresolved start blocks a different attempt and legacy fallback.
+quarantine old requests. Reload automatically replays an uncertain START with its
+original bytes. If it recovers a session that never reached the player, it stops
+that exact session through the durable STOP path. A new Play resolves the retained
+attempt before dispatching its new request. Transport failures, server errors and
+draining receipts retry within a 60-second budget; recovery never mints an attempt
+or falls back to legacy playback. Video and audiobook hosts share the recovery
+task and display one Retry notification only if automatic recovery cannot finish.
 A validation rejection, including `422 validation_failed`, retains its journal:
 it cannot prove that an earlier dispatch never allocated a session. The current
 API has no authoritative no-allocation receipt. Storage
 or Web Locks unavailability fails configured playback before dispatch. Clearing
 or evicting browser storage loses recovery state; unload cannot guarantee polling.
 
-Runtime wiring is explicit through `NewInitialPlaybackRuntime` and the router's
-`InitialPlayback` dependency. Normal application startup does not enable it.
-The constructor verifies the persisted installation identity and requires source,
-owner and media-grant policies. Ordinary starts only read source admission.
+Normal application startup wires `NewInitialPlaybackRuntime` through the router's
+`InitialPlayback` dependency. The constructor verifies the persisted installation
+identity and requires source, owner and media-grant policies. Ordinary starts may
+perform first admission through the retained PostgreSQL admission protocol; they
+never bypass source markers or authority checks.
 `internal/playback/testfixture.ProvisionPostgres` enrolls a newly created synthetic
 account transactionally; it cannot enroll an existing account.
 
-An explicit `InitialPlaybackReconcileAccounts` list enables bounded account scans.
+Every configured playback runtime runs bounded reconciliation across accounts;
+no account list or operator opt-in is required. Database compare-and-set transitions
+and exact source receipts allow multiple API replicas to complete the same work
+safely. The scan advances past visited rows even when a slow source exhausts a
+page deadline, and the runner joins application shutdown.
+A failed START performs its own durable abort and waits briefly for the source
+receipt and database drain deadline. Once both complete, it returns the existing
+`201 adaptation_unavailable` decision with terminal reason `playback_start_aborted`.
+If completion is still uncertain, retained state remains available for automatic
+reconciliation and exact START replay. Remote transcode startup uses the same
+30-second manifest readiness budget as local startup; a running process alone
+does not count as ready.
+
 Expired activated attempts move through owner-loss terminal recovery.
 Expired or withdrawn pending/installed starts move through durable abort intents;
 aborting intents retry their exact source operation. A stopping intent completes

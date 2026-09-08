@@ -16,14 +16,13 @@ const minSecretKeyLen = 32
 
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
-	InitialPlaybackAPIOrigin         string
-	InitialPlaybackEnabled           bool
-	InitialPlaybackReconcileAccounts []int
-	DatabaseURL                      string
-	RedisURL                         string // optional override; empty means use DB setting
-	Listen                           string
-	JFListen                         string
-	Mode                             string
+	InitialPlaybackAPIOrigin string
+	InitialPlaybackEnabled   bool
+	DatabaseURL              string
+	RedisURL                 string // optional override; empty means use DB setting
+	Listen                   string
+	JFListen                 string
+	Mode                     string
 	// SecretKey is the master key (raw SECRET_KEY env value) from which the
 	// at-rest credential cipher derives its data key. It lives outside Postgres
 	// so encrypted secrets survive a full database compromise/dump.
@@ -76,15 +75,14 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 	redisURL := os.Getenv("REDIS_URL")
 
 	return &BootstrapConfig{
-		InitialPlaybackAPIOrigin:         initialAPIOrigin,
-		InitialPlaybackEnabled:           initialEnabled,
-		InitialPlaybackReconcileAccounts: nil,
-		DatabaseURL:                      dbURL,
-		RedisURL:                         redisURL,
-		Listen:                           ":" + port,
-		JFListen:                         ":" + jfPort,
-		Mode:                             mode,
-		SecretKey:                        []byte(secretKey),
+		InitialPlaybackAPIOrigin: initialAPIOrigin,
+		InitialPlaybackEnabled:   initialEnabled,
+		DatabaseURL:              dbURL,
+		RedisURL:                 redisURL,
+		Listen:                   ":" + port,
+		JFListen:                 ":" + jfPort,
+		Mode:                     mode,
+		SecretKey:                []byte(secretKey),
 	}, nil
 }
 

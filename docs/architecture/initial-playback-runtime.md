@@ -85,3 +85,24 @@ Shutdown waits under the application's existing graceful-shutdown deadline.
 Cancellation is lease loss, not a fabricated stop receipt. If a dependency fails
 to honor cancellation and cleanup exceeds the deadline, the application reports
 that cleanup did not finish; it must not report a clean terminal receipt.
+
+## Failed starts and recovery
+
+Each configured runtime reconciles retained work across all accounts in bounded
+pages. Multiple replicas use the existing compare-and-set transitions and exact
+source receipts; the runner needs no account list and joins application shutdown.
+A slow source cannot keep the scan from reaching later attempts. When idle cleanup
+removes a local session, it closes that session's exact retained owner so the lease
+can expire and recovery can finish; an absent player never keeps an owner alive
+indefinitely.
+
+A server-owned startup abort waits briefly for its source receipt and database
+drain deadline, then returns the retained terminal decision when complete.
+Otherwise reconciliation finishes it independently of the browser. Workers get
+the same 30-second manifest readiness budget as local execution.
+
+The web client retries the exact saved START automatically. If a previous response
+never reached the player, recovery closes that captured session before another
+Play. Once the durable session mapping exists, recovery resumes its exact STOP
+directly, including after a lost response or reload. The original START remains
+saved until cleanup completes. Identity changes quarantine the old recovery task.

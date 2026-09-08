@@ -52,6 +52,11 @@ func (h *PlaybackHandler) recoverOrdinaryInitialAbortV3(ctx context.Context, sta
 			return fail(errors.Join(stopErr, err))
 		}
 	}
+	return ordinaryInitialAbortResponseV3(state)
+}
+
+func ordinaryInitialAbortResponseV3(state playback.InitialActivationV3) (playback.DecisionResponseV3, error) {
+	fail := func(err error) (playback.DecisionResponseV3, error) { return playback.DecisionResponseV3{}, err }
 	if state.Phase != playback.InitialActivationAbortedV3 || state.Terminal == nil {
 		return fail(playback.ErrInitialActivationConflictV3)
 	}

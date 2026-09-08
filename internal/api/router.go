@@ -88,10 +88,8 @@ import (
 
 // Dependencies holds all shared dependencies that handlers need.
 type Dependencies struct {
-	// InitialPlayback is explicit opt-in dependency wiring for admitted sources.
-	// Default startup leaves it nil; ordinary starts never enroll an account.
-	InitialPlayback                  *handlers.InitialPlaybackFlowV3
-	InitialPlaybackReconcileAccounts []int
+	// InitialPlayback supplies the default durable runtime and its recovery worker.
+	InitialPlayback *handlers.InitialPlaybackFlowV3
 
 	Config *config.Config
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
@@ -1078,15 +1076,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			if deps.RegisterShutdownWork != nil {
 				deps.RegisterShutdownWork(playbackHandler.InitialPlaybackShutdownDone())
 			}
-			if len(deps.InitialPlaybackReconcileAccounts) > 0 {
-				done := make(chan struct{})
-				go func() {
-					defer close(done)
-					playbackHandler.RunInitialPlaybackReconciliation(deps.InitialPlayback.Context, deps.InitialPlaybackReconcileAccounts, time.Second)
-				}()
-				if deps.RegisterShutdownWork != nil {
-					deps.RegisterShutdownWork(done)
-				}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				playbackHandler.RunInitialPlaybackReconciliation(deps.InitialPlayback.Context, time.Second)
+			}()
+			if deps.RegisterShutdownWork != nil {
+				deps.RegisterShutdownWork(done)
 			}
 		}
 		// Maintenance also bounds the in-memory fallback store: without it a

@@ -247,9 +247,22 @@ func (h *PlaybackHandler) startInitialPlaybackV3(r *http.Request, userID int, pr
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		defer cancel()
 		state, cancelErr := flow.Control.CancelInitialActivation(cleanup, binding, abortID)
-		if cancelErr == nil && state.Phase == playback.InitialActivationAbortingV3 {
-			_ = h.reconcileInitialAbortV3(cleanup, binding, abortID)
+		if cancelErr == nil && (state.Phase == playback.InitialActivationAbortingV3 || state.Phase == playback.InitialActivationAbortedV3) {
+			// Drain is judged by PostgreSQL, never by the API host's wall clock.
+			// The bounded cleanup owns this cancellation even after HTTP disconnect.
+			cancelErr = h.finishInitialAbortV3(cleanup, binding, abortID)
+			if cancelErr == nil {
+				state, cancelErr = flow.Control.ReadInitialActivation(cleanup, binding)
+				if cancelErr == nil {
+					response, responseErr := ordinaryInitialAbortResponseV3(state)
+					if responseErr == nil {
+						return response, nil
+					}
+					cancelErr = responseErr
+				}
+			}
 		}
+		logInitialAbortV3(cleanup, "abort_completion", req.PlaybackAttemptID, stage.ID, cancelErr)
 		return fail(cause)
 	}
 	sink, err := flow.Sources.OpenPlaybackSink(r.Context(), binding.Source)
@@ -455,6 +468,24 @@ func (h *PlaybackHandler) startInitialPlaybackV3(r *http.Request, userID int, pr
 	}
 	published = true
 	return response, nil
+}
+
+// finishInitialAbortV3 waits only for the captured drain, within its caller's
+// cleanup budget. Other failures stay durable for the normal reconciler.
+func (h *PlaybackHandler) finishInitialAbortV3(ctx context.Context, binding playback.InitialActivationBindingV3, abortID string) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err := h.reconcileInitialAbortV3(ctx, binding, abortID)
+		if !errors.Is(err, playback.ErrPlaybackRecoveryDrainingV3) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (h *PlaybackHandler) reconcileInitialAbortV3(ctx context.Context, binding playback.InitialActivationBindingV3, abortID string) error {

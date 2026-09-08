@@ -508,9 +508,11 @@ export function WatchPlaybackHost() {
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
       getDeviceId: () => getOrCreateDeviceId(),
+      onPlaybackStartResolved: () => toast.dismiss("playback-start-pending"),
       onPlaybackStartError: (error, retry) => {
-        toast.error("Playback start unconfirmed", {
+        toast.error("Playback unavailable", {
           id: "playback-start-pending",
+          duration: Infinity,
           description: error.message,
           action: { label: "Retry", onClick: retry },
         });
@@ -532,9 +534,10 @@ export function WatchPlaybackHost() {
     if (accountId == null || !profileId) return;
     let disposed = false;
     void initialPlaybackCapabilities(playerConfig)
-      .then((cap) => {
+      .then(async (cap) => {
         if (!disposed && cap?.installation_id && cap.state !== "not_configured") {
-          offerPendingInitialStart(playerConfig, cap);
+          await offerPendingInitialStart(playerConfig, cap);
+          if (disposed) return;
           offerPendingPlaybackStops(playerConfig, cap.installation_id);
         }
       })

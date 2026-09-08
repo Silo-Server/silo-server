@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestInitialReconciliationAccountPagesAndEligibility(t *testing.T) {
+func TestInitialReconciliationGlobalPagesAndEligibility(t *testing.T) {
 	f := newInitialActivationFixture(t)
 	f.begin(t)
-	rows, err := f.store.ListInitialReconciliation(t.Context(), f.userID, "", 1)
+	rows, err := f.store.ListInitialReconciliation(t.Context(), "", 1)
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("live pending included: %v %v", rows, err)
 	}
@@ -41,7 +41,7 @@ func TestInitialReconciliationAccountPagesAndEligibility(t *testing.T) {
 	seen := map[string]bool{}
 	after := ""
 	for {
-		page, err := f.store.ListInitialReconciliation(t.Context(), f.userID, after, 1)
+		page, err := f.store.ListInitialReconciliation(t.Context(), after, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,8 +60,8 @@ func TestInitialReconciliationAccountPagesAndEligibility(t *testing.T) {
 	}
 	other := newInitialActivationFixture(t)
 	other.begin(t)
-	if rows, err := f.store.ListInitialReconciliation(t.Context(), other.userID, "", 100); err != nil || len(rows) != 0 {
-		t.Fatalf("account isolation: %v %v", rows, err)
+	if rows, err := f.store.ListInitialReconciliation(t.Context(), "", 100); err != nil || len(rows) != 3 {
+		t.Fatalf("live second account must stay excluded: %v %v", rows, err)
 	}
 	if _, err := f.pool.Exec(t.Context(), `UPDATE playback_source_registrations SET admission_state='admitting' WHERE user_id=$1`, f.userID); err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestInitialReconciliationAccountPagesAndEligibility(t *testing.T) {
 	if _, err := f.pool.Exec(t.Context(), `UPDATE playback_v3_attempts SET control_lease_expires_at=clock_timestamp()-interval '1 hour',expires_at=clock_timestamp()-interval '1 minute' WHERE user_id=$1`, f.userID); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = f.store.ListInitialReconciliation(t.Context(), f.userID, "", 100)
+	rows, err = f.store.ListInitialReconciliation(t.Context(), "", 100)
 	if err != nil || len(rows) != 3 {
 		t.Fatalf("expired retention omitted: %d %v", len(rows), err)
 	}
@@ -77,19 +77,19 @@ func TestInitialReconciliationAccountPagesAndEligibility(t *testing.T) {
 	if _, err := f.store.AbortInitialActivation(t.Context(), f.binding, abortID); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = f.store.ListInitialReconciliation(t.Context(), f.userID, "", 100)
+	rows, err = f.store.ListInitialReconciliation(t.Context(), "", 100)
 	if err != nil || len(rows) != 3 {
 		t.Fatalf("aborting omitted: %d %v", len(rows), err)
 	}
 	if _, err := f.store.CompleteInitialAbort(t.Context(), f.binding, abortID, f.receipt(t, terminalInitialReceipt(t, f, abortID))); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = f.store.ListInitialReconciliation(t.Context(), f.userID, "", 100)
+	rows, err = f.store.ListInitialReconciliation(t.Context(), "", 100)
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("terminal included: %d %v", len(rows), err)
 	}
 	for _, limit := range []int{0, 101} {
-		if _, err := f.store.ListInitialReconciliation(t.Context(), f.userID, "", limit); err == nil {
+		if _, err := f.store.ListInitialReconciliation(t.Context(), "", limit); err == nil {
 			t.Fatal("invalid limit")
 		}
 	}
@@ -97,7 +97,7 @@ func TestInitialReconciliationAccountPagesAndEligibility(t *testing.T) {
 
 func TestInitialReconciliationIncludesStoppingNotActivated(t *testing.T) {
 	f := activatedLifecycleFixture(t)
-	rows, err := f.store.ListInitialReconciliation(t.Context(), f.userID, "", 10)
+	rows, err := f.store.ListInitialReconciliation(t.Context(), "", 10)
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("activated included: %v %v", rows, err)
 	}
@@ -110,7 +110,7 @@ func TestInitialReconciliationIncludesStoppingNotActivated(t *testing.T) {
 	if _, err := f.store.CleanupExpired(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = f.store.ListInitialReconciliation(t.Context(), f.userID, "", 10)
+	rows, err = f.store.ListInitialReconciliation(t.Context(), "", 10)
 	if err != nil || len(rows) != 1 || rows[0].Phase != playback.InitialActivationStoppingV3 {
 		t.Fatalf("stopping missing: %v %v", rows, err)
 	}

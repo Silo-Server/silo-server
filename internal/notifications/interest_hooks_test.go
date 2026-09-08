@@ -579,3 +579,26 @@ func TestInterestTrackingStoreConditionalCapabilities(t *testing.T) {
 		})
 	}
 }
+
+func TestInterestTrackingOptionalCapabilityResolution(t *testing.T) {
+	inner := &struct {
+		userstore.UserStore
+		userstore.OnboardingProgressStore
+	}{}
+	provider := WrapUserStoreProvider(preferenceTransactionTestProvider{store: inner}, &System{})
+	wrapped, err := provider.ForUser(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress, ok := userstore.Capability[userstore.OnboardingProgressStore](wrapped)
+	if !ok || progress != inner {
+		t.Fatal("lost underlying onboarding capability")
+	}
+	writer, ok := userstore.Capability[userstore.WatchedBatchWriter](wrapped)
+	if !ok || any(writer) != any(wrapped) {
+		t.Fatal("capability lookup bypassed notification mutation hooks")
+	}
+	if _, ok := userstore.Capability[userstore.SeriesEpisodeRollupStore](wrapped); ok {
+		t.Fatal("capability lookup invented backend support")
+	}
+}

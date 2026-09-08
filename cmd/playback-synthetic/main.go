@@ -189,7 +189,7 @@ func run(ctx context.Context, opts options) (result error) {
 	}
 	defer func() { _ = listener.Close() }()
 	manager := playback.NewSessionManager(0, 0)
-	handler := api.NewRouter(api.Dependencies{Config: cfg, AppContext: ctx, DB: pool, SecretCipher: cipher, UserStoreProvider: provider, RedisClient: redisClient, SessionMgr: manager, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), ClientIPResolver: clientip.NewResolver(nil), NodeID: "synthetic-playback", InitialPlayback: flow, InitialPlaybackReconcileAccounts: []int{source.AccountID}})
+	handler := api.NewRouter(api.Dependencies{Config: cfg, AppContext: ctx, DB: pool, SecretCipher: cipher, UserStoreProvider: provider, RedisClient: redisClient, SessionMgr: manager, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), ClientIPResolver: clientip.NewResolver(nil), NodeID: "synthetic-playback", InitialPlayback: flow})
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	finished := make(chan error, 1)
 	go func() { finished <- server.Serve(listener) }()

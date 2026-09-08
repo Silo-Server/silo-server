@@ -381,8 +381,7 @@ new execution or progress rights. See [the wire contract](../playback-api.md).
 
 PostgreSQL first admission is an explicit operation, separate from runtime
 enablement. SQLite provisioning, retirement/cutover, restore, takeover and replacement
-remain inactive. Explicit router configuration can run bounded reconciliation for
-selected accounts. It retries initial aborts and completes normal stops with an
+remain inactive. Every configured runtime runs bounded reconciliation across accounts. It retries initial aborts and completes normal stops with an
 existing matching source receipt; a stop without that receipt still requires the
-original client body. Normal application startup does not enable the runner. The
-initial protocol does not supply the later retirement-before-seal workflow.
+original client body. Each scan advances past visited rows even if a source exhausts the page deadline.
+The runner joins application shutdown. The initial protocol does not supply the later retirement-before-seal workflow.
