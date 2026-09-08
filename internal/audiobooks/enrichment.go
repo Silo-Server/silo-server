@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -719,7 +720,7 @@ func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
 	if e == nil || e.workLinker == nil || strings.TrimSpace(contentID) == "" {
 		return
 	}
-	workID, linked, err := e.workLinker.AutoLinkContent(ctx, contentID)
+	workID, linked, err := e.workLinker.AutoLinkContent(literaryworks.WithMatchOrigin(ctx, "audiobook_enrichment"), contentID)
 	if err != nil {
 		slog.WarnContext(ctx, "audiobook enrichment: literary work auto-link failed", "component", "audiobooks", "content_id", contentID, "error", err)
 		return

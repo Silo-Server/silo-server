@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -189,54 +190,79 @@ func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, 
 	return items, rows.Err()
 }
 
-// listMatchCandidateIDs selects opposite-format candidate content IDs using only
-// predicates that can ride base-table indexes (title on media_items, provider IDs
-// on media_item_provider_ids, series on the format-specific series table) instead
-// of filtering on lateral aggregate output. The opposite format is fixed by the
-// source type, so the series lookup targets a single concrete table.
-func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem, limit int) ([]string, error) {
+// listMatchCandidateIDs selects IDs before candidate metadata is hydrated.
+func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem, limit int) (ids []string, err error) {
+	started := time.Now()
+	defer func() { observeCandidateQuery(ctx, started, len(ids), err) }()
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
 	}
-	// Candidates are the opposite format of the source; match their own series table.
+	query, args := matchCandidateIDsQuery(source, limit)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// matchCandidateIDsQuery keeps each criterion in an independent index lookup.
+// Combining title and correlated provider/series EXISTS predicates with OR makes
+// PostgreSQL scan the book catalog even when each lookup matches very few rows.
+func matchCandidateIDsQuery(source MatchItem, limit int) (string, []any) {
 	seriesTable := "ebook_series"
 	if source.Type == "ebook" {
 		seriesTable = "audiobook_series"
 	}
 	args := []any{source.ContentID, source.Type}
-	matchFilters := make([]string, 0, 3)
+	lookups := make([]string, 0, 3)
 	if strings.TrimSpace(source.Title) != "" {
 		args = append(args, source.Title)
-		matchFilters = append(matchFilters, fmt.Sprintf("LOWER(mi.title) = LOWER($%d)", len(args)))
+		lookups = append(lookups, fmt.Sprintf(`
+			SELECT content_id FROM media_items
+			WHERE type IN ('ebook', 'audiobook') AND type <> $2
+			  AND LOWER(title) = LOWER($%d)`, len(args)))
 	}
+	// Stable parameter ordering lets the prepared-statement cache reuse queries
+	// regardless of Go map iteration order.
+	providers := make([]string, 0, len(source.ExternalIDs))
 	for provider, providerID := range source.ExternalIDs {
-		if provider == "" || provider == "asin" || providerID == "" {
-			continue
+		if provider != "" && provider != "asin" && providerID != "" {
+			providers = append(providers, provider)
 		}
-		args = append(args, provider, providerID)
-		matchFilters = append(matchFilters, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM media_item_provider_ids mip WHERE mip.content_id = mi.content_id AND mip.provider = $%d AND mip.provider_id = $%d)",
-			len(args)-1,
-			len(args),
-		))
+	}
+	sort.Strings(providers)
+	for _, provider := range providers {
+		args = append(args, provider, source.ExternalIDs[provider])
+		lookups = append(lookups, fmt.Sprintf(`
+			SELECT content_id FROM media_item_provider_ids
+			WHERE provider = $%d AND provider_id = $%d`, len(args)-1, len(args)))
 	}
 	if strings.TrimSpace(source.SeriesName) != "" && source.SeriesIndex != nil {
 		args = append(args, source.SeriesName, *source.SeriesIndex)
-		matchFilters = append(matchFilters, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM %s bs WHERE bs.content_id = mi.content_id AND LOWER(bs.series_name) = LOWER($%d) AND bs.series_index = $%d)",
-			seriesTable,
-			len(args)-1,
-			len(args),
-		))
+		lookups = append(lookups, fmt.Sprintf(`
+			SELECT content_id FROM %s
+			WHERE LOWER(series_name) = LOWER($%d) AND series_index = $%d`,
+			seriesTable, len(args)-1, len(args)))
 	}
-	matchWhere := ""
-	if len(matchFilters) > 0 {
-		matchWhere = " AND (" + strings.Join(matchFilters, " OR ") + ")"
+	candidateJoin := ""
+	if len(lookups) > 0 {
+		// UNION deduplicates across criteria before the global ordering and limit.
+		candidateJoin = " JOIN (" + strings.Join(lookups, " UNION ") + ") candidates ON candidates.content_id = mi.content_id"
 	}
+	// Preserve the existing opposite-format fallback when there are no usable
+	// criteria. In particular, an ASIN-only source still uses that fallback.
 	args = append(args, limit)
-	rows, err := r.pool.Query(ctx, `
+	return `
 		SELECT mi.content_id
-		FROM media_items mi
+		FROM media_items mi` + candidateJoin + `
 		WHERE mi.content_id <> $1
 		  AND mi.type IN ('ebook', 'audiobook')
 		  AND mi.type <> $2
@@ -247,23 +273,9 @@ func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem
 				(d.source_content_id = $1 AND d.target_content_id = mi.content_id)
 				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
 			  )
-		  )`+matchWhere+`
+		  )
 		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $`+fmt.Sprint(len(args))+`
-	`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+		LIMIT $` + fmt.Sprint(len(args)), args
 }
 
 func (r *Repository) queryMatchItems(ctx context.Context, suffix string, args ...any) (pgx.Rows, error) {

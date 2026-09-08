@@ -135,7 +135,23 @@ func (s *Service) LinkItems(ctx context.Context, workID string, contentIDs []str
 	return workID, nil
 }
 
-func (s *Service) AutoLinkContent(ctx context.Context, contentID string) (string, bool, error) {
+func (s *Service) AutoLinkContent(ctx context.Context, contentID string) (workID string, linked bool, err error) {
+	origin := matchOrigin(ctx)
+	active := autoMatchActive.WithLabelValues(origin)
+	active.Inc()
+	defer func() {
+		active.Dec()
+		outcome := "no_match"
+		switch {
+		case err != nil:
+			outcome = "error"
+		case linked:
+			outcome = "linked"
+		case workID != "":
+			outcome = "already_linked"
+		}
+		autoMatchTotal.WithLabelValues(origin, outcome).Inc()
+	}()
 	if s == nil || s.repo == nil {
 		return "", false, ErrWorkNotFound
 	}
@@ -171,7 +187,7 @@ func (s *Service) AutoLinkContent(ctx context.Context, contentID string) (string
 	if best.Score < AutoLinkThreshold || best.TargetContentID == "" {
 		return "", false, nil
 	}
-	workID := strings.TrimSpace(bestTarget.WorkID)
+	workID = strings.TrimSpace(bestTarget.WorkID)
 	if workID == "" {
 		workID = generatedWorkID(source.MatchItem)
 		if _, err := s.repo.CreateWork(ctx, CreateWorkParams{

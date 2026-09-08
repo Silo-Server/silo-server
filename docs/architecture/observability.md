@@ -208,3 +208,35 @@ would re-introduce a custom sink the OTLP + runtime split already covers.
   (DB connect, migrations, tuning) reach stderr only, matching existing `opslog` behavior.
 - **Per-subsystem trace propagation into plugins** is a follow-up owned by
   `silo-plugin-sdk`; this repo instruments only the host side.
+
+## Literary-work matching
+
+`internal/literaryworks` records candidate selection and automatic matching on
+Prometheus. The `origin` label is restricted to `scanner`, `ebook_enrichment`,
+`audiobook_enrichment`, and `other` (including interactive candidate requests).
+Media identifiers and titles are never labels.
+
+| Metric | Meaning |
+| --- | --- |
+| `silo_literary_match_candidate_duration_seconds` | Candidate-ID selection time, including pool wait and row reads; `outcome` is `success` or `error`. |
+| `silo_literary_match_candidates` | Candidate count for successful lookups, including zero matches. |
+| `silo_literary_match_active` | Automatic matching calls currently running on this replica. Sum across replicas to observe cluster concurrency. |
+| `silo_literary_match_attempts_total` | Completed automatic calls with `linked`, `already_linked`, `no_match`, or `error` outcomes. |
+
+Candidate selection unions independent title, provider-ID, and series index
+lookups before applying ignored decisions, global ordering, and the limit.
+Combining these criteria with cross-table `OR EXISTS` predicates can scan the
+entire book catalog despite the lookup indexes. Keep deduplication before the
+limit and hydrate metadata only for selected IDs. Sources without usable criteria
+retain the opposite-format fallback. Already-linked automatic calls skip candidate
+selection; unchanged unlinked books are still reconsidered so newly added
+counterparts can be found.
+
+The opt-in `TestCandidateLookupLargeCatalog` test compares the old and current
+queries with custom and generic prepared plans on a synthetic catalog. Set
+`SILO_TEST_DATABASE_URL` to a disposable PostgreSQL database and
+`SILO_TEST_LITERARY_PERF=1`, then run
+`go test ./internal/literaryworks -run TestCandidateLookupLargeCatalog -count=1 -v`.
+The fixture uses temporary tables and checks execution plans for catalog-wide
+work and unnecessary JIT. Treat reported timings as local test results rather
+than production latency guarantees.

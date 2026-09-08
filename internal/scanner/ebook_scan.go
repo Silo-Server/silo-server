@@ -18,6 +18,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
@@ -635,7 +636,7 @@ func (s *Scanner) autoLinkLiteraryWork(ctx context.Context, contentID string) {
 	if s == nil || s.literaryWorkLinker == nil || strings.TrimSpace(contentID) == "" {
 		return
 	}
-	workID, linked, err := s.literaryWorkLinker.AutoLinkContent(ctx, contentID)
+	workID, linked, err := s.literaryWorkLinker.AutoLinkContent(literaryworks.WithMatchOrigin(ctx, "scanner"), contentID)
 	if err != nil {
 		slog.WarnContext(ctx, "literary work auto-link failed", "component", "scanner", "content_id", contentID, "error", err)
 		return
