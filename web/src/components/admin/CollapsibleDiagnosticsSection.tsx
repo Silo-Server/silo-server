@@ -54,27 +54,25 @@ export function CollapsibleDiagnosticsSection({
         {isLoading ? (
           open ? (
             <Badge variant="secondary" className="text-[11px] tabular-nums">
-              &mdash;
+              <span className="sr-only">Loading count</span>
+              <span aria-hidden="true">&mdash;</span>
             </Badge>
           ) : (
-            <div
-              className="text-muted-foreground text-2xl leading-none font-bold tabular-nums"
-              aria-label="Loading count"
-            >
-              &mdash;
+            <div className="text-muted-foreground text-2xl leading-none font-bold tabular-nums">
+              <span className="sr-only">Loading count</span>
+              <span aria-hidden="true">&mdash;</span>
             </div>
           )
         ) : isError ? (
           open ? (
             <Badge variant="destructive" className="text-[11px] tabular-nums">
-              !
+              <span className="sr-only">Error loading count</span>
+              <span aria-hidden="true">!</span>
             </Badge>
           ) : (
-            <div
-              className="text-destructive text-2xl leading-none font-bold tabular-nums"
-              aria-label="Error loading count"
-            >
-              !
+            <div className="text-destructive text-2xl leading-none font-bold tabular-nums">
+              <span className="sr-only">Error loading count</span>
+              <span aria-hidden="true">!</span>
             </div>
           )
         ) : open ? (

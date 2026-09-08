@@ -332,7 +332,7 @@ describe("AdminLibraries", () => {
 
     expect(markup).toContain("Ambiguous Roots");
     expect(markup).toContain("Scanner roots that stay visible");
-    expect(markup).toContain('aria-label="Loading count"');
+    expect(markup).toContain("Loading count");
     expect(markup).toContain("bg-muted/50");
   });
 
@@ -369,7 +369,7 @@ describe("AdminLibraries", () => {
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");
-    expect(markup).toContain('aria-label="Error loading count"');
+    expect(markup).toContain("Error loading count");
     expect(markup).toContain("bg-destructive/10");
   });
 

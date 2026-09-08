@@ -25,8 +25,8 @@ describe("CollapsibleDiagnosticsSection", () => {
     expect(screen.queryByText("Child content")).not.toBeInTheDocument();
   });
 
-  it("renders a loading indicator when isLoading is true", () => {
-    render(
+  it("renders an accessible loading indicator when isLoading is true in both states", () => {
+    const { rerender } = render(
       <CollapsibleDiagnosticsSection
         title="Test Diagnostics"
         description="A test section description"
@@ -40,7 +40,25 @@ describe("CollapsibleDiagnosticsSection", () => {
       </CollapsibleDiagnosticsSection>,
     );
 
-    expect(screen.getByLabelText("Loading count")).toHaveTextContent("—");
+    expect(screen.getByText("Loading count")).toBeInTheDocument();
+    expect(screen.getByText("—")).toHaveAttribute("aria-hidden", "true");
+
+    rerender(
+      <CollapsibleDiagnosticsSection
+        title="Test Diagnostics"
+        description="A test section description"
+        count={0}
+        isLoading={true}
+        icon={<span>Icon</span>}
+        open={true}
+        onOpenChange={vi.fn()}
+      >
+        <div>Child content</div>
+      </CollapsibleDiagnosticsSection>,
+    );
+
+    expect(screen.getByText("Loading count")).toBeInTheDocument();
+    expect(screen.getByText("—")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("applies neutral text styling to zero count", () => {
@@ -61,8 +79,8 @@ describe("CollapsibleDiagnosticsSection", () => {
     expect(countElem.className).toContain("text-muted-foreground");
   });
 
-  it("renders an error indicator when isError is true", () => {
-    render(
+  it("renders an accessible error indicator when isError is true in both states", () => {
+    const { rerender } = render(
       <CollapsibleDiagnosticsSection
         title="Test Diagnostics"
         description="A test section description"
@@ -76,7 +94,25 @@ describe("CollapsibleDiagnosticsSection", () => {
       </CollapsibleDiagnosticsSection>,
     );
 
-    expect(screen.getByLabelText("Error loading count")).toHaveTextContent("!");
+    expect(screen.getByText("Error loading count")).toBeInTheDocument();
+    expect(screen.getByText("!")).toHaveAttribute("aria-hidden", "true");
+
+    rerender(
+      <CollapsibleDiagnosticsSection
+        title="Test Diagnostics"
+        description="A test section description"
+        count={0}
+        isError={true}
+        icon={<span>Icon</span>}
+        open={true}
+        onOpenChange={vi.fn()}
+      >
+        <div>Child content</div>
+      </CollapsibleDiagnosticsSection>,
+    );
+
+    expect(screen.getByText("Error loading count")).toBeInTheDocument();
+    expect(screen.getByText("!")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("toggles and renders child content when open", async () => {
