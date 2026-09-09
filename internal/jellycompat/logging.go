@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,12 +11,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 type loggingResponseWriter struct {
@@ -81,7 +80,7 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"original_path", firstNonEmpty(originalPathFromContext(r.Context()), r.URL.Path),
-			"query", r.URL.RawQuery,
+			"query", logredact.SanitizeQuery(r.URL.RawQuery),
 			"route", routePattern,
 			"status", statusOrDefault(ww.status),
 			"duration_ms", time.Since(start).Milliseconds(),
@@ -191,8 +190,8 @@ func (w *debugResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-// newDebugLogMiddleware creates a middleware that logs full request/response
-// pairs to the given file. Enable by setting JELLYCOMPAT_DEBUG_LOG=/path/to/file.
+// newDebugLogMiddleware logs request/response diagnostics with credentials
+// redacted. Non-JSON bodies are omitted. Enable with JELLYCOMPAT_DEBUG_LOG.
 // When userAgentFilter is non-empty, only requests whose User-Agent contains
 // the filter string (case-insensitive) are logged.
 func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.Handler) http.Handler {
@@ -205,10 +204,10 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 			}
 
 			// Capture request body for POST/PUT/PATCH.
-			var reqBody []byte
+			var requestCapture *debugRequestBody
 			if r.Body != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch) {
-				reqBody, _ = io.ReadAll(io.LimitReader(r.Body, debugMaxBodyCapture))
-				r.Body = io.NopCloser(bytes.NewReader(reqBody))
+				requestCapture = &debugRequestBody{ReadCloser: r.Body}
+				r.Body = requestCapture
 			}
 
 			start := time.Now()
@@ -225,16 +224,19 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 			fmt.Fprintf(logFile, "=== %s %s %s [%s] %dms ===\n",
 				start.Format("2006/01/02 15:04:05"),
 				r.Method,
-				r.URL.String(),
+				logredact.SanitizeRequestURL(r.URL.String()),
 				reqID,
 				elapsed.Milliseconds(),
 			)
 			fmt.Fprintf(logFile, "Remote: %s  User-Agent: %s\n", r.RemoteAddr, r.UserAgent())
 			fmt.Fprintf(logFile, "Status: %d\n", status)
 
-			if len(reqBody) > 0 {
-				fmt.Fprintf(logFile, "Request Body (%d bytes):\n", len(reqBody))
-				writeIndentedJSON(logFile, reqBody)
+			if requestCapture != nil && requestCapture.body.Len() > 0 {
+				_, _ = fmt.Fprintf(logFile, "Request Body (%d bytes captured):\n", requestCapture.body.Len())
+				if requestCapture.truncated {
+					_, _ = fmt.Fprintf(logFile, "[truncated at %d bytes]\n", debugMaxBodyCapture)
+				}
+				writeIndentedJSON(logFile, requestCapture.body.Bytes())
 			}
 
 			switch {
@@ -254,22 +256,31 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 	}
 }
 
-// writeIndentedJSON pretty-prints b if it's valid JSON, otherwise writes it as
-// UTF-8 text. If b is not valid UTF-8 (e.g. a handler lied about Content-Type),
-// it is omitted so the log file stays readable.
+// debugRequestBody observes reads without consuming ahead of the handler or
+// changing the request's length, read errors or Close result.
+type debugRequestBody struct {
+	io.ReadCloser
+	body      bytes.Buffer
+	truncated bool
+}
+
+func (b *debugRequestBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	remaining := debugMaxBodyCapture - b.body.Len()
+	if n > remaining {
+		b.truncated = true
+	}
+	if remaining > 0 {
+		_, _ = b.body.Write(p[:min(n, remaining)])
+	}
+	return n, err
+}
+
+// writeIndentedJSON writes only redacted structured bodies, never a raw-text
+// fallback that could contain passwords, form credentials or stream URLs.
 func writeIndentedJSON(w io.Writer, b []byte) {
-	var buf bytes.Buffer
-	if json.Indent(&buf, b, "", "  ") == nil {
-		buf.WriteByte('\n')
-		w.Write(buf.Bytes())
-		return
-	}
-	if utf8.Valid(b) {
-		w.Write(b)
-		fmt.Fprintln(w)
-		return
-	}
-	fmt.Fprintf(w, "[non-UTF-8 payload, %d bytes omitted]\n", len(b))
+	_, _ = w.Write(logredact.SanitizeJSON(b))
+	_, _ = fmt.Fprintln(w)
 }
 
 // isTextualContentType reports whether a captured body with Content-Type ct is
