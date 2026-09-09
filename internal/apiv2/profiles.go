@@ -1,13 +1,10 @@
 package apiv2
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -101,26 +98,6 @@ const memberAvatar = "avatar"
 var profileUpdateNullable = map[string]bool{
 	memberAvatar: true, "pin": true, "max_content_rating": true, "language": true,
 	"preferred_metadata_language": true, "subtitle_language": true, fieldMaxPlaybackQuality: true,
-}
-
-// rejectNonNullableNulls is the contract's omitted-versus-null rule for the
-// members that do not admit clearing.
-func rejectNonNullableNulls(raw []byte, nullable map[string]bool) *Problem {
-	// The framework already judged the syntax and shape; a document that
-	// does not decode here has no members to judge.
-	var members map[string]json.RawMessage
-	_ = json.Unmarshal(raw, &members)
-	var errs []ProblemError
-	for name, v := range members {
-		if bytes.Equal(bytes.TrimSpace(v), jsonNull) && !nullable[name] {
-			errs = append(errs, ProblemError{Location: locationBody + "." + name, Code: codeInvalidType, Detail: "null is not a value for this member; omit it to leave it unchanged"})
-		}
-	}
-	if len(errs) == 0 {
-		return nil
-	}
-	sort.Slice(errs, func(i, j int) bool { return errs[i].Location < errs[j].Location })
-	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").WithErrors(errs...)
 }
 
 // ProfileOutput is a single-profile response.
