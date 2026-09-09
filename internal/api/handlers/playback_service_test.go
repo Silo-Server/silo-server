@@ -14,7 +14,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 const (
@@ -328,6 +330,83 @@ func TestProgressSideEffectsNeverOverwriteANewerSample(t *testing.T) {
 	}
 	if live.Position != 1200 {
 		t.Fatalf("live position = %v, want 1200 (older sample overwrote a newer one)", live.Position)
+	}
+}
+
+// progressWriteInterceptor is a user store whose UpdateProgress runs a hook
+// before the first write of a given position lands, so a test can wedge
+// another replica's writes between this replica's row check and its write.
+type progressWriteInterceptor struct {
+	userstore.UserStore
+	beforePosition float64
+	before         func()
+	fired          bool
+}
+
+func (s *progressWriteInterceptor) UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
+	if !s.fired && position == s.beforePosition {
+		s.fired = true
+		s.before()
+	}
+	return s.UserStore.UpdateProgress(ctx, profileID, mediaItemID, position, duration, thresholds)
+}
+
+// TestProgressSideEffectsAcrossReplicasEndAtTheRowsLatestSample drives the
+// two-replica race a process-local lock cannot order: replica A passes its
+// row check for sequence 1, replica B applies and persists sequence 2 end to
+// end, then A's user-store write lands. A must notice the row moved and
+// leave the resume position (and its live session) at sequence 2.
+func TestProgressSideEffectsAcrossReplicasEndAtTheRowsLatestSample(t *testing.T) {
+	userStore := newPlaybackTestStore(t)
+	file := &models.MediaFile{ID: 100, ContentID: "book-1", Duration: 3600}
+	planStore := playback.NewMemoryPlanStoreV3()
+	ctx := newAuthorizedPlaybackContext()
+	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
+
+	replica := func(manager *playback.SessionManager, store userstore.UserStore) *PlaybackHandler {
+		h := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+		h.InstallationID = serviceInstallation
+		h.PlanStoreV3 = planStore
+		h.StoreProvider = testUserStoreProvider{store: store}
+		return h
+	}
+	managerA := playback.NewSessionManager(0, 0)
+	session, err := managerA.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := planStore.SaveAttempt(context.Background(), playback.AttemptRecordV3{
+		PlaybackAttemptID: uuid.NewString(), SessionID: session.ID, UserID: 1, ProfileID: "profile-1",
+		RequestedMediaFileID: file.ID, EffectiveMediaFileID: file.ID, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Replica B never held the session; it writes from the attempt row.
+	replicaB := replica(playback.NewSessionManager(0, 0), userStore)
+	interceptor := &progressWriteInterceptor{UserStore: userStore, beforePosition: 600, before: func() {
+		if _, err := replicaB.ApplyProgressV2(ctx, caller, session.ID, PlaybackProgressCommand{Sequence: 2, Position: 1200}); err != nil {
+			t.Errorf("replica B progress: %v", err)
+		}
+	}}
+	replicaA := replica(managerA, interceptor)
+
+	view, err := replicaA.ApplyProgressV2(ctx, caller, session.ID, PlaybackProgressCommand{Sequence: 1, Position: 600})
+	if err != nil || view.Outcome != PlaybackOutcomeApplied {
+		t.Fatalf("replica A view = %+v, %v", view, err)
+	}
+	if !interceptor.fired {
+		t.Fatal("precondition: replica B did not run between A's check and A's write")
+	}
+	saved, err := userStore.GetProgress(context.Background(), "profile-1", "book-1")
+	if err != nil || saved == nil {
+		t.Fatalf("saved progress = %+v, %v", saved, err)
+	}
+	if saved.PositionSeconds != 1200 {
+		t.Fatalf("saved position = %v, want 1200 (older sample overwrote a newer one across replicas)", saved.PositionSeconds)
+	}
+	live, err := managerA.GetSession(session.ID)
+	if err != nil || live.Position != 1200 {
+		t.Fatalf("live position = %+v, %v; want 1200", live, err)
 	}
 }
 

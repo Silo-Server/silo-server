@@ -277,6 +277,10 @@ export function useAudiobookPlayback({
   const playAfterSourceSwitchRef = useRef(false);
   const autoPlayPendingRef = useRef(autoPlay);
   const playingRef = useRef(false);
+  // Set when the last part ended and its session was stopped. The element
+  // keeps its (now revoked) source; the next Play or seek starts a new
+  // attempt instead of touching it.
+  const endedRef = useRef(false);
   // Wall-clock time playback last paused, for smart rewind on resume. Cleared
   // by explicit seeks so a hand-picked position is never second-guessed.
   const pausedAtRef = useRef<number | null>(null);
@@ -319,6 +323,7 @@ export function useAudiobookPlayback({
 
       const sessionId = plan.session_id ?? decision.session_id ?? sessionIdRef.current;
       const planAttemptId = randomUUID();
+      endedRef.current = false;
       planRef.current = plan;
       playbackAttemptIdRef.current = playbackAttemptId;
       planAttemptIdRef.current = planAttemptId;
@@ -513,7 +518,13 @@ export function useAudiobookPlayback({
     initialSeekAppliedRef.current = true;
     currentTimeRef.current = target;
     setCurrentTime(target);
-    if (samePart && audio && audio.readyState > 0 && canSeekAnywhereRef.current) {
+    if (
+      samePart &&
+      audio &&
+      audio.readyState > 0 &&
+      canSeekAnywhereRef.current &&
+      !endedRef.current
+    ) {
       // A new start position for the part already loaded (a chapter picked
       // on the book page while it plays): seek the element now. The source
       // effect does not re-run for an unchanged part, so nothing else would.
@@ -727,6 +738,17 @@ export function useAudiobookPlayback({
       playingRef.current = false;
       setPlaying(false);
       reportRef.current(duration);
+      // The book is over: end the session now rather than holding its slot
+      // (and any transcode) until the paused-session reaper runs. Dropping the
+      // session id also closes the control socket, which would otherwise keep
+      // reconnecting to a stopped session.
+      endedRef.current = true;
+      const endedSessionId = sessionIdRef.current;
+      if (endedSessionId) {
+        stopSession(endedSessionId);
+        sessionIdRef.current = null;
+        setSessionState((current) => ({ ...current, sessionId: null }));
+      }
     };
     const onError = () => {
       const err = audio.error;
@@ -771,6 +793,7 @@ export function useAudiobookPlayback({
     rate,
     recoverFromPlanFailure,
     setAbsoluteTime,
+    stopSession,
   ]);
 
   useEffect(() => {
@@ -815,7 +838,7 @@ export function useAudiobookPlayback({
         playAfterSourceSwitchRef.current = shouldContinuePlaying;
         setBuffered(null);
         setActiveFileIndex(nextIndex);
-      } else if (audio && canSeekAnywhereRef.current) {
+      } else if (audio && canSeekAnywhereRef.current && !endedRef.current) {
         audio.currentTime = Math.max(0, local - timelineOffsetSecondsRef.current);
       } else {
         pendingLocalSeekRef.current = local;
@@ -834,6 +857,13 @@ export function useAudiobookPlayback({
   const resumePlayback = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    if (endedRef.current) {
+      // The finished book's session is stopped and its stream revoked. Play
+      // starts a new attempt from the beginning, as the element itself would.
+      seekTo(0);
+      playAfterSourceSwitchRef.current = true;
+      return;
+    }
     const pausedAtMs = pausedAtRef.current;
     pausedAtRef.current = null;
     if (smartRewindEnabled && pausedAtMs != null) {

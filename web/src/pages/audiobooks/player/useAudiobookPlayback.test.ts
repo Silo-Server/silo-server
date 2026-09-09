@@ -825,6 +825,60 @@ describe("useAudiobookPlayback sequencing", () => {
     expect(events).toEqual(["start-1", "stop-requested", "stop-done", "start-2"]);
   });
 
+  it("stops the session when the final part ends", async () => {
+    const events: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          events.push("start");
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(audioOnlyDecision("last-part", body.start_position), { status: 201 });
+        }
+        if (init?.method === "DELETE") {
+          events.push("stop");
+          return stopReceipt();
+        }
+        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
+        return new Response(null, { status: 202 });
+      }),
+    );
+    const { result } = renderAudiobookPlayback();
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    expect(events).toEqual(["start"]);
+
+    act(() => audio.dispatchEvent(new Event("ended")));
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start", "stop"]);
+    expect(result.current.playing).toBe(false);
+    expect(result.current.currentTime).toBe(600);
+    // The element stays mounted and nothing restarts on its own, but the
+    // control socket lets go of the stopped session.
+    expect(result.current.hasFile).toBe(true);
+    expect(realtimeOptions.current?.sessionId).toBeNull();
+
+    // Play after the end starts a new attempt from the beginning instead of
+    // playing the revoked stream.
+    act(() => result.current.togglePlay());
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start", "stop", "start"]);
+    expect(audio.play).not.toHaveBeenCalled();
+    const lastStart = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"))
+      .at(-1)!;
+    expect(JSON.parse(String((lastStart[1] as RequestInit).body))).toMatchObject({
+      start_position: 0,
+    });
+  });
+
   it("seeks the loaded element when the start position changes within the same part", async () => {
     vi.stubGlobal(
       "fetch",

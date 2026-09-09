@@ -70,9 +70,14 @@ receipt is `{outcome, accepted?}`, where `accepted` is the latest committed
 
 An applied sample is persisted through the same writers v1 uses (resume
 position, scrobbles), from the live session when this replica holds it and from
-the attempt row otherwise. An attempt started with `progress_persistence:
-"client"` records no resume position; multi-part audiobooks use it and report
-their global position through `POST /api/v2/sync/progress`.
+the attempt row otherwise. The writers run after the compare-and-set and the
+resume position is last-write-wins, so after writing, the server re-reads the
+row and rewrites if a newer sample landed meanwhile (on this or another
+replica); the stored resume position ends at the row's latest sample. A
+replayed sample persists again, since the client retried because the first
+reply was lost. An attempt started with `progress_persistence: "client"`
+records no resume position; multi-part audiobooks use it and report their
+global position through `POST /api/v2/sync/progress`.
 
 Stop accepts `{installation_id, stop_id}` plus an optional final sample
 `{sequence, position, is_paused}`; `sequence` and `position` appear together or

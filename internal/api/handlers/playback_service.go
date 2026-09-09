@@ -284,33 +284,65 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	return view, nil
 }
 
-// progressSampleCurrent reports whether sample is still the attempt's latest
-// accepted sample. The CAS orders samples on the row, but the side effects
-// below run after it: without this check, sequence 1 could finish its writes
-// after sequence 2 and leave the live session and the saved resume position
-// behind the row.
-func progressSampleCurrent(ctx context.Context, store playback.ProgressStoreV3, sessionID string, sample playback.ProgressSampleV3) bool {
+// maxProgressWritePassesV2 bounds how many times persistProgressV2 rewrites
+// the side effects after the row moved under it. Each extra pass needs the
+// row to have advanced while the previous write ran, so one is the norm.
+const maxProgressWritePassesV2 = 3
+
+// latestAcceptedSampleV2 reads the attempt's latest accepted sample by
+// probing the row with sample: a repeat of the latest sample is "replayed",
+// a stale one carries the newer sample in Accepted. ok is false when the
+// attempt is stopped, gone, or the store failed, and nothing should be
+// persisted.
+func latestAcceptedSampleV2(ctx context.Context, store playback.ProgressStoreV3, sessionID string, sample playback.ProgressSampleV3) (latest playback.ProgressSampleV3, ok bool) {
 	receipt, err := store.ApplyProgress(ctx, sessionID, sample)
 	if err != nil {
-		return false
+		return playback.ProgressSampleV3{}, false
 	}
-	// A repeat of the latest sample is "replayed"; anything else means a
-	// newer sample has since been accepted.
-	return receipt.Outcome == playback.ProgressReplayedV3
+	if receipt.Outcome == playback.ProgressStaleSampleV3 && receipt.Accepted != nil {
+		return *receipt.Accepted, true
+	}
+	return sample, true
 }
 
-// persistProgressV2 runs the v1 progress side effects for an applied sample:
-// the manager position when this replica holds the session, the user-store
-// writer either way.
+// persistProgressV2 runs the v1 progress side effects and leaves them at the
+// attempt's latest accepted sample.
+//
+// The CAS orders samples on the row, but the writers run after it and the
+// user-store write is last-write-wins, so two replicas can finish in the
+// opposite order to the row: sequence 1 lands on replica A after sequence 2
+// landed on replica B. A process-local lock cannot order that, so the row is
+// the guard instead. The writers run for the row's latest sample, then the
+// row is read again; if it moved while they ran, the newer sample is written
+// on top. Whoever writes last therefore writes the latest: a later sample's
+// writer either ran after this caller's final check or was the one that moved
+// the row, and it finishes with the same check.
 func (h *PlaybackHandler) persistProgressV2(ctx context.Context, store playback.ProgressStoreV3, record *playback.AttemptRecordV3, sessionID string, sample playback.ProgressSampleV3) {
-	// Serialize the side effects per session and re-check the row under the
-	// lock: two applied samples racing here would otherwise write in the
-	// order they finished, not the order the row accepted them.
+	// Within one replica the passes are serialized per session so two local
+	// writers cannot interleave inside a pass.
 	unlock := h.progressSideEffectLock(sessionID)
 	defer unlock()
-	if !progressSampleCurrent(ctx, store, sessionID, sample) {
-		return
+	target := sample
+	for pass := 0; ; pass++ {
+		latest, ok := latestAcceptedSampleV2(ctx, store, sessionID, target)
+		if !ok {
+			return
+		}
+		if pass > 0 && latest == target {
+			return
+		}
+		if pass == maxProgressWritePassesV2 {
+			slog.WarnContext(ctx, "playback progress side effects trail the attempt row", "component", "api", "session", sessionID, "playback_session_id", sessionID, "sequence", latest.Sequence)
+			return
+		}
+		target = latest
+		h.writeProgressSideEffectsV2(ctx, record, sessionID, target)
 	}
+}
+
+// writeProgressSideEffectsV2 applies one sample to the live session when this
+// replica holds it and to the user-store writer either way.
+func (h *PlaybackHandler) writeProgressSideEffectsV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, sample playback.ProgressSampleV3) {
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err == nil && session != nil {
 		wasPaused := session.IsPaused

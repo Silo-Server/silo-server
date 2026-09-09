@@ -171,9 +171,11 @@ export function sendSessionProgress(
 
 /**
  * Stops a session. A sequenced session mints one stop identity, attaches the
- * latest sample, waits for prior progress and retries the exact body until a
- * `stopped` or `replayed` receipt arrives or the 30s budget runs out. A v1
- * session sends the bodiless v1 DELETE.
+ * latest sample, waits for prior progress (itself bounded to 30s) and then
+ * retries the exact body until a `stopped` or `replayed` receipt arrives or
+ * its own 30s budget runs out. The two budgets are separate so a slow drain
+ * cannot leave the stop with no time to be delivered. A v1 session sends the
+ * bodiless v1 DELETE.
  */
 export function stopSequencedSession(
   config: PlayerConfig,
@@ -197,8 +199,8 @@ export function stopSequencedSession(
   }
   const body = state.stopBody;
   const stopId = (JSON.parse(body) as { stop_id: string }).stop_id;
-  const deadline = Date.now() + 30_000;
   const stopping = waitForProgress(state.tail).then(async () => {
+    const deadline = Date.now() + 30_000;
     for (;;) {
       try {
         const response = await mutationFetch(

@@ -133,6 +133,27 @@ describe("sequenced playback mutations", () => {
     expect(fetcher.mock.calls[fetcher.mock.calls.length - 1]![1].body).toBe(original);
   });
 
+  it("starts the stop budget after waiting for queued progress", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi
+      .fn()
+      // The queued progress request never answers; the stop waits the full
+      // 30s for it, then its first DELETE fails transiently.
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockResolvedValueOnce(problem(503, "dependency_unavailable"))
+      .mockImplementation(async () => receipt({ outcome: "replayed" }));
+    vi.stubGlobal("fetch", fetcher);
+    registerSessionMutations("stop-budget", "install");
+    void sendSessionProgress(config, "stop-budget", sample).catch(() => {});
+    const stop = stopSequencedSession(config, "stop-budget");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(stop).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[2]![1].body).toBe(fetcher.mock.calls[1]![1].body);
+  });
+
   it("treats a 404 stop as already over", async () => {
     const fetcher = vi.fn().mockResolvedValue(problem(404, "not_found"));
     vi.stubGlobal("fetch", fetcher);
