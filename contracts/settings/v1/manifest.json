@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 8,
+  "revision": 9,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -130,6 +130,194 @@
     }
   },
   "definitions": [
+    {
+      "key": "player.video_skip_back_seconds",
+      "introduced_in": 9,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          {
+            "value": 5,
+            "label": "5 seconds"
+          },
+          {
+            "value": 10,
+            "label": "10 seconds"
+          },
+          {
+            "value": 15,
+            "label": "15 seconds"
+          },
+          {
+            "value": 30,
+            "label": "30 seconds"
+          },
+          {
+            "value": 45,
+            "label": "45 seconds"
+          },
+          {
+            "value": 60,
+            "label": "60 seconds"
+          },
+          {
+            "value": 90,
+            "label": "90 seconds"
+          }
+        ]
+      },
+      "default_value": 10,
+      "unit": "seconds",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv", "web"],
+      "category": "player",
+      "label": "Video rewind interval",
+      "description": "Seconds to skip back in video playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+      "recommended_control": "select"
+    },
+    {
+      "key": "player.video_skip_forward_seconds",
+      "introduced_in": 9,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          {
+            "value": 5,
+            "label": "5 seconds"
+          },
+          {
+            "value": 10,
+            "label": "10 seconds"
+          },
+          {
+            "value": 15,
+            "label": "15 seconds"
+          },
+          {
+            "value": 30,
+            "label": "30 seconds"
+          },
+          {
+            "value": 45,
+            "label": "45 seconds"
+          },
+          {
+            "value": 60,
+            "label": "60 seconds"
+          },
+          {
+            "value": 90,
+            "label": "90 seconds"
+          }
+        ]
+      },
+      "default_value": 30,
+      "unit": "seconds",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv", "web"],
+      "category": "player",
+      "label": "Video fast-forward interval",
+      "description": "Seconds to skip forward in video playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+      "recommended_control": "select"
+    },
+    {
+      "key": "player.audiobook_skip_back_seconds",
+      "introduced_in": 9,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          {
+            "value": 5,
+            "label": "5 seconds"
+          },
+          {
+            "value": 10,
+            "label": "10 seconds"
+          },
+          {
+            "value": 15,
+            "label": "15 seconds"
+          },
+          {
+            "value": 30,
+            "label": "30 seconds"
+          },
+          {
+            "value": 45,
+            "label": "45 seconds"
+          },
+          {
+            "value": 60,
+            "label": "60 seconds"
+          },
+          {
+            "value": 90,
+            "label": "90 seconds"
+          }
+        ]
+      },
+      "default_value": 10,
+      "unit": "seconds",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv", "web"],
+      "category": "player",
+      "label": "Audiobook rewind interval",
+      "description": "Seconds to skip back in audiobook playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+      "recommended_control": "select"
+    },
+    {
+      "key": "player.audiobook_skip_forward_seconds",
+      "introduced_in": 9,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          {
+            "value": 5,
+            "label": "5 seconds"
+          },
+          {
+            "value": 10,
+            "label": "10 seconds"
+          },
+          {
+            "value": 15,
+            "label": "15 seconds"
+          },
+          {
+            "value": 30,
+            "label": "30 seconds"
+          },
+          {
+            "value": 45,
+            "label": "45 seconds"
+          },
+          {
+            "value": 60,
+            "label": "60 seconds"
+          },
+          {
+            "value": 90,
+            "label": "90 seconds"
+          }
+        ]
+      },
+      "default_value": 30,
+      "unit": "seconds",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv", "web"],
+      "category": "player",
+      "label": "Audiobook fast-forward interval",
+      "description": "Seconds to skip forward in audiobook playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+      "recommended_control": "select"
+    },
     {
       "key": "playback.audio_language",
       "introduced_in": 1,

@@ -36,6 +36,10 @@ import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 interface PlayerControlsProps {
+  /** The profile's rewind/fast-forward intervals, shown on the transport buttons. */
+  skipSeconds: { back: number; forward: number };
+  /** Directional skips; the player owns the timeline math (offsets, pending seeks). */
+  onSkip: { back: () => void; forward: () => void };
   // Visibility
   visible: boolean;
   // Video state
@@ -104,10 +108,9 @@ interface PlayerControlsProps {
 }
 
 /** Skip amount for the ±seconds buttons, matching keyboard shortcuts. */
-export const SKIP_BACK_SECONDS = 10;
-export const SKIP_FORWARD_SECONDS = 30;
-
 export function PlayerControls({
+  skipSeconds,
+  onSkip,
   visible,
   playing,
   currentTime,
@@ -185,10 +188,8 @@ export function PlayerControls({
     setAudioOpen(false);
     setChaptersOpen(false);
   }
-  const safeDuration = duration > 0 ? duration : 0;
-  const handleSkipBack = () => onSeek(Math.max(0, currentTime - SKIP_BACK_SECONDS));
-  const handleSkipForward = () =>
-    onSeek(Math.min(safeDuration || currentTime, currentTime + SKIP_FORWARD_SECONDS));
+  const handleSkipBack = onSkip.back;
+  const handleSkipForward = onSkip.forward;
   // When playing any episode in a series (even the first or last), reserve
   // both prev/next slots so the cluster remains symmetric around the play
   // button. Movies (no episode nav at all) skip the slots entirely.
@@ -234,10 +235,10 @@ export function PlayerControls({
             <CircleButton
               size="md"
               variant="secondary"
-              ariaLabel={`Back ${SKIP_BACK_SECONDS} seconds`}
+              ariaLabel={`Back ${skipSeconds.back} seconds`}
               onClick={handleSkipBack}
             >
-              <SkipIcon direction="back" seconds={SKIP_BACK_SECONDS} />
+              <SkipIcon direction="back" seconds={skipSeconds.back} />
             </CircleButton>
             <button
               type="button"
@@ -254,10 +255,10 @@ export function PlayerControls({
             <CircleButton
               size="md"
               variant="secondary"
-              ariaLabel={`Forward ${SKIP_FORWARD_SECONDS} seconds`}
+              ariaLabel={`Forward ${skipSeconds.forward} seconds`}
               onClick={handleSkipForward}
             >
-              <SkipIcon direction="forward" seconds={SKIP_FORWARD_SECONDS} />
+              <SkipIcon direction="forward" seconds={skipSeconds.forward} />
             </CircleButton>
             {showEpisodeSlots ? (
               hasNextEpisode ? (
@@ -292,6 +293,7 @@ export function PlayerControls({
           activeEditKind={activeEditKind}
           onRegionEdgeChange={onRegionEdgeChange}
           onSeek={onSeek}
+          onSkip={onSkip}
         />
 
         {compactControls ? (
@@ -415,10 +417,10 @@ export function PlayerControls({
               <CircleButton
                 size="sm"
                 variant="secondary"
-                ariaLabel={`Back ${SKIP_BACK_SECONDS} seconds`}
+                ariaLabel={`Back ${skipSeconds.back} seconds`}
                 onClick={handleSkipBack}
               >
-                <SkipIcon direction="back" seconds={SKIP_BACK_SECONDS} />
+                <SkipIcon direction="back" seconds={skipSeconds.back} />
               </CircleButton>
 
               <CircleButton
@@ -438,10 +440,10 @@ export function PlayerControls({
               <CircleButton
                 size="sm"
                 variant="secondary"
-                ariaLabel={`Forward ${SKIP_FORWARD_SECONDS} seconds`}
+                ariaLabel={`Forward ${skipSeconds.forward} seconds`}
                 onClick={handleSkipForward}
               >
-                <SkipIcon direction="forward" seconds={SKIP_FORWARD_SECONDS} />
+                <SkipIcon direction="forward" seconds={skipSeconds.forward} />
               </CircleButton>
 
               {showEpisodeSlots ? (

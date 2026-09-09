@@ -1,3 +1,4 @@
+import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import {
   lazy,
   Suspense,
@@ -403,6 +404,7 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
 }
 
 export function WatchPlaybackHost() {
+  const seekPreferences = useSeekPreferences("video");
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback host is unavailable outside WatchPlaybackProvider");
@@ -972,6 +974,7 @@ export function WatchPlaybackHost() {
           onPictureInPictureChange={handlePictureInPictureChange}
           onPlaybackStateChange={handlePlaybackStateChange}
           onPlaybackTransportReady={handlePlaybackTransportReady}
+          seekIntervals={{ back: seekPreferences.skipBack, forward: seekPreferences.skipForward }}
           onReturnFromPostRoll={isPostRoll ? handleReturnFromPostRoll : undefined}
         />
       </Suspense>
@@ -1003,6 +1006,7 @@ export function WatchPlaybackBar() {
   const request = state.request;
   const snapshot = state.snapshot;
   const transport = state.transport;
+  const seekPreferences = useSeekPreferences("video");
   const { data: item } = useWatchDetail(request?.contentId, request?.fileId, request?.libraryId);
   const [scrubValue, setScrubValue] = useState<number | null>(null);
 
@@ -1044,6 +1048,18 @@ export function WatchPlaybackBar() {
                 max={Math.max(snapshot?.duration ?? 0, 0)}
                 step={1}
                 thumbLabels={["Playback position"]}
+                onKeyDownCapture={(event) => {
+                  // Unmodified arrows skip by the profile's intervals; the
+                  // slider keeps its own Shift+Arrow page step and modifier
+                  // shortcuts.
+                  if (!transport) return;
+                  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+                  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (event.key === "ArrowLeft") transport.skipBack();
+                  else transport.skipForward();
+                }}
                 disabled={!transport || !snapshot || snapshot.duration <= 0}
                 className="[&_[data-slot=slider-range]]:bg-primary -my-2 py-2 [&_[data-slot=slider-thumb]]:size-4 [&_[data-slot=slider-thumb]]:border-white/60 [&_[data-slot=slider-thumb]]:bg-white [&_[data-slot=slider-thumb]]:shadow-[0_2px_10px_rgba(0,0,0,0.35)] [&_[data-slot=slider-track]]:h-1.5 [&_[data-slot=slider-track]]:bg-white/10"
                 onValueChange={([value]) => {
@@ -1067,9 +1083,9 @@ export function WatchPlaybackBar() {
               variant="glass"
               size="icon"
               className="h-10 w-10 rounded-full"
-              onClick={() => transport?.seekBy(-10)}
+              onClick={() => transport?.skipBack()}
               disabled={!transport}
-              title="Back 10 seconds"
+              title={`Back ${seekPreferences.skipBack} seconds`}
             >
               <SkipBack className="h-4 w-4" />
             </Button>
@@ -1089,9 +1105,9 @@ export function WatchPlaybackBar() {
               variant="glass"
               size="icon"
               className="h-10 w-10 rounded-full"
-              onClick={() => transport?.seekBy(10)}
+              onClick={() => transport?.skipForward()}
               disabled={!transport}
-              title="Forward 10 seconds"
+              title={`Forward ${seekPreferences.skipForward} seconds`}
             >
               <SkipForward className="h-4 w-4" />
             </Button>

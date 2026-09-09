@@ -45,6 +45,10 @@ export function MiniBar({
         buffered={playback.buffered}
         chapters={playback.chapters}
         onSeek={playback.seekTo}
+        onSkip={{
+          back: () => playback.skip(-prefs.skipBack),
+          forward: () => playback.skip(prefs.skipForward),
+        }}
       />
 
       <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-5">

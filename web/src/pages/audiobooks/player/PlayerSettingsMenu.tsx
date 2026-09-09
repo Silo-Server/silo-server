@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
-import { SKIP_INTERVAL_CHOICES, type AudiobookPrefs } from "./useAudiobookPrefs";
+import type { AudiobookPrefs } from "./useAudiobookPrefs";
 
 interface PlayerSettingsMenuProps {
   prefs: AudiobookPrefs;
@@ -10,6 +10,17 @@ interface PlayerSettingsMenuProps {
 export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Intervals are unavailable while the server's support is still being
+  // checked and read-only while a profile write is in flight; smart rewind
+  // stays browser-local and editable throughout.
+  const intervalsDisabled = !prefs.canEditSkipIntervals || prefs.isSavingSkipIntervals;
+  const intervalsNote = !prefs.canEditSkipIntervals
+    ? "Checking what this server supports…"
+    : !prefs.hasSharedSkipIntervals
+      ? "Saved on this browser only"
+      : prefs.sharedSkipIntervalsError
+        ? "Couldn't load your profile's intervals; showing defaults"
+        : "Saved to your profile for every Silo app";
 
   const handleBlur = useCallback((e: React.FocusEvent) => {
     if (!containerRef.current?.contains(e.relatedTarget as Node)) {
@@ -44,12 +55,21 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
           aria-label="Player settings"
           className="absolute right-0 bottom-full mb-2 flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm"
         >
-          <SkipIntervalRow label="Skip back" value={prefs.skipBack} onChange={prefs.setSkipBack} />
+          <SkipIntervalRow
+            label="Skip back"
+            value={prefs.skipBack}
+            choices={prefs.choices.back}
+            onChange={prefs.setSkipBack}
+            disabled={intervalsDisabled}
+          />
           <SkipIntervalRow
             label="Skip forward"
             value={prefs.skipForward}
+            choices={prefs.choices.forward}
             onChange={prefs.setSkipForward}
+            disabled={intervalsDisabled}
           />
+          <span className="text-[11px] leading-snug text-white/40">{intervalsNote}</span>
 
           <button
             type="button"
@@ -86,22 +106,33 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
 function SkipIntervalRow({
   label,
   value,
+  choices,
   onChange,
+  disabled = false,
 }: {
   label: string;
   value: number;
+  choices: number[];
   onChange: (seconds: number) => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div
+      role="group"
+      aria-label={label}
+      aria-disabled={disabled || undefined}
+      className="flex flex-col gap-1.5"
+    >
       <span className="text-[11px] tracking-[0.14em] text-white/40 uppercase">{label}</span>
       <div className="flex flex-wrap gap-1">
-        {SKIP_INTERVAL_CHOICES.map((seconds) => (
+        {choices.map((seconds) => (
           <button
             key={seconds}
             type="button"
+            aria-pressed={seconds === value}
             data-active={seconds === value ? "true" : undefined}
-            className={`rounded-full px-2 py-0.5 text-xs tabular-nums transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+            disabled={disabled}
+            className={`rounded-full px-2 py-0.5 text-xs tabular-nums transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent ${
               seconds === value ? "bg-white/15 text-white" : "text-white/60"
             }`}
             onClick={() => onChange(seconds)}

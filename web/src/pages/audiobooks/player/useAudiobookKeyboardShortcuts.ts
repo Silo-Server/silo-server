@@ -1,3 +1,4 @@
+import { useMediaSkipHandlers } from "@/player/hooks/useMediaSkipHandlers";
 import { useContext, useEffect } from "react";
 import { WatchPlaybackControllerContext } from "@/playback/watchPlaybackContext";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
@@ -48,6 +49,12 @@ export function useAudiobookKeyboardShortcuts({
     nextChapter,
     prevChapter,
   } = playback;
+
+  useMediaSkipHandlers(
+    !videoSessionActive && hasFile,
+    () => skip(-skipBack),
+    () => skip(skipForward),
+  );
 
   useEffect(() => {
     if (videoSessionActive || !hasFile) return;

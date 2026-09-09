@@ -96,6 +96,7 @@ export function WatchPage({
   autoEnterPictureInPicture,
   onPlaybackStateChange,
   onPlaybackTransportReady,
+  seekIntervals,
   onReturnFromPostRoll,
   watchTogetherRoomId,
   watchTogetherRoomToken,
@@ -505,6 +506,7 @@ export function WatchPage({
       autoEnterPictureInPicture={autoEnterPictureInPicture}
       onPlaybackStateChange={handlePlaybackStateChange}
       onPlaybackTransportReady={onPlaybackTransportReady}
+      seekIntervals={seekIntervals}
       onRealtimeEvent={handleRealtimeEvent}
       onRealtimeConnectionStateChange={setRealtimeConnectionState}
       onExit={onExit}

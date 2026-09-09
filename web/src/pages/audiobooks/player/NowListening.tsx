@@ -114,6 +114,10 @@ export function NowListening({
               buffered={playback.buffered}
               chapters={playback.chapters}
               onSeek={playback.seekTo}
+              onSkip={{
+                back: () => playback.skip(-prefs.skipBack),
+                forward: () => playback.skip(prefs.skipForward),
+              }}
             />
             <div className="text-muted-foreground flex items-center justify-between text-xs tabular-nums">
               <span>{formatTime(playback.currentTime)}</span>

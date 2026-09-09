@@ -12,12 +12,7 @@ export interface WatchPlaybackSnapshot {
   playing: boolean;
 }
 
-export interface WatchPlaybackTransportControls {
-  playPause: () => void | Promise<void>;
-  seekBy: (secondsDelta: number) => void;
-  seekTo: (seconds: number) => void;
-  togglePictureInPicture: () => void | Promise<void>;
-}
+export type WatchPlaybackTransportControls = import("@/player/types").PlayerPlaybackTransport;
 
 export interface WatchPlaybackHostState {
   request: WatchRouteRequest | null;

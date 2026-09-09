@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 8;
+export const SETTINGS_REVISION = 9;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -199,6 +199,10 @@ export const SETTING_KEYS = {
   PLAYBACK_SUBTITLE_MODE: "playback.subtitle_mode",
   /** Audio sync offset */
   PLAYER_AUDIO_SYNC_MS: "player.audio_sync_ms",
+  /** Audiobook rewind interval */
+  PLAYER_AUDIOBOOK_SKIP_BACK_SECONDS: "player.audiobook_skip_back_seconds",
+  /** Audiobook fast-forward interval */
+  PLAYER_AUDIOBOOK_SKIP_FORWARD_SECONDS: "player.audiobook_skip_forward_seconds",
   /** Dolby Vision */
   PLAYER_DOLBY_VISION_ENABLED: "player.dolby_vision_enabled",
   /** Dolby Vision Profile 7 fallback */
@@ -225,6 +229,10 @@ export const SETTING_KEYS = {
   PLAYER_SUBTITLE_SYNC_MS: "player.subtitle_sync_ms",
   /** Video sizing */
   PLAYER_VIDEO_GRAVITY: "player.video_gravity",
+  /** Video rewind interval */
+  PLAYER_VIDEO_SKIP_BACK_SECONDS: "player.video_skip_back_seconds",
+  /** Video fast-forward interval */
+  PLAYER_VIDEO_SKIP_FORWARD_SECONDS: "player.video_skip_forward_seconds",
   /** Search scope */
   SEARCH_MEDIA_SCOPE: "search.media_scope",
   /** Match device caption settings */
@@ -728,6 +736,60 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     minimum: -5000,
     maximum: 5000,
   },
+  "player.audiobook_skip_back_seconds": {
+    key: "player.audiobook_skip_back_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 10,
+    label: "Audiobook rewind interval",
+    description:
+      "Seconds to skip back in audiobook playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
+    ],
+  },
+  "player.audiobook_skip_forward_seconds": {
+    key: "player.audiobook_skip_forward_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 30,
+    label: "Audiobook fast-forward interval",
+    description:
+      "Seconds to skip forward in audiobook playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
+    ],
+  },
   "player.dolby_vision_enabled": {
     key: "player.dolby_vision_enabled",
     type: "boolean",
@@ -955,6 +1017,60 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "fit", label: "Fit", introducedIn: 1 },
       { value: "fill", label: "Fill", introducedIn: 1 },
       { value: "stretch", label: "Stretch", introducedIn: 1 },
+    ],
+  },
+  "player.video_skip_back_seconds": {
+    key: "player.video_skip_back_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 10,
+    label: "Video rewind interval",
+    description:
+      "Seconds to skip back in video playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
+    ],
+  },
+  "player.video_skip_forward_seconds": {
+    key: "player.video_skip_forward_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 30,
+    label: "Video fast-forward interval",
+    description:
+      "Seconds to skip forward in video playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
     ],
   },
   "search.media_scope": {
