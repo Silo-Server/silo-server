@@ -214,11 +214,11 @@ func (s *Service) CreateEventLog(ctx context.Context, entry WebhookEventLog) (*W
 	return s.repo.CreateEventLog(ctx, entry)
 }
 
-func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Request) (*ProcessWebhookResult, error) {
-	conn, err := s.repo.GetConnectionBySecret(ctx, secret)
-	if err != nil {
-		return nil, err
-	}
+func (s *Service) ResolveWebhook(ctx context.Context, secret string) (*Connection, error) {
+	return s.repo.GetConnectionBySecret(ctx, secret)
+}
+
+func (s *Service) ProcessWebhook(ctx context.Context, conn *Connection, r *http.Request) (*ProcessWebhookResult, error) {
 	result := &ProcessWebhookResult{
 		ConnectionID: conn.ID,
 		Provider:     conn.Provider,
