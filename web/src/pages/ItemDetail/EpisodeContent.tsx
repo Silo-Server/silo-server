@@ -1,3 +1,4 @@
+import DetailSynopsis from "./components/DetailSynopsis";
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
@@ -259,167 +260,169 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     breadcrumbSegments.push({ label: `Episode ${episodeNum}` });
   }
 
-  const contextLabel =
-    seasonNum != null && episodeNum != null ? `S${seasonNum} \u00B7 E${episodeNum}` : undefined;
-
   return (
     <div>
-      <DetailHero
-        title={title}
-        topNav={<PageBack />}
-        context={
-          <div className="space-y-3">
-            <DetailBreadcrumb segments={breadcrumbSegments} />
-            {contextLabel && (
-              <div className="text-muted-foreground text-xs font-medium">{contextLabel}</div>
-            )}
-          </div>
-        }
-        backdropUrl={item.backdrop_url}
-        backdropThumbhash={item.backdrop_thumbhash}
-        hidePoster
-        logoUrl={item.logo_url}
-        metadata={
-          <div className="flex flex-wrap items-center gap-2">
-            <MetadataBadges
-              duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
+      <div className="episode-detail-viewport">
+        <DetailHero
+          variant="episode"
+          title={title}
+          topNav={<PageBack />}
+          context={<DetailBreadcrumb segments={breadcrumbSegments} />}
+          backdropUrl={item.backdrop_url}
+          backdropThumbhash={item.backdrop_thumbhash}
+          hidePoster
+          logoUrl={item.logo_url}
+          metadata={
+            <div className="flex flex-wrap items-center gap-2">
+              <MetadataBadges
+                duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
+              />
+              {item.air_date && (
+                <span className="metadata-badge">
+                  {(() => {
+                    const d = new Date(item.air_date);
+                    return Number.isNaN(d.getTime())
+                      ? item.air_date
+                      : new Intl.DateTimeFormat(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        }).format(d);
+                  })()}
+                </span>
+              )}
+              <QualityBadges summary={selectedMediaSummary} />
+            </div>
+          }
+          scoreRow={
+            <ScoreRow
+              ratingImdb={effectiveRating}
+              ratingRtCritic={item.rating_rt_critic}
+              ratingRtAudience={item.rating_rt_audience}
             />
-            {item.air_date && (
-              <span className="metadata-badge">
-                {(() => {
-                  const d = new Date(item.air_date);
-                  return Number.isNaN(d.getTime())
-                    ? item.air_date
-                    : new Intl.DateTimeFormat(undefined, {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      }).format(d);
-                })()}
-              </span>
+          }
+          overview={item.overview}
+          overviewTranslating={overviewTranslating}
+          onTranslateOverview={onTranslateOverview}
+          crewLine={<HeroCrewLine crew={item.crew ?? []} />}
+          actions={
+            <WatchedActionBar
+              compactMobile
+              item={item}
+              contentId={item.content_id}
+              playHref={
+                item.versions && item.versions.length > 0 ? `/watch/${item.content_id}` : undefined
+              }
+              playLabel={primaryAction.label}
+              playProgress={primaryAction.progress}
+              restartHref={restartHref}
+              resumePositionSeconds={
+                item.user_data && "position_seconds" in item.user_data
+                  ? item.user_data.position_seconds
+                  : undefined
+              }
+              resumeDurationSeconds={
+                item.user_data && "duration_seconds" in item.user_data
+                  ? item.user_data.duration_seconds
+                  : undefined
+              }
+              resumeResolution={
+                item.user_data && "last_resolution" in item.user_data
+                  ? item.user_data.last_resolution
+                  : undefined
+              }
+              resumeHdr={
+                item.user_data && "last_hdr" in item.user_data ? item.user_data.last_hdr : undefined
+              }
+              effectiveVersionResolution={item.effective_version_resolution}
+              effectiveVersionHdr={item.effective_version_hdr}
+              onRefresh={
+                canCurateMetadata
+                  ? (mode) =>
+                      refreshMetadataMutation.mutate({
+                        item,
+                        mode,
+                        onReplaced: (contentID) =>
+                          navigate(`/item/${contentID}`, { replace: true }),
+                      })
+                  : undefined
+              }
+              isRefreshing={refreshMetadataMutation.isPending}
+              onRedetectIntro={
+                isAdmin ? () => redetectIntroMutation.mutate(item.content_id) : undefined
+              }
+              isRedetectingIntro={redetectIntroMutation.isPending}
+              isAdmin={isAdmin}
+              canCurateMetadata={canCurateMetadata}
+              canEditMarkers={canEditMarkers}
+              onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
+              onShowMediaInfo={
+                canCurateMetadata && (item.versions?.length ?? 0) > 0
+                  ? () => openMediaInfo()
+                  : undefined
+              }
+              versions={item.versions ?? []}
+              playbackVariants={item.playback_variants}
+              selectedVersion={selectedVersion}
+              onSelectVersion={handleSelectVersion}
+              onDownload={
+                user?.download_allowed && (item.versions ?? []).length > 0
+                  ? () => setDownloadOpen(true)
+                  : undefined
+              }
+              onSearchSubtitles={
+                (item.versions?.length ?? 0) > 0 ? () => setSubtitleSearchOpen(true) : undefined
+              }
+              qualityPreference={qualityPreference}
+              audioSelectionMode={audioSelectionMode}
+              explicitAudioTrackIndex={explicitAudioTrackIndex}
+              onSelectAudioTrack={handleSelectAudioTrack}
+              onResetAudioSelection={handleResetAudioSelection}
+              prePlaySubtitleMode={subtitleSelectionMode}
+              explicitSubtitleSelection={explicitSubtitleSelection}
+              onSelectSubtitle={handleSelectSubtitle}
+              onSelectSubtitleOff={handleSelectSubtitleOff}
+              onResetSubtitleSelection={handleResetSubtitleSelection}
+              preferredSubtitleLanguage={item.effective_subtitle_language}
+              preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
+              subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
+              showForcedSubtitles={item.effective_show_forced_subtitles}
+              profileLanguage={currentProfile?.language}
+            />
+          }
+        />
+
+        {(siblingsLoading || siblingEpisodes.length > 1) && (
+          <section className="page-shell episode-detail-navigation" aria-label="More episodes">
+            {/* More Episodes carousel — most useful, so show first */}
+            {siblingsLoading ? (
+              <EpisodeCarouselSkeleton />
+            ) : (
+              <div>
+                <h2 className="mb-5 text-xl font-semibold tracking-tight">More Episodes</h2>
+                <EpisodeCarousel
+                  episodes={siblingEpisodes}
+                  currentEpisodeNumber={episodeNum ?? -1}
+                  episodeLinkState={episodeLinkState}
+                />
+              </div>
             )}
-            <QualityBadges summary={selectedMediaSummary} />
-          </div>
-        }
-        scoreRow={
-          <ScoreRow
-            ratingImdb={effectiveRating}
-            ratingRtCritic={item.rating_rt_critic}
-            ratingRtAudience={item.rating_rt_audience}
-          />
-        }
-        overview={item.overview}
-        overviewTranslating={overviewTranslating}
-        onTranslateOverview={onTranslateOverview}
-        crewLine={<HeroCrewLine crew={item.crew ?? []} />}
-        actions={
-          <WatchedActionBar
-            item={item}
-            contentId={item.content_id}
-            playHref={
-              item.versions && item.versions.length > 0 ? `/watch/${item.content_id}` : undefined
-            }
-            playLabel={primaryAction.label}
-            playProgress={primaryAction.progress}
-            restartHref={restartHref}
-            resumePositionSeconds={
-              item.user_data && "position_seconds" in item.user_data
-                ? item.user_data.position_seconds
-                : undefined
-            }
-            resumeDurationSeconds={
-              item.user_data && "duration_seconds" in item.user_data
-                ? item.user_data.duration_seconds
-                : undefined
-            }
-            resumeResolution={
-              item.user_data && "last_resolution" in item.user_data
-                ? item.user_data.last_resolution
-                : undefined
-            }
-            resumeHdr={
-              item.user_data && "last_hdr" in item.user_data ? item.user_data.last_hdr : undefined
-            }
-            effectiveVersionResolution={item.effective_version_resolution}
-            effectiveVersionHdr={item.effective_version_hdr}
-            onRefresh={
-              canCurateMetadata
-                ? (mode) =>
-                    refreshMetadataMutation.mutate({
-                      item,
-                      mode,
-                      onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
-                    })
-                : undefined
-            }
-            isRefreshing={refreshMetadataMutation.isPending}
-            onRedetectIntro={
-              isAdmin ? () => redetectIntroMutation.mutate(item.content_id) : undefined
-            }
-            isRedetectingIntro={redetectIntroMutation.isPending}
-            isAdmin={isAdmin}
-            canCurateMetadata={canCurateMetadata}
-            canEditMarkers={canEditMarkers}
-            onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
-            onShowMediaInfo={
-              canCurateMetadata && (item.versions?.length ?? 0) > 0
-                ? () => openMediaInfo()
-                : undefined
-            }
-            versions={item.versions ?? []}
-            playbackVariants={item.playback_variants}
-            selectedVersion={selectedVersion}
-            onSelectVersion={handleSelectVersion}
-            onDownload={
-              user?.download_allowed && (item.versions ?? []).length > 0
-                ? () => setDownloadOpen(true)
-                : undefined
-            }
-            onSearchSubtitles={
-              (item.versions?.length ?? 0) > 0 ? () => setSubtitleSearchOpen(true) : undefined
-            }
-            qualityPreference={qualityPreference}
-            audioSelectionMode={audioSelectionMode}
-            explicitAudioTrackIndex={explicitAudioTrackIndex}
-            onSelectAudioTrack={handleSelectAudioTrack}
-            onResetAudioSelection={handleResetAudioSelection}
-            prePlaySubtitleMode={subtitleSelectionMode}
-            explicitSubtitleSelection={explicitSubtitleSelection}
-            onSelectSubtitle={handleSelectSubtitle}
-            onSelectSubtitleOff={handleSelectSubtitleOff}
-            onResetSubtitleSelection={handleResetSubtitleSelection}
-            preferredSubtitleLanguage={item.effective_subtitle_language}
-            preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
-            subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
-            showForcedSubtitles={item.effective_show_forced_subtitles}
-            profileLanguage={currentProfile?.language}
-          />
-        }
-      />
+          </section>
+        )}
+      </div>
 
       <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
+        <DetailSynopsis
+          overview={item.overview}
+          translating={overviewTranslating}
+          onTranslate={onTranslateOverview}
+        />
         {canCurateMetadata && (
           <MediaLocations
             title="Media locations"
             versions={item.versions}
             onShowMediaInfo={openMediaInfo}
           />
-        )}
-
-        {/* More Episodes carousel — most useful, so show first */}
-        {siblingsLoading ? (
-          <EpisodeCarouselSkeleton />
-        ) : (
-          siblingEpisodes.length > 1 && (
-            <div>
-              <h2 className="mb-5 text-xl font-semibold tracking-tight">More Episodes</h2>
-              <EpisodeCarousel
-                episodes={siblingEpisodes}
-                currentEpisodeNumber={episodeNum ?? -1}
-                episodeLinkState={episodeLinkState}
-              />
-            </div>
-          )
         )}
 
         {item.cast && item.cast.length > 0 && (

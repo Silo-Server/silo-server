@@ -1,3 +1,4 @@
+import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
 import {
   lazy,
   Suspense,
@@ -994,6 +995,7 @@ export function WatchPlaybackHost() {
 }
 
 export function WatchPlaybackBar() {
+  const barRef = usePlaybackBarHeight("watch");
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback bar is unavailable outside WatchPlaybackProvider");
@@ -1015,7 +1017,10 @@ export function WatchPlaybackBar() {
   const displayedTime = scrubValue ?? snapshot?.currentTime ?? 0;
 
   return (
-    <div className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center">
+    <div
+      ref={barRef}
+      className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center"
+    >
       <div className="glass-dark border-border/70 pointer-events-auto w-full max-w-4xl rounded-2xl border px-4 py-3 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.7)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">

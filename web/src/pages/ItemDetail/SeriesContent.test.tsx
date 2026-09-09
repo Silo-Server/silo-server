@@ -201,6 +201,22 @@ describe("SeriesContent", () => {
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
   });
 
+  it.each([false, true])(
+    "only reserves empty season navigation while loading (%s)",
+    (isLoading) => {
+      mocks.useSeasons.mockReturnValue({ data: { seasons: [] }, isLoading });
+      const markup = renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <SeriesContent item={makeSeriesItem()} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(markup.includes("series-detail-navigation")).toBe(isLoading);
+      expect(markup.includes('role="region" aria-label="Seasons and episodes"')).toBe(isLoading);
+    },
+  );
+
   it("passes rating state and change handler to ActionBar", () => {
     renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>

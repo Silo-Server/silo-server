@@ -2665,3 +2665,489 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: 0 12px 40px rgb(0 0 0 / 0.4);
   }
 }
+
+@layer utilities {
+  /* Episode navigation owns its viewport space; variable-length copy scrolls
+     independently instead of growing the hero and displacing the episode rail.
+     Layout measures the shell header, including text-size customization. */
+  .episode-detail-viewport {
+    --detail-player-height: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
+    height: calc(
+      100dvh - var(--detail-header-height, calc(4.75rem + 2px)) - var(--detail-player-height)
+    );
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) min(var(--detail-navigation-height, 18rem), 40%);
+    container-type: size;
+    container-name: detail-viewport;
+  }
+
+  .episode-detail-navigation {
+    min-height: 0;
+    overflow-y: auto;
+    min-width: 0;
+    padding-block: 12px;
+  }
+
+  .episode-detail-navigation h2 {
+    margin-bottom: 4px;
+  }
+
+  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
+    height: 100%;
+    min-height: 0;
+    padding-top: 64px;
+    padding-bottom: 16px;
+  }
+
+  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout > .grid,
+  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-primary-content {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy {
+    padding: 4px;
+  }
+
+  /* Copy flows naturally above the controls. Only overflowing information
+     scrolls, so Play remains visible even with a logo or a long overview. */
+  .detail-hero-information {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    margin-top: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .detail-hero-information h1:not(.sr-only) {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--detail-title-lines, 2);
+    line-height: 1.15;
+    overflow: hidden;
+  }
+
+  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy > .detail-action-bar {
+    flex-shrink: 0;
+    margin-bottom: 4px;
+    max-height: 65%;
+    overflow-y: auto;
+  }
+
+  @media (min-width: 1024px) {
+    .episode-detail-viewport {
+      height: calc(100dvh - var(--detail-header-height, 0px) - var(--detail-player-height));
+    }
+  }
+
+  /* Keep the rail usable on short screens without reducing touch targets. */
+  @media (max-height: 650px) {
+    .episode-detail-viewport {
+      --detail-navigation-height: 16rem;
+    }
+
+    .episode-detail-navigation .media-card-longpress {
+      width: 180px;
+    }
+
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
+      padding-top: 52px;
+      padding-bottom: 8px;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-height: 650px) and (orientation: landscape) {
+    .episode-detail-viewport {
+      grid-template-columns: minmax(0, 1fr) minmax(160px, 35%);
+      grid-template-rows: minmax(0, 1fr);
+    }
+
+    .episode-detail-navigation {
+      align-self: end;
+      width: 100%;
+      padding-inline: 12px;
+    }
+  }
+}
+
+@layer utilities {
+  .series-detail-viewport {
+    --detail-navigation-height: 22rem;
+  }
+
+  .series-detail-navigation {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    min-width: 0;
+    padding-block: 12px;
+  }
+
+  .series-detail-navigation > section {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .series-detail-navigation > section > .overlay-scroll {
+    flex: 1;
+    min-height: 0;
+    align-content: start;
+  }
+
+  .series-detail-navigation .group\/season {
+    width: 140px;
+  }
+
+  .item-detail-hero:is([data-variant="series"], [data-variant="season"])
+    .detail-hero-primary-content {
+    flex-direction: row;
+    align-items: end;
+    gap: 16px;
+  }
+
+  .item-detail-hero:is([data-variant="series"], [data-variant="season"])
+    .detail-hero-primary-content
+    > .media-card-image {
+    flex-shrink: 0;
+    width: auto;
+    height: min(330px, 100%);
+    aspect-ratio: 2 / 3;
+  }
+
+  .item-detail-hero:is([data-variant="series"], [data-variant="season"])
+    .detail-hero-primary-content
+    > .media-card-image
+    img {
+    height: 100%;
+  }
+
+  .item-detail-hero:is([data-variant="series"], [data-variant="season"]) .detail-hero-copy {
+    min-width: 0;
+  }
+
+  @media (max-width: 1023px) {
+    .item-detail-hero:is([data-variant="series"], [data-variant="season"])
+      .detail-hero-primary-content
+      > .media-card-image {
+      height: min(150px, 50%);
+    }
+  }
+
+  @media (max-height: 650px) {
+    .series-detail-viewport {
+      --detail-navigation-height: 16rem;
+    }
+
+    .series-detail-navigation .group\/season {
+      width: 80px;
+    }
+  }
+
+  @media (max-height: 650px) and (orientation: landscape) {
+    .series-detail-navigation {
+      align-self: end;
+      width: 100%;
+      padding-inline: 12px;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-height: 650px) and (orientation: landscape) {
+    .series-detail-navigation .overlay-scroll {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-height: 650px) and (orientation: landscape) {
+    .episode-detail-navigation {
+      min-height: 0;
+      max-height: 100%;
+    }
+
+    .series-detail-navigation {
+      height: min(16rem, 100%);
+    }
+
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
+      padding-inline: 16px;
+    }
+  }
+
+  @media (max-height: 450px) and (orientation: landscape) {
+    .episode-detail-navigation .media-card-longpress {
+      width: 140px;
+    }
+  }
+}
+
+@layer utilities {
+  /* Use the remaining space after shell/player chrome, not device height. */
+  @container detail-viewport (max-height: 600px) {
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
+      padding-top: 52px;
+      padding-bottom: 8px;
+    }
+
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy > .detail-action-bar {
+      max-height: 45%;
+      margin-top: 12px;
+    }
+  }
+}
+
+@layer utilities {
+  .detail-short-label,
+  .detail-mobile-menu-actions,
+  .detail-mobile-synopsis {
+    display: none;
+  }
+
+  @media (max-width: 1023px) {
+    .episode-detail-viewport {
+      height: auto;
+      min-height: calc(100dvh - var(--detail-header-height, 78px) - var(--detail-player-height));
+      display: flex;
+      flex-direction: column;
+      container-type: normal;
+    }
+    .episode-detail-viewport .item-detail-hero {
+      flex: 1 0 auto;
+      overflow: visible;
+    }
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
+      height: auto;
+      min-height: 0;
+      padding: 52px 16px 16px;
+    }
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout > .grid,
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-primary-content,
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy {
+      height: auto;
+    }
+    .item-detail-hero[data-viewport-bounded="true"]
+      .detail-hero-primary-content
+      > .media-card-image {
+      display: none;
+    }
+    .detail-hero-information {
+      overflow: visible;
+      margin-top: 0;
+      flex: none;
+    }
+    .detail-hero-information .detail-hero-context {
+      margin-bottom: 8px;
+      font-size: 0.75rem;
+    }
+    .detail-hero-information .detail-hero-studio,
+    .detail-hero-information .detail-hero-description {
+      display: none;
+    }
+    .detail-hero-information h1:not(.sr-only) {
+      font-size: clamp(1.25rem, 6vw, 1.875rem);
+      margin-bottom: 12px;
+    }
+    .detail-hero-information > img {
+      height: 72px;
+      max-width: 320px;
+      margin-bottom: 12px;
+    }
+    .detail-hero-facts {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+    }
+    .detail-hero-facts > div {
+      margin: 0;
+    }
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy > .detail-action-bar {
+      overflow: visible;
+      max-height: none;
+      margin-top: 16px;
+      margin-bottom: 0;
+    }
+    [data-compact-mobile] .detail-full-label,
+    [data-compact-mobile] .detail-secondary-action {
+      display: none;
+    }
+    [data-compact-mobile] .detail-short-label {
+      display: inline;
+    }
+    [data-compact-mobile] .detail-primary-actions {
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    [data-compact-mobile] .detail-primary-actions > button {
+      min-width: 44px;
+      height: 44px;
+      padding-inline: 14px;
+      font-size: 0.875rem;
+      gap: 8px;
+    }
+    [data-compact-mobile] .detail-primary-actions > button[aria-haspopup="menu"] {
+      width: 44px;
+      padding-inline: 0;
+    }
+    [data-compact-mobile] button[aria-pressed="true"] {
+      border-color: var(--primary);
+    }
+    [data-compact-mobile] .detail-stream-actions {
+      gap: 8px;
+    }
+    [data-compact-mobile] .detail-stream-actions button {
+      min-height: 44px;
+    }
+    .detail-mobile-menu-actions,
+    .detail-mobile-synopsis {
+      display: block;
+    }
+    .episode-detail-navigation,
+    .series-detail-navigation {
+      flex: none;
+      height: auto;
+      min-height: 0;
+      max-height: none;
+      padding: 12px 16px 16px;
+      overflow: visible;
+    }
+    .series-detail-navigation > section {
+      height: auto;
+    }
+    .series-detail-navigation > section > div:first-child {
+      margin-bottom: 12px;
+    }
+    .series-detail-navigation .overlay-scroll {
+      display: grid;
+      grid-template-columns: none;
+      grid-auto-flow: column;
+      grid-auto-columns: 160px;
+      gap: 12px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      max-height: none !important;
+      padding-bottom: 8px;
+      align-content: start;
+    }
+    .series-detail-navigation .media-card-longpress > a > .mt-1\.5 {
+      display: none;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-width: 1023px) {
+    [data-compact-mobile] .detail-stream-actions button > span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .episode-detail-navigation .media-card-longpress {
+      width: 160px;
+    }
+    .episode-detail-navigation .embla__viewport {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-width: 1023px) {
+    .detail-hero-facts {
+      gap: 8px;
+    }
+    .detail-hero-facts .metadata-badge {
+      padding-inline: 6px;
+      font-size: 0.75rem;
+    }
+    .detail-hero-facts > div > .flex {
+      gap: 6px;
+    }
+    .series-detail-navigation .group\/season {
+      width: 80px;
+    }
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
+      padding-bottom: 8px;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-width: 1023px) {
+    .detail-hero-context nav > div > span {
+      min-width: 0;
+      flex-shrink: 0;
+    }
+    .detail-hero-context nav > div > span:first-child {
+      flex-shrink: 1;
+    }
+    .detail-hero-context nav a {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .detail-hero-context nav [aria-current] {
+      white-space: nowrap;
+    }
+    .detail-hero-context nav svg {
+      flex-shrink: 0;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-width: 1023px) {
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout > .grid {
+      grid-template-columns: minmax(0, 1fr);
+      min-width: 0;
+    }
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-primary-content {
+      min-width: 0;
+      width: 100%;
+    }
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy {
+      min-width: 0;
+      max-width: 100%;
+    }
+  }
+  @media (min-width: 1024px) and (max-height: 800px) {
+    .episode-detail-viewport {
+      grid-template-rows: minmax(0, 1fr) min(var(--detail-navigation-height, 18rem), 45%);
+    }
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
+      padding-top: 52px;
+      padding-bottom: 8px;
+    }
+    .detail-hero-information h1:not(.sr-only) {
+      font-size: 3rem;
+    }
+  }
+}
+
+@layer utilities {
+  .episode-detail-viewport:not(:has(> .episode-detail-navigation, > .series-detail-navigation)) {
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
