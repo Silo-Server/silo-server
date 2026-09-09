@@ -154,6 +154,45 @@ func authedRequest(method, target string) *http.Request {
 	return req.WithContext(ctx)
 }
 
+func authedAdminRequest(method, target string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{
+		UserID:    1,
+		Role:      "admin",
+		TokenType: auth.TokenTypeAccess,
+	})
+	ctx = apimw.SetProfileID(ctx, "profile-1")
+	return req.WithContext(ctx)
+}
+
+func TestHandleListMineReturnsEmptyArray(t *testing.T) {
+	h := NewRequestsHandler(&fakeRequestService{})
+
+	rec := httptest.NewRecorder()
+	h.HandleListMine(rec, authedRequest("GET", "/api/v1/requests/mine"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got, want := rec.Body.String(), "{\"requests\":[]}\n"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}
+
+func TestHandleAdminListReturnsEmptyArray(t *testing.T) {
+	h := NewRequestsHandler(&fakeRequestService{})
+
+	rec := httptest.NewRecorder()
+	h.HandleAdminList(rec, authedAdminRequest("GET", "/api/v1/admin/requests"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got, want := rec.Body.String(), "{\"requests\":[]}\n"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}
+
 func TestHandleListStudiosReturnsJSON(t *testing.T) {
 	logo := "https://image.tmdb.org/t/p/w300/x.png"
 	svc := &fakeRequestService{
