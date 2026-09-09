@@ -465,3 +465,83 @@ func TestSidecarRoutesReconstructFromTheStreamReference(t *testing.T) {
 		}
 	}
 }
+
+// TestReplayedProgressRedoesPersistence: a retried identical sample means
+// the first reply was lost, possibly before the side effects ran, so the
+// replay persists again rather than trusting the earlier attempt.
+func TestReplayedProgressRedoesPersistence(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	// The CAS committed but the side effects never ran (no live update).
+	if _, err := store.ApplyProgress(context.Background(), f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 250}); err != nil {
+		t.Fatal(err)
+	}
+	if live, _ := f.manager.GetSession(f.session.ID); live.Position == 250 {
+		t.Fatal("precondition: live session already at 250")
+	}
+	view, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 250})
+	if err != nil || view.Outcome != PlaybackOutcomeReplayed {
+		t.Fatalf("view = %+v, %v", view, err)
+	}
+	live, err := f.manager.GetSession(f.session.ID)
+	if err != nil || live.Position != 250 {
+		t.Fatalf("replayed sample was not persisted: %+v %v", live, err)
+	}
+}
+
+// TestStopFinalizationRunsOnce: two replays of an unfinalized stop must
+// produce one history writer run, not one per replay.
+func TestStopFinalizationRunsOnce(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	stopID := uuid.NewString()
+	if _, _, err := store.StopAttempt(context.Background(), f.session.ID, stopID, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the claim as a dead replica would, then replay: the replay must not
+	// finalize while the lease is live, and must report the stored receipt.
+	if won, err := store.ClaimStopFinalization(context.Background(), f.session.ID, time.Now().Add(time.Minute)); err != nil || !won {
+		t.Fatalf("seed claim: %v %v", won, err)
+	}
+	view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
+	if err != nil || view.Outcome != PlaybackOutcomeReplayed || view.StopID != stopID {
+		t.Fatalf("view = %+v, %v", view, err)
+	}
+	if _, err := f.manager.GetSession(f.session.ID); err != nil {
+		t.Fatalf("a replay that lost the claim must not tear the session down: %v", err)
+	}
+	// Once the lease lapses the next replay finishes the job exactly once.
+	// Rewrite the stored receipt with an already-expired lease, as time would.
+	receipt, _, _ := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil)
+	receipt.FinalizingUntil = time.Now().Add(-time.Second)
+	if err := store.RecordStopReceipt(context.Background(), f.session.ID, receipt); err != nil {
+		t.Fatal(err)
+	}
+	view, err = f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
+	if err != nil || view.Outcome != PlaybackOutcomeReplayed {
+		t.Fatalf("second replay = %+v, %v", view, err)
+	}
+	if _, err := f.manager.GetSession(f.session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("finalization did not run after the lease lapsed: %v", err)
+	}
+	finalized, _, _ := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil)
+	if !finalized.Finalized {
+		t.Fatalf("receipt not finalized: %+v", finalized)
+	}
+}
+
+// TestReplanRefusesAStoppedAttempt: a late seek or recovery on a session
+// another replica stopped is session_not_found, not a new transport.
+func TestReplanRefusesAStoppedAttempt(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
+	assertPlaybackOperationError(t, err, http.StatusNotFound, "session_not_found")
+}

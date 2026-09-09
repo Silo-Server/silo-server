@@ -93,3 +93,40 @@ func TestMemoryPlanStoreStopOnce(t *testing.T) {
 		t.Fatalf("older final: %+v %v %v", r, first, err)
 	}
 }
+
+func TestMemoryPlanStoreClaimStopFinalizationIsExclusive(t *testing.T) {
+	store := NewMemoryPlanStoreV3()
+	ctx := t.Context()
+	sessionID := uuid.NewString()
+	if err := store.SaveAttempt(ctx, progressTestAttempt(sessionID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("claim on a live row: %v", err)
+	}
+	receipt, _, err := store.StopAttempt(ctx, sessionID, uuid.NewString(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if won, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); err != nil || !won {
+		t.Fatalf("first claim: %v %v", won, err)
+	}
+	if won, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); err != nil || won {
+		t.Fatalf("second claim: %v %v", won, err)
+	}
+	receipt.Finalized = true
+	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); err != nil || won {
+		t.Fatalf("claim after finalization: %v %v", won, err)
+	}
+	// A stopped row refuses a replan commit.
+	lease, err := store.BeginReplan(ctx, sessionID, "r1", "d", "", time.Now().Add(time.Minute))
+	if err != nil || lease.State != ReplanLeaseOwnedV3 {
+		t.Fatalf("lease: %+v %v", lease, err)
+	}
+	if err := store.CompleteReplan(ctx, sessionID, "r1", lease.LeaseToken, "", []byte(`{}`), progressTestAttempt(sessionID)); !errors.Is(err, ErrAttemptStoppedV3) {
+		t.Fatalf("complete after stop: %v", err)
+	}
+}

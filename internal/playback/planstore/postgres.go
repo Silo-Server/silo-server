@@ -324,14 +324,17 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, lea
 			effective_media_file_id = $2, current_plan_id = $3,
 			current_replan_request_id = $4, current_plan = $5, frozen_recipe = $6,
 			normalized_request = $7, start_response = $8, expires_at = $9, updated_at = NOW()
-		WHERE session_id = $1::uuid AND current_replan_request_id = $10`,
+		WHERE session_id = $1::uuid AND current_replan_request_id = $10 AND stopped_at IS NULL`,
 		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, record.ExpiresAt, baseReplanRequestID)
 	if err != nil {
 		return err
 	}
 	if attemptResult.RowsAffected() != 1 {
-		var exists bool
-		if scanErr := tx.QueryRow(ctx, `SELECT true FROM playback_v3_attempts WHERE session_id = $1::uuid`, sessionID).Scan(&exists); scanErr == nil {
+		var stopped *time.Time
+		if scanErr := tx.QueryRow(ctx, `SELECT stopped_at FROM playback_v3_attempts WHERE session_id = $1::uuid`, sessionID).Scan(&stopped); scanErr == nil {
+			if stopped != nil {
+				return playback.ErrAttemptStoppedV3
+			}
 			return playback.ErrReplanSupersededV3
 		}
 		return playback.ErrSessionNotFound
@@ -510,6 +513,33 @@ func (s *Postgres) RecordStopReceipt(ctx context.Context, sessionID string, rece
 		return playback.ErrSessionNotFound
 	}
 	return nil
+}
+
+func (s *Postgres) ClaimStopFinalization(ctx context.Context, sessionID string, leaseUntil time.Time) (bool, error) {
+	// One UPDATE claims the lease only when nobody finalized and no live
+	// lease exists, so concurrent replays cannot both run the writers.
+	result, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET stop_receipt = jsonb_set(stop_receipt, '{finalizing_until}', to_jsonb($2::timestamptz), true),
+		    updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NOT NULL
+		  AND COALESCE((stop_receipt->>'finalized')::boolean, false) = false
+		  AND COALESCE((stop_receipt->>'finalizing_until')::timestamptz, 'epoch'::timestamptz) < NOW()`,
+		sessionID, leaseUntil)
+	if err != nil {
+		return false, err
+	}
+	if result.RowsAffected() == 1 {
+		return true, nil
+	}
+	var exists bool
+	if err := s.db.QueryRow(ctx, `SELECT true FROM playback_v3_attempts WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NOT NULL`, sessionID).Scan(&exists); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, playback.ErrSessionNotFound
+		}
+		return false, err
+	}
+	return false, nil
 }
 
 func (s *Postgres) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {

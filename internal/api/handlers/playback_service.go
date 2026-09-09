@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -272,7 +273,11 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 		return PlaybackMutationView{}, playbackStoreOperationError()
 	}
 	view := PlaybackMutationView{Outcome: receipt.Outcome, Accepted: acceptedProgressV2(receipt.Accepted)}
-	if receipt.Outcome != playback.ProgressAppliedV3 {
+	// An applied sample persists. A replayed one (the exact latest sample
+	// again) persists too: the client retried because the first reply was
+	// lost, which may have been before the side effects ran. The writers
+	// are idempotent for an identical position, so redoing them is safe.
+	if receipt.Outcome != playback.ProgressAppliedV3 && receipt.Outcome != playback.ProgressReplayedV3 {
 		return view, nil
 	}
 	h.persistProgressV2(ctx, store, record, sessionID, sample)
@@ -323,6 +328,8 @@ func (h *PlaybackHandler) persistProgressV2(ctx context.Context, store playback.
 }
 
 // progressSideEffectLock serializes progress side effects for one session.
+// Entries are dropped when the session stops (forgetProgressSideEffectLock);
+// a late caller that still holds a dropped mutex simply finishes on it.
 func (h *PlaybackHandler) progressSideEffectLock(sessionID string) func() {
 	entry, _ := h.progressSideEffectLocks.LoadOrStore(sessionID, &sync.Mutex{})
 	mu, ok := entry.(*sync.Mutex)
@@ -331,6 +338,16 @@ func (h *PlaybackHandler) progressSideEffectLock(sessionID string) func() {
 	}
 	mu.Lock()
 	return mu.Unlock
+}
+
+// forgetProgressSideEffectLock releases the per-session lock entry once the
+// attempt is terminal, so a long-lived replica does not retain one entry per
+// historical session.
+func (h *PlaybackHandler) forgetProgressSideEffectLock(sessionID string) {
+	if h == nil {
+		return
+	}
+	h.progressSideEffectLocks.Delete(sessionID)
 }
 
 func (h *PlaybackHandler) scrobblePauseTransitionV2(ctx context.Context, sess *playback.Session, wasPaused bool) {
@@ -395,24 +412,38 @@ func (h *PlaybackHandler) StopPlaybackV2(ctx context.Context, caller PlaybackCal
 	case err != nil:
 		return PlaybackMutationView{}, playbackStoreOperationError()
 	}
-	if !first && receipt.Finalized {
-		return PlaybackMutationView{Outcome: PlaybackOutcomeReplayed, Accepted: acceptedProgressV2(receipt.Accepted), StopID: receipt.StopID, HistoryID: receipt.HistoryID}, nil
-	}
-	// This stop won, or a replay found the winner's side effects unfinished
-	// (the winning replica died between the CAS and the writers below). Either
-	// way the receipt is already durable, so the writers run best effort and
-	// the request cannot fail from here. The deny marker, teardown and history
-	// are idempotent, so finishing them twice is safe.
-	receipt = h.finalizeStopV2(ctx, store, record, sessionID, receipt)
 	outcome := PlaybackOutcomeStopped
 	if !first {
 		outcome = PlaybackOutcomeReplayed
 	}
+	if !receipt.Finalized {
+		// This stop won, or a replay found the winner's side effects
+		// unfinished (the winning replica died between the CAS and the
+		// writers). The history writer mints a new row per call, so exactly
+		// one caller may run it: claim finalization on the row first. A
+		// caller that loses the claim replays the receipt as stored.
+		receipt = h.finalizeStopV2(ctx, store, record, sessionID, receipt)
+	}
+	h.forgetProgressSideEffectLock(sessionID)
 	return PlaybackMutationView{Outcome: outcome, Accepted: acceptedProgressV2(receipt.Accepted), StopID: receipt.StopID, HistoryID: receipt.HistoryID}, nil
 }
 
-// finalizeStopV2 runs the stop side effects and records the finalized receipt.
+// stopFinalizationLease bounds how long a claimed finalization may run before
+// another replay may take it over.
+const stopFinalizationLease = 30 * time.Second
+
+// finalizeStopV2 claims finalization, runs the stop side effects, and records
+// the finalized receipt. When the claim is lost the stored receipt is returned
+// unchanged. The request cannot fail from here: the receipt is already durable.
 func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.ProgressStoreV3, record *playback.AttemptRecordV3, sessionID string, receipt playback.StopReceiptV3) playback.StopReceiptV3 {
+	claimed, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(stopFinalizationLease))
+	if err != nil {
+		slog.WarnContext(ctx, "failed to claim playback stop finalization", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+		return receipt
+	}
+	if !claimed {
+		return receipt
+	}
 	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted)
 	receipt.Finalized = true
 	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
@@ -513,7 +544,17 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
 	}
-	return h.replanPlaybackApplicationV3(playbackCallerSessionRequest(ctx, caller, sessionID), sessionID, body)
+	// A stop accepted on any replica ends the attempt; a late recovery or
+	// seek must not launch a replacement transport the deny marker will
+	// refuse to serve. The store's commit predicate refuses stopped rows too.
+	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil && record.StoppedAt != nil {
+		return playback.DecisionResponseV3{}, playbackSessionNotFoundOperationError()
+	}
+	response, err := h.replanPlaybackApplicationV3(playbackCallerSessionRequest(ctx, caller, sessionID), sessionID, body)
+	if errors.Is(err, playback.ErrAttemptStoppedV3) {
+		return playback.DecisionResponseV3{}, playbackSessionNotFoundOperationError()
+	}
+	return response, err
 }
 
 // ReportRouteEventV2 is POST /api/v2/playback/route-events. The event is
@@ -585,6 +626,7 @@ func (h *PlaybackHandler) markAttemptStoppedServerSide(ctx context.Context, sess
 		return
 	}
 	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID)
+	h.forgetProgressSideEffectLock(sessionID)
 }
 
 func markAttemptStoppedServerSide(ctx context.Context, planStore playback.PlanStoreV3, deny *playback.StreamDeny, sessionID string) {

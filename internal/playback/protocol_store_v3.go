@@ -79,6 +79,10 @@ type StopReceiptV3 struct {
 	// unset finishes them: the winning replica died between the CAS and the
 	// writers.
 	Finalized bool `json:"finalized,omitempty"`
+	// FinalizingUntil is the lease of the caller currently running the side
+	// effects (see ProgressStoreV3.ClaimStopFinalization). Zero when nobody
+	// holds the claim.
+	FinalizingUntil time.Time `json:"finalizing_until,omitempty"`
 }
 
 // ProgressStoreV3 is the durable per-attempt progress and stop sequencing.
@@ -100,6 +104,13 @@ type ProgressStoreV3 interface {
 	// sample) on a stopped row after the stop writer has run, so replayed
 	// stops return what the first one produced.
 	RecordStopReceipt(ctx context.Context, sessionID string, receipt StopReceiptV3) error
+	// ClaimStopFinalization is a compare-and-set on the receipt's Finalizing
+	// flag. Exactly one caller wins the claim on a stopped, unfinalized row
+	// and runs the non-idempotent writers (history, scrobbles); every other
+	// caller returns false and replays the stored receipt as is. A claim is
+	// released by RecordStopReceipt with Finalized set, or by a later
+	// ClaimStopFinalization once the claim's lease has passed.
+	ClaimStopFinalization(ctx context.Context, sessionID string, leaseUntil time.Time) (bool, error)
 }
 
 type AttemptRecordV3 struct {
@@ -364,6 +375,9 @@ func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, request
 	if attemptID == "" {
 		return ErrSessionNotFound
 	}
+	if existing.StoppedAt != nil {
+		return ErrAttemptStoppedV3
+	}
 	if existing.CurrentReplanRequestID != baseReplanRequestID {
 		return ErrReplanSupersededV3
 	}
@@ -521,6 +535,28 @@ func (s *MemoryPlanStoreV3) RecordStopReceipt(_ context.Context, sessionID strin
 	if stored, ok := s.stopReceipts[sessionID]; !ok || stored.StopID != receipt.StopID {
 		return ErrSessionNotFound
 	}
+	if receipt.Finalized {
+		receipt.FinalizingUntil = time.Time{}
+	}
 	s.stopReceipts[sessionID] = receipt
 	return nil
+}
+
+func (s *MemoryPlanStoreV3) ClaimStopFinalization(_ context.Context, sessionID string, leaseUntil time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, record := s.findAttemptLocked(sessionID)
+	if record == nil || record.StoppedAt == nil {
+		return false, ErrSessionNotFound
+	}
+	stored, ok := s.stopReceipts[sessionID]
+	if !ok {
+		return false, ErrSessionNotFound
+	}
+	if stored.Finalized || time.Now().Before(stored.FinalizingUntil) {
+		return false, nil
+	}
+	stored.FinalizingUntil = leaseUntil
+	s.stopReceipts[sessionID] = stored
+	return true, nil
 }

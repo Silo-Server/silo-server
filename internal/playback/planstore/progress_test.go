@@ -3,6 +3,7 @@ package planstore
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -151,5 +152,81 @@ func TestStopAttemptKeepsNewerProgress(t *testing.T) {
 	replay, first, err := store.StopAttempt(ctx, quiet, uuid.NewString(), nil)
 	if err != nil || first || !sameStopReceipt(replay, receipt) {
 		t.Fatalf("quiet replay: %+v first=%v %v", replay, first, err)
+	}
+}
+
+// TestClaimStopFinalizationIsExclusive: exactly one caller wins the claim on
+// a stopped, unfinalized row; a finalized receipt refuses every claim; an
+// expired lease can be taken over.
+func TestClaimStopFinalizationIsExclusive(t *testing.T) {
+	f := newPlanstoreFixture(t)
+	store := NewPostgres(f.pool)
+	ctx := t.Context()
+	sessionID := uuid.NewString()
+	if err := store.SaveAttempt(ctx, f.attemptRecord(sessionID, uuid.NewString(), "digest")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("claim on a live row: %v", err)
+	}
+	stopID := uuid.NewString()
+	receipt, _, err := store.StopAttempt(ctx, sessionID, stopID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	won, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute))
+	if err != nil || !won {
+		t.Fatalf("first claim: won=%v err=%v", won, err)
+	}
+	if won, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); err != nil || won {
+		t.Fatalf("second claim under a live lease: won=%v err=%v", won, err)
+	}
+	// An expired lease is taken over.
+	if _, err := f.pool.Exec(ctx, `UPDATE playback_v3_attempts SET stop_receipt = jsonb_set(stop_receipt, '{finalizing_until}', to_jsonb(NOW() - interval '1 minute')) WHERE session_id = $1::uuid`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); err != nil || !won {
+		t.Fatalf("takeover of an expired lease: won=%v err=%v", won, err)
+	}
+	receipt.Finalized = true
+	receipt.HistoryID = uuid.NewString()
+	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(time.Minute)); err != nil || won {
+		t.Fatalf("claim on a finalized receipt: won=%v err=%v", won, err)
+	}
+	replay, first, err := store.StopAttempt(ctx, sessionID, uuid.NewString(), nil)
+	if err != nil || first || !replay.Finalized || replay.HistoryID != receipt.HistoryID {
+		t.Fatalf("replay: %+v first=%v %v", replay, first, err)
+	}
+}
+
+// TestCompleteReplanRefusesAStoppedRow: a stop that landed while a replan ran
+// must not be overwritten by the replan's commit.
+func TestCompleteReplanRefusesAStoppedRow(t *testing.T) {
+	f := newPlanstoreFixture(t)
+	store := NewPostgres(f.pool)
+	ctx := t.Context()
+	sessionID := uuid.NewString()
+	record := f.attemptRecord(sessionID, uuid.NewString(), "digest")
+	if err := store.SaveAttempt(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.BeginReplan(ctx, sessionID, "replan-1", "d", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
+	if err != nil || lease.State != playback.ReplanLeaseOwnedV3 {
+		t.Fatalf("lease: %+v %v", lease, err)
+	}
+	if _, _, err := store.StopAttempt(ctx, sessionID, uuid.NewString(), nil); err != nil {
+		t.Fatal(err)
+	}
+	updated := record
+	updated.CurrentReplanRequestID = "replan-1"
+	if err := store.CompleteReplan(ctx, sessionID, "replan-1", lease.LeaseToken, record.CurrentReplanRequestID, []byte(`{}`), updated); !errors.Is(err, playback.ErrAttemptStoppedV3) {
+		t.Fatalf("complete after stop: %v", err)
+	}
+	after, err := store.GetAttempt(ctx, sessionID)
+	if err != nil || after.CurrentReplanRequestID == "replan-1" {
+		t.Fatalf("stopped row was overwritten: %+v %v", after, err)
 	}
 }
