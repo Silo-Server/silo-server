@@ -27,7 +27,7 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 	if err := store.Put(Session{Token: token, StreamAppUserID: 1, ProfileID: "p1", PseudoUserID: PseudoUserID(1, "p1")}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	router := NewRouter(Dependencies{Config: cfg, SessionStore: store})
+	router := NewRouter(Dependencies{Config: cfg, SessionStore: store, ContentService: &genresContentService{}})
 
 	// (1) Registration + auth placement: unauthenticated requests to the
 	// session-auth-group routes must be 401 (registered + behind auth), never 404

@@ -2,6 +2,7 @@ package userstore
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -36,6 +37,9 @@ func AddVisibleHistory(ctx context.Context, store UserStore, entry WatchHistoryE
 type MarkWatchedTarget struct {
 	MediaItemID     string
 	DurationSeconds float64
+	// EventAt preserves an explicitly supplied progress date while the write
+	// timestamp advances independently. Nil retains normal manual-mark timing.
+	EventAt *time.Time
 }
 
 // WatchedBatchWriter is an optional store capability: mark every target
@@ -63,6 +67,11 @@ func MarkWatchedBatch(ctx context.Context, store UserStore, profileID string, ta
 	}
 	if writer, ok := store.(WatchedBatchWriter); ok {
 		return writer.MarkWatchedBatch(ctx, profileID, targets, entries)
+	}
+	for _, target := range targets {
+		if target.EventAt != nil {
+			return nil, fmt.Errorf("explicit dated marks require transactional batch support")
+		}
 	}
 	written := make([]WatchHistoryEntry, 0, len(entries))
 	for i, target := range targets {

@@ -184,7 +184,7 @@ func (s *Server) SessionStore() *SessionStore {
 func (s *Server) StartBackgroundTasks(ctx context.Context) <-chan struct{} {
 	if s.deps.DB != nil {
 		repo := NewSessionRepository(s.deps.DB, s.deps.SecretCipher)
-		StartSessionCleanupWithPlaybackStore(ctx, repo, s.deps.PlaybackStore, 1*time.Hour)
+		StartSessionCleanupWithPlaybackStore(ctx, repo, s.deps.PlaybackStore, s.deps.DeviceProfiles, 1*time.Hour)
 	}
 	return StartTerminalScrobbleRecovery(ctx, s.deps.PlaybackStore, s.deps.WatchScrobbler, 30*time.Second)
 }

@@ -30,19 +30,14 @@ func cleanupExpiredCompatState(ctx context.Context, repo *SessionRepository, pla
 // StartSessionCleanup runs a background goroutine that periodically removes
 // expired compat sessions from the database. It stops when ctx is cancelled.
 func StartSessionCleanup(ctx context.Context, repo *SessionRepository, interval time.Duration) {
-	StartSessionCleanupWithPlaybackStore(ctx, repo, nil, interval)
+	StartSessionCleanupWithPlaybackStore(ctx, repo, nil, nil, interval)
 }
 
 // StartSessionCleanupWithPlaybackStore also sweeps expired durable playback
-// negotiation rows when the configured playback store supports it.
-func StartSessionCleanupWithPlaybackStore(ctx context.Context, repo *SessionRepository, playbackStore CompatPlaybackStore, interval time.Duration) {
-	if repo == nil {
-		if _, ok := playbackStore.(playbackSessionExpirer); !ok {
-			return
-		}
-	}
+// negotiation rows and batches of expired device registrations within each tick's deadline.
+func StartSessionCleanupWithPlaybackStore(ctx context.Context, repo *SessionRepository, playbackStore CompatPlaybackStore, deviceProfiles *DeviceProfileStore, interval time.Duration) {
 	playbackExpirer, _ := playbackStore.(playbackSessionExpirer)
-	if repo == nil && playbackExpirer == nil {
+	if repo == nil && playbackExpirer == nil && deviceProfiles == nil {
 		return
 	}
 	go func() {
@@ -53,15 +48,37 @@ func StartSessionCleanupWithPlaybackStore(ctx context.Context, repo *SessionRepo
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				authDeleted, playbackDeleted, err := cleanupExpiredCompatState(ctx, repo, playbackExpirer, time.Now())
+				cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				authDeleted, playbackDeleted, err := cleanupExpiredCompatState(cleanupCtx, repo, playbackExpirer, time.Now())
+				var profilesDeleted int64
+				if deviceProfiles != nil {
+					var profileErr error
+					profilesDeleted, profileErr = cleanupExpiredDeviceProfiles(cleanupCtx, deviceProfiles)
+					err = errors.Join(err, profileErr)
+				}
+				cancel()
 				if err != nil {
 					slog.WarnContext(ctx, "jellycompat session cleanup failed", "component", "jellycompat", "error", err)
 					continue
 				}
-				if authDeleted > 0 || playbackDeleted > 0 {
-					slog.DebugContext(ctx, "jellycompat session cleanup", "component", "jellycompat", "auth_sessions", authDeleted, "playback_sessions", playbackDeleted)
+				if authDeleted > 0 || playbackDeleted > 0 || profilesDeleted > 0 {
+					slog.DebugContext(ctx, "jellycompat session cleanup", "component", "jellycompat", "auth_sessions", authDeleted, "playback_sessions", playbackDeleted, "device_profiles", profilesDeleted)
 				}
 			}
 		}
 	}()
+}
+
+func cleanupExpiredDeviceProfiles(ctx context.Context, store playbackSessionExpirer) (int64, error) {
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		deleted, err := store.DeleteExpired(ctx)
+		total += deleted
+		if err != nil || deleted < deviceProfileExpiryBatchSize {
+			return total, err
+		}
+	}
 }

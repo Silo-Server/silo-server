@@ -460,20 +460,7 @@ func (s *Service) recordMarkWatchedBatch(
 	// still resolve per episode, now in a single bulk lookup. No durations are
 	// available here, and the store leaves a known duration in place when a
 	// target supplies zero.
-	identities := s.resolveStableIdentities(ctx, targetIDs)
-	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targetIDs))
-	entries := make([]userstore.WatchHistoryEntry, 0, len(targetIDs))
-	for _, targetID := range targetIDs {
-		batchTargets = append(batchTargets, userstore.MarkWatchedTarget{MediaItemID: targetID})
-		entries = append(entries, userstore.WatchHistoryEntry{
-			ProfileID:   profileID,
-			MediaItemID: targetID,
-			WatchedAt:   formatWatchedAt(watchedAt),
-			Completed:   true,
-			Source:      source,
-			Identity:    identities[targetID],
-		})
-	}
+	batchTargets, entries := s.markWatchedBatchEntries(ctx, profileID, targetIDs, watchedAt, source)
 	if _, err := userstore.MarkWatchedBatch(ctx, store, profileID, batchTargets, entries); err != nil {
 		return err
 	}
@@ -570,4 +557,57 @@ func formatWatchedAt(watchedAt time.Time) string {
 		return ""
 	}
 	return watchedAt.UTC().Format(time.RFC3339)
+}
+
+// RecordJellycompatProgress commits the leaf's explicit state and its optional
+// played/unplayed history mutation before notifying watch providers.
+func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, profileID string, edit userstore.JellycompatProgressEdit, played *bool) error {
+	if edit.EventAt.IsZero() {
+		edit.EventAt = time.Now().UTC()
+	}
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	writer, ok := store.(userstore.JellycompatProgressEditor)
+	if !ok {
+		return fmt.Errorf("atomic user progress updates unavailable")
+	}
+	if played != nil {
+		edit.ClearHistory = !*played
+		if *played {
+			entry := userstore.WatchHistoryEntry{ProfileID: profileID, MediaItemID: edit.MediaItemID, WatchedAt: formatWatchedAt(edit.EventAt), Completed: true, Source: userstore.WatchHistorySourceJellycompat}
+			s.applyStableIdentity(ctx, &entry)
+			edit.History = &entry
+		}
+	}
+	if err := writer.ApplyJellycompatProgress(ctx, profileID, edit); err != nil {
+		return err
+	}
+	if played != nil && *played {
+		s.notifyWatchedCompleted(ctx, userID, profileID, []string{edit.MediaItemID})
+	}
+	return nil
+}
+
+func (s *Service) markWatchedBatchEntries(ctx context.Context, profileID string, targetIDs []string, watchedAt time.Time, source userstore.WatchHistorySource) ([]userstore.MarkWatchedTarget, []userstore.WatchHistoryEntry) {
+	identities := s.resolveStableIdentities(ctx, targetIDs)
+	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targetIDs))
+	entries := make([]userstore.WatchHistoryEntry, 0, len(targetIDs))
+	for _, targetID := range targetIDs {
+		target := userstore.MarkWatchedTarget{MediaItemID: targetID}
+		if source == userstore.WatchHistorySourceJellycompat {
+			target.EventAt = new(watchedAt)
+		}
+		batchTargets = append(batchTargets, target)
+		entries = append(entries, userstore.WatchHistoryEntry{
+			ProfileID:   profileID,
+			MediaItemID: targetID,
+			WatchedAt:   formatWatchedAt(watchedAt),
+			Completed:   true,
+			Source:      source,
+			Identity:    identities[targetID],
+		})
+	}
+	return batchTargets, entries
 }

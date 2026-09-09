@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -200,17 +201,18 @@ type episodeListSource interface {
 
 // directContentService implements ContentService by calling catalog repos directly.
 type directContentService struct {
-	browseRepo      browseSource
-	itemRepo        itemAccessSource
-	searchProvider  catalog.CatalogSearchProvider
-	seasonRepo      seasonListSource
-	episodeRepo     episodeListSource
-	detailSvc       *catalog.DetailService
-	folderRepo      folderListSource
-	storeProvider   userstore.UserStoreProvider
-	accessFilter    AccessFilterResolver
-	posterPresigner LibraryPosterPresigner
-	presignTTL      time.Duration
+	catalogUserState bool
+	browseRepo       browseSource
+	itemRepo         itemAccessSource
+	searchProvider   catalog.CatalogSearchProvider
+	seasonRepo       seasonListSource
+	episodeRepo      episodeListSource
+	detailSvc        *catalog.DetailService
+	folderRepo       folderListSource
+	storeProvider    userstore.UserStoreProvider
+	accessFilter     AccessFilterResolver
+	posterPresigner  LibraryPosterPresigner
+	presignTTL       time.Duration
 }
 
 func newDirectContentService(
@@ -359,6 +361,11 @@ func (s *directContentService) accessibleLibraryIDs(ctx context.Context, filter 
 func (s *directContentService) BrowseItems(ctx context.Context, session *Session, params url.Values) (*upstreamBrowseResponse, error) {
 	filter := s.resolveFilter(ctx, session)
 	isPlayedFilter := params.Get("is_played") // "", "true", or "false"
+	var played *bool
+	if isPlayedFilter != "" && parseBool(params.Get("compose_state"), false) {
+		played = new(parseBool(isPlayedFilter, false))
+		isPlayedFilter = ""
+	}
 	contentIDs := parseContentIDParam(params.Get("content_ids"))
 	includeTotal := parseBool(params.Get("include_total"), true)
 
@@ -381,7 +388,15 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 
 	filters := catalog.BrowseFilters{
 		Type:               compatScopedTypes(params.Get("type")),
+		UserID:             session.StreamAppUserID,
+		ProfileID:          session.ProfileID,
+		IsPlayed:           played,
+		IsFavorite:         parseBool(params.Get("is_favorite"), false),
+		IsResumable:        parseBool(params.Get("is_resumable"), false),
 		Genre:              params.Get("genre"),
+		Genres:             splitNonemptyGenres(params.Get("genres")),
+		Years:              parseBrowseYears(params.Get("years")),
+		SearchTerm:         params.Get("search_term"),
 		NamePrefix:         params.Get("name_prefix"),
 		ContentIDs:         contentIDs,
 		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
@@ -395,6 +410,36 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		MaxLimit:           compatBrowseMaxLimit,
 		Offset:             requestedOffset,
 		RequireBackdrop:    parseBool(params.Get("require_backdrop"), false),
+	}
+	if !s.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable || isPlayedFilter != "") {
+		if isPlayedFilter != "" {
+			filters.IsPlayed = new(parseBool(isPlayedFilter, false))
+		}
+		filters.Limit = requestedLimit
+		result, err := s.browseConfiguredUserState(ctx, session, filters, includeTotal, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+			result, err := s.browseRepo.BrowsePage(ctx, page, false)
+			if err != nil {
+				return nil, false, err
+			}
+			localized := result.Items
+			if s.detailSvc != nil {
+				if models, err := s.detailSvc.LocalizeItemModels(ctx, result.Items, filter); err == nil && models != nil {
+					localized = models
+				}
+			}
+			items := make([]upstreamListItem, 0, len(localized))
+			for _, item := range localized {
+				items = append(items, mediaItemToListItem(item))
+			}
+			return items, result.HasMore, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		presignCompatListItems(ctx, s.detailSvc, result.Items)
+		fillListItemDurations(ctx, s.detailSvc, result.Items)
+		s.EnrichSeriesUserData(ctx, session, result.Items)
+		return result, nil
 	}
 
 	// A no-parentId recently_added browse (the /Items/Latest hot path) would
@@ -964,7 +1009,23 @@ func (s *directContentService) ListItemFilters(ctx context.Context, session *Ses
 	if err != nil {
 		return nil, fmt.Errorf("list genres: %w", err)
 	}
-	return &upstreamItemFiltersResponse{Genres: genres}, nil
+	result := &upstreamItemFiltersResponse{Genres: genres, Studios: []string{}, OfficialRatings: []string{}, Years: []int{}}
+	if facets, ok := s.browseRepo.(interface {
+		ListStudios(context.Context, catalog.BrowseFilters) ([]string, error)
+		ListContentRatings(context.Context, catalog.BrowseFilters) ([]string, error)
+		ListYears(context.Context, catalog.BrowseFilters) ([]int, error)
+	}); ok {
+		if result.Studios, err = facets.ListStudios(ctx, filters); err != nil {
+			return nil, err
+		}
+		if result.OfficialRatings, err = facets.ListContentRatings(ctx, filters); err != nil {
+			return nil, err
+		}
+		if result.Years, err = facets.ListYears(ctx, filters); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 // enrichListItemsUserData adds user data to a batch of list items.
@@ -1436,4 +1497,23 @@ func wrapCatalogError(err error) error {
 		return &HTTPError{StatusCode: 404, Message: errMsg}
 	}
 	return err
+}
+
+func splitNonemptyGenres(raw string) []string {
+	var out []string
+	for value := range strings.SplitSeq(raw, "|") {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+func parseBrowseYears(raw string) []int {
+	var out []int
+	for value := range strings.SplitSeq(raw, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }

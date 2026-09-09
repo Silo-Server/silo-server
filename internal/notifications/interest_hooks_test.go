@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 type preferenceTransactionTestProvider struct {
@@ -329,6 +330,107 @@ func TestInterestTrackingStoreForwardsRollupWhenSupported(t *testing.T) {
 	}
 	if _, ok := wrapped.(userstore.SettingValueCompareAndSetter); !ok {
 		t.Error("rollup-capable wrapper dropped SettingValueCompareAndSetter")
+	}
+}
+
+func TestInterestTrackingStorePreservesJellycompatProgress(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	provider := WrapUserStoreProvider(preferenceTransactionTestProvider{store: userdb.NewSQLiteUserStore(db)}, &System{})
+	wrapped, err := provider.ForUser(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wrapped.CreateProfile(t.Context(), userstore.Profile{ID: "profile-1", Name: "Profile"}); err != nil {
+		t.Fatal(err)
+	}
+	writer, ok := wrapped.(userstore.JellycompatProgressEditor)
+	if !ok {
+		t.Fatal("production decorator lost explicit progress writer")
+	}
+	date := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if err := writer.ApplyJellycompatProgress(t.Context(), "profile-1", userstore.JellycompatProgressEdit{MediaItemID: "item-1", PositionSeconds: 123, DurationSeconds: 600, EventAt: date}); err != nil {
+		t.Fatal(err)
+	}
+	reader, ok := wrapped.(interface {
+		ListJellycompatProgressDates(context.Context, string, []string) (map[string]string, error)
+	})
+	if !ok {
+		t.Fatal("production decorator lost progress dates reader")
+	}
+	dates, err := reader.ListJellycompatProgressDates(t.Context(), "profile-1", []string{"item-1"})
+	if err != nil || dates["item-1"] != date.Format(time.RFC3339Nano) {
+		t.Fatalf("dates=%+v err=%v", dates, err)
+	}
+	progress, err := wrapped.GetProgress(t.Context(), "profile-1", "item-1")
+	if err != nil || progress == nil || progress.PositionSeconds != 123 {
+		t.Fatalf("progress=%+v err=%v", progress, err)
+	}
+}
+
+type atomicProgressObserver struct{ calls int }
+
+func (o *atomicProgressObserver) HandleWatchedCompleted(context.Context, int, string, []string) {
+	o.calls++
+}
+
+func TestAtomicJellycompatProgressNotifiesOnlyAfterCommit(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TRIGGER fail_atomic_progress BEFORE INSERT ON watch_progress WHEN NEW.position_seconds = 321 BEGIN SELECT RAISE(ABORT, 'forced progress failure'); END"); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	if err := store.CreateProfile(t.Context(), userstore.Profile{ID: "profile-1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	updater := &InterestUpdater{pending: map[interestMutation]int{}}
+	wrapped := &interestTrackingStore{UserStore: store, userID: 1, updater: updater}
+	observer := &atomicProgressObserver{}
+	service := watchstate.NewService(preferenceTransactionTestProvider{store: wrapped}).WithCompletionObserver(observer)
+	date := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	edit := userstore.JellycompatProgressEdit{MediaItemID: "item-1", PositionSeconds: 321, DurationSeconds: 600, Completed: true, EventAt: date}
+	if err := service.RecordJellycompatProgress(t.Context(), 1, "profile-1", edit, new(true)); err == nil {
+		t.Fatal("progress failure ignored")
+	}
+	if observer.calls != 0 || len(updater.pending) != 0 {
+		t.Fatal("failed edit notified observers")
+	}
+	edit.PositionSeconds = 123
+	if err := service.RecordJellycompatProgress(t.Context(), 1, "profile-1", edit, new(true)); err != nil {
+		t.Fatal(err)
+	}
+	if observer.calls != 1 || len(updater.pending) != 1 {
+		t.Fatal("committed edit did not notify observers")
+	}
+	clear(updater.pending)
+	edit.PositionSeconds = 321
+	edit.Completed = false
+	if err := service.RecordJellycompatProgress(t.Context(), 1, "profile-1", edit, new(false)); err == nil {
+		t.Fatal("unplayed failure ignored")
+	}
+	if observer.calls != 1 || len(updater.pending) != 0 {
+		t.Fatal("failed unplayed edit notified observers")
+	}
+	progress, err := store.GetProgress(t.Context(), "profile-1", "item-1")
+	if err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 123 {
+		t.Fatalf("failed edit changed progress: %+v %v", progress, err)
+	}
+	history, err := store.ListHistory(t.Context(), "profile-1", 10, 0)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("failed edit changed history: %+v %v", history, err)
 	}
 }
 

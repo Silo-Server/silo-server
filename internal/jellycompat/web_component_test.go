@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,147 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
+
+func seedWebSeekSources(t *testing.T, root string) {
+	t.Helper()
+	for fixture, path := range map[string]string{"playbackmanager.js": webPlaybackManagerSource, "htmlvideo.js": webHTMLVideoPlayerSource} {
+		data, err := os.ReadFile(filepath.Join("testdata", "web-seek-reanchor", fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestManagedWebSeekPatchBehavior(t *testing.T) {
+	root := t.TempDir()
+	seedWebSeekSources(t, root)
+	if err := patchManagedWebSources(root); err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js required to execute upstream Jellyfin Web seek logic")
+	}
+	cmd := exec.CommandContext(t.Context(), node, "testdata/web-seek-reanchor/behavior.cjs", filepath.Join(root, webPlaybackManagerSource), filepath.Join(root, webHTMLVideoPlayerSource))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("patched upstream behavior: %v\n%s", err, out)
+	}
+}
+
+func TestManagedWebSeekPatchRejectsIncompatibleSources(t *testing.T) {
+	for _, mode := range []string{"missing", "ambiguous", "already patched"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			seedWebSeekSources(t, root)
+			manager := filepath.Join(root, webPlaybackManagerSource)
+			player := filepath.Join(root, webHTMLVideoPlayerSource)
+			original, err := os.ReadFile(manager)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "missing":
+				if err := os.WriteFile(player, []byte("upstream changed"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "ambiguous":
+				data, err := os.ReadFile(player)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(player, append(data, data...), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "already patched":
+				if err := patchManagedWebSources(root); err != nil {
+					t.Fatal(err)
+				}
+				original, err = os.ReadFile(manager)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := patchManagedWebSources(root); err == nil || !strings.Contains(err.Error(), "incompatible upstream source") {
+				t.Fatalf("got %v", err)
+			}
+			after, err := os.ReadFile(manager)
+			if err != nil || string(after) != string(original) {
+				t.Fatal("failed validation partially modified source")
+			}
+		})
+	}
+}
+
+func TestInstallWebComponentPatchesBeforeBuildAndRecordsProvenance(t *testing.T) {
+	gitDir, err := commandOutput(t.Context(), "", "git", "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Skip("installer fixture requires a Git checkout")
+	}
+	var npmCalls int
+	status, err := InstallWebComponent(t.Context(), WebComponentInstallOptions{
+		InstallRoot: t.TempDir(), Version: "10.11.8",
+		RunCommand: func(_ context.Context, dir string, args []string, _ string) error {
+			if args[0] == "git" {
+				dir = args[len(args)-1]
+				seedWebSeekSources(t, dir)
+				if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+strings.TrimSpace(gitDir)+"\n"), 0o644); err != nil {
+					return err
+				}
+				return os.WriteFile(filepath.Join(dir, "LICENSE"), []byte("GPL-2.0 fixture"), 0o644)
+			}
+			npmCalls++
+			for path, marker := range map[string]string{webPlaybackManagerSource: "SiloSeekReanchor: true", webHTMLVideoPlayerSource: "canSeekTo(milliseconds)"} {
+				data, err := os.ReadFile(filepath.Join(dir, path))
+				if err != nil || !strings.Contains(string(data), marker) {
+					t.Fatalf("npm ran before patch %s: %v", path, err)
+				}
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(dir, "dist", "index.html"), []byte("fixture"), 0o644)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if npmCalls != 2 {
+		t.Fatalf("npm calls=%d", npmCalls)
+	}
+	metadata, err := readWebMetadata(status.InstallPath)
+	if err != nil || !metadata.Modified || len(metadata.Patches) != 1 || metadata.Patches[0] != webSeekReanchorPatch {
+		t.Fatalf("metadata=%+v err=%v", metadata, err)
+	}
+	provenance, err := os.ReadFile(filepath.Join(status.InstallPath, webSourceFile))
+	if err != nil || !strings.Contains(string(provenance), "Modified: true") || !strings.Contains(string(provenance), webSeekReanchorPatch) {
+		t.Fatalf("provenance=%s err=%v", provenance, err)
+	}
+}
+
+// Set this to an unmodified upstream checkout to verify the guarded patch
+// against complete source files as well as the small executable excerpts.
+func TestManagedWebSeekPatchUpstreamCheckout(t *testing.T) {
+	upstream := os.Getenv("SILO_TEST_JELLYFIN_WEB_SOURCE")
+	if upstream == "" {
+		t.Skip("SILO_TEST_JELLYFIN_WEB_SOURCE is not set")
+	}
+	root := t.TempDir()
+	for _, path := range []string{webPlaybackManagerSource, webHTMLVideoPlayerSource} {
+		if err := copyFile(filepath.Join(upstream, path), filepath.Join(root, path)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := patchManagedWebSources(root); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestWebComponentStatusMissing(t *testing.T) {
 	root := t.TempDir()

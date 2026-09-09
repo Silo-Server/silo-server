@@ -89,21 +89,19 @@ func TestHydrateProgressItems_DoesNotCallGetItemDetail(t *testing.T) {
 		t.Fatalf("expected 2 hydrated items; got %d (%v)", len(got), got)
 	}
 
-	// Every result must carry single-element placeholder slices so the JSON
-	// keys are present regardless of omitempty. See stubDetailListFields for
-	// rationale.
+	// Missing detail stays absent until real detail hydration succeeds.
 	for i, item := range got {
-		if len(item.dto.People) != 1 {
-			t.Errorf("item[%d].People = %v; expected single-element stub", i, item.dto.People)
+		if len(item.dto.People) != 0 {
+			t.Errorf("item[%d].People = %v; expected no invented detail", i, item.dto.People)
 		}
-		if len(item.dto.Chapters) != 1 {
-			t.Errorf("item[%d].Chapters = %v; expected single-element stub", i, item.dto.Chapters)
+		if len(item.dto.Chapters) != 0 {
+			t.Errorf("item[%d].Chapters = %v; expected no invented detail", i, item.dto.Chapters)
 		}
-		if len(item.dto.MediaStreams) != 1 {
-			t.Errorf("item[%d].MediaStreams = %v; expected single-element stub", i, item.dto.MediaStreams)
+		if len(item.dto.MediaStreams) != 0 {
+			t.Errorf("item[%d].MediaStreams = %v; expected no invented detail", i, item.dto.MediaStreams)
 		}
-		if len(item.dto.MediaSources) != 1 {
-			t.Errorf("item[%d].MediaSources = %v; expected single-element stub", i, item.dto.MediaSources)
+		if len(item.dto.MediaSources) != 0 {
+			t.Errorf("item[%d].MediaSources = %v; expected no invented detail", i, item.dto.MediaSources)
 		}
 	}
 }

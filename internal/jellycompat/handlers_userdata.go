@@ -1,12 +1,18 @@
 package jellycompat
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // UserDataHandler serves Jellyfin favorites and played-state routes.
@@ -35,6 +41,9 @@ func (h *UserDataHandler) HandleGetUserData(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if !validateOptionalUser(w, r, session) {
+		return
+	}
 	contentID, err := decodeContentID(h.codec, chi.URLParam(r, "itemId"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
@@ -56,6 +65,35 @@ func (h *UserDataHandler) HandleGetUserData(w http.ResponseWriter, r *http.Reque
 	}
 	isFavorite := favMap[detail.ContentID]
 	progress := progressMap[detail.ContentID]
+
+	if strings.EqualFold(detail.Type, "series") || strings.EqualFold(detail.Type, "season") {
+		targets, err := h.resolvePlayedTargets(r, session, chi.URLParam(r, "itemId"))
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		counts := userstore.SeriesWatchCounts{TotalEpisodes: len(targets)}
+		for chunk := range slices.Chunk(targets, 500) {
+			childProgress, err := resolveProgressForContentIDs(r.Context(), session, h.userData, chunk)
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			for _, target := range chunk {
+				if child := childProgress[target]; child != nil {
+					if child.Completed {
+						counts.WatchedCount++
+					} else if child.PositionSeconds > 0 {
+						counts.InProgressCount++
+					}
+				}
+			}
+		}
+		// Parents derive played state solely from their children, even when
+		// an old parent progress row remains in the configured user store.
+		detail.UserData = catalog.SeasonUserDataFromCounts(counts)
+		progress = nil
+	}
 
 	writeJSON(w, http.StatusOK, h.mapper.itemFromDetail(*detail, isFavorite, progress).UserData)
 }
@@ -122,13 +160,11 @@ func (h *UserDataHandler) HandleGetUserDataLegacy(w http.ResponseWriter, r *http
 }
 
 // HandleUpdateUserDataLegacy serves POST /Users/{userId}/Items/{itemId}/UserData.
-// Accepts the update and returns 204 — individual field updates are handled
-// through the dedicated played/favorite endpoints instead.
 func (h *UserDataHandler) HandleUpdateUserDataLegacy(w http.ResponseWriter, r *http.Request) {
 	if !validatePseudoUser(w, chi.URLParam(r, "userId"), SessionFromContext(r.Context())) {
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	h.HandleUpdateUserData(w, r)
 }
 
 func (h *UserDataHandler) handleFavoriteMutation(w http.ResponseWriter, r *http.Request, favorite bool) {
@@ -144,6 +180,13 @@ func (h *UserDataHandler) handleFavoriteMutation(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if !validateOptionalUser(w, r, session) {
+		return
+	}
+	if _, err := h.content.GetItemDetail(r.Context(), session, contentID, nil); err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
 	if favorite {
 		err = h.userData.AddFavorite(r.Context(), session, contentID)
 	} else {
@@ -154,23 +197,7 @@ func (h *UserDataHandler) handleFavoriteMutation(w http.ResponseWriter, r *http.
 		return
 	}
 
-	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-
-	favMap, progressMap, err := resolveUserStateForContentIDs(
-		r.Context(), session, h.userData, []string{detail.ContentID},
-	)
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-	isFavorite := favMap[detail.ContentID]
-	progress := progressMap[detail.ContentID]
-
-	writeJSON(w, http.StatusOK, h.mapper.itemFromDetail(*detail, isFavorite, progress).UserData)
+	h.HandleGetUserData(w, r)
 }
 
 func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Request, played bool) {
@@ -186,7 +213,24 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if played {
+	if !validateOptionalUser(w, r, session) {
+		return
+	}
+	if raw := newCaseInsensitiveQuery(r.URL.Query()).Get("datePlayed"); played && raw != "" {
+		date, parseErr := time.Parse(time.RFC3339Nano, raw)
+		if parseErr != nil {
+			writeError(w, 400, "BadRequest", "Invalid datePlayed")
+			return
+		}
+		writer, ok := h.userData.(interface {
+			MarkPlayedBatchAt(context.Context, *Session, []string, time.Time) error
+		})
+		if !ok {
+			writeError(w, 501, "NotImplemented", "Dated watch state unavailable")
+			return
+		}
+		err = writer.MarkPlayedBatchAt(r.Context(), session, targets, date)
+	} else if played {
 		err = h.userData.MarkPlayedBatch(r.Context(), session, targets)
 	} else {
 		err = h.userData.MarkUnplayedBatch(r.Context(), session, targets)
@@ -195,7 +239,7 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	h.HandleGetUserData(w, r)
 }
 
 func (h *UserDataHandler) resolvePlayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {
@@ -270,4 +314,116 @@ func appendUniqueContentIDs(targets []string, seen map[string]struct{}, contentI
 		targets = append(targets, contentID)
 	}
 	return targets
+}
+
+// updateUserDataRequest uses pointers so omitted and null fields preserve state.
+type updateUserDataRequest struct {
+	PlaybackPositionTicks *int64     `json:"PlaybackPositionTicks"`
+	PlayedPercentage      *float64   `json:"PlayedPercentage"`
+	Played                *bool      `json:"Played"`
+	IsFavorite            *bool      `json:"IsFavorite"`
+	LastPlayedDate        *time.Time `json:"LastPlayedDate"`
+	PlayCount             *int       `json:"PlayCount"`
+	Rating                *float64   `json:"Rating"`
+	Likes                 *bool      `json:"Likes"`
+}
+
+func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, 401, "Unauthorized", "Missing authentication token")
+		return
+	}
+	if !validateOptionalUser(w, r, session) {
+		return
+	}
+	var req updateUserDataRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
+		writeError(w, 400, "BadRequest", "Invalid request body")
+		return
+	}
+	if req.Rating != nil || req.Likes != nil || (req.PlayCount != nil && (*req.PlayCount < 0 || *req.PlayCount > 1)) {
+		writeError(w, 400, "BadRequest", "Unsupported user data field or play count (supported: 0 or 1)")
+		return
+	}
+	if req.PlaybackPositionTicks != nil && *req.PlaybackPositionTicks < 0 || req.PlayedPercentage != nil && (*req.PlayedPercentage < 0 || *req.PlayedPercentage > 100) {
+		writeError(w, 400, "BadRequest", "Invalid playback position")
+		return
+	}
+	contentID, err := decodeContentID(h.codec, chi.URLParam(r, "itemId"))
+	if err != nil {
+		writeError(w, 404, "NotFound", "Item not found")
+		return
+	}
+	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+
+	if detail.Type == "series" || detail.Type == "season" {
+		if req.PlaybackPositionTicks != nil || req.PlayedPercentage != nil || req.LastPlayedDate != nil {
+			writeError(w, 400, "BadRequest", "Progress fields require a playable item")
+			return
+		}
+		if req.PlayCount != nil && req.Played == nil {
+			req.Played = new(*req.PlayCount > 0)
+		}
+		if req.Played != nil {
+			targets, err := h.resolvePlayedTargets(r, session, chi.URLParam(r, "itemId"))
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			if req.IsFavorite != nil {
+				writer, ok := h.userData.(interface {
+					UpdateParentUserData(context.Context, *Session, string, []string, bool, bool) error
+				})
+				if !ok {
+					writeError(w, 501, "NotImplemented", "Atomic parent user data updates unavailable")
+					return
+				}
+				if err := writer.UpdateParentUserData(r.Context(), session, detail.ContentID, targets, *req.Played, *req.IsFavorite); err != nil {
+					writeCompatUpstreamError(w, err)
+					return
+				}
+				h.HandleGetUserData(w, r)
+				return
+			}
+			if *req.Played {
+				err = h.userData.MarkPlayedBatch(r.Context(), session, targets)
+			} else {
+				err = h.userData.MarkUnplayedBatch(r.Context(), session, targets)
+			}
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+		}
+		if req.IsFavorite != nil {
+			if *req.IsFavorite {
+				err = h.userData.AddFavorite(r.Context(), session, detail.ContentID)
+			} else {
+				err = h.userData.RemoveFavorite(r.Context(), session, detail.ContentID)
+			}
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+		}
+		h.HandleGetUserData(w, r)
+		return
+	}
+	writer, ok := h.userData.(interface {
+		UpdateUserData(context.Context, *Session, string, float64, updateUserDataRequest) error
+	})
+	if !ok {
+		writeError(w, 501, "NotImplemented", "User data updates unavailable")
+		return
+	}
+	if err := writer.UpdateUserData(r.Context(), session, detail.ContentID, float64(detail.Runtime)*60, req); err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.HandleGetUserData(w, r)
 }
