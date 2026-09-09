@@ -1,6 +1,10 @@
 package jellycompat
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/contentid"
@@ -46,6 +50,71 @@ func TestLegacyNumericContentIDRoundTrips(t *testing.T) {
 	got, err := NewResourceIDCodec().DecodeStringID(EncodedIDItem, u)
 	if err != nil || got != legacy {
 		t.Fatalf("legacy numeric round trip = (%q, %v), want (%q, nil)", got, err, legacy)
+	}
+}
+
+func TestUserCollectionIDDecodesWithoutSharedState(t *testing.T) {
+	for _, id := range []string{
+		"731d3da2-4f4b-4a71-8f2f-38e1d34775b0",
+		"02c40000-0000-4000-8000-000000000000",
+		"04c40000-0000-4000-8000-000000000000",
+		"00000000-0000-4000-8000-000000000000",
+		"ffffffff-ffff-4fff-bfff-ffffffffffff",
+		"01K3M9K0R7D6Y9T7F1P6W2H8ZX",
+		"731d3da2-4f4b-5a71-8f2f-38e1d34775b0",
+		"00000000000000000000000000",
+		"7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+		"123",
+		"legacy-collection",
+	} {
+		t.Run(id, func(t *testing.T) {
+			encoded := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, id)
+			sum := sha256.Sum256([]byte(id))
+			key := hex.EncodeToString(sum[:14])
+			if encoded == id {
+				t.Fatal("personal route ID must carry a source marker")
+			}
+			if adminID := NewResourceIDCodec().EncodeStringID(EncodedIDCollection, id); adminID == encoded {
+				t.Fatal("personal and admin collections must have distinct route IDs")
+			}
+			for _, route := range []string{encoded, strings.ReplaceAll(encoded, "-", ""), strings.ToUpper(encoded)} {
+				codec := NewResourceIDCodec()
+				got, err := codec.DecodeStringID(EncodedIDUserCollection, route)
+				if err != nil || got != key {
+					t.Fatalf("user collection lookup key = (%q, %v), want (%q, nil)", got, err, key)
+				}
+				for kind := EncodedIDLibrary; kind < EncodedIDUserCollection; kind++ {
+					if _, err := codec.DecodeStringID(kind, route); err == nil {
+						t.Errorf("personal collection route decoded as kind %d", kind)
+					}
+				}
+				query := parseItemsQuery(httptest.NewRequest("GET", "/Items?ParentId="+route+"&Ids="+route, nil), codec)
+				if query.parentPersonalCollectionID != key || len(query.specificPersonalCollectionIDs) != 1 || query.specificPersonalCollectionIDs[0] != key {
+					t.Errorf("personal route was misclassified: %+v", query)
+				}
+			}
+		})
+	}
+	for _, id := range []string{"movie-tmdb-228064", "local-00000000b0000000000000000000"} {
+		for _, kind := range []EncodedIDType{EncodedIDItem, EncodedIDSeason} {
+			contentRoute := NewResourceIDCodec().EncodeStringID(kind, id)
+			if _, err := NewResourceIDCodec().DecodeStringID(EncodedIDUserCollection, contentRoute); err == nil {
+				t.Errorf("content route %q decoded as a personal collection", contentRoute)
+			}
+		}
+	}
+}
+
+func TestUserCollectionIDRejectsHashedUUIDs(t *testing.T) {
+	// Other opaque kinds use RFC 4122 UUIDv5 hashes. Even if their leading
+	// bytes match the personal kind, they must never enter the personal path.
+	for _, raw := range []string{
+		"0b010000-0000-5000-8000-000000000000",
+		"0b010000-0000-5000-bfff-ffffffffffff",
+	} {
+		if _, err := NewResourceIDCodec().DecodeStringID(EncodedIDUserCollection, raw); err == nil {
+			t.Errorf("accepted another kind's hashed UUID %s", raw)
+		}
 	}
 }
 

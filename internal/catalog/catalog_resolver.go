@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -681,6 +682,9 @@ func (r *CatalogResolver) resolveCollectionWithEffectiveSort(
 	// default come into play. A frozen sort from an earlier page of this request
 	// wins over both — see CatalogRequest.ResolvedSort.
 	switch {
+	case req.Randomize:
+		req.Query.Sort = QuerySort{}
+		req.UseSourceOrder = true
 	case req.ResolvedSort != nil:
 		req.Query.Sort = *req.ResolvedSort
 		req.UseSourceOrder = req.Query.Sort.Field == ""
@@ -720,6 +724,16 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 			items, err = FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, items, collection.DisplayQueryDefinition, access)
 			if err != nil {
 				return nil, err
+			}
+			if req.PersonID > 0 {
+				items, err = r.fetchAccessibleItemsByID(ctx, contentIDsFromMediaItems(items), catalogBaseCollectionRequest(req), access)
+				if err != nil {
+					return nil, err
+				}
+			}
+			// Keep unscoped overlays on the source's relation (notably episodes).
+			if req.Query.MediaScope == "" {
+				req.Query.MediaScope = def.MediaScope
 			}
 			return r.resolveExactOrderedMediaItems(ctx, items, req, access)
 		}
@@ -841,11 +855,20 @@ func (r *CatalogResolver) resolveExactOrderedMediaItems(ctx context.Context, ite
 	req = normalizeExactCollectionOverlayRequest(req, items)
 	items = filterCatalogSearchItems(items, req.SearchQuery)
 	items = filterCatalogNamePrefix(items, req.NamePrefix)
+	if req.RequireBackdrop {
+		// Match browse's BTRIM predicate using hydrated images, including episode inheritance.
+		items = slices.DeleteFunc(items, func(item *models.MediaItem) bool {
+			return item == nil || strings.Trim(item.BackdropPath, " ") == ""
+		})
+	}
 	if req.UseSourceOrder {
 		var err error
 		items, err = r.filterExactSourceItemsByQuery(ctx, items, req.Query, access)
 		if err != nil {
 			return nil, err
+		}
+		if req.Randomize {
+			rand.Shuffle(len(items), func(i, j int) { items[i], items[j] = items[j], items[i] })
 		}
 		total := len(items)
 		paged := paginateCatalogItems(items, req.Offset, req.Limit)
@@ -1501,6 +1524,9 @@ func validateCatalogCollectionRequest(req CatalogRequest, allowPersonalizedSorts
 func catalogRequestHasOverlay(req CatalogRequest) bool {
 	return strings.TrimSpace(req.SearchQuery) != "" ||
 		strings.TrimSpace(req.NamePrefix) != "" ||
+		req.PersonID > 0 ||
+		req.RequireBackdrop ||
+		req.Randomize ||
 		catalogQueryHasFilter(req.Query) ||
 		strings.TrimSpace(req.Query.Sort.Field) != ""
 }
@@ -2069,12 +2095,14 @@ func (r *CatalogResolver) loadCollectionSourceBaseItems(ctx context.Context, req
 
 func catalogBaseCollectionRequest(req CatalogRequest) CatalogRequest {
 	return CatalogRequest{
-		Source:         req.Source,
-		CollectionID:   req.CollectionID,
-		Limit:          req.Limit,
-		Offset:         req.Offset,
-		SkipTotal:      req.SkipTotal,
-		UseSourceOrder: true,
+		Source:          req.Source,
+		CollectionID:    req.CollectionID,
+		PersonID:        req.PersonID,
+		RequireBackdrop: req.RequireBackdrop,
+		Limit:           req.Limit,
+		Offset:          req.Offset,
+		SkipTotal:       req.SkipTotal,
+		UseSourceOrder:  true,
 	}
 }
 
@@ -2268,6 +2296,8 @@ func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilter
 		NamePrefix:         req.NamePrefix,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaxContentRating:   access.MaxContentRating,
+		PersonID:           req.PersonID,
+		RequireBackdrop:    req.RequireBackdrop,
 	}
 	applyCatalogBrowseOverlayRules(&filters, req.Query)
 
