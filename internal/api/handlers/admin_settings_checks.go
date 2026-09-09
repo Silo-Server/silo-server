@@ -149,7 +149,7 @@ func (h *AdminHandler) HandleCheckSettingsConnection(w http.ResponseWriter, r *h
 		response = checkAITranscriptionConnection(r.Context(), cfg)
 	case "meilisearch":
 		response = checkMeilisearchConnection(r.Context(), effectiveSettings)
-	case "mdblist":
+	case mdblistSourceKey:
 		response = checkMDBListConnection(r.Context(), cfg)
 	default:
 		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported connection check kind")

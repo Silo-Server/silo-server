@@ -32,36 +32,46 @@ interface SyncScheduleFieldProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  label?: string;
+  inputId?: string;
 }
 
-export function SyncScheduleField({ value, onChange, disabled }: SyncScheduleFieldProps) {
-  const [mode, setMode] = useState<"none" | "preset" | "custom">(() => deriveMode(value));
+export function SyncScheduleField({
+  value,
+  onChange,
+  disabled,
+  label = "Sync Schedule",
+  inputId,
+}: SyncScheduleFieldProps) {
+  const [customValue, setCustomValue] = useState<string | null>(null);
+  const mode = customValue === value ? "custom" : deriveMode(value);
 
   const selectValue =
     mode === "none" ? "__none__" : mode === "custom" ? "custom" : (findPreset(value) ?? "custom");
 
   return (
     <div className="space-y-2">
-      <Label>Sync Schedule</Label>
+      <Label htmlFor={inputId}>{label}</Label>
       <Select
         value={selectValue}
         onValueChange={(v) => {
           if (v === "__none__") {
-            setMode("none");
+            setCustomValue(null);
             onChange("");
           } else if (v === "custom") {
-            setMode("custom");
-            if (!value || findPreset(value)) {
-              onChange("0 3 * * *");
+            const next = !value || findPreset(value) ? "0 3 * * *" : value;
+            setCustomValue(next);
+            if (next !== value) {
+              onChange(next);
             }
           } else {
-            setMode("preset");
+            setCustomValue(null);
             onChange(v);
           }
         }}
         disabled={disabled}
       >
-        <SelectTrigger className="w-full sm:w-[280px]">
+        <SelectTrigger id={inputId} className="w-full sm:w-[280px]">
           <SelectValue placeholder="Select a schedule" />
         </SelectTrigger>
         <SelectContent>
@@ -81,7 +91,10 @@ export function SyncScheduleField({ value, onChange, disabled }: SyncScheduleFie
             type="text"
             placeholder="0 3 * * *"
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              setCustomValue(e.target.value);
+              onChange(e.target.value);
+            }}
             disabled={disabled}
             className="w-full font-mono sm:w-[280px]"
           />

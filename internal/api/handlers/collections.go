@@ -20,6 +20,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+const mdblistSourceKey = "mdblist"
+
 // CollectionHandler handles personal collection CRUD endpoints.
 type CollectionHandler struct {
 	storeProvider      userstore.UserStoreProvider
@@ -63,6 +65,7 @@ type updateCollectionRequest struct {
 	IncludeInServerCollections *bool                  `json:"include_in_server_collections"`
 	PosterSourceURL            *string                `json:"poster_source_url"`
 	GroupID                    optionalNullableString `json:"group_id"`
+	SyncSchedule               *string                `json:"sync_schedule"`
 }
 
 type collectionItemRequest struct {
@@ -116,7 +119,14 @@ type collectionCapabilitiesResponse struct {
 	// the sort-preference endpoints. CollectionSortPreferences alone cannot
 	// distinguish a server that also stores the personal-list kinds
 	// ('watchlist', 'favorites') from one that rejects them.
-	SortPreferenceKinds []string `json:"sort_preference_kinds"`
+	SortPreferenceKinds        []string                           `json:"sort_preference_kinds"`
+	UserCollectionSyncSchedule collectionSyncScheduleCapabilities `json:"user_collection_sync_schedule"`
+}
+
+type collectionSyncScheduleCapabilities struct {
+	Editable   bool     `json:"editable"`
+	Presets    []string `json:"presets"`
+	CustomCron bool     `json:"custom_cron"`
 }
 
 type collectionDisplayFilterPresets struct {
@@ -236,6 +246,13 @@ func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http
 
 // HandleCapabilities exposes additive feature support for collection clients.
 func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
+	syncPresets := make([]string, 0, len(usercollections.AllowedSyncSchedules))
+	customCron := apimw.IsAdmin(r.Context())
+	if customCron {
+		syncPresets = append(syncPresets, usercollections.AdminSyncSchedulePresets...)
+	} else {
+		syncPresets = append(syncPresets, "daily", "weekly", "monthly")
+	}
 	writeJSON(w, http.StatusOK, collectionCapabilitiesResponse{
 		DisplayFilterFields: []string{"type", "watched"},
 		DisplayFilterPresets: collectionDisplayFilterPresets{
@@ -246,6 +263,11 @@ func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Re
 		CollectionSortPreferences: true,
 		EffectiveCollectionSort:   true,
 		SortPreferenceKinds:       sortPreferenceKinds,
+		UserCollectionSyncSchedule: collectionSyncScheduleCapabilities{
+			Editable:   true,
+			Presets:    syncPresets,
+			CustomCron: customCron,
+		},
 	})
 }
 
@@ -402,9 +424,9 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 	}
 
 	// Source URL and max items both live inside source_config (Limit / URL).
-	// Load the existing collection and re-marshal so the unaffected fields
-	// (preset, media_type, etc.) survive untouched.
-	if req.SourceURL != nil || req.MaxItems != nil || req.LibraryIDs != nil {
+	// Load the existing collection when source fields or the schedule change.
+	sourceConfigChanged := req.SourceURL != nil || req.MaxItems != nil || req.LibraryIDs != nil
+	if sourceConfigChanged || req.SyncSchedule != nil {
 		existing, err := store.GetCollection(r.Context(), collectionID)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
@@ -414,55 +436,77 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection")
 			return
 		}
-		cfg, err := usercollections.ParseSourceConfig(existing.SourceConfig)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to parse source config")
-			return
-		}
-		if req.LibraryIDs != nil {
+		if req.SyncSchedule != nil {
 			if !catalog.IsSyncableType(existing.CollectionType) {
-				writeError(w, http.StatusBadRequest, "bad_request", "library_ids can only be edited for imported collections")
+				writeError(w, http.StatusBadRequest, "bad_request", "sync_schedule can only be edited for imported collections")
 				return
 			}
-			if !validateOptionalLibraryIDs(*req.LibraryIDs, w) {
-				return
-			}
-			cfg.LibraryIDs = append([]int(nil), (*req.LibraryIDs)...)
-			emptyQuery := "{}"
-			input.QueryDefinition = &emptyQuery
-		}
-		if req.MaxItems != nil {
-			if *req.MaxItems < 0 {
-				writeError(w, http.StatusBadRequest, "bad_request", "max_items must be zero or positive")
-				return
-			}
-			if *req.MaxItems == 0 {
-				cfg.Limit = nil
-			} else {
-				value := *req.MaxItems
-				cfg.Limit = &value
-			}
-		}
-		if req.SourceURL != nil {
-			if existing.CollectionType != "mdblist" {
-				writeError(w, http.StatusBadRequest, "bad_request", "source_url can only be edited for MDBList collections")
-				return
-			}
-			normalized, err := usercollections.CanonicalMDBListURL(*req.SourceURL)
+			schedule, err := usercollections.ResolveSyncSchedule(*req.SyncSchedule, apimw.IsAdmin(r.Context()))
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "bad_request", "source_url must be an MDBList list (https://mdblist.com/lists/...)")
+				writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 				return
 			}
-			cfg.URL = normalized
-			topURL := normalized
-			input.SourceURL = &topURL
+			if schedule == nil {
+				input.ClearSyncSchedule = true
+				input.ClearNextSyncAt = true
+			} else {
+				input.SyncSchedule = schedule
+				input.NextSyncAt = usercollections.InitialNextSyncAt(schedule)
+			}
 		}
-		raw, err := usercollections.MarshalSourceConfig(cfg)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to encode source config")
-			return
+		if sourceConfigChanged {
+			// Re-marshal so unaffected fields (preset, media_type, etc.) survive
+			// untouched when one source field changes.
+			cfg, err := usercollections.ParseSourceConfig(existing.SourceConfig)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to parse source config")
+				return
+			}
+			if req.LibraryIDs != nil {
+				if !catalog.IsSyncableType(existing.CollectionType) {
+					writeError(w, http.StatusBadRequest, "bad_request", "library_ids can only be edited for imported collections")
+					return
+				}
+				if !validateOptionalLibraryIDs(*req.LibraryIDs, w) {
+					return
+				}
+				cfg.LibraryIDs = append([]int(nil), (*req.LibraryIDs)...)
+				emptyQuery := "{}"
+				input.QueryDefinition = &emptyQuery
+			}
+			if req.MaxItems != nil {
+				if *req.MaxItems < 0 {
+					writeError(w, http.StatusBadRequest, "bad_request", "max_items must be zero or positive")
+					return
+				}
+				if *req.MaxItems == 0 {
+					cfg.Limit = nil
+				} else {
+					value := *req.MaxItems
+					cfg.Limit = &value
+				}
+			}
+			if req.SourceURL != nil {
+				if existing.CollectionType != mdblistSourceKey {
+					writeError(w, http.StatusBadRequest, "bad_request", "source_url can only be edited for MDBList collections")
+					return
+				}
+				normalized, err := usercollections.CanonicalMDBListURL(*req.SourceURL)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "bad_request", "source_url must be an MDBList list (https://mdblist.com/lists/...)")
+					return
+				}
+				cfg.URL = normalized
+				topURL := normalized
+				input.SourceURL = &topURL
+			}
+			raw, err := usercollections.MarshalSourceConfig(cfg)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to encode source config")
+				return
+			}
+			input.SourceConfig = &raw
 		}
-		input.SourceConfig = &raw
 	}
 
 	if err := store.UpdateCollection(r.Context(), input); err != nil {

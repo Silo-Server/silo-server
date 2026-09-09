@@ -514,12 +514,13 @@ func (s *Service) applyResult(
 	}
 
 	if err := store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-		ID:         collection.ID,
-		Status:     status,
-		Message:    message,
-		ItemCount:  len(matched),
-		LastSyncAt: completedAt,
-		NextSyncAt: nextSyncAt,
+		ID:                   collection.ID,
+		Status:               status,
+		Message:              message,
+		ItemCount:            len(matched),
+		LastSyncAt:           completedAt,
+		ExpectedSyncSchedule: collection.SyncSchedule,
+		NextSyncAt:           nextSyncAt,
 	}); err != nil {
 		return nil, nil, err
 	}

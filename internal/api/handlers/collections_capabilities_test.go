@@ -7,6 +7,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -43,5 +46,47 @@ func TestCollectionCapabilitiesAdvertiseSortSupport(t *testing.T) {
 		if !slices.Contains(got.SortPreferenceKinds, want) {
 			t.Fatalf("sort_preference_kinds = %v, missing %q", got.SortPreferenceKinds, want)
 		}
+	}
+}
+
+func TestCollectionCapabilitiesAdvertiseCallerSyncSchedulePolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		role        string
+		wantCustom  bool
+		wantPresets []string
+	}{
+		{name: "regular account", role: "user", wantPresets: []string{"daily", "weekly", "monthly"}},
+		{name: "server admin", role: "admin", wantCustom: true, wantPresets: usercollections.AdminSyncSchedulePresets},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/collections/capabilities", nil)
+			req = req.WithContext(middleware.SetClaims(req.Context(), &auth.Claims{Role: tt.role}))
+			NewCollectionHandler(nil).HandleCapabilities(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			var got collectionCapabilitiesResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			capability := got.UserCollectionSyncSchedule
+			if !capability.Editable {
+				t.Fatal("user collection sync schedule is not advertised as editable")
+			}
+			if capability.CustomCron != tt.wantCustom {
+				t.Fatalf("custom_cron = %v, want %v", capability.CustomCron, tt.wantCustom)
+			}
+			if !slices.Equal(capability.Presets, tt.wantPresets) {
+				t.Fatalf("presets = %v, want %v", capability.Presets, tt.wantPresets)
+			}
+		})
 	}
 }
