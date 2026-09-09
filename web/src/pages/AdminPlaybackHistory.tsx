@@ -25,6 +25,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 
+import { formatDecisionLabel } from "./adminActivityPresentation";
+
 const ALL_USERS = "all";
 const ALL_PROFILES = "all";
 const ALL_COMPLETION = "all";
@@ -306,7 +308,9 @@ export default function AdminPlaybackHistory() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary">{row.play_method}</Badge>
+                            <Badge variant="secondary">
+                              {formatDecisionLabel(row.play_method)}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">

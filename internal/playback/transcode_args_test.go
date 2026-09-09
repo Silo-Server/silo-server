@@ -11,6 +11,29 @@ import (
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
+func TestActivityOutputContainerMatchesFFmpeg(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts TranscodeOpts
+		want string
+	}{
+		{"hevc-copy", TranscodeOpts{TargetCodecVideo: "copy", SourceVideoCodec: "hevc"}, "fmp4"},
+		{"forced-ts", TranscodeOpts{TargetCodecVideo: "copy", SourceVideoCodec: "hevc", CopyVideoMPEGTS: true}, "mpegts"},
+		{"mpeg2-copy", TranscodeOpts{TargetCodecVideo: "copy", SourceVideoCodec: "mpeg2video"}, "mpegts"},
+		{"video-encode", TranscodeOpts{TargetCodecVideo: "h264", SourceVideoCodec: "hevc"}, "mpegts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HLSOutputContainer(tc.opts); got != tc.want {
+				t.Fatalf("output container = %q, want %q", got, tc.want)
+			}
+			args := strings.Join(buildFFmpegArgs(tc.opts), " ")
+			if !strings.Contains(args, "-hls_segment_type "+tc.want) {
+				t.Fatal("activity format does not match the FFmpeg muxer")
+			}
+		})
+	}
+}
+
 // TestToneMapFFmpegGraphsCoverSupportedExecutors verifies each executor emits its required graph.
 func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 	tests := []struct {

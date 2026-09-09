@@ -77,6 +77,28 @@ func TestSessionManager_StartStop(t *testing.T) {
 	}
 }
 
+func TestSessionManagerOutputFormatFollowsReplacement(t *testing.T) {
+	sm := playback.NewSessionManager(5, 2)
+	session, err := sm.StartSession(1, "profile", 100, playback.PlayRemux, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sm.SetOutputFormat(session.ID, "fmp4", "hls"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := sm.GetSession(session.ID)
+	if err != nil || got.OutputContainer != "fmp4" || got.OutputProtocol != "hls" {
+		t.Fatal("transport output format was not recorded")
+	}
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{PlayMethod: playback.PlayDirect, TranscodeRouteSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = sm.GetSession(session.ID)
+	if got.OutputContainer != "" || got.OutputProtocol != "" {
+		t.Fatal("a replacement retained the previous container")
+	}
+}
+
 func TestSessionManager_StopNonExistent(t *testing.T) {
 	sm := playback.NewSessionManager(5, 2)
 

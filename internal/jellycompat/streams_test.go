@@ -1504,13 +1504,75 @@ type recordingSessionSyncer struct {
 	calls           int
 	lastCtxErr      error
 	lastHadDeadline bool
+	onSync          func()
 }
 
 func (s *recordingSessionSyncer) SyncNow(ctx context.Context) error {
 	s.calls++
 	s.lastCtxErr = ctx.Err()
 	_, s.lastHadDeadline = ctx.Deadline()
+	if s.onSync != nil {
+		s.onSync()
+	}
 	return nil
+}
+
+type outputFormatTestSessionManager struct {
+	*testCompatSessionManager
+}
+
+func (m *outputFormatTestSessionManager) SetOutputFormat(id, container, protocol string) error {
+	session, err := m.GetSession(id)
+	if err != nil {
+		return err
+	}
+	session.OutputContainer, session.OutputProtocol = container, protocol
+	return nil
+}
+
+func TestHandleVideoStreamSyncsChangedRemuxOutputFormat(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		t.Run(fmt.Sprintf("direct_%t", direct), func(t *testing.T) {
+			handler, routeID, directBody := newStaticDirectPlayHandler(t)
+			source := testCompatSource(handler.codec, testCompatVersion())
+			source.SupportsDirectPlay, source.SupportsDirectStream = direct, true
+			method := "remux"
+			wantBody := "remuxed"
+			if direct {
+				method, wantBody = "direct", directBody
+			} else {
+				handler.FFmpegPath, _, _ = writeCompatAudioRecipeFFmpeg(t, false, wantBody)
+			}
+			mgr := &outputFormatTestSessionManager{&testCompatSessionManager{sessions: map[string]*playback.Session{
+				"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayMethod(method), BasePlayMethod: playback.PlayMethod(method)},
+			}}}
+			handler.sessionMgr = mgr
+			handler.playbackStore.Put(PlaybackSession{
+				ID: "play-1", CompatToken: "token-1", RouteItemID: routeID,
+				UpstreamSessionID: "upstream-1", UpstreamPlayMethod: method, MediaSources: []PlaybackMediaSource{source},
+			})
+			syncer := &recordingSessionSyncer{onSync: func() {
+				session, _ := mgr.GetSession("upstream-1")
+				if session.OutputContainer != playback.OutputContainerFMP4 || session.OutputProtocol != playback.OutputProtocolHTTP {
+					t.Fatal("immediate admin sync ran before the remux output format was recorded")
+				}
+			}}
+			handler.SessionSyncer = syncer
+			for range 2 {
+				rec := serveCompatVideoStream(handler, routeID, "PlaySessionId=play-1&MediaSourceId="+url.QueryEscape(source.ID), false)
+				if rec.Code != http.StatusOK || rec.Body.String() != wantBody {
+					t.Fatalf("stream = %d %q, want 200 %q", rec.Code, rec.Body.String(), wantBody)
+				}
+				wantCalls := 1
+				if direct {
+					wantCalls = 0
+				}
+				if syncer.calls != wantCalls {
+					t.Fatalf("admin sync calls = %d, want %d; unchanged requests must not flush again", syncer.calls, wantCalls)
+				}
+			}
+		})
+	}
 }
 
 // TestHandleSessionPlayingStopped_TearsDownAndSyncsImmediately verifies the
