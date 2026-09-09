@@ -208,7 +208,9 @@ are remapped via add-then-swap, not in-place PK mutation. It dynamically
 enumerates the reference graph (the three PKs, every FK child from
 `pg_constraint`, and soft-reference columns by name — **65 columns** on the real
 schema), drops/recreates FKs and triggers, and retains a `content_id_migration_map`
-audit table for rollback.
+audit table for rollback. Migration `20260901152535_drop_dead_tables` drops that
+map ahead of the 1.0 schema lock, so on any database past it the remap is no
+longer reversible in place — restore from a backup instead.
 
 **Collisions are never merged.** If two items derive to the same key, or a key is
 already taken, those rows keep their Sonyflake id and are flagged `collision` in

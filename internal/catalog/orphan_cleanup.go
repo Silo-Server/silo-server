@@ -51,14 +51,6 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	WHERE pha.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
-	SELECT 1 FROM public.plex_sync_item_bindings psib
-	WHERE psib.media_item_id = mi.content_id
-  )
-  AND NOT EXISTS (
-	SELECT 1 FROM public.plex_sync_item_state psis
-	WHERE psis.media_item_id = mi.content_id
-  )
-  AND NOT EXISTS (
 	SELECT 1 FROM public.podcast_feeds pf
 	WHERE pf.media_item_id = mi.content_id
   )

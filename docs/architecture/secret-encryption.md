@@ -142,6 +142,8 @@ Deliberately **not** encrypted (tracked as follow-ups):
   lookup. They need a deterministic **blind-index hash** column instead:
   `api_keys.api_key`, `webhook_sync_connections.webhook_secret`,
   `jellycompat_sessions.token`, and `watch_together_rooms.join_token`.
-Excluded (not a gap): `plex_sync_connections.*` is a dead table (zero Go
-references); `oauth_completion.token_ciphertext` is already AES-GCM;
-`users.password_hash` and the `*_hash` columns are already hashed.
+Excluded (not a gap): `oauth_completion.token_ciphertext` is already AES-GCM;
+`users.password_hash` and the `*_hash` columns are already hashed. The
+`plex_sync_*` tables, whose `plex_server_token` was never encrypted, were dropped
+as dead tables; `webhook_sync_connections.access_token` superseded them and is
+encrypted.
