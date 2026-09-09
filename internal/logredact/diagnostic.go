@@ -89,9 +89,33 @@ func sanitizeDiagnosticValue(value any) any {
 	case string:
 		// Playback responses contain token-bearing relative and absolute URLs
 		// under ordinary keys such as DirectStreamUrl and MediaSources[].Path.
-		if strings.Contains(v, "?") || strings.Contains(v, "://") {
+		if looksLikeDiagnosticURL(v) {
 			return SanitizeRequestURL(v)
 		}
 	}
 	return value
+}
+
+// looksLikeDiagnosticURL matches rooted paths and scheme-prefixed URLs,
+// not a question mark or an embedded link in ordinary metadata. Spaces do not
+// disqualify a URL: its query can still contain a credential needing redaction.
+func looksLikeDiagnosticURL(value string) bool {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "/") {
+		return true
+	}
+	scheme, _, found := strings.Cut(value, "://")
+	if !found || scheme == "" {
+		return false
+	}
+	for i, c := range scheme {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' {
+			continue
+		}
+		if i > 0 && (c >= '0' && c <= '9' || c == '+' || c == '-' || c == '.') {
+			continue
+		}
+		return false
+	}
+	return true
 }

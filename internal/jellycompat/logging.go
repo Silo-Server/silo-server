@@ -233,6 +233,9 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 
 			if requestCapture != nil && requestCapture.body.Len() > 0 {
 				_, _ = fmt.Fprintf(logFile, "Request Body (%d bytes captured):\n", requestCapture.body.Len())
+				if requestCapture.truncated {
+					_, _ = fmt.Fprintf(logFile, "[truncated at %d bytes]\n", debugMaxBodyCapture)
+				}
 				writeIndentedJSON(logFile, requestCapture.body.Bytes())
 			}
 
@@ -257,12 +260,17 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 // changing the request's length, read errors or Close result.
 type debugRequestBody struct {
 	io.ReadCloser
-	body bytes.Buffer
+	body      bytes.Buffer
+	truncated bool
 }
 
 func (b *debugRequestBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
-	if remaining := debugMaxBodyCapture - b.body.Len(); remaining > 0 {
+	remaining := debugMaxBodyCapture - b.body.Len()
+	if n > remaining {
+		b.truncated = true
+	}
+	if remaining > 0 {
 		_, _ = b.body.Write(p[:min(n, remaining)])
 	}
 	return n, err

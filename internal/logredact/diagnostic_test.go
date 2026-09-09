@@ -81,3 +81,37 @@ func TestSanitizeJSONOmitsUnsafeRepresentations(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeJSONPreservesOrdinaryText(t *testing.T) {
+	for _, value := range []string{"Can he escape? Nobody knows", "Why?", "Read https://example.com for details?", "A story? Part #2", "Still here?\nYes."} {
+		body, err := json.Marshal(map[string]string{"Overview": value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]string
+		if err := json.Unmarshal(SanitizeJSON(body), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got["Overview"] != value {
+			t.Errorf("ordinary text changed: got %q, want %q", got["Overview"], value)
+		}
+	}
+}
+
+func TestSanitizeJSONRedactsURLFormsWithSpaces(t *testing.T) {
+	for _, value := range []string{
+		"/stream?ApiKey=url-secret&Name=Two Words",
+		"https://example.com/stream?api_key=url-secret&Name=Two Words",
+		"HTTPS://example.com/stream?API_KEY=url-secret",
+		"https://operator:url-secret@%invalid/stream",
+		" /stream?ApiKey=url-secret&Name=Two Words",
+	} {
+		body, err := json.Marshal(map[string]string{"DirectStreamUrl": value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(SanitizeJSON(body)); strings.Contains(got, "url-secret") {
+			t.Errorf("URL credential escaped redaction: %s", got)
+		}
+	}
+}

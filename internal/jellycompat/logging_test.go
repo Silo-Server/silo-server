@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -157,5 +158,33 @@ func TestDebugLoggerFilterLeavesRequestUnread(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", original))
 	if logs.Len() != 0 {
 		t.Fatal("filtered request was logged")
+	}
+}
+
+func TestDebugLoggerReportsActualRequestTruncation(t *testing.T) {
+	for _, size := range []int{debugMaxBodyCapture - 1, debugMaxBodyCapture, debugMaxBodyCapture + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			const prefix = `{"Pw":"capture-secret","data":"`
+			const suffix = `"}`
+			body := prefix + strings.Repeat("a", size-len(prefix)-len(suffix)) + suffix
+			var logs bytes.Buffer
+			h := newDebugLogMiddleware(&logs, "")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got, err := io.ReadAll(r.Body)
+				if err != nil || string(got) != body {
+					t.Fatal("request body changed")
+				}
+			}))
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			r.ContentLength = -1 // Verify observed reads, not a trusted length header.
+			h.ServeHTTP(httptest.NewRecorder(), r)
+			wantTruncated := size > debugMaxBodyCapture
+			if got := strings.Contains(logs.String(), "[truncated at"); got != wantTruncated {
+				t.Errorf("truncation notice = %t, want %t", got, wantTruncated)
+			}
+			if !wantTruncated && strings.Contains(logs.String(), "omitted") {
+				t.Error("complete JSON was omitted")
+			}
+			assertLogSecretsAbsent(t, logs.String(), "capture-secret")
+		})
 	}
 }
