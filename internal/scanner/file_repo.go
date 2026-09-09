@@ -34,6 +34,13 @@ type FileRepository struct {
 	pool *pgxpool.Pool
 }
 
+type fileScanFence struct {
+	ID             int
+	ScanGeneration int64
+}
+
+const scanReconcileBatchSize = 1000
+
 type RawMatchBacklogMode string
 
 const (
@@ -2774,6 +2781,77 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 	return nil
 }
 
+// MarkMissingIfUnchanged marks a file missing only when it is still the scan
+// generation observed by the caller. A false result means another scan
+// refreshed, removed, or already marked the row after that snapshot.
+func (r *FileRepository) MarkMissingIfUnchanged(ctx context.Context, id int, scanGeneration int64, since time.Time) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		WITH locked AS (
+			SELECT id
+			FROM media_files
+			WHERE id = $2 AND missing_since IS NULL
+			FOR UPDATE
+		), claimed AS (
+			UPDATE media_file_scan_generations AS generation
+			SET scan_generation = generation.scan_generation + 1
+			FROM locked
+			WHERE generation.media_file_id = locked.id
+			  AND generation.scan_generation = $3
+			RETURNING generation.media_file_id
+		)
+		UPDATE media_files AS mf
+		SET missing_since = $1, updated_at = NOW()
+		FROM claimed
+		WHERE mf.id = claimed.media_file_id
+	`, since, id, scanGeneration)
+	if err != nil {
+		return false, fmt.Errorf("conditionally marking file missing: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// RefreshPresentPaths records that a completed scan observed paths on disk.
+// Advancing the generation even for otherwise-unchanged files prevents an
+// older overlapping scan from marking or deleting those rows from its stale
+// snapshot. Batching keeps parameter and lock footprints bounded for large
+// libraries while the folder/path uniqueness constraint keeps each update
+// indexable.
+func (r *FileRepository) RefreshPresentPaths(ctx context.Context, folderID int, paths []string) (int, error) {
+	refreshed := 0
+	for start := 0; start < len(paths); start += scanReconcileBatchSize {
+		end := min(start+scanReconcileBatchSize, len(paths))
+		var batchRefreshed int
+		err := r.pool.QueryRow(ctx, `
+			WITH present AS MATERIALIZED (
+				SELECT id
+				FROM media_files
+				WHERE media_folder_id = $1
+				  AND file_path = ANY($2::text[])
+				FOR UPDATE
+			), bumped AS (
+				UPDATE media_file_scan_generations AS generation
+				SET scan_generation = generation.scan_generation + 1
+				FROM present
+				WHERE generation.media_file_id = present.id
+				RETURNING generation.media_file_id
+			), cleared AS (
+				UPDATE media_files AS mf
+				SET missing_since = NULL, updated_at = NOW()
+				FROM bumped
+				WHERE mf.id = bumped.media_file_id
+				  AND mf.missing_since IS NOT NULL
+				RETURNING mf.id
+			)
+			SELECT count(*) FROM bumped
+		`, folderID, paths[start:end]).Scan(&batchRefreshed)
+		if err != nil {
+			return refreshed, fmt.Errorf("refreshing present file paths for folder %d: %w", folderID, err)
+		}
+		refreshed += batchRefreshed
+	}
+	return refreshed, nil
+}
+
 // DeleteMissingByFolder deletes media files in the given folder that have been
 // marked missing for longer than the grace period. Missing files are already
 // hidden from clients; the grace only delays deleting the row so a file that
@@ -2902,44 +2980,77 @@ func (r *FileRepository) ListRootsWithOnlyMissingFiles(ctx context.Context, fold
 	return suspect, nil
 }
 
-// DeleteByIDs removes specific media file rows by primary key.
-func (r *FileRepository) DeleteByIDs(ctx context.Context, ids []int) (int, error) {
-	if len(ids) == 0 {
+// DeleteIfUnchanged removes snapshot rows only while their scan generation is
+// current. A newer presence observation or upsert advances the generation and
+// makes a stale reconciliation harmless.
+func (r *FileRepository) DeleteIfUnchanged(ctx context.Context, fences []fileScanFence) (int, error) {
+	if len(fences) == 0 {
 		return 0, nil
 	}
 
-	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE id = ANY($1)",
-		ids,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("deleting media files by id: %w", err)
+	deleted := 0
+	for start := 0; start < len(fences); start += scanReconcileBatchSize {
+		end := min(start+scanReconcileBatchSize, len(fences))
+		ids := make([]int, 0, end-start)
+		generations := make([]int64, 0, end-start)
+		for _, fence := range fences[start:end] {
+			ids = append(ids, fence.ID)
+			generations = append(generations, fence.ScanGeneration)
+		}
+		tag, err := r.pool.Exec(ctx, `
+			WITH snapshot AS MATERIALIZED (
+				SELECT mf.id, expected.scan_generation
+				FROM media_files AS mf
+				JOIN unnest($1::int[], $2::bigint[]) AS expected(id, scan_generation)
+				  ON expected.id = mf.id
+				FOR UPDATE OF mf
+			), claimed AS (
+				UPDATE media_file_scan_generations AS generation
+				SET scan_generation = generation.scan_generation + 1
+				FROM snapshot
+				WHERE generation.media_file_id = snapshot.id
+				  AND generation.scan_generation = snapshot.scan_generation
+				RETURNING generation.media_file_id
+			)
+			DELETE FROM media_files AS mf
+			USING claimed
+			WHERE mf.id = claimed.media_file_id
+		`, ids, generations)
+		if err != nil {
+			return deleted, fmt.Errorf("conditionally deleting media files: %w", err)
+		}
+		deleted += int(tag.RowsAffected())
 	}
-	return int(tag.RowsAffected()), nil
+	return deleted, nil
 }
 
-// ListIDsOutsideRoots returns file row ids for a folder whose paths are no
-// longer covered by any configured root.
-func (r *FileRepository) ListIDsOutsideRoots(ctx context.Context, folderID int, roots []string) ([]int, error) {
+// ListFencesOutsideRoots returns the deletion fences for rows whose paths are
+// no longer covered by any configured root.
+func (r *FileRepository) ListFencesOutsideRoots(ctx context.Context, folderID int, roots []string) ([]fileScanFence, error) {
 	if len(roots) == 0 {
-		rows, err := r.pool.Query(ctx, `SELECT id FROM media_files WHERE media_folder_id = $1`, folderID)
+		rows, err := r.pool.Query(ctx, `
+			SELECT mf.id, generation.scan_generation
+			FROM media_files AS mf
+			JOIN media_file_scan_generations AS generation ON generation.media_file_id = mf.id
+			WHERE mf.media_folder_id = $1
+		`, folderID)
 		if err != nil {
-			return nil, fmt.Errorf("querying file ids outside roots: %w", err)
+			return nil, fmt.Errorf("querying file fences outside roots: %w", err)
 		}
 		defer rows.Close()
 
-		ids := make([]int, 0)
+		fences := make([]fileScanFence, 0)
 		for rows.Next() {
-			var id int
-			if err := rows.Scan(&id); err != nil {
-				return nil, fmt.Errorf("scanning file id outside roots: %w", err)
+			var fence fileScanFence
+			if err := rows.Scan(&fence.ID, &fence.ScanGeneration); err != nil {
+				return nil, fmt.Errorf("scanning file fence outside roots: %w", err)
 			}
-			ids = append(ids, id)
+			fences = append(fences, fence)
 		}
 		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("iterating file ids outside roots: %w", err)
+			return nil, fmt.Errorf("iterating file fences outside roots: %w", err)
 		}
-		return ids, nil
+		return fences, nil
 	}
 
 	args := make([]any, 0, 1+len(roots)*2)
@@ -2947,25 +3058,29 @@ func (r *FileRepository) ListIDsOutsideRoots(ctx context.Context, folderID int, 
 	coveredClauses, coveredArgs := rootCoverageClauses(roots, 2)
 	args = append(args, coveredArgs...)
 
-	query := `SELECT id FROM media_files WHERE media_folder_id = $1 AND NOT (` + strings.Join(coveredClauses, " OR ") + `)`
+	query := `
+		SELECT mf.id, generation.scan_generation
+		FROM media_files AS mf
+		JOIN media_file_scan_generations AS generation ON generation.media_file_id = mf.id
+		WHERE mf.media_folder_id = $1 AND NOT (` + strings.Join(coveredClauses, " OR ") + `)`
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("querying file ids outside roots: %w", err)
+		return nil, fmt.Errorf("querying file fences outside roots: %w", err)
 	}
 	defer rows.Close()
 
-	ids := make([]int, 0)
+	fences := make([]fileScanFence, 0)
 	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scanning file id outside roots: %w", err)
+		var fence fileScanFence
+		if err := rows.Scan(&fence.ID, &fence.ScanGeneration); err != nil {
+			return nil, fmt.Errorf("scanning file fence outside roots: %w", err)
 		}
-		ids = append(ids, id)
+		fences = append(fences, fence)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating file ids outside roots: %w", err)
+		return nil, fmt.Errorf("iterating file fences outside roots: %w", err)
 	}
-	return ids, nil
+	return fences, nil
 }
 
 // GetByFolder returns all media files belonging to the specified folder.
