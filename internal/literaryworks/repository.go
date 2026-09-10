@@ -198,59 +198,8 @@ func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
 	}
-	// Candidates are the opposite format of the source; match their own series table.
-	seriesTable := "ebook_series"
-	if source.Type == "ebook" {
-		seriesTable = "audiobook_series"
-	}
-	args := []any{source.ContentID, source.Type}
-	matchFilters := make([]string, 0, 3)
-	if strings.TrimSpace(source.Title) != "" {
-		args = append(args, source.Title)
-		matchFilters = append(matchFilters, fmt.Sprintf("LOWER(mi.title) = LOWER($%d)", len(args)))
-	}
-	for provider, providerID := range source.ExternalIDs {
-		if provider == "" || provider == "asin" || providerID == "" {
-			continue
-		}
-		args = append(args, provider, providerID)
-		matchFilters = append(matchFilters, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM media_item_provider_ids mip WHERE mip.content_id = mi.content_id AND mip.provider = $%d AND mip.provider_id = $%d)",
-			len(args)-1,
-			len(args),
-		))
-	}
-	if strings.TrimSpace(source.SeriesName) != "" && source.SeriesIndex != nil {
-		args = append(args, source.SeriesName, *source.SeriesIndex)
-		matchFilters = append(matchFilters, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM %s bs WHERE bs.content_id = mi.content_id AND LOWER(bs.series_name) = LOWER($%d) AND bs.series_index = $%d)",
-			seriesTable,
-			len(args)-1,
-			len(args),
-		))
-	}
-	matchWhere := ""
-	if len(matchFilters) > 0 {
-		matchWhere = " AND (" + strings.Join(matchFilters, " OR ") + ")"
-	}
-	args = append(args, limit)
-	rows, err := r.pool.Query(ctx, `
-		SELECT mi.content_id
-		FROM media_items mi
-		WHERE mi.content_id <> $1
-		  AND mi.type IN ('ebook', 'audiobook')
-		  AND mi.type <> $2
-		  AND NOT EXISTS (
-			SELECT 1 FROM literary_work_match_decisions d
-			WHERE d.decision = 'ignored'
-			  AND (
-				(d.source_content_id = $1 AND d.target_content_id = mi.content_id)
-				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
-			  )
-		  )`+matchWhere+`
-		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $`+fmt.Sprint(len(args))+`
-	`, args...)
+	sql, args := buildMatchCandidateQuery(source, limit)
+	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +213,77 @@ func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// buildMatchCandidateQuery renders the candidate lookup and its arguments.
+func buildMatchCandidateQuery(source MatchItem, limit int) (string, []any) {
+	// Candidates are the opposite format of the source; match their own series table.
+	seriesTable := "ebook_series"
+	if source.Type == "ebook" {
+		seriesTable = "audiobook_series"
+	}
+	args := []any{source.ContentID, source.Type}
+	// Each match signal becomes its own UNION branch so it can ride its own
+	// index. OR-ing them inside a single WHERE spans three tables, which
+	// PostgreSQL cannot fold into a bitmap OR: it degrades to walking every
+	// opposite-format book and applying the OR as a post-filter.
+	branches := make([]string, 0, 3)
+	if strings.TrimSpace(source.Title) != "" {
+		args = append(args, source.Title)
+		// The type predicate is repeated here so the branch matches the partial
+		// index idx_media_items_books_title_lower.
+		branches = append(branches, fmt.Sprintf(`
+			SELECT t.content_id FROM media_items t
+			WHERE LOWER(t.title) = LOWER($%d)
+			  AND t.type IN ('ebook', 'audiobook')`, len(args)))
+	}
+	for provider, providerID := range source.ExternalIDs {
+		if provider == "" || provider == "asin" || providerID == "" {
+			continue
+		}
+		args = append(args, provider, providerID)
+		branches = append(branches, fmt.Sprintf(`
+			SELECT mip.content_id FROM media_item_provider_ids mip
+			WHERE mip.provider = $%d AND mip.provider_id = $%d`,
+			len(args)-1,
+			len(args),
+		))
+	}
+	if strings.TrimSpace(source.SeriesName) != "" && source.SeriesIndex != nil {
+		args = append(args, source.SeriesName, *source.SeriesIndex)
+		branches = append(branches, fmt.Sprintf(`
+			SELECT bs.content_id FROM %s bs
+			WHERE LOWER(bs.series_name) = LOWER($%d) AND bs.series_index = $%d`,
+			seriesTable,
+			len(args)-1,
+			len(args),
+		))
+	}
+	matchWhere := ""
+	if len(branches) > 0 {
+		matchWhere = `
+		  AND mi.content_id IN (` + strings.Join(branches, `
+			UNION`) + `
+		  )`
+	}
+	args = append(args, limit)
+	return `
+		SELECT mi.content_id
+		FROM media_items mi
+		WHERE mi.content_id <> $1
+		  AND mi.type IN ('ebook', 'audiobook')
+		  AND mi.type <> $2
+		  AND NOT EXISTS (
+			SELECT 1 FROM literary_work_match_decisions d
+			WHERE d.decision = 'ignored'
+			  AND (
+				(d.source_content_id = $1 AND d.target_content_id = mi.content_id)
+				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
+			  )
+		  )` + matchWhere + `
+		ORDER BY mi.title ASC, mi.content_id ASC
+		LIMIT $` + fmt.Sprint(len(args)) + `
+	`, args
 }
 
 func (r *Repository) queryMatchItems(ctx context.Context, suffix string, args ...any) (pgx.Rows, error) {
