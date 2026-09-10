@@ -20,15 +20,30 @@ type fakeTriggerRepository struct {
 	setCalls map[string][]taskmanager.TriggerConfig
 }
 
-func (r *fakeTriggerRepository) GetTriggers(_ context.Context, taskKey string) ([]taskmanager.TriggerConfig, error) {
+func (r *fakeTriggerRepository) GetTriggers(_ context.Context, taskKey string) ([]taskmanager.TriggerConfig, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	configs, exists := r.triggers[taskKey]
+	return append([]taskmanager.TriggerConfig(nil), configs...), exists, nil
+}
+
+func (r *fakeTriggerRepository) GetOrCreateTriggers(_ context.Context, taskKey string, defaults []taskmanager.TriggerConfig) ([]taskmanager.TriggerConfig, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.triggers[taskKey]; !exists {
+		r.setTriggers(taskKey, defaults)
+	}
 	return append([]taskmanager.TriggerConfig(nil), r.triggers[taskKey]...), nil
 }
 
 func (r *fakeTriggerRepository) SetTriggers(_ context.Context, taskKey string, triggers []taskmanager.TriggerConfig) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.setTriggers(taskKey, triggers)
+	return nil
+}
+
+func (r *fakeTriggerRepository) setTriggers(taskKey string, triggers []taskmanager.TriggerConfig) {
 	if r.triggers == nil {
 		r.triggers = map[string][]taskmanager.TriggerConfig{}
 	}
@@ -38,7 +53,6 @@ func (r *fakeTriggerRepository) SetTriggers(_ context.Context, taskKey string, t
 	copied := append([]taskmanager.TriggerConfig(nil), triggers...)
 	r.triggers[taskKey] = copied
 	r.setCalls[taskKey] = copied
-	return nil
 }
 
 type fakeExecutionRepository struct{}
