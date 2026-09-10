@@ -39,10 +39,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatDate } from "@/lib/datetime";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 function maskKey(key: string): string {
   if (key.length <= 10) return key;
   return key.slice(0, 6) + "..." + key.slice(-4);
+}
+
+async function copyKey(key: string): Promise<boolean> {
+  try {
+    await copyTextToClipboard(key);
+    toast.success("Copied to clipboard");
+    return true;
+  } catch {
+    toast.error("Couldn't copy — select the key and copy it manually");
+    return false;
+  }
 }
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
@@ -60,11 +72,6 @@ export default function AdminApiKeys() {
 
   function handleRevoke(key: AdminAPIKey) {
     setConfirmRevokeKey(key);
-  }
-
-  function handleCopy(text: string) {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
   }
 
   if (isLoading)
@@ -150,7 +157,7 @@ export default function AdminApiKeys() {
                       size="icon"
                       className="h-6 w-6"
                       aria-label={`Copy API key ${key.label}`}
-                      onClick={() => handleCopy(key.key)}
+                      onClick={() => void copyKey(key.key)}
                     >
                       <Copy className="h-3 w-3" aria-hidden="true" />
                     </Button>
@@ -264,11 +271,9 @@ function CreateApiKeyForm({ onClose }: { onClose: () => void }) {
     });
   }
 
-  function handleCopyAndClose() {
-    if (createdKey) {
-      navigator.clipboard.writeText(createdKey);
-      toast.success("Copied to clipboard");
-    }
+  async function handleCopyAndClose() {
+    // The key is shown once; keep the dialog open if the copy didn't land.
+    if (createdKey && !(await copyKey(createdKey))) return;
     onClose();
   }
 
