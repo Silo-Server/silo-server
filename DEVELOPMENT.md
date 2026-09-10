@@ -75,6 +75,20 @@ runs from a clean checkout without them, and release builds set `GOWORK=off`.
 Any SDK package or symbol this repository uses must therefore be pushed and
 tagged in `silo-plugin-sdk` before the change here can merge.
 
+`Dockerfile.dev` uses the SDK version pinned in `go.mod` by default, even when
+a `silo_plugin_sdk` build context is supplied. To test SDK changes from a local
+checkout, opt in explicitly:
+
+```sh
+docker buildx build -f Dockerfile.dev \
+  --build-arg PLUGIN_SDK_SOURCE=local \
+  --build-context silo_plugin_sdk=../silo-plugin-sdk \
+  -t silo:dev --load .
+```
+
+The local checkout must contain all SDK APIs used by the server. Omit the build
+argument and context for a build using the pinned SDK.
+
 Plugin authors should start in the `silo-plugin-sdk` repository, usually checked
 out beside this one. It owns the plugin package format, protobuf contracts,
 generated plugin API, import paths, and manifest helpers.

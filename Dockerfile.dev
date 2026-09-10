@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
+# Use go.mod by default. Local SDK development requires both
+# --build-arg PLUGIN_SDK_SOURCE=local and --build-context silo_plugin_sdk=...
+ARG PLUGIN_SDK_SOURCE=module
+
 # Stage 1: Build frontend
 FROM node:22-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
@@ -15,7 +19,7 @@ COPY contracts/api/v2/fixtures/ /app/contracts/api/v2/fixtures/
 RUN pnpm run build
 
 # Stage 2: Prepare Go build workspace
-FROM golang:1.26 AS build-base
+FROM golang:1.26 AS go-base
 ENV CGO_ENABLED=1
 ENV GOPROXY=https://proxy.golang.org,direct
 ENV GOPRIVATE=github.com/Silo-Server/*
@@ -24,6 +28,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev && 
 WORKDIR /app
 COPY go.mod go.sum ./
 COPY internal/compat/zishang520-webtransport-go/ internal/compat/zishang520-webtransport-go/
+
+FROM go-base AS sdk-module
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+FROM go-base AS sdk-local
 # Apply the local SDK replacement before downloading modules. Copy its module
 # metadata first so SDK source edits do not invalidate the dependency layer.
 COPY --from=silo_plugin_sdk go.mod go.sum /tmp/silo-plugin-sdk/
@@ -33,6 +44,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go mod edit -replace=github.com/Silo-Server/silo-plugin-sdk=/tmp/silo-plugin-sdk && \
     go mod download
 COPY --from=silo_plugin_sdk pkg/ /tmp/silo-plugin-sdk/pkg/
+
+FROM sdk-${PLUGIN_SDK_SOURCE} AS build-base
 COPY web/embed.go web/embed.go
 COPY --from=frontend /app/web/dist web/dist
 COPY cmd/ cmd/
@@ -42,8 +55,7 @@ COPY migrations/ migrations/
 # internal/, so the build fails without it.
 COPY contracts/ contracts/
 
-# Stage 3: Build Go binary for dev using a local plugin SDK checkout passed via
-# BuildKit named context `silo_plugin_sdk`.
+# Stage 3: Build Go binary for dev with the selected SDK source.
 FROM build-base AS build
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
