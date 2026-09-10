@@ -36,6 +36,7 @@ const (
 	hwAccelVAAPI                = "vaapi"
 	hwAccelVideoToolbox         = "videotoolbox"
 	reasonChapterExtractFailed  = "chapter_extract_failed"
+	reasonChapterUploadFailed   = "chapter_upload_failed"
 	reasonDecodeInvalidData     = "decode_invalid_data"
 	reasonFFmpegProbeFailed     = "ffmpeg_probe_failed"
 	reasonToneMapUnsupported    = "tonemap_unsupported"
