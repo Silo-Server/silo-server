@@ -873,6 +873,7 @@ func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
 		Year:             releaseYear(resp.ReleaseDate),
 		Runtime:          resp.Runtime,
 		Genres:           namesFromGenres(resp.Genres),
+		GenreIDs:         genreIDsFromEntries(resp.Genres),
 		VoteAverage:      resp.VoteAverage,
 		VoteCount:        resp.VoteCount,
 		Status:           resp.Status,
@@ -931,6 +932,7 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		LastAirDate:      resp.LastAirDate,
 		Year:             releaseYear(resp.FirstAirDate),
 		Genres:           namesFromGenres(resp.Genres),
+		GenreIDs:         genreIDsFromEntries(resp.Genres),
 		VoteAverage:      resp.VoteAverage,
 		VoteCount:        resp.VoteCount,
 		Status:           resp.Status,
@@ -1002,6 +1004,18 @@ func keywordIDs(groups ...[]idEntry) []int {
 		for _, e := range g {
 			out = append(out, e.ID)
 		}
+	}
+	return out
+}
+
+// genreIDsFromEntries extracts the numeric IDs from raw TMDB genre entries.
+func genreIDsFromEntries(genres []genreEntry) []int {
+	if len(genres) == 0 {
+		return nil
+	}
+	out := make([]int, 0, len(genres))
+	for _, g := range genres {
+		out = append(out, g.ID)
 	}
 	return out
 }

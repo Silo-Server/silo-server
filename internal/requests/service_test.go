@@ -511,6 +511,230 @@ func TestCreateRequestClearsPriorFailedRequest(t *testing.T) {
 	}
 }
 
+func TestCreateRequestAnimeDetectionKeyword(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detail: &tmdb.MediaDetail{
+			KeywordIDs:       []int{210024},
+			GenreIDs:         []int{28},
+			OriginalLanguage: "en",
+		},
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Anime Movie",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if !req.IsAnime {
+		t.Fatal("expected IsAnime=true for keyword 210024")
+	}
+	if len(store.created) != 1 {
+		t.Fatalf("created requests = %d, want 1", len(store.created))
+	}
+	if !store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=true for keyword 210024")
+	}
+}
+
+func TestCreateRequestAnimeDetectionGenre16LanguageZH(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detail: &tmdb.MediaDetail{
+			KeywordIDs:       []int{999},
+			GenreIDs:         []int{16, 10759},
+			OriginalLanguage: "zh",
+		},
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Chinese Anime",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if !req.IsAnime {
+		t.Fatal("expected IsAnime=true for genre 16 + language zh")
+	}
+	if len(store.created) != 1 {
+		t.Fatalf("created requests = %d, want 1", len(store.created))
+	}
+	if !store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=true for genre 16 + language zh")
+	}
+}
+
+func TestCreateRequestAnimeDetectionGenre16LanguageJA(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detail: &tmdb.MediaDetail{
+			KeywordIDs:       nil,
+			GenreIDs:         []int{16, 28},
+			OriginalLanguage: "ja",
+		},
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeSeries,
+		TMDBID:    999,
+		Title:     "Japanese Anime",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if !req.IsAnime {
+		t.Fatal("expected IsAnime=true for genre 16 + language ja")
+	}
+	if !store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=true for genre 16 + language ja")
+	}
+}
+
+func TestCreateRequestAnimeDetectionGenre16LanguageKO(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detail: &tmdb.MediaDetail{
+			KeywordIDs:       nil,
+			GenreIDs:         []int{16},
+			OriginalLanguage: "ko",
+		},
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Korean Anime",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if !req.IsAnime {
+		t.Fatal("expected IsAnime=true for genre 16 + language ko")
+	}
+	if !store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=true for genre 16 + language ko")
+	}
+}
+
+func TestCreateRequestAnimeDetectionGenreOnlyNoLanguage(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detail: &tmdb.MediaDetail{
+			KeywordIDs:       nil,
+			GenreIDs:         []int{16},
+			OriginalLanguage: "",
+		},
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Genre Only",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.IsAnime {
+		t.Fatal("expected IsAnime=false for genre 16 without language")
+	}
+	if store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=false for genre 16 without language")
+	}
+}
+
+func TestCreateRequestAnimeDetectionLanguageOnlyNoGenre(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detail: &tmdb.MediaDetail{
+			KeywordIDs:       nil,
+			GenreIDs:         []int{28},
+			OriginalLanguage: "ja",
+		},
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Language Only",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.IsAnime {
+		t.Fatal("expected IsAnime=false for language ja without genre 16")
+	}
+	if store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=false for language ja without genre 16")
+	}
+}
+
+func TestCreateRequestAnimeDetectionWrongLanguage(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detail: &tmdb.MediaDetail{
+			KeywordIDs:       nil,
+			GenreIDs:         []int{16},
+			OriginalLanguage: "en",
+		},
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Western Animation",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.IsAnime {
+		t.Fatal("expected IsAnime=false for genre 16 + language en")
+	}
+	if store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=false for genre 16 + language en")
+	}
+}
+
+func TestCreateRequestAnimeDetectionNilDetail(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{detail: nil}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Nil Detail",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.IsAnime {
+		t.Fatal("expected IsAnime=false for nil detail")
+	}
+	if store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=false for nil detail")
+	}
+}
+
 func TestSearchMarksSeriesAvailableByHydratedTVDBID(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -2122,6 +2346,7 @@ type fakeTMDBClient struct {
 	externalIDsByID   map[int]*tmdb.ExternalIDs
 	externalIDCalls   []int
 	detail            *tmdb.MediaDetail
+	detailErr         error
 	discoverPage      *tmdb.MediaPage
 	discoverErr       error
 	searchMediaType   string
@@ -2161,7 +2386,7 @@ func (f *fakeTMDBClient) GetExternalIDs(_ context.Context, _ string, id int) (*t
 }
 
 func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.MediaDetail, error) {
-	return f.detail, nil
+	return f.detail, f.detailErr
 }
 
 // certTMDBClient layers GetCertification onto fakeTMDBClient so a service
@@ -2937,5 +3162,105 @@ func TestSubmitApprovedPopulatesRequesterIdentity(t *testing.T) {
 	}
 	if router.gotRequesterEmail != "u@example.com" || router.gotRequesterUsername != "bob" {
 		t.Fatalf("descriptor identity = %q/%q, want u@example.com/bob", router.gotRequesterEmail, router.gotRequesterUsername)
+	}
+}
+
+func TestDetectRequestAnimePassesGenreIDsAndLanguage(t *testing.T) {
+	t.Run("genre_16_zh_classifies_anime", func(t *testing.T) {
+		store := newFakeStore()
+		store.settings = Settings{RequestsEnabled: true}
+		client := &fakeTMDBClient{
+			detail: &tmdb.MediaDetail{
+				GenreIDs:         []int{16, 10759},
+				OriginalLanguage: "zh",
+			},
+		}
+		svc := newTestServiceWithTMDB(store, client)
+		if !svc.detectRequestAnime(context.Background(), MediaTypeMovie, 999) {
+			t.Fatal("expected anime for genre 16 + language zh via detectRequestAnime")
+		}
+	})
+
+	t.Run("genre_16_en_classifies_non_anime", func(t *testing.T) {
+		store := newFakeStore()
+		store.settings = Settings{RequestsEnabled: true}
+		client := &fakeTMDBClient{
+			detail: &tmdb.MediaDetail{
+				GenreIDs:         []int{16},
+				OriginalLanguage: "en",
+			},
+		}
+		svc := newTestServiceWithTMDB(store, client)
+		if svc.detectRequestAnime(context.Background(), MediaTypeMovie, 888) {
+			t.Fatal("expected non-anime for genre 16 + language en via detectRequestAnime")
+		}
+	})
+
+	t.Run("keyword_210024_classifies_anime", func(t *testing.T) {
+		store := newFakeStore()
+		store.settings = Settings{RequestsEnabled: true}
+		client := &fakeTMDBClient{
+			detail: &tmdb.MediaDetail{
+				KeywordIDs:       []int{210024},
+				GenreIDs:         nil,
+				OriginalLanguage: "",
+			},
+		}
+		svc := newTestServiceWithTMDB(store, client)
+		if !svc.detectRequestAnime(context.Background(), MediaTypeSeries, 777) {
+			t.Fatal("expected anime for keyword 210024 via detectRequestAnime")
+		}
+	})
+
+	t.Run("nil_detail_returns_false", func(t *testing.T) {
+		store := newFakeStore()
+		store.settings = Settings{RequestsEnabled: true}
+		client := &fakeTMDBClient{detail: nil}
+		svc := newTestServiceWithTMDB(store, client)
+		if svc.detectRequestAnime(context.Background(), MediaTypeMovie, 666) {
+			t.Fatal("expected non-anime for nil detail")
+		}
+	})
+
+	t.Run("ja_without_genre_16_non_anime", func(t *testing.T) {
+		store := newFakeStore()
+		store.settings = Settings{RequestsEnabled: true}
+		client := &fakeTMDBClient{
+			detail: &tmdb.MediaDetail{
+				GenreIDs:         []int{28, 18},
+				OriginalLanguage: "ja",
+			},
+		}
+		svc := newTestServiceWithTMDB(store, client)
+		if svc.detectRequestAnime(context.Background(), MediaTypeMovie, 555) {
+			t.Fatal("expected non-anime for ja without genre 16 via detectRequestAnime")
+		}
+	})
+}
+
+func TestCreateRequestAnimeDetectionErrorDetail(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &fakeTMDBClient{
+		detailErr: errors.New("TMDB API error"),
+	}
+	service := newTestServiceWithTMDB(store, client)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    999,
+		Title:     "Error Detail",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.IsAnime {
+		t.Fatal("expected IsAnime=false for error detail (fail-safe)")
+	}
+	if len(store.created) != 1 {
+		t.Fatalf("created requests = %d, want 1", len(store.created))
+	}
+	if store.created[0].IsAnime {
+		t.Fatal("expected stored CreateRequestRecord.IsAnime=false for error detail (fail-safe)")
 	}
 }

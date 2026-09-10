@@ -1609,7 +1609,7 @@ func (s *Service) detectRequestAnime(ctx context.Context, mediaType MediaType, t
 	if err != nil || detail == nil {
 		return false
 	}
-	return detectAnime(detail.KeywordIDs)
+	return detectAnime(detail.KeywordIDs, detail.GenreIDs, detail.OriginalLanguage)
 }
 
 // integrationConfigured reports whether a fulfillment backend exists for the
