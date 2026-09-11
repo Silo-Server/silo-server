@@ -2343,7 +2343,9 @@ func (s *MetadataService) mergeAndPersist(
 
 	// Apply best images.
 	if isCanonicalWrite {
-		applyBestImages(item, images, mergeMode, req.Language)
+		if !isFieldLocked(locked, FieldImages) {
+			applyBestImages(item, images, mergeMode, req.Language)
+		}
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
 			existingImageThumbhash(existingItem, ImagePoster),
@@ -2476,7 +2478,10 @@ func (s *MetadataService) mergeAndPersist(
 	// and no remote row); it is a no-op when every file is linked.
 	if contentType == "series" {
 		if len(seasons) > 0 || len(episodes) > 0 {
-			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
+			s.persistSeasonsAndEpisodes(
+				ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode,
+				isFieldLocked(locked, FieldImages),
+			)
 		}
 		if err := s.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to synthesize fallback series structure", "component", "metadata",
@@ -3692,7 +3697,10 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		s.persistSeasonsAndEpisodes(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode)
+		s.persistSeasonsAndEpisodes(
+			ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode,
+			isFieldLocked(intSliceToFields(series.LockedFields), FieldImages),
+		)
 		updated = true
 	}
 	if !updated {
@@ -4410,6 +4418,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	seasons []SeasonResult,
 	episodes []EpisodeResult,
 	mergeMode MergeMode,
+	imagesLocked bool,
 ) {
 	if series == nil || strings.TrimSpace(series.ContentID) == "" {
 		return
@@ -4490,8 +4499,9 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	}
 
 	type preparedSeasonWrite struct {
-		model    *models.Season
-		provider SeasonResult
+		model         *models.Season
+		provider      SeasonResult
+		artworkLocked bool
 	}
 	type preparedEpisodeWrite struct {
 		model    *models.Episode
@@ -4560,21 +4570,29 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		}
 		providerSeason := season
 		providerSeason.PosterPath, providerSeason.PosterSourcePath = splitProviderImagePath(season.PosterPath)
+		seasonArtworkLocked := imagesLocked && existingSeason != nil &&
+			(existingSeason.PosterPath != "" || existingSeason.PosterSourcePath != "")
 		if existingSeason != nil && isCanonicalWrite {
 			mergedSeason := seasonResultFromModel(existingSeason)
 			MergeSeasonResult(&providerSeason, &mergedSeason, mergeMode)
-			// preserveCachedArtwork sees the raw provider path so a local
-			// file:// source still routes into *_source_path here.
-			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-				season.PosterPath,
-				season.PosterThumbhash,
-				existingSeason.PosterPath,
-				existingSeason.PosterSourcePath,
-				existingSeason.PosterThumbhash,
-			)
-			mergedSeason.PosterPath = nextPath
-			mergedSeason.PosterThumbhash = nextThumbhash
-			mergedSeason.PosterSourcePath = nextSourcePath
+			if seasonArtworkLocked {
+				mergedSeason.PosterPath = existingSeason.PosterPath
+				mergedSeason.PosterSourcePath = existingSeason.PosterSourcePath
+				mergedSeason.PosterThumbhash = existingSeason.PosterThumbhash
+			} else {
+				// preserveCachedArtwork sees the raw provider path so a local
+				// file:// source still routes into *_source_path here.
+				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
+					season.PosterPath,
+					season.PosterThumbhash,
+					existingSeason.PosterPath,
+					existingSeason.PosterSourcePath,
+					existingSeason.PosterThumbhash,
+				)
+				mergedSeason.PosterPath = nextPath
+				mergedSeason.PosterThumbhash = nextThumbhash
+				mergedSeason.PosterSourcePath = nextSourcePath
+			}
 			providerSeason = mergedSeason
 		}
 		dbSeason := &models.Season{
@@ -4617,13 +4635,19 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		if dbSeason.Title == "" {
 			dbSeason.Title = fallbackSeasonTitle(dbSeason.SeasonNumber)
 		}
-		return preparedSeasonWrite{model: dbSeason, provider: providerSeason}, true
+		return preparedSeasonWrite{
+			model:         dbSeason,
+			provider:      providerSeason,
+			artworkLocked: seasonArtworkLocked,
+		}, true
 	}
 
 	finishExplicitSeasonSequential := func(write preparedSeasonWrite) {
 		dbSeason := write.model
 		seasonIDs[dbSeason.SeasonNumber] = dbSeason.ContentID
-		addSeasonImageJob(dbSeason)
+		if !write.artworkLocked {
+			addSeasonImageJob(dbSeason)
+		}
 		if !isCanonicalWrite && s.seasonLocalizationRepo != nil {
 			existingLoc, locErr := s.seasonLocalizationRepo.Get(ctx, dbSeason.ContentID, language)
 			if locErr != nil {
@@ -4720,7 +4744,9 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		}
 
 		for i, write := range writes {
-			addSeasonImageJob(write.model)
+			if !write.artworkLocked {
+				addSeasonImageJob(write.model)
+			}
 			if localizationPersisted[i] {
 				addSeasonLocalizationImageJob(write.model, localizations[i])
 			}
@@ -4801,6 +4827,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				DefaultMetadataLanguage: canonicalLanguage,
 				MetadataSource:          "provider",
 			}
+			seasonArtworkLocked := false
 			if existingSeason, err := loadSeason(ep.SeasonNumber, false); err == nil && existingSeason != nil {
 				seasonModel.ContentID = existingSeason.ContentID
 				seasonModel.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
@@ -4816,6 +4843,12 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 						mergedSeason.PosterPath,
 						"",
 					)
+					if imagesLocked && (existingSeason.PosterPath != "" || existingSeason.PosterSourcePath != "") {
+						mergedSeason.PosterPath = existingSeason.PosterPath
+						mergedSeason.PosterSourcePath = existingSeason.PosterSourcePath
+						mergedSeason.PosterThumbhash = existingSeason.PosterThumbhash
+						seasonArtworkLocked = true
+					}
 					seasonModel.Title = mergedSeason.Title
 					seasonModel.Overview = mergedSeason.Overview
 					seasonModel.PosterPath = mergedSeason.PosterPath
@@ -4837,14 +4870,16 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				}
 				seasonModel.ContentID = sid
 			}
-			write := preparedSeasonWrite{model: seasonModel}
+			write := preparedSeasonWrite{model: seasonModel, artworkLocked: seasonArtworkLocked}
 			writes = append(writes, write)
 			modelsToPersist = append(modelsToPersist, seasonModel)
 		}
 
 		finishImplicitSeason := func(write preparedSeasonWrite) {
 			seasonIDs[write.model.SeasonNumber] = write.model.ContentID
-			addSeasonImageJob(write.model)
+			if !write.artworkLocked {
+				addSeasonImageJob(write.model)
+			}
 		}
 		upsertImplicitOne := func(write preparedSeasonWrite) error {
 			if err := s.seasonRepo.Upsert(ctx, write.model); err != nil {
@@ -7189,7 +7224,7 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 
 	selectBest := func(imageType ImageType, filters []func(RemoteImage) bool) *best {
 		for _, img := range images {
-			if img.Type == imageType && img.URL != "" && isLocalImageSourcePath(img.URL) {
+			if img.Type == imageType && img.URL != "" && isLocalImageSourcePath(img.URL) && isWordmarkLogoCandidate(img) {
 				return &best{url: img.URL, rating: img.Rating, providerID: img.ProviderID}
 			}
 		}
@@ -7197,7 +7232,7 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		for _, accept := range filters {
 			candidate := &best{}
 			for _, img := range images {
-				if img.Type != imageType || img.URL == "" || !accept(img) {
+				if img.Type != imageType || img.URL == "" || !isWordmarkLogoCandidate(img) || !accept(img) {
 					continue
 				}
 				if candidate.url == "" {
@@ -7290,7 +7325,40 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 	}
 	applyIfBetter(&item.PosterPath, bestByType[ImagePoster])
 	applyIfBetter(&item.BackdropPath, bestByType[ImageBackdrop])
-	applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
+	if bestByType[ImageLogo].url == "" && mode == MergeReplaceUnlocked && itemHasRejectedTVDBLogo(item) {
+		// A user-triggered refresh must not preserve illustrated TVDB clear-art
+		// when no eligible wordmark replacement exists.
+		item.LogoPath = ""
+		item.LogoSourcePath = ""
+	} else {
+		applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
+	}
+}
+
+// isWordmarkLogoCandidate limits remote logo selection to sources whose
+// provider contract represents logos as dedicated wordmarks. TVDB currently
+// reports illustrated clear-art (title plus characters or props) as ImageLogo,
+// and RemoteImage has no signal that can distinguish it from a clear logo.
+// Local sidecars stay authoritative; TMDB's dedicated logo collection is the
+// only supported remote wordmark source until providers expose a stronger kind.
+func isWordmarkLogoCandidate(img RemoteImage) bool {
+	if img.Type != ImageLogo || isLocalImageSourcePath(img.URL) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(img.ProviderID), "tmdb")
+}
+
+func itemHasRejectedTVDBLogo(item *models.MediaItem) bool {
+	if item == nil {
+		return false
+	}
+	return isTVDBLogoPath(item.LogoSourcePath) || isTVDBLogoPath(item.LogoPath)
+}
+
+func isTVDBLogoPath(path string) bool {
+	path = strings.ToLower(strings.TrimSpace(path))
+	return strings.HasPrefix(path, "tvdb://") ||
+		(strings.HasPrefix(path, "tvdb/") && strings.Contains(path, "/logo/"))
 }
 
 type itemArtworkField struct {
@@ -7313,6 +7381,13 @@ func itemArtworkFields(item *models.MediaItem) []itemArtworkField {
 
 func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 	for _, field := range itemArtworkFields(item) {
+		// applyBestImages intentionally clears rejected TVDB clear-art on a
+		// manual refresh when no wordmark replacement exists. Do not let the
+		// generic cached-art preservation path restore that rejected logo.
+		if field.imageType == ImageLogo && *field.path == "" && itemHasRejectedTVDBLogo(existing) {
+			*field.source = ""
+			continue
+		}
 		existingPath := existingImagePath(existing, field.imageType)
 		existingThumbhash := existingImageThumbhash(existing, field.imageType)
 		existingSource := existingImageSourcePath(existing, field.imageType)
@@ -7613,7 +7688,11 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 			providerErrors[p.Slug()] = err.Error()
 			continue
 		}
-		allImages = append(allImages, images...)
+		for _, image := range images {
+			if isWordmarkLogoCandidate(image) {
+				allImages = append(allImages, image)
+			}
+		}
 	}
 
 	// Sort by rating descending (popularity).
@@ -7622,6 +7701,126 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 	})
 
 	return allImages, providerErrors, nil
+}
+
+// FetchSeasonImages queries the configured season provider chain for the full
+// artwork gallery of one exact season. Providers must echo SeasonNumber on
+// scoped results, preventing an older plugin that ignores the request field
+// from leaking show artwork into a numbered season. If a provider has not yet
+// adopted the gallery contract, its exact primary poster from GetSeasons is a
+// compatibility fallback. Specials additionally include ordinary show posters
+// after every exact Specials result, giving users a useful fallback when no
+// dedicated Specials artwork exists.
+func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map[string]string, language string, folderID int, seasonNumber int) ([]RemoteImage, map[string]string, error) {
+	chain, err := s.resolveChainCached(ctx, folderID, "season")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
+	}
+
+	var exactImages []RemoteImage
+	var specialsFallback []RemoteImage
+	providerErrors := make(map[string]string)
+	seen := make(map[string]struct{})
+	appendPoster := func(target *[]RemoteImage, image RemoteImage) bool {
+		if image.Type != ImagePoster || strings.TrimSpace(image.URL) == "" {
+			return false
+		}
+		if _, duplicate := seen[image.URL]; duplicate {
+			return false
+		}
+		seen[image.URL] = struct{}{}
+		*target = append(*target, image)
+		return true
+	}
+
+	for _, p := range chain {
+		exactFound := false
+		ip, imageCapable := p.(ImageProvider)
+		if imageCapable {
+			requestedSeason := seasonNumber
+			images, imageErr := ip.GetImages(ctx, ImageRequest{
+				ProviderIDs:  providerIDs,
+				ContentType:  "series",
+				Language:     language,
+				SeasonNumber: &requestedSeason,
+			})
+			if imageErr != nil {
+				slog.WarnContext(ctx, "fetch season images: provider gallery error", "component", "metadata",
+					"provider", p.Slug(), "season", seasonNumber, "error", imageErr)
+				providerErrors[p.Slug()] = imageErr.Error()
+			} else {
+				for _, image := range images {
+					if image.SeasonNumber == nil || *image.SeasonNumber != seasonNumber {
+						continue
+					}
+					if strings.TrimSpace(image.ProviderID) == "" {
+						image.ProviderID = p.Slug()
+					}
+					if appendPoster(&exactImages, image) {
+						exactFound = true
+					}
+				}
+			}
+		}
+
+		// Backward-compatible exact primary for providers that do not yet emit
+		// season-scoped gallery records.
+		if !exactFound {
+			if ep, ok := p.(EpisodeProvider); ok {
+				seasons, seasonErr := ep.GetSeasons(ctx, SeasonsRequest{
+					ProviderIDs: providerIDs,
+					ContentType: "series",
+					Language:    language,
+				})
+				if seasonErr != nil {
+					slog.WarnContext(ctx, "fetch season images: provider season error", "component", "metadata",
+						"provider", p.Slug(), "season", seasonNumber, "error", seasonErr)
+					providerErrors[p.Slug()] = seasonErr.Error()
+				} else {
+					for _, season := range seasons {
+						if season.SeasonNumber != seasonNumber || strings.TrimSpace(season.PosterPath) == "" {
+							continue
+						}
+						n := seasonNumber
+						appendPoster(&exactImages, RemoteImage{
+							ProviderID:   p.Slug(),
+							URL:          season.PosterPath,
+							Type:         ImagePoster,
+							SeasonNumber: &n,
+						})
+						break
+					}
+				}
+			}
+		}
+
+		if seasonNumber == 0 && imageCapable {
+			images, imageErr := ip.GetImages(ctx, ImageRequest{
+				ProviderIDs: providerIDs,
+				ContentType: "series",
+				Language:    language,
+			})
+			if imageErr != nil {
+				slog.WarnContext(ctx, "fetch season images: Specials show fallback error", "component", "metadata",
+					"provider", p.Slug(), "error", imageErr)
+				providerErrors[p.Slug()] = imageErr.Error()
+				continue
+			}
+			for _, image := range images {
+				if image.SeasonNumber != nil {
+					continue
+				}
+				if strings.TrimSpace(image.ProviderID) == "" {
+					image.ProviderID = p.Slug()
+				}
+				appendPoster(&specialsFallback, image)
+			}
+		}
+	}
+
+	sort.SliceStable(exactImages, func(i, j int) bool { return exactImages[i].Rating > exactImages[j].Rating })
+	sort.SliceStable(specialsFallback, func(i, j int) bool { return specialsFallback[i].Rating > specialsFallback[j].Rating })
+	return append(exactImages, specialsFallback...), providerErrors, nil
 }
 
 // ApplyItemImage downloads a single image, caches it to S3, and returns
