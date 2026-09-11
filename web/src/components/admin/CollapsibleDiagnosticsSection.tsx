@@ -4,10 +4,16 @@ import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+/**
+ * CollapsibleDiagnosticsSection renders an expandable administrative diagnostics panel
+ * displaying a severity icon, title, description, and status count, error indicator, or loading placeholder.
+ */
 export function CollapsibleDiagnosticsSection({
   title,
   description,
   count,
+  isLoading,
+  isError,
   icon,
   iconClassName,
   open,
@@ -17,6 +23,8 @@ export function CollapsibleDiagnosticsSection({
   title: string;
   description: string;
   count: number;
+  isLoading?: boolean;
+  isError?: boolean;
   icon: ReactNode;
   iconClassName?: string;
   open: boolean;
@@ -43,12 +51,43 @@ export function CollapsibleDiagnosticsSection({
           <h2 className="text-sm font-semibold tracking-wide">{title}</h2>
           <p className="text-muted-foreground text-xs leading-relaxed">{description}</p>
         </div>
-        {open ? (
+        {isLoading ? (
+          open ? (
+            <Badge variant="secondary" className="text-[11px] tabular-nums">
+              <span className="sr-only">Loading count</span>
+              <span aria-hidden="true">&mdash;</span>
+            </Badge>
+          ) : (
+            <div className="text-muted-foreground text-2xl leading-none font-bold tabular-nums">
+              <span className="sr-only">Loading count</span>
+              <span aria-hidden="true">&mdash;</span>
+            </div>
+          )
+        ) : isError ? (
+          open ? (
+            <Badge variant="destructive" className="text-[11px] tabular-nums">
+              <span className="sr-only">Error loading count</span>
+              <span aria-hidden="true">!</span>
+            </Badge>
+          ) : (
+            <div className="text-destructive text-2xl leading-none font-bold tabular-nums">
+              <span className="sr-only">Error loading count</span>
+              <span aria-hidden="true">!</span>
+            </div>
+          )
+        ) : open ? (
           <Badge variant="secondary" className="text-[11px] tabular-nums">
             {count}
           </Badge>
         ) : (
-          <div className="text-2xl leading-none font-bold tabular-nums">{count}</div>
+          <div
+            className={cn(
+              "text-2xl leading-none font-bold tabular-nums",
+              count === 0 && "text-muted-foreground",
+            )}
+          >
+            {count}
+          </div>
         )}
         <ChevronDown
           className={cn(
