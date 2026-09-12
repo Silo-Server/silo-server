@@ -169,8 +169,8 @@ func TestRuntimeReconcile(t *testing.T) {
 
 // TestCommittedArtifactMatchesRouter is the route/spec reconciliation over
 // the production wiring: every route the real assembled router serves is an
-// operation in the COMMITTED contracts/api/v2/openapi.json or a manual
-// registry entry, and vice versa. A stale artifact fails here as well as in
+// operation in the COMMITTED contracts/api/v2/openapi.json or the closed
+// plugin-content extension, and vice versa. A stale artifact fails here as well as in
 // make verify-apiv2-openapi.
 func TestCommittedArtifactMatchesRouter(t *testing.T) {
 	observed, err := routeinventory.Observed(newChiRouter(Dependencies{}))
@@ -178,12 +178,12 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, RawHandshakes())
+	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range unaccounted {
-		t.Errorf("served but in neither openapi.json nor the manual registry: %s", r)
+		t.Errorf("served but in neither openapi.json nor the plugin-content extension: %s", r)
 	}
 	for _, r := range unserved {
 		t.Errorf("documented but not served: %s", r)
@@ -195,37 +195,22 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 	if !bytes.Equal(generated, contracts.OpenAPI) {
 		t.Fatal("contracts/api/v2/openapi.json is stale; run make apiv2-openapi")
 	}
-	if len(RawHandshakes()) != 0 {
-		t.Fatalf("the manual registry is expected to be empty until a raw handshake is ratified: %+v", RawHandshakes())
-	}
 }
 
-// TestReconcileSpecSeeded proves the reconciliation fires in each direction
-// and that a test-only manual-registry entry accounts for a raw route.
+// TestReconcileSpecSeeded proves the reconciliation fires in each direction.
 func TestReconcileSpecSeeded(t *testing.T) {
-	ws := RawHandshake{Method: http.MethodGet, Path: Prefix + "/probe/ws", Protocol: "websocket", Reason: "test-only raw handshake"}
 	observed, err := routeinventory.Observed(newChiRouter(Dependencies{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI, nil)
+	unaccounted, unserved, err := reconcileSpec(observed, contracts.OpenAPI)
 	if err != nil || len(unaccounted) != 0 || len(unserved) != 0 {
 		t.Fatalf("baseline: %v %v %v", unaccounted, unserved, err)
 	}
 	// A raw route the router serves but nothing describes.
-	unaccounted, _, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, nil)
-	if len(unaccounted) != 1 || unaccounted[0] != "GET "+ws.Path {
+	unaccounted, _, _ = reconcileSpec(append(observed, "GET "+Prefix+"/probe/ws"), contracts.OpenAPI)
+	if len(unaccounted) != 1 || unaccounted[0] != "GET "+Prefix+"/probe/ws" {
 		t.Fatalf("raw route not reported: %v", unaccounted)
-	}
-	// The same route with its manual-registry entry.
-	unaccounted, unserved, _ = reconcileSpec(append(observed, "GET "+ws.Path), contracts.OpenAPI, []RawHandshake{ws})
-	if len(unaccounted) != 0 || len(unserved) != 0 {
-		t.Fatalf("manual entry did not account for the raw route: %v %v", unaccounted, unserved)
-	}
-	// A manual entry for a route nobody serves is reported.
-	_, unserved, _ = reconcileSpec(observed, contracts.OpenAPI, []RawHandshake{ws})
-	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+ws.Path) {
-		t.Fatalf("unserved manual entry not reported: %v", unserved)
 	}
 	// A documented operation the router does not serve (stale artifact).
 	var withoutInfo []string
@@ -234,13 +219,9 @@ func TestReconcileSpecSeeded(t *testing.T) {
 			withoutInfo = append(withoutInfo, route)
 		}
 	}
-	_, unserved, _ = reconcileSpec(withoutInfo, contracts.OpenAPI, nil)
+	_, unserved, _ = reconcileSpec(withoutInfo, contracts.OpenAPI)
 	if len(unserved) != 1 || !strings.HasPrefix(unserved[0], "GET "+Prefix+"/system/info") {
 		t.Fatalf("stale artifact not reported: %v", unserved)
-	}
-	// A route cannot be both.
-	if _, _, err := reconcileSpec(observed, contracts.OpenAPI, []RawHandshake{{Method: http.MethodGet, Path: Prefix + "/system/info"}}); err == nil {
-		t.Fatal("an operation doubling as a manual entry was accepted")
 	}
 }
 

@@ -176,14 +176,6 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   readingRulerTop: 50,
 };
 
-export function ebookReadPath(contentID: string, fileID: number): string {
-  return `/ebooks/${encodeURIComponent(contentID)}/files/${fileID}/read`;
-}
-
-export function ebookProgressPath(contentID: string): string {
-  return `/ebooks/${encodeURIComponent(contentID)}/progress`;
-}
-
 export function ebookReaderProgressQueryKey(contentID: string | undefined) {
   return ebookKeys.readerProgress(contentID);
 }

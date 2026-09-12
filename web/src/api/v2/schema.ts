@@ -21178,7 +21178,7 @@ export interface components {
       position_seconds: number;
       /**
        * @description Where to fetch the poster; empty when there is none
-       * @example /api/v1/images/poster/42
+       * @example https://media.example/poster.jpg
        */
       poster_url: string;
       /**

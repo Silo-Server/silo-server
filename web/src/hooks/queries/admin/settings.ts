@@ -43,6 +43,29 @@ function affectsOverlayConfig(key: string) {
   return (OVERLAY_CONFIG_SERVER_KEYS as readonly string[]).includes(key);
 }
 
+/* eslint-disable react-hooks/refs -- baseline capture must observe authority synchronously. */
+function useRetainedSettingsBaseline(
+  displayed: SettingsValues | undefined,
+  current: SettingsValues | undefined,
+) {
+  const baseline = useRef<SettingsValues | undefined>(undefined);
+  const context = captureProfileRequestContext();
+  const authority = JSON.stringify(context ? adminSettingsKey(context) : null);
+  const baselineAuthority = useRef(authority);
+  if (baselineAuthority.current !== authority) {
+    baselineAuthority.current = authority;
+    baseline.current = undefined;
+  }
+  if (!baseline.current && current) baseline.current = current;
+  return {
+    capture: () => captureSettingsBaseline(displayed ?? baseline.current),
+    reset: () => {
+      baseline.current = undefined;
+    },
+  };
+}
+/* eslint-enable react-hooks/refs */
+
 export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
 export function useAdminServerSettings() {
@@ -101,15 +124,7 @@ export function useAdminServerStatus() {
 
 export function useUpdateServerSettings(displayed?: SettingsValues) {
   const { data: current } = useAdminServerSettings();
-  const baseline = useRef<SettingsValues | undefined>(undefined);
-  const context = captureProfileRequestContext();
-  const authority = JSON.stringify(context ? adminSettingsKey(context) : null);
-  const baselineAuthority = useRef(authority);
-  if (baselineAuthority.current !== authority) {
-    baselineAuthority.current = authority;
-    baseline.current = undefined;
-  }
-  if (!baseline.current && current) baseline.current = current;
+  const retained = useRetainedSettingsBaseline(displayed, current);
   const queryClient = useQueryClient();
   const mutation = useMutation({
     retry: false,
@@ -161,7 +176,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
         );
       }
       await Promise.all(invalidations);
-      if (isCapturedProfileAuthorityActive(profileContext)) baseline.current = undefined;
+      if (isCapturedProfileAuthorityActive(profileContext)) retained.reset();
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
@@ -169,7 +184,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
     },
   });
   const capture = (values: SettingsValues) => ({
-    ...captureSettingsBaseline(displayed ?? baseline.current),
+    ...retained.capture(),
     values: { ...values },
   });
   return {
@@ -216,15 +231,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
 
 export function useUpdateServerSetting(displayed?: SettingsValues) {
   const { data: current } = useAdminServerSettings();
-  const baseline = useRef<SettingsValues | undefined>(undefined);
-  const context = captureProfileRequestContext();
-  const authority = JSON.stringify(context ? adminSettingsKey(context) : null);
-  const baselineAuthority = useRef(authority);
-  if (baselineAuthority.current !== authority) {
-    baselineAuthority.current = authority;
-    baseline.current = undefined;
-  }
-  if (!baseline.current && current) baseline.current = current;
+  const retained = useRetainedSettingsBaseline(displayed, current);
   const queryClient = useQueryClient();
   const mutation = useMutation({
     retry: false,
@@ -271,7 +278,7 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
         );
       }
       await Promise.all(invalidations);
-      if (isCapturedProfileAuthorityActive(variables.profileContext)) baseline.current = undefined;
+      if (isCapturedProfileAuthorityActive(variables.profileContext)) retained.reset();
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
@@ -279,7 +286,7 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
     },
   });
   const capture = (values: { key: string; value: string }) => ({
-    ...captureSettingsBaseline(displayed ?? baseline.current),
+    ...retained.capture(),
     ...values,
   });
   return {

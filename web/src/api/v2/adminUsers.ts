@@ -1,30 +1,20 @@
-import {
-  captureProfileRequestContext,
-  isCapturedProfileAuthorityActive,
-  StaleApiRequestContextError,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from "@/api/types";
 import { v2, type V2Body, type V2Result } from "./request";
 import { sessionFromTokenPair } from "./account";
+import {
+  captureAdminAuthority,
+  adminAuthorityScope,
+  requireAdminAuthority,
+} from "./adminAuthority";
 export type AdminUserEditor = {
   user: AdminUser;
   etag: string;
   profileContext: ProfileRequestContextSnapshot;
 };
-export function captureAdminUserAuthority() {
-  const context = captureProfileRequestContext();
-  if (!context) throw new StaleApiRequestContextError();
-  return context;
-}
-export function adminUserScope(context = captureProfileRequestContext()) {
-  return context
-    ? `${context.serverOrigin}:${context.authContextVersion}:${context.profileId}`
-    : "unavailable";
-}
-export function requireAdminUserAuthority(context: ProfileRequestContextSnapshot) {
-  if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
-}
+export const captureAdminUserAuthority = captureAdminAuthority;
+export const adminUserScope = adminAuthorityScope;
+export const requireAdminUserAuthority = requireAdminAuthority;
 function numericID(value: string) {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Unsupported user ID.");

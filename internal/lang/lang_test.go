@@ -11,6 +11,9 @@ func TestCanonicalTag(t *testing.T) {
 		"qaa": "qaa", "en-abcde-abcde": "", "en-a-foo-a-bar": "",
 		"x-abcde-abcde": "x-abcde-abcde", "en-x-abcde-abcde": "en-x-abcde-abcde",
 		"en-a-abcde-abcde": "en-a-abcde-abcde",
+		// Grandfathered forms resolve to their registered replacements.
+		"i-klingon": "tlh", "en-GB-oed": "en-GB-oxendict", "sgn-BE-FR": "sfb",
+		"i-navajo": "nv", "i-notreal": "", "Klingon (TNG)": "",
 	}
 	for in, want := range cases {
 		if got := CanonicalTag(in); got != want {

@@ -1,28 +1,17 @@
 import {
-  captureProfileRequestContext,
-  isCapturedProfileAuthorityActive,
-  StaleApiRequestContextError,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+  captureAdminAuthority,
+  adminAuthorityScope,
+  requireAdminAuthority,
+} from "./adminAuthority";
 import type {
   AppNotification,
   NotificationPreferences,
   NotificationReasonFlags,
 } from "@/api/types";
 import { v2, type V2Result } from "./request";
-export function captureNotificationAuthority() {
-  const context = captureProfileRequestContext();
-  if (!context) throw new StaleApiRequestContextError();
-  return context;
-}
-export function notificationScope(context = captureProfileRequestContext()) {
-  return context
-    ? `${context.serverOrigin}:${context.authContextVersion}:${context.profileId}`
-    : "unavailable";
-}
-export function requireNotificationAuthority(context: ProfileRequestContextSnapshot) {
-  if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
-}
+export const captureNotificationAuthority = captureAdminAuthority;
+export const notificationScope = adminAuthorityScope;
+export const requireNotificationAuthority = requireAdminAuthority;
 function notification(
   row: V2Result<"GET /api/v2/notifications">["items"][number],
 ): AppNotification {

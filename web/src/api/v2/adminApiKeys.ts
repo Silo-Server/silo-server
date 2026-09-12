@@ -1,9 +1,9 @@
+import { type ProfileRequestContextSnapshot } from "@/api/client";
 import {
-  captureProfileRequestContext,
-  isCapturedProfileAuthorityActive,
-  StaleApiRequestContextError,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+  captureAdminAuthority,
+  adminAuthorityScope,
+  requireAdminAuthority,
+} from "./adminAuthority";
 import type { components } from "./schema";
 import { v2, type V2Body } from "./request";
 
@@ -19,19 +19,9 @@ export type AdminAPIKeyPage = {
   items: AdminAPIKeyListItem[];
   page: { has_more: boolean; next_cursor?: string };
 };
-export function captureAdminApiKeyAuthority() {
-  const context = captureProfileRequestContext();
-  if (!context) throw new StaleApiRequestContextError();
-  return context;
-}
-export function adminApiKeyScope(context = captureProfileRequestContext()) {
-  return context
-    ? `${context.serverOrigin}:${context.authContextVersion}:${context.profileId}`
-    : "unavailable";
-}
-function requireAuthority(context: ProfileRequestContextSnapshot) {
-  if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
-}
+export const captureAdminApiKeyAuthority = captureAdminAuthority;
+export const adminApiKeyScope = adminAuthorityScope;
+const requireAuthority = requireAdminAuthority;
 function strongETag(etag: string | null) {
   if (!etag || !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(etag)) {
     throw new Error("Reload this API key before saving: a strong ETag is required.");

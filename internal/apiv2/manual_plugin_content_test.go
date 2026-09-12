@@ -15,7 +15,7 @@ func TestReconcilePluginContent(t *testing.T) {
 		}
 		return out
 	}
-	for _, name := range []string{"exact", "missing extension", "missing mount", "missing method", "unserved", "unexpected served path", "unexpected served method", "unexpected documented path", "unexpected documented method", "prefix", "duplicate mount", "duplicate method", "finite collision", "manual collision"} {
+	for _, name := range []string{"exact", "missing extension", "missing mount", "missing method", "unserved", "unexpected served path", "unexpected served method", "unexpected documented path", "unexpected documented method", "prefix", "duplicate mount", "duplicate method", "finite collision"} {
 		t.Run(name, func(t *testing.T) {
 			description := describePluginContent()
 			// Method slices for the two proxy mounts share backing storage by design.
@@ -24,7 +24,6 @@ func TestReconcilePluginContent(t *testing.T) {
 			}
 			doc := map[string]any{pluginContentExtension: description, "paths": map[string]any{}}
 			observed := inventory()
-			var manual []RawHandshake
 			wantErr, wantUnaccounted, wantUnserved := false, 0, 0
 			switch name {
 			case "missing extension":
@@ -63,9 +62,6 @@ func TestReconcilePluginContent(t *testing.T) {
 			case "finite collision":
 				doc["paths"] = map[string]any{description.Mounts[0].Path: map[string]any{"get": map[string]any{}}}
 				wantErr = true
-			case "manual collision":
-				manual = []RawHandshake{{Method: "GET", Path: description.Mounts[0].Path}}
-				wantErr = true
 			}
 			if name != "missing extension" {
 				doc[pluginContentExtension] = description
@@ -74,7 +70,7 @@ func TestReconcilePluginContent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			unaccounted, unserved, err := reconcileSpec(observed, data, manual)
+			unaccounted, unserved, err := reconcileSpec(observed, data)
 			if (err != nil) != wantErr || len(unaccounted) != wantUnaccounted || len(unserved) != wantUnserved {
 				t.Fatalf("unaccounted=%v unserved=%v err=%v", unaccounted, unserved, err)
 			}

@@ -10,7 +10,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
@@ -721,18 +720,7 @@ func (q SettingScopeQuery) identity(ctx context.Context, key string) handlers.Se
 		ClientFamily:    q.ClientFamily,
 		LibraryID:       string(q.LibraryID),
 		SeriesID:        q.SeriesID,
-		VerifyProfile:   profileVerifier(ctx),
-	}
-}
-
-// profileVerifier answers whether the gate verified a PIN-locked profile for
-// this request, the same rule updateProfile applies.
-func profileVerifier(ctx context.Context) func(profileID string) error {
-	return func(profileID string) error {
-		if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
-			return nil
-		}
-		return access.ErrProfileUnverified
+		VerifyProfile:   verifyHouseholdProfile(ctx),
 	}
 }
 
@@ -887,7 +875,7 @@ func (q EffectiveSettingsQuery) query(ctx context.Context, keys []string) (handl
 		ClientFamily:    q.ClientFamily,
 		LibraryIDs:      libraries,
 		SeriesIDs:       q.SeriesIDs,
-		VerifyProfile:   profileVerifier(ctx),
+		VerifyProfile:   verifyHouseholdProfile(ctx),
 	}, nil
 }
 

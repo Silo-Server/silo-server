@@ -1,7 +1,6 @@
 package scenariocatalog
 
 import (
-	"fmt"
 	"net/http"
 )
 
@@ -13,19 +12,8 @@ func SignupStatusAcceptance(catalogs []*Catalog) ([]*Catalog, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range selected {
-		for _, r := range c.Rows {
-			for _, s := range r.Scenarios {
-				for _, requirement := range s.Requires {
-					if requirement != frozenDatabaseRequirement {
-						return nil, fmt.Errorf("%s: unsupported requirement", s.ID)
-					}
-				}
-				if s.V2Expectation.OperationID != "getSignupStatus" || len(s.Then) != 0 || len(s.V2Expectation.Then) != 0 {
-					return nil, fmt.Errorf("%s: unsupported signup status acceptance sequence", s.ID)
-				}
-			}
-		}
+	if err := validateAcceptanceScenarios(selected, "getSignupStatus", "signup status"); err != nil {
+		return nil, err
 	}
 	return selected, nil
 }

@@ -56,6 +56,17 @@ type WatchTogetherRoomReadOutput struct {
 	}
 }
 
+func watchTogetherRoomOutput(row watchtogether.Snapshot, token string) (*WatchTogetherRoomReadOutput, error) {
+	snapshot, err := watchTogetherRoomSnapshotOf(row)
+	if err != nil {
+		return nil, NewProblem(TypeInternalError, "Invalid room snapshot.")
+	}
+	out := new(WatchTogetherRoomReadOutput)
+	out.Body.Room = snapshot
+	out.Body.RoomAccessToken = token
+	return out, nil
+}
+
 func watchTogetherRoomSnapshotOf(row watchtogether.Snapshot) (WatchTogetherRoomSnapshot, error) {
 	instant, err := time.Parse(time.RFC3339Nano, row.AnchorUpdatedAt)
 	if err != nil {
@@ -110,13 +121,6 @@ func registerWatchTogetherRoomRead(reg *Registry) {
 		if err != nil {
 			return nil, suggestionProblem(err)
 		}
-		snapshot, err := watchTogetherRoomSnapshotOf(row)
-		if err != nil {
-			return nil, NewProblem(TypeInternalError, "Invalid room snapshot.")
-		}
-		out := new(WatchTogetherRoomReadOutput)
-		out.Body.Room = snapshot
-		out.Body.RoomAccessToken = token
-		return out, nil
+		return watchTogetherRoomOutput(row, token)
 	})
 }

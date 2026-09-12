@@ -21,7 +21,7 @@ const (
 func CanonicalTag(value string) string {
 	value = strings.ReplaceAll(strings.TrimSpace(value), "_", "-")
 	if !languageTagPattern.MatchString(value) {
-		return ""
+		return grandfatheredTag(value)
 	}
 	if hasDuplicateSubtags(value) {
 		return ""
@@ -35,6 +35,21 @@ func CanonicalTag(value string) string {
 	}
 	// The settings contract is open to well-formed, unregistered subtags.
 	return canonicalTagCase(value)
+}
+
+// grandfatheredTag resolves the irregular BCP 47 forms the grammar prefilter
+// cannot express ("i-klingon", "en-GB-oed", "sgn-BE-FR") to their registered
+// replacements. The parser rejects everything else the prefilter rejects, so
+// display names and free text still return "".
+func grandfatheredTag(value string) string {
+	if !strings.Contains(value, "-") {
+		return ""
+	}
+	tag, err := language.Parse(value)
+	if err != nil || tag == language.Und {
+		return ""
+	}
+	return tag.String()
 }
 
 // hasDuplicateSubtags rejects structurally invalid repeated variants and

@@ -1,9 +1,9 @@
+import { type ProfileRequestContextSnapshot } from "@/api/client";
 import {
-  captureProfileRequestContext,
-  isCapturedProfileAuthorityActive,
-  StaleApiRequestContextError,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+  captureAdminAuthority,
+  adminAuthorityScope,
+  requireAdminAuthority,
+} from "./adminAuthority";
 import type { AccessGroup, AccessGroupInput } from "@/api/types";
 import type { components } from "./schema";
 import { v2, type V2Body } from "./request";
@@ -14,19 +14,9 @@ export type AccessGroupEditor = {
   etag: string;
   profileContext: ProfileRequestContextSnapshot;
 };
-export function captureAccessGroupAuthority() {
-  const value = captureProfileRequestContext();
-  if (!value) throw new StaleApiRequestContextError();
-  return value;
-}
-export function accessGroupScope(context = captureProfileRequestContext()) {
-  return context
-    ? `${context.serverOrigin}:${context.authContextVersion}:${context.profileId}`
-    : "unavailable";
-}
-function requireAuthority(context: ProfileRequestContextSnapshot) {
-  if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
-}
+export const captureAccessGroupAuthority = captureAdminAuthority;
+export const accessGroupScope = adminAuthorityScope;
+const requireAuthority = requireAdminAuthority;
 function numericID(value: string) {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id <= 0)

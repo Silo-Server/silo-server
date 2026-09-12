@@ -44,13 +44,6 @@ func registerWatchTogetherCreate(reg *Registry) {
 				return nil, suggestionProblem(err)
 			}
 		}
-		snapshot, err := watchTogetherRoomSnapshotOf(row)
-		if err != nil {
-			return nil, NewProblem(TypeInternalError, "Invalid room snapshot.")
-		}
-		out := new(WatchTogetherRoomReadOutput)
-		out.Body.Room = snapshot
-		out.Body.RoomAccessToken = token
-		return out, nil
+		return watchTogetherRoomOutput(row, token)
 	})
 }

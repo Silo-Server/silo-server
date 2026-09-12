@@ -1882,7 +1882,7 @@ logs remain separate.
 `GET /api/v1/admin/logs/ws` is retained as a plain WebSocket path with a documented
 handshake, like the realtime events and playback control sockets. Its v2 form is
 `GET /api/v2/admin/logs/ws` (`connectAdminLogsSocket`), registered as a raw handshake in
-`openapi.json` rather than a Huma operation; the manual `RawHandshake` registry stays empty.
+`openapi.json` through the raw-operation registry rather than a Huma operation.
 
 `GET /api/v2/admin/logs/ws/capabilities` (`getAdminLogsSocketCapabilities`) reports whether
 the handshake is served on this process, the protocol (`silo.admin-logs.v2`) and the stream

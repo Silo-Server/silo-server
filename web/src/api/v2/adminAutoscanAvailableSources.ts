@@ -1,26 +1,20 @@
-import {
-  isCapturedProfileAuthorityActive,
-  StaleApiRequestContextError,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AutoscanAvailableSource } from "@/api/types";
 import { v2 } from "./request";
+import { readAutoscanPages } from "./adminAutoscanPagination";
 
 export async function readAdminAutoscanAvailableSources(
   profileContext: ProfileRequestContextSnapshot,
 ): Promise<AutoscanAvailableSource[]> {
-  const rows: AutoscanAvailableSource[] = [];
-  const seen = new Set<string>();
-  let cursor: string | undefined;
-  for (let page = 0; page < 100; page++) {
-    if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();
-    const result = await v2("GET /api/v2/admin/autoscan/scan-source-plugins", {
-      profileContext,
-      query: { limit: 100, cursor },
-    });
-    if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();
-    rows.push(
-      ...result.items.map(
+  return readAutoscanPages(
+    profileContext,
+    (cursor) =>
+      v2("GET /api/v2/admin/autoscan/scan-source-plugins", {
+        profileContext,
+        query: { limit: 100, cursor },
+      }),
+    (items) =>
+      items.map(
         (row): AutoscanAvailableSource => ({
           ...row,
           descriptor: {
@@ -60,15 +54,8 @@ export async function readAdminAutoscanAvailableSources(
           },
         }),
       ),
-    );
-    if (!result.page || typeof result.page.has_more !== "boolean")
-      throw new Error("Invalid autoscan source descriptor page.");
-    if (!result.page.has_more) return rows;
-    const next = result.page.next_cursor;
-    if (!next || seen.has(next))
-      throw new Error("Invalid autoscan source descriptor continuation.");
-    seen.add(next);
-    cursor = next;
-  }
-  throw new Error("Too many autoscan source descriptors to display.");
+    "Invalid autoscan source descriptor page.",
+    "Invalid autoscan source descriptor continuation.",
+    "Too many autoscan source descriptors to display.",
+  );
 }

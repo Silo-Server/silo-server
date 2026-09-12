@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/branding"
@@ -84,7 +85,11 @@ func registerAdminBrandingAssets(reg *Registry) {
 			if err != nil {
 				return nil, adminBrandingAssetProblem(err)
 			}
-			return &AdminBrandingAssetOutput{Body: AdminBrandingAsset{Kind: view.Kind, Ref: view.Ref, URL: view.URL}}, nil
+			return &AdminBrandingAssetOutput{Body: AdminBrandingAsset{
+				Kind: view.Kind,
+				Ref:  view.Ref,
+				URL:  Prefix + "/branding/assets/" + url.PathEscape(view.Kind) + "?v=" + url.QueryEscape(view.Ref),
+			}}, nil
 		})
 	remove := humaOp(http.MethodDelete, Prefix+"/admin/branding/assets/{kind}", "deleteAdminBrandingAsset", "admin-settings",
 		"Clear the custom image of one branding slot so the bundled default serves again. Stored bytes are left in place. A delayed retry also clears an image uploaded after the first success, so clients never retry automatically.")

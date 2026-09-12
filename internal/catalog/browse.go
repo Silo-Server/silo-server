@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -954,7 +955,37 @@ func listSubtitleLanguagesWithSource(
 		ORDER BY value ASC
 		LIMIT %d
 	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fromClause, mediaFileJoin, browseFilterPrefix(whereClause), catalogFacetMaxValues)
-	return queryDistinctStrings(ctx, pool, query, args)
+	values, err := queryDistinctStrings(ctx, pool, query, args)
+	if err != nil {
+		return nil, err
+	}
+	return canonicalSubtitleFacetValues(values), nil
+}
+
+// canonicalSubtitleFacetValues restores canonical BCP 47 casing to facet
+// values. Both arms of the facet query lowercase (the generated column through
+// canonical_language_code, the external arm explicitly) so that filter
+// comparisons are case-insensitive; the API still returns the same spelling
+// the items themselves carry, "zh-Hant" rather than "zh-hant". Values the
+// canonicalizer cannot parse are returned as stored so a legacy tag never
+// vanishes from the facet. Two stored spellings can share one canonical form
+// (a not-yet-repaired "eng" beside "en"), so the result is deduplicated and
+// re-sorted.
+func canonicalSubtitleFacetValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if canonical := lang.CanonicalTag(value); canonical != "" {
+			value = canonical
+		}
+		if _, dup := seen[value]; dup {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (r *BrowseRepository) listDistinctJSONBLanguageWithFilters(ctx context.Context, column string, filters BrowseFilters) ([]string, error) {

@@ -23,6 +23,7 @@ registered on the matched template; otherwise it is reported as
 ambiguous-method for manual resolution.
 """
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -42,6 +43,18 @@ def tmpl(p):
     return re.sub(r"\{[^}]*\}", "{x}", p)
 
 
+# The inventory contains the registered v1 bridge paths, while clients on
+# this branch call v2 paths. Resolve those aliases from the migration ledger
+# before considering the generic /api/v2/* delegation rows.
+v2_aliases = defaultdict(list)
+ledger_path = os.path.join(os.path.dirname(INV), "migration.json")
+try:
+    with open(ledger_path, encoding="utf-8") as f:
+        ledger = json.load(f).get("entries", [])
+except FileNotFoundError:
+    ledger = []
+
+
 bypath = defaultdict(list)
 for r in inv:
     if r["listener"] == "api":
@@ -52,14 +65,33 @@ def key(r):
     return f"{r['listener']} {r['method']} {r['path']}"
 
 
+bykey = {key(r): r for r in inv if r["listener"] == "api"}
+for e in ledger:
+    v2 = e.get("v2") or {}
+    if not v2.get("path") or not v2.get("method"):
+        continue
+    row = bykey.get(f"api {e['method']} {e['path']}")
+    if row is not None:
+        v2_aliases[(v2["method"], tmpl(v2["path"]))].append(row)
+
+
 def match(method, path):
     p = path
     # Clients build a few stream/transcode URLs without the /api/v1 prefix; the
     # server later prefixes them.
     if p.startswith("/stream/") or p.startswith("/playback/transcode/"):
         p = "/api/v1" + p
-    cands = list(bypath.get(p) or bypath.get(p.rstrip("/")) or bypath.get(p + "/") or [])
-    how = "exact"
+    normalized = tmpl(p)
+    cands = list(v2_aliases.get((method, normalized), [])) if method != "UNKNOWN" else []
+    if not cands and method == "UNKNOWN":
+        for (v2_method, v2_path), rows in v2_aliases.items():
+            if v2_path == normalized:
+                cands.extend(rows)
+    if cands:
+        how = "v2-alias"
+    else:
+        cands = list(bypath.get(normalized) or bypath.get(tmpl(p.rstrip("/"))) or bypath.get(tmpl(p + "/")) or [])
+        how = "exact"
     if not cands:
         segs = p.split("/")
         for t, rows in bypath.items():
@@ -74,6 +106,11 @@ def match(method, path):
                 how = "wildcard"
     if not cands:
         return [], "none"
+    if how == "v2-alias":
+        # The v2 method was matched against the ledger alias. The inventory
+        # row may retain the bridge's v1 method (for example v2 PATCH mapped
+        # to a v1 PUT), so do not filter it a second time.
+        return cands, how
     if method == "UNKNOWN":
         ms = {r["method"] for r in cands}
         if len(ms) == 1:

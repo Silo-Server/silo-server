@@ -206,86 +206,118 @@ type AdminTemplateResult struct {
 	FeaturedFailed []AdminTemplateFeaturedEntry   `json:"featured_failed"`
 }
 
-// adminCollectionCommand lowers only the typed DTO's identifiers. Raw request
-// bytes are consulted solely for explicit group_id:null, never for extra fields.
-func adminCollectionCommand(input any, raw []byte, output any) *Problem {
-	data, err := json.Marshal(input)
-	if err != nil {
-		return NewProblem(TypeValidationFailed, "Invalid collection definition.")
-	}
-	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(data, &fields); err != nil {
-		return NewProblem(TypeValidationFailed, "Invalid collection definition.")
-	}
-	if value, ok := fields["library_id"]; ok {
-		var id ID
-		if err = json.Unmarshal(value, &id); err != nil {
-			return NewProblem(TypeValidationFailed, "Invalid library ID.")
-		}
-		if id != "" {
-			ids, p := intsOfIDs([]ID{id}, "library_id")
-			if p != nil {
-				return p
-			}
-			fields["library_id"], _ = json.Marshal(ids[0])
-		}
-	}
-	if value, ok := fields["library_ids"]; ok {
-		var ids []ID
-		if err = json.Unmarshal(value, &ids); err != nil {
-			return NewProblem(TypeValidationFailed, "Invalid library IDs.")
-		}
-		ints, p := intsOfIDs(ids, "library_ids")
-		if p != nil {
-			return p
-		}
-		fields["library_ids"], _ = json.Marshal(ints)
-	}
-	if len(raw) > 0 {
-		var original map[string]json.RawMessage
-		if err = json.Unmarshal(raw, &original); err != nil {
-			return NewProblem(TypeValidationFailed, "Invalid collection definition.")
-		}
-		if value, ok := original[adminCollectionGroupField]; ok && strings.TrimSpace(string(value)) == adminCollectionNull {
-			fields[adminCollectionGroupField] = json.RawMessage(adminCollectionNull)
-		}
-	}
-	data, err = json.Marshal(fields)
-	if err != nil {
-		return NewProblem(TypeValidationFailed, "Invalid collection definition.")
-	}
-	if err = json.Unmarshal(data, output); err != nil {
-		return NewProblem(TypeValidationFailed, "Invalid collection definition.")
-	}
-	return nil
-}
 func (v AdminCollectionCreate) command() (handlers.AdminCollectionCreate, *Problem) {
 	var c handlers.AdminCollectionCreate
-	p := adminCollectionCommand(v, nil, &c)
-	return c, p
+	if v.LibraryID != "" {
+		ids, p := intsOfIDs([]ID{v.LibraryID}, "library_id")
+		if p != nil {
+			return c, p
+		}
+		c.LibraryID = ids[0]
+	}
+	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
+	if p != nil {
+		return c, p
+	}
+	c.LibraryIDs, c.Slug, c.Title, c.Description = ids, v.Slug, v.Title, v.Description
+	c.CollectionType, c.Visibility, c.SortOrder = v.CollectionType, v.Visibility, v.SortOrder
+	c.Featured, c.PosterURL, c.BackdropURL, c.SourceURL = v.Featured, v.PosterURL, v.BackdropURL, v.SourceURL
+	c.QueryDefinition, c.SortConfig, c.SourceConfig = v.QueryDefinition, v.SortConfig, v.SourceConfig
+	c.ManagementMode, c.ManagementSource, c.ManagementKey, c.SyncSchedule = v.ManagementMode, v.ManagementSource, v.ManagementKey, v.SyncSchedule
+	if v.GroupID != nil {
+		value := string(*v.GroupID)
+		c.GroupID = &value
+	}
+	return c, nil
 }
 func (v AdminCollectionUpdate) command(raw []byte) (handlers.AdminCollectionUpdate, *Problem) {
 	var c handlers.AdminCollectionUpdate
 	if p := rejectNonNullableNulls(raw, map[string]bool{adminCollectionGroupField: true}); p != nil {
 		return c, p
 	}
-	p := adminCollectionCommand(v, raw, &c)
-	return c, p
+	if v.LibraryIDs != nil {
+		ids, p := intsOfIDs(*v.LibraryIDs, "library_ids")
+		if p != nil {
+			return c, p
+		}
+		c.LibraryIDs = &ids
+	}
+	c.Slug, c.Title, c.Description, c.CollectionType = v.Slug, v.Title, v.Description, v.CollectionType
+	c.Visibility, c.SortOrder, c.Featured = v.Visibility, v.SortOrder, v.Featured
+	c.PosterURL, c.BackdropURL, c.SourceURL = v.PosterURL, v.BackdropURL, v.SourceURL
+	c.QueryDefinition, c.SortConfig, c.SourceConfig = v.QueryDefinition, v.SortConfig, v.SourceConfig
+	c.ManagementMode, c.ManagementSource, c.ManagementKey, c.SyncSchedule = v.ManagementMode, v.ManagementSource, v.ManagementKey, v.SyncSchedule
+	if v.GroupID != nil {
+		value := string(*v.GroupID)
+		c.GroupID.SetValue(&value, true)
+	}
+	var original map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &original); err != nil {
+		return c, NewProblem(TypeValidationFailed, "Invalid collection definition.")
+	}
+	if value, ok := original[adminCollectionGroupField]; ok && strings.TrimSpace(string(value)) == adminCollectionNull {
+		c.GroupID.SetValue(nil, true)
+	}
+	return c, nil
 }
 func (v AdminMDBListImport) command() (handlers.AdminCollectionImportMDBList, *Problem) {
 	var c handlers.AdminCollectionImportMDBList
-	p := adminCollectionCommand(v, nil, &c)
-	return c, p
+	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
+	if p != nil {
+		return c, p
+	}
+	var libraryID int
+	if v.LibraryID != "" {
+		lowered, p := intsOfIDs([]ID{v.LibraryID}, "library_id")
+		if p != nil {
+			return c, p
+		}
+		libraryID = lowered[0]
+	}
+	c.LibraryID, c.LibraryIDs, c.Title, c.Description, c.URL = libraryID, ids, v.Title, v.Description, v.URL
+	c.SortConfig, c.Limit, c.Featured, c.SortOrder, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Limit, v.Featured, v.SortOrder, v.PosterURL, v.SyncSchedule
+	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
+	return c, nil
 }
 func (v AdminTMDBImport) command() (handlers.AdminCollectionImportTMDB, *Problem) {
 	var c handlers.AdminCollectionImportTMDB
-	p := adminCollectionCommand(v, nil, &c)
-	return c, p
+	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
+	if p != nil {
+		return c, p
+	}
+	var libraryID int
+	if v.LibraryID != "" {
+		lowered, p := intsOfIDs([]ID{v.LibraryID}, "library_id")
+		if p != nil {
+			return c, p
+		}
+		libraryID = lowered[0]
+	}
+	c.LibraryID, c.LibraryIDs, c.Title, c.Description = libraryID, ids, v.Title, v.Description
+	c.Preset, c.TimeWindow, c.MediaType, c.Limit = v.Preset, v.TimeWindow, v.MediaType, v.Limit
+	c.SortConfig, c.Featured, c.SortOrder, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Featured, v.SortOrder, v.PosterURL, v.SyncSchedule
+	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
+	return c, nil
 }
 func (v AdminTraktImport) command() (handlers.AdminCollectionImportTrakt, *Problem) {
 	var c handlers.AdminCollectionImportTrakt
-	p := adminCollectionCommand(v, nil, &c)
-	return c, p
+	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
+	if p != nil {
+		return c, p
+	}
+	var libraryID int
+	if v.LibraryID != "" {
+		lowered, p := intsOfIDs([]ID{v.LibraryID}, "library_id")
+		if p != nil {
+			return c, p
+		}
+		libraryID = lowered[0]
+	}
+	c.LibraryID, c.LibraryIDs, c.Title, c.Description = libraryID, ids, v.Title, v.Description
+	c.Preset, c.MediaType, c.ProfileID, c.ListURL, c.Limit = v.Preset, v.MediaType, string(v.ProfileID), v.ListURL, v.Limit
+	c.SortConfig, c.Featured, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Featured, v.PosterURL, v.SyncSchedule
+	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
+	return c, nil
 }
 func (v AdminTemplateApply) command() (handlers.AdminCollectionTemplateApply, *Problem) {
 	var c handlers.AdminCollectionTemplateApply

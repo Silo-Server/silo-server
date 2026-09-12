@@ -9,7 +9,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 )
 
@@ -323,7 +322,7 @@ func (reg *Registry) deleteProfile(ctx context.Context, in *ProfileIDInput) (*st
 		UserID:          claims.UserID,
 		ProfileID:       string(in.ID),
 		ActiveProfileID: profileFrom(ctx),
-		VerifyProfile:   scopeVerifier(ctx),
+		VerifyProfile:   verifyHouseholdProfile(ctx),
 	})
 	if err != nil {
 		return nil, profileProblem(err)
@@ -350,7 +349,7 @@ type PlaybackSession struct {
 	EpisodeName              string  `json:"episode_name" doc:"Empty unless an episode" example:""`
 	SeasonNumber             *int    `json:"season_number" nullable:"true" doc:"null unless an episode" example:"1"`
 	EpisodeNumber            *int    `json:"episode_number" nullable:"true" doc:"null unless an episode" example:"1"`
-	PosterURL                string  `json:"poster_url" doc:"Where to fetch the poster; empty when there is none" example:"/api/v1/images/poster/42"`
+	PosterURL                string  `json:"poster_url" doc:"Where to fetch the poster; empty when there is none" example:"https://media.example/poster.jpg"`
 	PlayMethod               string  `json:"play_method" doc:"The negotiated method as the node reported it" example:"direct"`
 	ReportingNode            string  `json:"reporting_node" doc:"Identifier of the node serving the stream" example:"api"`
 	NodeDisplayName          string  `json:"node_display_name" doc:"Empty when the node has no display name" example:""`
@@ -427,7 +426,7 @@ func (reg *Registry) listHouseholdSessions(ctx context.Context, _ *struct{}) (*P
 	rows, err := reg.deps.Profiles.ListHouseholdSessions(ctx, handlers.HouseholdSessionsQuery{
 		UserID:          claims.UserID,
 		ActiveProfileID: profileFrom(ctx),
-		VerifyProfile:   scopeVerifier(ctx),
+		VerifyProfile:   verifyHouseholdProfile(ctx),
 	})
 	if err != nil {
 		return nil, profileProblem(err)
@@ -672,7 +671,7 @@ func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) 
 		UserID:          claims.UserID,
 		ActiveProfileID: profileFrom(ctx),
 		Request:         req,
-		VerifyProfile:   scopeVerifier(ctx),
+		VerifyProfile:   verifyHouseholdProfile(ctx),
 	})
 	if err != nil {
 		return nil, profileProblem(err)
@@ -682,21 +681,6 @@ func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) 
 		return nil, p
 	}
 	return &ProfileCreatedOutput{Location: Prefix + "/profiles/" + string(profile.ID), Body: profile}, nil
-}
-
-// scopeVerifier is the v2 household-manager verifier: a PIN-locked primary
-// profile counts as verified only when the viewer-access gate verified it by
-// X-Profile-Token. An API-key credential is exempt from PIN verification at
-// the gate; v1 does not let that exemption stand in for the PIN when
-// managing the household, so a scope whose verification was skipped is
-// rejected.
-func scopeVerifier(ctx context.Context) func(profileID string) error {
-	return func(profileID string) error {
-		if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
-			return nil
-		}
-		return access.ErrProfileUnverified
-	}
 }
 
 // toRequest lowers the create body onto the v1 request, where an omitted
@@ -768,7 +752,7 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 		ProfileID:       string(in.ID),
 		ActiveProfileID: profileFrom(ctx),
 		Request:         req,
-		VerifyProfile:   scopeVerifier(ctx),
+		VerifyProfile:   verifyHouseholdProfile(ctx),
 	})
 	if err != nil {
 		return nil, profileProblem(err)

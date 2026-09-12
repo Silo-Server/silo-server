@@ -25,6 +25,19 @@ func profileFrom(ctx context.Context) string { return apimw.GetProfileID(ctx) }
 // scopeFrom returns the resolved viewer scope.
 func scopeFrom(ctx context.Context) (access.Scope, bool) { return access.GetScope(ctx) }
 
+// verifyHouseholdProfile permits household-management operations only when
+// the requested profile is the verified profile for this request. API-key
+// profile scopes may skip the ordinary PIN gate, but that exemption does not
+// authorize household changes.
+func verifyHouseholdProfile(ctx context.Context) func(profileID string) error {
+	return func(profileID string) error {
+		if scope, ok := scopeFrom(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
+			return nil
+		}
+		return access.ErrProfileUnverified
+	}
+}
+
 func hasScope(ctx context.Context) bool {
 	_, ok := scopeFrom(ctx)
 	return ok

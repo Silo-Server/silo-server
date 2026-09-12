@@ -147,47 +147,17 @@ func urlParseDirectQuery(r *http.Request) (url.Values, *Problem) {
 // This adapter is independent of the held playback executor/runtime transport.
 type directDownloadWriter struct {
 	http.ResponseWriter
-	request  *http.Request
-	status   int
-	rejected bool
+	request *http.Request
+	inner   *streamResponseWriter
 }
 
-func (w *directDownloadWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-func (w *directDownloadWriter) WriteHeader(status int) {
-	if w.status != 0 {
-		if status >= 400 && !w.rejected {
-			panic(http.ErrAbortHandler)
-		}
-		return
+func (w *directDownloadWriter) transport() *streamResponseWriter {
+	if w.inner == nil {
+		w.inner = &streamResponseWriter{ResponseWriter: w.ResponseWriter, request: w.request, problemType: TypeForStatus, redactHeaders: []string{directContentLength, directContentType, directDisposition, directContentEncoding, jobLocationHeader, etagField, directLastModified}}
 	}
-	if status < 200 {
-		w.ResponseWriter.WriteHeader(status)
-		return
-	}
-	w.status = status
-	if status < 400 {
-		w.ResponseWriter.WriteHeader(status)
-		return
-	}
-	w.rejected = true
-	for _, name := range []string{directContentLength, directContentType, directDisposition, directContentEncoding, jobLocationHeader, etagField, directLastModified} {
-		w.Header().Del(name)
-	}
-	kind := TypeForStatus(status)
-	writeProblem(w.ResponseWriter, w.request, NewProblem(kind, kind.Title))
+	return w.inner
 }
-func (w *directDownloadWriter) Write(data []byte) (int, error) {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	if w.rejected {
-		return len(data), nil
-	}
-	return w.ResponseWriter.Write(data)
-}
-func (w *directDownloadWriter) FlushError() error {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	return http.NewResponseController(w.ResponseWriter).Flush()
-}
+func (w *directDownloadWriter) Unwrap() http.ResponseWriter    { return w.ResponseWriter }
+func (w *directDownloadWriter) WriteHeader(status int)         { w.transport().WriteHeader(status) }
+func (w *directDownloadWriter) Write(data []byte) (int, error) { return w.transport().Write(data) }
+func (w *directDownloadWriter) FlushError() error              { return w.transport().FlushError() }

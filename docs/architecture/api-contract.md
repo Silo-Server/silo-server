@@ -63,7 +63,7 @@ only to sequence releases safely; it is not a support policy.
 - `contracts/api/v2/openapi.json` is a deterministic generated artifact. It is never edited by
   hand.
 - It is the single native OpenAPI artifact. Huma contributes structured operations and a small
-  typed manual registry contributes stable raw HTTP handshakes that OpenAPI can describe; Silo
+  typed raw-operation registry contributes stable raw HTTP handshakes that OpenAPI can describe; Silo
   does not publish separate structured and raw specifications.
 - Stable operation IDs and schema names are contract identifiers. After the 1.0 lock, renaming
   either is treated as a breaking change even when the HTTP path and JSON happen to be unchanged.
@@ -215,7 +215,7 @@ management routes under `/api/v1/libraries/`, the admin scan triggers, and the t
 refresh are `core_admin`, while the viewer-facing `/api/v1/library/{id}/*` reads are
 `browse_search`. Proxy and transcode-node rows that are `ported` keep `v2` null by design: those
 listeners have no `/api/v2` namespace, so the route is retained at its version-neutral path and
-described through the manual registry, never aliased into v2. Ratifying such a row therefore
+described through the raw-operation registry, never aliased into v2. Ratifying such a row therefore
 means ratifying its retention, not a mapping: the schema's node-listener rule requires a ratified
 `proxy` or `transcode_node` port to keep `v2` unset, carry `disposition_rule` `listener_delegation`,
 and open its `notes` with `Retained on <listener> listener with <auth class>`, citing the
@@ -357,11 +357,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   an exact entry — operation id, rule id, fingerprint — in
   `contracts/api/v2/breaking-approvals.json`; once `contracts/api/v2/LOCKED` exists no entry
   applies. `TestCommittedArtifactMatchesRouter` reconciles the assembled router with the
-  committed artifact plus the typed manual registry of raw handshakes (`apiv2.RawHandshake`,
-  empty today), in both directions. The retained `/api/v1/health` and `/api/v1/ready` probes and
-  the opt-in, dedicated `/metrics` listener is operator-facing and deliberately absent from the
-  artifact and from generated native clients; it is disabled unless `SILO_METRICS_LISTEN` is set
-  and must bind to a private monitoring address.
+  committed artifact plus the closed plugin-content mount inventory, in both directions. The
+  retained `/api/v1/health` and `/api/v1/ready` probes and the opt-in, dedicated `/metrics`
+  listener are operator-facing and deliberately absent from the artifact and from generated
+  native clients; the listener is disabled unless `SILO_METRICS_LISTEN` is set and must bind to
+  a private monitoring address.
 - **The fixtures.** `contracts/api/v2/fixtures/` is generated through the assembled v2 router
   by `TestContractFixtures` in `internal/apiv2` (`make apiv2-fixtures`), never edited: each
   body is what the server answered a synthetic request with a fixed request id and fake

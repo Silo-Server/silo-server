@@ -65,3 +65,25 @@ func TestExternalSubtitleDirCacheConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestParseSuffixCanonicalizesCompatibleLanguageTags(t *testing.T) {
+	tests := []struct {
+		name, suffix, want string
+	}{
+		{"three letter", ".eng", "en"},
+		{"display name", ".Arabic", "ar"},
+		{"region", ".pt-BR", "pt-BR"},
+		{"script", ".zh-Hant", "zh-Hant"},
+		{"missing", ".forced", ""},
+		{"unknown", ".zzzz", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got ExternalSubtitleInfo
+			parseSuffix(tc.suffix, &got)
+			if got.Language != tc.want {
+				t.Fatalf("language = %q, want %q", got.Language, tc.want)
+			}
+		})
+	}
+}

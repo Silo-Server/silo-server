@@ -3,12 +3,9 @@ import type {
   CreateHistoryImportRunRequest,
   EmbyConnectLoginRequest,
   EmbyConnectLoginResponse,
-  HistoryImportRun,
-  HistoryImportSource,
   PlexCheckResponse,
   PlexPinResponse,
 } from "@/api/types";
-import type { components } from "@/api/v2/schema";
 import { v2, V2ProblemError, type V2Body } from "@/api/v2/request";
 import { historyImportKeys } from "./keys";
 import { toast } from "sonner";
@@ -19,13 +16,13 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 
-export type PersonalImportRun = Omit<HistoryImportRun, "status"> & {
-  status: HistoryImportRun["status"] | "canceling";
-  terminal: boolean;
-  cancelable: boolean;
-  location?: string;
-  retryAfterMs?: number;
-};
+export {
+  historyImportRunFromV2,
+  historyImportSourceFromV2,
+  type PersonalImportRun,
+} from "@/api/v2/historyImportTypes";
+import { historyImportRunFromV2, historyImportSourceFromV2 } from "@/api/v2/historyImportTypes";
+import type { PersonalImportRun } from "@/api/v2/historyImportTypes";
 function importContext() {
   const context = captureProfileRequestContext();
   if (!context) throw new StaleApiRequestContextError();
@@ -55,26 +52,6 @@ function runLocation(id: string) {
 }
 
 const STALE_TIME = 15_000;
-
-// The UI keeps the pre-v2 run and source shapes (numeric keys); v2 carries
-// every identifier as an opaque string, so the adapters below convert at the
-// boundary, as profiles.ts does.
-export function historyImportSourceFromV2(
-  source: components["schemas"]["HistoryImportSource"],
-): HistoryImportSource {
-  return { ...source, id: Number(source.id) };
-}
-
-export function historyImportRunFromV2(
-  run: components["schemas"]["HistoryImportRun"],
-): PersonalImportRun {
-  return {
-    ...run,
-    status: run.status as PersonalImportRun["status"],
-    user_id: Number(run.user_id),
-    mapping_id: run.mapping_id === undefined ? undefined : Number(run.mapping_id),
-  };
-}
 
 function createRunBodyToV2(
   body: CreateHistoryImportRunRequest,

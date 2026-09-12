@@ -207,33 +207,14 @@ func playbackSubtitleFontProblem(err error) *Problem {
 type playbackDeliveryWriter struct {
 	http.ResponseWriter
 	request *http.Request
-	status  int
-	failed  bool
+	inner   *streamResponseWriter
 }
 
-func (w *playbackDeliveryWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-func (w *playbackDeliveryWriter) WriteHeader(status int) {
-	if w.status != 0 {
-		if status >= 400 && !w.failed {
-			panic(http.ErrAbortHandler)
-		}
-		return
+func (w *playbackDeliveryWriter) transport() *streamResponseWriter {
+	if w.inner == nil {
+		w.inner = &streamResponseWriter{ResponseWriter: w.ResponseWriter, request: w.request, problemType: playbackDeliveryProblemType, redactHeaders: []string{playbackContentLength, playbackContentEncoding, directDisposition, jobLocationHeader, etagField, playbackLastModified}}
 	}
-	if status < 200 {
-		w.ResponseWriter.WriteHeader(status)
-		return
-	}
-	w.status = status
-	if status < 400 {
-		w.ResponseWriter.WriteHeader(status)
-		return
-	}
-	w.failed = true
-	for _, header := range []string{playbackContentLength, playbackContentEncoding, "Content-Disposition", jobLocationHeader, etagField, playbackLastModified} {
-		w.Header().Del(header)
-	}
-	kind := playbackDeliveryProblemType(status)
-	writeProblem(w.ResponseWriter, w.request, NewProblem(kind, kind.Title))
+	return w.inner
 }
 
 // playbackDeliveryProblemType maps a pre-body failure status of a v1 media
@@ -245,18 +226,7 @@ func playbackDeliveryProblemType(status int) ProblemType {
 	}
 	return TypeForStatus(status)
 }
-func (w *playbackDeliveryWriter) Write(data []byte) (int, error) {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	if w.failed {
-		return len(data), nil
-	}
-	return w.ResponseWriter.Write(data)
-}
-func (w *playbackDeliveryWriter) FlushError() error {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	return http.NewResponseController(w.ResponseWriter).Flush()
-}
+func (w *playbackDeliveryWriter) Unwrap() http.ResponseWriter    { return w.ResponseWriter }
+func (w *playbackDeliveryWriter) WriteHeader(status int)         { w.transport().WriteHeader(status) }
+func (w *playbackDeliveryWriter) Write(data []byte) (int, error) { return w.transport().Write(data) }
+func (w *playbackDeliveryWriter) FlushError() error              { return w.transport().FlushError() }

@@ -1,6 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
-  api,
   getAccessToken,
   getAuthContextVersion,
   getProfileToken,
@@ -10,6 +9,7 @@ import {
   setProfileToken,
   setRefreshToken,
 } from "../api/client";
+import { v2 } from "../api/v2/request";
 import { playerFetch } from "./player-fetch";
 
 afterEach(() => {
@@ -34,13 +34,14 @@ it("shares one refresh between concurrent player and ordinary API requests", asy
     const headers = init?.headers as Record<string, string>;
     expect(headers["X-Profile-Id"]).toBe("profile-original");
     expect(headers["X-Profile-Token"]).toBe("pin-original");
-    return headers.Authorization === "Bearer fresh"
-      ? new Response(null, { status: 204 })
-      : new Response("expired", { status: 401 });
+    if (headers.Authorization !== "Bearer fresh") return new Response("expired", { status: 401 });
+    return String(input) === "/api/v2/profiles"
+      ? Response.json({ items: [] })
+      : new Response(null, { status: 204 });
   });
   vi.stubGlobal("fetch", fetchMock);
   const config = {
-    apiBaseUrl: "/api/v1",
+    apiBaseUrl: "/api/v2",
     getAccessToken,
     getAuthContext: getAuthContextVersion,
     getProfileId: () => "profile-original",
@@ -51,7 +52,7 @@ it("shares one refresh between concurrent player and ordinary API requests", asy
   const requests = Promise.all([
     playerFetch(config, "/playback/heartbeat", { method: "POST" }),
     playerFetch(config, "/subtitles/ai/status"),
-    api("/profiles"),
+    v2("GET /api/v2/profiles"),
   ]);
   await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
   finishRefresh(
@@ -60,7 +61,7 @@ it("shares one refresh between concurrent player and ordinary API requests", asy
       { status: 200 },
     ),
   );
-  await expect(requests).resolves.toEqual([undefined, undefined, undefined]);
+  await expect(requests).resolves.toEqual([undefined, undefined, { items: [] }]);
   expect(
     fetchMock.mock.calls.filter(([input]) => String(input) === "/api/v2/auth/refresh"),
   ).toHaveLength(1);

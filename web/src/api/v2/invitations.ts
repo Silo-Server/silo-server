@@ -1,9 +1,9 @@
+import { type ProfileRequestContextSnapshot } from "@/api/client";
 import {
-  captureProfileRequestContext,
-  isCapturedProfileAuthorityActive,
-  StaleApiRequestContextError,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+  captureAdminAuthority,
+  adminAuthorityScope,
+  requireAdminAuthority,
+} from "./adminAuthority";
 import type { components } from "./schema";
 import { v2, type V2Body } from "./request";
 export type AdminInvitation = components["schemas"]["AdminInvitation"];
@@ -14,17 +14,9 @@ export type InvitationPage = {
   items: AdminInvitation[];
   page: { has_more: boolean; next_cursor?: string };
 };
-export function invitationScope(c = captureProfileRequestContext()) {
-  return c ? `${c.serverOrigin}:${c.authContextVersion}:${c.profileId}` : "unavailable";
-}
-export function captureInvitationAuthority() {
-  const c = captureProfileRequestContext();
-  if (!c) throw new StaleApiRequestContextError();
-  return c;
-}
-function check(c: InvitationAuthority) {
-  if (!isCapturedProfileAuthorityActive(c)) throw new StaleApiRequestContextError();
-}
+export const invitationScope = adminAuthorityScope;
+export const captureInvitationAuthority = captureAdminAuthority;
+const check = requireAdminAuthority;
 export async function getAdminInvitationCapabilities(
   profileContext = captureInvitationAuthority(),
 ) {

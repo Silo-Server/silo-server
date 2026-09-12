@@ -6,9 +6,7 @@ import { DocumentLoader } from "@/reader/readest/libs/document";
 import {
   cacheEbookReaderProgress,
   DEFAULT_READER_SETTINGS,
-  ebookProgressPath,
   ebookReaderProgressQueryKey,
-  ebookReadPath,
   formatReaderProgress,
   isReaderSupportedFile,
   normalizeReaderSettings,
@@ -39,14 +37,6 @@ function version(overrides: Partial<FileVersion>): FileVersion {
 }
 
 describe("FoliateBookReader helpers", () => {
-  it("builds the protected ebook read endpoint", () => {
-    expect(ebookReadPath("ebook 1", 42)).toBe("/ebooks/ebook%201/files/42/read");
-  });
-
-  it("builds the protected ebook progress endpoint", () => {
-    expect(ebookProgressPath("ebook 1")).toBe("/ebooks/ebook%201/progress");
-  });
-
   it("caches saved reader progress under the shared detail query key", () => {
     const client = new QueryClient();
     const saved = {

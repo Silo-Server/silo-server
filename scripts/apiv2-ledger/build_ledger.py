@@ -364,10 +364,10 @@ def disposition_for(r, consumers):
     return 'ported', 'default_ported', 'No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.'
 
 NODE_PORTED_RATIONALE = ("No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: "
-    "this route is retained at its version-neutral path on the node listener and described through the typed manual registry, "
+    "this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), "
     "with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually "
     "and are not aliases into v2). Its section PR confirms retention or retires it individually.")
-NODE_PORTED_NOTE = "v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described in the manual registry, not aliased under /api/v2."
+NODE_PORTED_NOTE = "v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
 
 def media_kind(r, which):
     v = r['request_kind'] if which == 'request' else r['response_media_kind']

@@ -203,7 +203,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				ContainerTrackID: canonicalContainerTrackID(string(s.ID)),
 				Index:            s.Index,
 				Codec:            s.CodecName,
-				Language:         lang.Canonical(s.Tags["language"]),
+				Language:         lang.CompatibleTag(s.Tags["language"]),
 				Title:            firstNonEmpty(s.Tags["title"], strings.ToUpper(s.CodecName)),
 				EmbeddedTitle:    s.Tags["title"],
 				Resolution:       subtitleResolutionLabel(s),

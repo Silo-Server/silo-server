@@ -74,7 +74,7 @@ func registerDeviceSettings(reg *Registry) {
 
 func deviceSettingsActor(ctx context.Context) (handlers.DeviceSettingsActor, *Problem) {
 	userID, profileID, p := viewerIdentity(ctx)
-	return handlers.DeviceSettingsActor{UserID: userID, ProfileID: profileID, VerifyProfile: profileVerifier(ctx)}, p
+	return handlers.DeviceSettingsActor{UserID: userID, ProfileID: profileID, VerifyProfile: verifyHouseholdProfile(ctx)}, p
 }
 
 func (reg *Registry) listDevices(ctx context.Context, cursors *Cursors, in *DeviceSettingsListInput) (*DeviceSettingsListOutput, error) {

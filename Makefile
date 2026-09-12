@@ -203,6 +203,7 @@ MIGRATION_LEDGER := contracts/api/v2/migration.json
 # dynamic_plugin_proxy override). Runs the whole internal/contractledger
 # package so this named step enforces everything the docs attribute to it.
 verify-migration-ledger:
+	@python3 scripts/apiv2-ledger/test_extract_consumers.py
 	@python3 scripts/apiv2-ledger/assign_sections.py --check $(MIGRATION_LEDGER) \
 		|| { echo "::error::$(MIGRATION_LEDGER) section assignments are stale; run scripts/apiv2-ledger/assign_sections.py"; exit 1; }
 	@go test -count=1 ./internal/contractledger/ \

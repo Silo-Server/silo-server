@@ -1,9 +1,4 @@
-import {
-  captureProfileRequestContext,
-  isCapturedProfileAuthorityActive,
-  StaleApiRequestContextError,
-  type ProfileRequestContextSnapshot,
-} from "@/api/client";
+import { type ProfileRequestContextSnapshot } from "@/api/client";
 import type {
   HistoryImportSource,
   HistoryImportUserMapping,
@@ -16,6 +11,11 @@ import type {
 import { v2, V2ProblemError } from "./request";
 import type { components } from "./schema";
 import { historyImportRunFromV2 } from "@/hooks/queries/history-import";
+import {
+  captureAdminAuthority,
+  adminAuthorityScope,
+  requireAdminAuthority,
+} from "./adminAuthority";
 
 type SourceWire = components["schemas"]["AdminHistoryImportSource"];
 type MappingWire = components["schemas"]["AdminHistoryImportMapping"];
@@ -26,18 +26,9 @@ export type AdminImportRun = Omit<HistoryImportRun, "status"> & {
   location?: string;
   retryAfterMs?: number;
 };
-export const adminImportScope = () => {
-  const c = captureProfileRequestContext();
-  return c ? `${c.serverOrigin}:${c.authContextVersion}:${c.profileId}` : "unavailable";
-};
-export function importAuthority() {
-  const c = captureProfileRequestContext();
-  if (!c) throw new StaleApiRequestContextError();
-  return c;
-}
-function checkAuthority(c: ProfileRequestContextSnapshot) {
-  if (!isCapturedProfileAuthorityActive(c)) throw new StaleApiRequestContextError();
-}
+export const adminImportScope = adminAuthorityScope;
+export const importAuthority = captureAdminAuthority;
+const checkAuthority = requireAdminAuthority;
 function tag(etag?: string) {
   if (!etag) throw new Error("Reload this configuration before saving.");
   return etag;
