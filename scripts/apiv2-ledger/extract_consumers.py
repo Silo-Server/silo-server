@@ -159,7 +159,7 @@ def already(repo, fp, ln, np, window=4):
 # ---------------------------------------------------------------------------
 # The optional generic allows one level of nesting (api<Partial<Progress>>(...)).
 WEB_CALL = re.compile(
-    r"\b(api|apiResponse|apiKeepalive|apiDownload|apiBlob|apiWithProfileRequestContext|apiFetch|fetch|apiFormData|apiUpload|playerFetch)\s*(<(?:[^<>]|<[^<>]*>)*>)?\s*\("
+    r"\b(v2|api|apiResponse|apiKeepalive|apiDownload|apiBlob|apiWithProfileRequestContext|apiFetch|fetch|apiFormData|apiUpload|playerFetch)\s*(<(?:[^<>]|<[^<>]*>)*>)?\s*\("
 )
 # Identifiers whose value is the API origin or its ws:// form. A template that
 # starts with one of these is an API path.
@@ -235,8 +235,13 @@ def templates_in(line):
 
 
 def web_api_path(lit, fn):
-    """Turn a literal passed to a web HTTP helper into an /api/v1 path, or None."""
+    """Turn a literal passed to a web HTTP helper into an API path, or None."""
+    if fn == "v2":
+        m = re.match(r"[A-Z]+\s+(/api/v2(?:/|$).*)", lit)
+        return m.group(1) if m else None
     if lit.startswith("/api/v1"):
+        return lit
+    if lit.startswith("/api/v2"):
         return lit
     if WEB_BASE_IDENTS.match(lit):
         rest = collapse_interp(lit)[3:]  # drop the leading {x}
@@ -249,6 +254,9 @@ def web_api_path(lit, fn):
 
 
 def web_method(args):
+    op = re.search(r"^[\s\"'`]*([A-Z]+)\s+/api/v[12](?:/|$)", args)
+    if op:
+        return op.group(1)
     mm = re.search(r"method:\s*[\"'`]([A-Z]+)[\"'`]", args)
     tern = re.search(r"method:\s*[^,}]*\?\s*[\"'`]([A-Z]+)[\"'`]\s*:\s*[\"'`]([A-Z]+)[\"'`]", args)
     if tern:

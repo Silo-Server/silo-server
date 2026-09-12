@@ -349,7 +349,7 @@ type PlaybackSession struct {
 	EpisodeName              string  `json:"episode_name" doc:"Empty unless an episode" example:""`
 	SeasonNumber             *int    `json:"season_number" nullable:"true" doc:"null unless an episode" example:"1"`
 	EpisodeNumber            *int    `json:"episode_number" nullable:"true" doc:"null unless an episode" example:"1"`
-	PosterURL                string  `json:"poster_url" doc:"Where to fetch the poster; empty when there is none" example:"/api/v1/images/poster/42"`
+	PosterURL                string  `json:"poster_url" doc:"Where to fetch the poster; empty when there is none" example:"https://media.example/poster.jpg"`
 	PlayMethod               string  `json:"play_method" doc:"The negotiated method as the node reported it" example:"direct"`
 	ReportingNode            string  `json:"reporting_node" doc:"Identifier of the node serving the stream" example:"api"`
 	NodeDisplayName          string  `json:"node_display_name" doc:"Empty when the node has no display name" example:""`

@@ -42,7 +42,7 @@ func TestAdminBrandingAssetUpload(t *testing.T) {
 		t.Fatal("unauthorized upload reached the service")
 	}
 	rec := do(t, h, http.MethodPost, path, body, with(bearer(adminToken), "Content-Type", ct))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"kind":"wordmark"`) || !strings.Contains(rec.Body.String(), `"ref":"abcdef0123456789.webp"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"kind":"wordmark"`) || !strings.Contains(rec.Body.String(), `"ref":"abcdef0123456789.webp"`) || !strings.Contains(rec.Body.String(), `"url":"/api/v2/branding/assets/wordmark?v=abcdef0123456789.webp"`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	if f.kind != "wordmark" || f.contentType != "image/png" || f.size != 64 {
