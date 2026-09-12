@@ -367,45 +367,6 @@ export class ApiClientError extends Error {
   }
 }
 
-function fallbackApiErrorMessage(res: Response): string {
-  const statusText = res.statusText.trim();
-  if (statusText) {
-    return statusText;
-  }
-  if (res.status === 401) {
-    return "Authentication required.";
-  }
-  if (res.status === 403) {
-    return "You do not have permission to perform this action.";
-  }
-  if (res.status === 404) {
-    return "Requested resource was not found.";
-  }
-  if (res.status >= 500) {
-    return "Request failed. Please try again.";
-  }
-  if (res.status > 0) {
-    return `Request failed (${res.status}).`;
-  }
-  return "Request failed.";
-}
-
-function normalizeApiError(apiErr: Partial<ApiError> | null, res: Response): ApiError {
-  const payload = apiErr && typeof apiErr === "object" ? apiErr : {};
-  const code =
-    typeof payload.error === "string" && payload.error.trim() ? payload.error : "unknown";
-  const message =
-    typeof payload.message === "string" && payload.message.trim()
-      ? payload.message.trim()
-      : fallbackApiErrorMessage(res);
-
-  return {
-    ...payload,
-    error: code,
-    message,
-  };
-}
-
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   const target = name.toLowerCase();
   return Object.keys(headers).some((key) => key.toLowerCase() === target);

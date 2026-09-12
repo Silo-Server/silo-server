@@ -1,13 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bootstrapAccessToken,
-  captureProfileRequestContext,
   getAccessToken,
-  getProfileToken,
-  onProfileUnverified,
   setAccessToken,
-  setProfileId,
-  setProfileToken,
   setRefreshToken,
 } from "./client";
 
