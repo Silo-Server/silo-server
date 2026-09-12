@@ -12,7 +12,7 @@ services:
     shm_size: ${POSTGRES_SHM_SIZE:-2gb}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-silo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-silo}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -107,7 +107,7 @@ services:
     environment:
       MODE: integrated
       PORT: "8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
       REDIS_URL: redis://redis:6379
       SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
       POSTGRES_TUNE: "off"

@@ -5,7 +5,7 @@ services:
     shm_size: ${POSTGRES_SHM_SIZE:-8gb}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-silo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-silo}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
@@ -65,7 +65,7 @@ services:
       # Back it up SEPARATELY from your database dumps; losing it makes encrypted
       # secrets unrecoverable. See docs/architecture/secret-encryption.md.
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
       REDIS_URL: redis://redis:6379
       SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
       POSTGRES_TUNE: ${POSTGRES_TUNE:-auto}
@@ -108,7 +108,7 @@ services:
   #     MODE: proxy
   #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
   #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
   #     REDIS_URL: redis://redis:6379
   #     PORT: "8080"
   #   ports:
@@ -140,7 +140,7 @@ services:
   #     MODE: transcode
   #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
   #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
   #     REDIS_URL: redis://redis:6379
   #     SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
   #     PORT: "8080"
