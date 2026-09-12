@@ -159,13 +159,17 @@ def already(repo, fp, ln, np, window=4):
 # ---------------------------------------------------------------------------
 # The optional generic allows one level of nesting (api<Partial<Progress>>(...)).
 WEB_CALL = re.compile(
-    r"\b(api|apiResponse|apiKeepalive|apiDownload|apiBlob|apiWithProfileRequestContext|apiFetch|fetch|apiFormData|apiUpload|playerFetch)\s*(<(?:[^<>]|<[^<>]*>)*>)?\s*\("
+    r"\b(v2|api|apiResponse|apiKeepalive|apiDownload|apiBlob|apiWithProfileRequestContext|apiFetch|fetch|apiFormData|apiUpload|playerFetch)\s*(<(?:[^<>]|<[^<>]*>)*>)?\s*\("
 )
 # Identifiers whose value is the API origin or its ws:// form. A template that
 # starts with one of these is an API path.
 WEB_BASE_IDENTS = re.compile(r"^\$\{[^}]*(apiBaseUrl|apiBase|wsBase|API_BASE|apiRoot)[^}]*\}")
 WEB_HELPER_DEF = re.compile(r"function\s+(\w+)\s*\(|(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::\s*\w+\s*)?=>")
 WEB_HELPER_RETURN = re.compile(r"(?:return\s+|=>\s*)`([^`]*)`")
+WEB_V2_OPERATION_ASSIGN = re.compile(
+    r"(?:const|let)\s+(\w+)\s*=\s*[^;]*?\"([A-Z]+\s+/api/v2[^\"]+)\"[^;]*?:\s*\"([A-Z]+\s+/api/v2[^\"]+)\"",
+    re.S,
+)
 
 
 def web_helpers(src):
@@ -220,6 +224,41 @@ def first_string_literal(args):
     return None
 
 
+def first_argument(args):
+    """Return the first call argument without inspecting nested arguments."""
+    depth = 0
+    quote = None
+    escaped = False
+    for i, c in enumerate(args):
+        if quote:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == quote:
+                quote = None
+            continue
+        if c in "\"'`":
+            quote = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth = max(0, depth - 1)
+        elif c == "," and depth == 0:
+            return args[:i]
+    return args
+
+
+def v2_operation_literals(args, operation_vars):
+    """Extract every statically known operation key from a v2 call."""
+    expr = first_argument(args).strip()
+    quoted = re.findall(r"[\"'`]([A-Z]+\s+/api/v2(?:/[^\"'`]*)?)['\"`]", expr)
+    if quoted:
+        return quoted
+    var = re.fullmatch(r"(\w+)", expr)
+    return operation_vars.get(var.group(1), []) if var else []
+
+
 def templates_in(line):
     """Yield the body of every top-level template literal on a line (nesting-aware)."""
     i = 0
@@ -235,8 +274,13 @@ def templates_in(line):
 
 
 def web_api_path(lit, fn):
-    """Turn a literal passed to a web HTTP helper into an /api/v1 path, or None."""
+    """Turn a literal passed to a web HTTP helper into an API path, or None."""
+    if fn == "v2":
+        m = re.match(r"[A-Z]+\s+(/api/v2(?:/|$).*)", lit)
+        return m.group(1) if m else None
     if lit.startswith("/api/v1"):
+        return lit
+    if lit.startswith("/api/v2"):
         return lit
     if WEB_BASE_IDENTS.match(lit):
         rest = collapse_interp(lit)[3:]  # drop the leading {x}
@@ -249,6 +293,9 @@ def web_api_path(lit, fn):
 
 
 def web_method(args):
+    op = re.search(r"^[\s\"'`]*([A-Z]+)\s+/api/v[12](?:/|$)", args)
+    if op:
+        return op.group(1)
     mm = re.search(r"method:\s*[\"'`]([A-Z]+)[\"'`]", args)
     tern = re.search(r"method:\s*[^,}]*\?\s*[\"'`]([A-Z]+)[\"'`]\s*:\s*[\"'`]([A-Z]+)[\"'`]", args)
     if tern:
@@ -288,6 +335,9 @@ def web_scan():
     for fp in web_files():
         src = read(fp)
         lines = src.split("\n")
+        operation_vars = {}
+        for om in WEB_V2_OPERATION_ASSIGN.finditer(src):
+            operation_vars[om.group(1)] = [om.group(2), om.group(3)]
         for m in WEB_CALL.finditer(src):
             fn = m.group(1)
             # Drop only the outer angle brackets: strip("<>") would also eat the
@@ -299,19 +349,27 @@ def web_scan():
             line = src.count("\n", 0, m.start()) + 1
             if strip_comment(lines[line - 1]) == "":
                 continue
-            lit = first_string_literal(args)
+            if fn == "v2":
+                literals = v2_operation_literals(args, operation_vars)
+            else:
+                lit = first_string_literal(args)
+                literals = [lit] if lit is not None else []
             via = fn
             head = args.lstrip()
             hm = re.match(r"(\w+)\s*\(", head)
             if hm and hm.group(1) in helpers and (lit is None or not args.lstrip().startswith(("`", '"', "'"))):
                 lit = helpers[hm.group(1)]
                 via = fn + "/helper:" + hm.group(1)
-            if lit is None:
+            if not literals:
                 continue
-            path = web_api_path(lit, fn)
-            if path is None:
-                continue
-            record("web", WEB_BASE, fp, line, web_method(args), path, lit, [generic], via)
+            for lit in literals:
+                path = web_api_path(lit, fn)
+                if path is None:
+                    continue
+                method = web_method(args)
+                if fn == "v2":
+                    method = lit.split(None, 1)[0]
+                record("web", WEB_BASE, fp, line, method, path, lit, [generic], via)
         # Pass 3: URL templates that are not the first argument of a helper call:
         # bare /api/v1 literals (img src, window.open, EventSource) and
         # base-rooted templates (`${wsBase}/...`, `${config.apiBaseUrl}/...`).

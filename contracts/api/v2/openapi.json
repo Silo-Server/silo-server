@@ -30191,7 +30191,7 @@
           "poster_url": {
             "description": "Where to fetch the poster; empty when there is none",
             "examples": [
-              "/api/v1/images/poster/42"
+              "https://media.example/poster.jpg"
             ],
             "type": "string"
           },

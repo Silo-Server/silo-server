@@ -367,45 +367,6 @@ export class ApiClientError extends Error {
   }
 }
 
-function fallbackApiErrorMessage(res: Response): string {
-  const statusText = res.statusText.trim();
-  if (statusText) {
-    return statusText;
-  }
-  if (res.status === 401) {
-    return "Authentication required.";
-  }
-  if (res.status === 403) {
-    return "You do not have permission to perform this action.";
-  }
-  if (res.status === 404) {
-    return "Requested resource was not found.";
-  }
-  if (res.status >= 500) {
-    return "Request failed. Please try again.";
-  }
-  if (res.status > 0) {
-    return `Request failed (${res.status}).`;
-  }
-  return "Request failed.";
-}
-
-function normalizeApiError(apiErr: Partial<ApiError> | null, res: Response): ApiError {
-  const payload = apiErr && typeof apiErr === "object" ? apiErr : {};
-  const code =
-    typeof payload.error === "string" && payload.error.trim() ? payload.error : "unknown";
-  const message =
-    typeof payload.message === "string" && payload.message.trim()
-      ? payload.message.trim()
-      : fallbackApiErrorMessage(res);
-
-  return {
-    ...payload,
-    error: code,
-    message,
-  };
-}
-
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   const target = name.toLowerCase();
   return Object.keys(headers).some((key) => key.toLowerCase() === target);
@@ -419,105 +380,11 @@ function setHeader(headers: Record<string, string>, name: string, value: string)
   headers[name] = value;
 }
 
-interface ParsedApiError {
-  /** Normalized error with guaranteed `error`/`message` fields. */
-  apiErr: ApiError;
-  /** Raw parsed JSON body, or undefined when the body wasn't JSON/empty. */
-  raw?: unknown;
-}
-
-async function parseApiError(res: Response): Promise<ParsedApiError> {
-  let apiErr: Partial<ApiError> = {};
-  let raw: unknown;
-  try {
-    raw = await res.json();
-    if (raw && typeof raw === "object") {
-      apiErr = raw as Partial<ApiError>;
-    }
-  } catch {
-    // response wasn't JSON
-  }
-  return { apiErr: normalizeApiError(apiErr, res), raw };
-}
-
-/** Builds an ApiClientError from a parsed error response, attaching the raw body. */
-function apiClientErrorFrom(status: number, parsed: ParsedApiError): ApiClientError {
-  const err = new ApiClientError(status, parsed.apiErr.error, parsed.apiErr.message, parsed.apiErr);
-  err.body = parsed.raw;
-  return err;
-}
-
-async function readApiResponse<T>(res: Response): Promise<T> {
-  // Handle empty successful responses.
-  if (res.status === 204 || res.status === 205) {
-    return undefined as T;
-  }
-  const text = await res.text();
-  if (text.trim() === "") {
-    return undefined as T;
-  }
-  return JSON.parse(text) as T;
-}
-
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  return readApiResponse<T>(await apiResponse(path, options));
-}
-
-/**
- * Sends a request with one captured account/profile authority. The explicit
- * headers cannot be replaced by the current session, and a stale snapshot is
- * rejected before fetch.
- */
-export async function apiWithProfileRequestContext<T>(
-  path: string,
-  snapshot: ProfileRequestContextSnapshot,
-  options: RequestInit = {},
-): Promise<T> {
-  if (!isProfileRequestContextCurrent(snapshot)) {
-    throw new StaleApiRequestContextError();
-  }
-  const headers = { ...(options.headers as Record<string, string>) };
-  setHeader(headers, "Authorization", `Bearer ${snapshot.accessToken}`);
-  setHeader(headers, "X-Profile-Id", snapshot.profileId);
-  setHeader(headers, "X-Profile-Token", snapshot.profileToken ?? "");
-  const response = await apiResponseInternal(path, { ...options, headers }, snapshot);
-  if (!isProfileRequestContextCurrent(snapshot)) {
-    throw new StaleApiRequestContextError();
-  }
-  return readApiResponse<T>(response);
-}
-
 export class StaleApiRequestContextError extends Error {
   constructor() {
     super("The account or server changed before the queued request could be sent.");
     this.name = "StaleApiRequestContextError";
   }
-}
-
-/** Performs an authenticated API request while leaving the successful body unread. */
-export async function apiResponse(path: string, options: RequestInit = {}): Promise<Response> {
-  return apiResponseInternal(path, options);
-}
-
-async function apiResponseInternal(
-  path: string,
-  options: RequestInit,
-  snapshot?: ProfileRequestContextSnapshot,
-): Promise<Response> {
-  const { res, requestProfileId, requestProfileToken } = await fetchWithSession(
-    `/api/v1${path}`,
-    options,
-    snapshot,
-  );
-
-  if (!res.ok) {
-    const parsed = await parseApiError(res);
-    if (res.status === 403 && parsed.apiErr.error === "profile_unverified") {
-      reportProfileUnverified(requestProfileId, requestProfileToken, snapshot);
-    }
-    throw apiClientErrorFrom(res.status, parsed);
-  }
-  return res;
 }
 
 /** The response of one session-bound fetch plus the profile identity it carried. */
@@ -529,12 +396,10 @@ export interface SessionFetchResult {
 
 /**
  * Sends one request with the current account, profile, and device headers and
- * retries once after a token refresh on 401. The URL is complete (`/api/v1/…`
- * or `/api/v2/…`); the caller owns the status and body handling, which is
- * where the v1 `{error, message}` and v2 Problem Details surfaces differ.
+ * retries once after a token refresh on 401. The URL is complete and the
+ * caller owns the status and body handling.
  *
- * Shared by `api`/`apiResponse` and the v2 request boundary; not for direct
- * use at call sites.
+ * Shared by the v2 request boundary; not for direct use at call sites.
  */
 export async function fetchWithSession(
   url: string,
