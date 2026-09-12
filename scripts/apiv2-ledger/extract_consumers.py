@@ -166,6 +166,10 @@ WEB_CALL = re.compile(
 WEB_BASE_IDENTS = re.compile(r"^\$\{[^}]*(apiBaseUrl|apiBase|wsBase|API_BASE|apiRoot)[^}]*\}")
 WEB_HELPER_DEF = re.compile(r"function\s+(\w+)\s*\(|(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::\s*\w+\s*)?=>")
 WEB_HELPER_RETURN = re.compile(r"(?:return\s+|=>\s*)`([^`]*)`")
+WEB_V2_OPERATION_ASSIGN = re.compile(
+    r"(?:const|let)\s+(\w+)\s*=\s*[^;]*?\"([A-Z]+\s+/api/v2[^\"]+)\"[^;]*?:\s*\"([A-Z]+\s+/api/v2[^\"]+)\"",
+    re.S,
+)
 
 
 def web_helpers(src):
@@ -296,6 +300,9 @@ def web_scan():
     for fp in web_files():
         src = read(fp)
         lines = src.split("\n")
+        operation_vars = {}
+        for om in WEB_V2_OPERATION_ASSIGN.finditer(src):
+            operation_vars[om.group(1)] = [om.group(2), om.group(3)]
         for m in WEB_CALL.finditer(src):
             fn = m.group(1)
             # Drop only the outer angle brackets: strip("<>") would also eat the
@@ -307,19 +314,33 @@ def web_scan():
             line = src.count("\n", 0, m.start()) + 1
             if strip_comment(lines[line - 1]) == "":
                 continue
-            lit = first_string_literal(args)
+            if fn == "v2":
+                first = args.lstrip()
+                lit = first_string_literal(first) if first[:1] in ('"', "'", "`") else None
+                literals = [lit] if lit is not None else []
+                if not literals:
+                    var = re.match(r"(\w+)\s*(?:,|$)", first)
+                    if var:
+                        literals = operation_vars.get(var.group(1), [])
+            else:
+                lit = first_string_literal(args)
+                literals = [lit] if lit is not None else []
             via = fn
             head = args.lstrip()
             hm = re.match(r"(\w+)\s*\(", head)
             if hm and hm.group(1) in helpers and (lit is None or not args.lstrip().startswith(("`", '"', "'"))):
                 lit = helpers[hm.group(1)]
                 via = fn + "/helper:" + hm.group(1)
-            if lit is None:
+            if not literals:
                 continue
-            path = web_api_path(lit, fn)
-            if path is None:
-                continue
-            record("web", WEB_BASE, fp, line, web_method(args), path, lit, [generic], via)
+            for lit in literals:
+                path = web_api_path(lit, fn)
+                if path is None:
+                    continue
+                method = web_method(args)
+                if fn == "v2":
+                    method = lit.split(None, 1)[0]
+                record("web", WEB_BASE, fp, line, method, path, lit, [generic], via)
         # Pass 3: URL templates that are not the first argument of a helper call:
         # bare /api/v1 literals (img src, window.open, EventSource) and
         # base-rooted templates (`${wsBase}/...`, `${config.apiBaseUrl}/...`).
