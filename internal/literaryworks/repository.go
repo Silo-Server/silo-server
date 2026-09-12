@@ -194,6 +194,12 @@ func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, 
 // on media_item_provider_ids, series on the format-specific series table) instead
 // of filtering on lateral aggregate output. The opposite format is fixed by the
 // source type, so the series lookup targets a single concrete table.
+//
+// The title/provider/series predicates are combined as a UNION of independently
+// indexable branches rather than one OR: mixing a column predicate with EXISTS
+// subqueries in an OR forces the planner to walk every ebook/audiobook row and
+// apply the OR as a filter (~250k rows per call on a large library), while each
+// UNION branch resolves through its own index in a handful of buffer hits.
 func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem, limit int) ([]string, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
@@ -204,51 +210,67 @@ func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem
 		seriesTable = "audiobook_series"
 	}
 	args := []any{source.ContentID, source.Type}
-	matchFilters := make([]string, 0, 3)
+	branches := make([]string, 0, 3)
 	if strings.TrimSpace(source.Title) != "" {
 		args = append(args, source.Title)
-		matchFilters = append(matchFilters, fmt.Sprintf("LOWER(mi.title) = LOWER($%d)", len(args)))
+		branches = append(branches, fmt.Sprintf(`
+			SELECT mi.content_id, mi.title
+			FROM media_items mi
+			WHERE mi.type IN ('ebook', 'audiobook')
+			  AND mi.type <> $2
+			  AND LOWER(mi.title) = LOWER($%d)`, len(args)))
 	}
 	for provider, providerID := range source.ExternalIDs {
 		if provider == "" || provider == "asin" || providerID == "" {
 			continue
 		}
 		args = append(args, provider, providerID)
-		matchFilters = append(matchFilters, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM media_item_provider_ids mip WHERE mip.content_id = mi.content_id AND mip.provider = $%d AND mip.provider_id = $%d)",
-			len(args)-1,
-			len(args),
-		))
+		branches = append(branches, fmt.Sprintf(`
+			SELECT mi.content_id, mi.title
+			FROM media_item_provider_ids mip
+			JOIN media_items mi ON mi.content_id = mip.content_id
+			WHERE mip.provider = $%d
+			  AND mip.provider_id = $%d
+			  AND mi.type IN ('ebook', 'audiobook')
+			  AND mi.type <> $2`, len(args)-1, len(args)))
 	}
 	if strings.TrimSpace(source.SeriesName) != "" && source.SeriesIndex != nil {
 		args = append(args, source.SeriesName, *source.SeriesIndex)
-		matchFilters = append(matchFilters, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM %s bs WHERE bs.content_id = mi.content_id AND LOWER(bs.series_name) = LOWER($%d) AND bs.series_index = $%d)",
-			seriesTable,
-			len(args)-1,
-			len(args),
-		))
+		branches = append(branches, fmt.Sprintf(`
+			SELECT mi.content_id, mi.title
+			FROM %s bs
+			JOIN media_items mi ON mi.content_id = bs.content_id
+			WHERE LOWER(bs.series_name) = LOWER($%d)
+			  AND bs.series_index = $%d
+			  AND mi.type IN ('ebook', 'audiobook')
+			  AND mi.type <> $2`, seriesTable, len(args)-1, len(args)))
 	}
-	matchWhere := ""
-	if len(matchFilters) > 0 {
-		matchWhere = " AND (" + strings.Join(matchFilters, " OR ") + ")"
+	// Without any match predicate every opposite-format item is a candidate;
+	// keep that as the (rare) fallback branch so behavior is unchanged.
+	if len(branches) == 0 {
+		branches = append(branches, `
+			SELECT mi.content_id, mi.title
+			FROM media_items mi
+			WHERE mi.type IN ('ebook', 'audiobook')
+			  AND mi.type <> $2`)
 	}
 	args = append(args, limit)
 	rows, err := r.pool.Query(ctx, `
-		SELECT mi.content_id
-		FROM media_items mi
-		WHERE mi.content_id <> $1
-		  AND mi.type IN ('ebook', 'audiobook')
-		  AND mi.type <> $2
+		WITH candidates AS (`+strings.Join(branches, `
+			UNION`)+`
+		)
+		SELECT c.content_id
+		FROM candidates c
+		WHERE c.content_id <> $1
 		  AND NOT EXISTS (
 			SELECT 1 FROM literary_work_match_decisions d
 			WHERE d.decision = 'ignored'
 			  AND (
-				(d.source_content_id = $1 AND d.target_content_id = mi.content_id)
-				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
+				(d.source_content_id = $1 AND d.target_content_id = c.content_id)
+				OR (d.source_content_id = c.content_id AND d.target_content_id = $1)
 			  )
-		  )`+matchWhere+`
-		ORDER BY mi.title ASC, mi.content_id ASC
+		  )
+		ORDER BY c.title ASC, c.content_id ASC
 		LIMIT $`+fmt.Sprint(len(args))+`
 	`, args...)
 	if err != nil {
