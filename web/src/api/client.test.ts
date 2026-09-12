@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  bootstrapAccessToken,
-  getAccessToken,
-  setAccessToken,
-  setRefreshToken,
-} from "./client";
+import { bootstrapAccessToken, getAccessToken, setAccessToken, setRefreshToken } from "./client";
 
 describe("bootstrapAccessToken", () => {
   beforeEach(() => {
