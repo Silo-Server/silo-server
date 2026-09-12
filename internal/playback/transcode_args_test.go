@@ -1196,12 +1196,86 @@ func TestBuildFFmpegArgs_BitmapBurnInNVENCStaysOnCPUOverlay(t *testing.T) {
 	})
 
 	joined := strings.Join(args, " ")
-	want := "-filter_complex [0:v:0]hwdownload,format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"
+	want := "-filter_complex [0:v:0]hwdownload,format=nv12,format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"
 	if !strings.Contains(joined, want) {
 		t.Fatalf("nvenc bitmap burn-in should keep the CPU roundtrip %q: %s", want, joined)
 	}
 	if strings.Contains(joined, "overlay_vaapi") {
 		t.Fatalf("nvenc bitmap burn-in must not use the VAAPI GPU overlay: %s", joined)
+	}
+}
+
+// A CUDA surface can only be downloaded in the software format its frames
+// context was created with, so a 10-bit source must come off the GPU as p010le
+// and reach yuv420p through a second conversion. Requesting yuv420p from
+// hwdownload itself fails the graph before the encoder opens, which took out
+// every 10-bit HEVC burn-in attempt.
+func TestBuildFFmpegArgs_BitmapBurnInNVENCDownloadsSourceDepth(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:           "/media/movie.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-pgs-nvenc-10bit",
+		SourceVideoCodec:    "hevc",
+		SourceVideoProfile:  "main10",
+		SourceVideoBitDepth: 10,
+		TargetCodecVideo:    "h264",
+		TargetCodecAudio:    "aac",
+		SegmentDuration:     2,
+		HWAccel:             "nvenc",
+		TargetResolution:    "720p",
+		SubtitleTrackIndex:  0,
+		SubtitleBurnIn:      true,
+		SubtitleCodec:       "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	want := "-filter_complex [0:v:0]hwdownload,format=p010le,format=yuv420p[vmain];[vmain][0:s:0]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("10-bit nvenc bitmap burn-in should download as p010le %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "hwdownload,format=yuv420p") {
+		t.Fatalf("hwdownload must never be asked for yuv420p: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_TextBurnInHardwareDownloadsSourceDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		hwAccel  string
+		bitDepth int
+		wantVF   string
+	}{
+		{name: "NVENC8Bit", hwAccel: "nvenc", bitDepth: 8, wantVF: "hwdownload,format=nv12,format=yuv420p,scale=-2:720,subtitles="},
+		{name: "NVENC10Bit", hwAccel: "nvenc", bitDepth: 10, wantVF: "hwdownload,format=p010le,format=yuv420p,scale=-2:720,subtitles="},
+		{name: "VAAPI10Bit", hwAccel: "vaapi", bitDepth: 10, wantVF: "hwdownload,format=p010le,format=yuv420p,scale=-2:720,subtitles="},
+		{name: "QSV10Bit", hwAccel: "qsv", bitDepth: 10, wantVF: "hwdownload,format=p010le,format=yuv420p,scale=-2:720,subtitles="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildFFmpegArgs(TranscodeOpts{
+				InputPath:           "/media/movie.mkv",
+				OutputDir:           "/tmp/out",
+				SessionID:           "session-srt-" + tc.name,
+				SourceVideoCodec:    "hevc",
+				SourceVideoProfile:  "main10",
+				SourceVideoBitDepth: tc.bitDepth,
+				TargetCodecVideo:    "h264",
+				TargetCodecAudio:    "aac",
+				SegmentDuration:     2,
+				HWAccel:             tc.hwAccel,
+				TargetResolution:    "720p",
+				SubtitleTrackIndex:  1,
+				SubtitleBurnIn:      true,
+				SubtitleCodec:       "subrip",
+			})
+
+			joined := strings.Join(args, " ")
+			if !strings.Contains(joined, tc.wantVF) {
+				t.Fatalf("%s text burn-in should download as the source depth %q: %s", tc.hwAccel, tc.wantVF, joined)
+			}
+			if strings.Contains(joined, "hwdownload,format=yuv420p") {
+				t.Fatalf("hwdownload must never be asked for yuv420p: %s", joined)
+			}
+		})
 	}
 }
 

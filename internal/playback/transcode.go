@@ -1566,6 +1566,17 @@ func ResolveAACOutputV3(targetChannels, targetBitrateKbps int) (int, int) {
 	}
 }
 
+// hwSurfaceToCPUFilter brings hardware-decoded frames to the CPU for software
+// subtitle rendering. It is two conversions, not one: hwdownload can only write
+// the surface's own software format (nv12 at 8-bit, p010le at 10-bit), so the
+// yuv420p that overlay and libass need has to come from a separate format=
+// after the download. Asking hwdownload for yuv420p directly fails the graph
+// with "Invalid output format yuv420p for hwframe download" before the encoder
+// ever opens.
+func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
+	return "hwdownload,format=" + tonemap.SurfaceDownloadPixelFormat(opts.SourceVideoBitDepth) + ",format=yuv420p"
+}
+
 // appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle
 // codecs (PGS/VOBSUB/DVB). libass's subtitles= filter cannot render bitmap
 // tracks, so the decoded subtitle stream is composited onto the video with an
@@ -1628,7 +1639,7 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 			graph = softwareDecodedBitmapBurnInGraph(opts, subInput, false)
 		} else if opts.HWAccel == transcodeHWNVENC {
 			// Download to CPU for the overlay, then re-upload to CUDA.
-			graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
+			graph = "[0:v:0]" + hwSurfaceToCPUFilter(opts) + "[vmain];[vmain]" + cpuFilters +
 				",format=nv12,hwupload_cuda[vout]"
 		} else {
 			// CPU encoding: overlay directly on decoded frames.
@@ -1659,7 +1670,8 @@ func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv b
 // codecs take the overlay path in appendBitmapSubtitleBurnInArgs.
 // For CPU encoding, the filter chain is: [scale,]subtitles.
 // For QSV/VAAPI, frames must be downloaded from hardware, processed on CPU,
-// then re-uploaded: hwdownload → format=yuv420p → [scale,] subtitles → hwupload → hwmap.
+// then re-uploaded: hwdownload → format=nv12|p010le → format=yuv420p →
+// [scale,] subtitles → hwupload → hwmap.
 func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 	scale := resolutionToScale(opts.TargetResolution)
 	subtitleInputPath := opts.InputPath
@@ -1687,7 +1699,7 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 		// VAAPI→QSV pipeline: download from VAAPI surface to CPU, apply subtitle
 		// and scale filters, convert to nv12 (required by hwupload for VAAPI
 		// surfaces), upload back to VAAPI, then map to QSV for the encoder.
-		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
+		vf := hwSurfaceToCPUFilter(opts) + "," + cpuFilters + ",format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
 		args = append(args, "-vf", vf)
 	case "vaapi":
 		if opts.SoftwareVideoDecode {
@@ -1695,7 +1707,7 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 			return append(args, "-vf", vf)
 		}
 		// VAAPI-only: download, apply CPU filters, convert to nv12, upload back.
-		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload"
+		vf := hwSurfaceToCPUFilter(opts) + "," + cpuFilters + ",format=nv12,hwupload"
 		args = append(args, "-vf", vf)
 	case transcodeHWNVENC:
 		if opts.SoftwareVideoDecode {
@@ -1705,7 +1717,7 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 			return append(args, "-vf", vf)
 		}
 		// NVENC/CUDA: download to CPU for subtitle rendering, then upload back.
-		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload_cuda"
+		vf := hwSurfaceToCPUFilter(opts) + "," + cpuFilters + ",format=nv12,hwupload_cuda"
 		args = append(args, "-vf", vf)
 	default:
 		// CPU encoding: filters run directly on decoded frames.
