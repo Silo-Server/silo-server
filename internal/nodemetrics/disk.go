@@ -21,8 +21,10 @@ const diskProbeTimeout = 5 * time.Second
 // fsStats is one filesystem's capacity, in the portable shape this package
 // needs from statfs(2).
 type fsStats struct {
-	UsedBytes  uint64
-	TotalBytes uint64
+	InodesUsed  uint64
+	InodesTotal uint64
+	UsedBytes   uint64
+	TotalBytes  uint64
 	// FSID identifies the filesystem itself, so two paths on one volume — the
 	// common case where scratch and media live on the same disk — are reported
 	// once instead of twice with identical numbers. It is empty when the
@@ -246,6 +248,7 @@ func (s *Sampler) probeDisk(entry *diskEntry) {
 func (s *Sampler) diskStats(paths []string, now time.Time) []DiskStats {
 	s.diskMu.Lock()
 	defer s.diskMu.Unlock()
+	s.diskDetails = nil
 
 	wanted := make(map[string]bool, len(paths))
 	for _, path := range paths {
@@ -285,6 +288,9 @@ func (s *Sampler) diskStats(paths []string, now time.Time) []DiskStats {
 					continue
 				}
 				seenFS[entry.good.FSID] = true
+			}
+			if entry.good.InodesTotal > 0 {
+				s.diskDetails = append(s.diskDetails, DiskDetails{Role: role, InodesUsed: new(entry.good.InodesUsed), InodesTotal: new(entry.good.InodesTotal)})
 			}
 			out = append(out, DiskStats{
 				Path:    path,

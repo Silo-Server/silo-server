@@ -18,6 +18,7 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	sdkruntime "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
+	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
 type Config struct {
@@ -67,6 +68,8 @@ type Host struct {
 
 type instance struct {
 	process      *plugin.Client
+	command      *exec.Cmd
+	usageOnce    sync.Once
 	protocol     plugin.ClientProtocol
 	client       *Client
 	cancelHealth context.CancelFunc
@@ -119,18 +122,29 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	}
 	h.mu.Unlock()
 
+	command := exec.Command(req.BinaryPath)
 	process := plugin.NewClient(&plugin.ClientConfig{
 		HandshakeConfig: HandshakeConfig(),
+		GRPCDialOptions: []grpc.DialOption{grpc.WithChainUnaryInterceptor(observePluginRPC)},
 		AllowedProtocols: []plugin.Protocol{
 			plugin.ProtocolGRPC,
 		},
-		Cmd:        exec.Command(req.BinaryPath),
+		Cmd:        command,
 		Plugins:    sdkruntime.DefaultPluginSet(sdkruntime.CapabilityServers{}),
 		Logger:     h.logger,
 		Stderr:     os.Stderr,
 		SyncStdout: os.Stdout,
 		SyncStderr: os.Stderr,
 	})
+	retained := false
+	defer func() {
+		if !retained {
+			// Kill waits for go-plugin's existing Wait goroutine before it
+			// returns. Only then is ProcessState safe to read.
+			process.Kill()
+			processmetrics.Record(processmetrics.Plugin, command.ProcessState, nil, nil)
+		}
+	}()
 
 	protocol, err := process.Client()
 	if err != nil {
@@ -194,6 +208,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	healthCtx, healthCancel := context.WithCancel(context.Background())
 	instance := &instance{
 		process:      process,
+		command:      command,
 		protocol:     protocol,
 		client:       client,
 		cancelHealth: healthCancel,
@@ -202,6 +217,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	h.mu.Lock()
 	h.instances[req.InstallationID] = instance
 	h.mu.Unlock()
+	retained = true
 
 	go h.monitorHealth(healthCtx, req.InstallationID, instance)
 
@@ -311,6 +327,11 @@ func (h *Host) stopInstance(instance *instance) {
 	}
 	if instance.process != nil {
 		instance.process.Kill()
+		instance.usageOnce.Do(func() {
+			if instance.command != nil {
+				processmetrics.Record(processmetrics.Plugin, instance.command.ProcessState, nil, nil)
+			}
+		})
 	}
 }
 
@@ -334,7 +355,7 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 
 	streamID := broker.NextId()
 	go broker.AcceptAndServe(streamID, func(opts []grpc.ServerOption) *grpc.Server {
-		s := grpc.NewServer(opts...)
+		s := grpc.NewServer(append(opts, grpc.ChainUnaryInterceptor(observePluginCallback))...)
 		srv := NewRuntimeHostServerWithServices(
 			h.eventPublisher,
 			h.libraryLister,

@@ -68,9 +68,20 @@ export function useBuildInfo() {
  * same "not being sampled" state it uses for a non-Linux host.
  */
 export function useSystemResources(enabled = true) {
+  const capabilities = useQuery({
+    queryKey: [...adminKeys.systemResources(), "capabilities"],
+    queryFn: () => v2("GET /api/v2/admin/system/resources/capabilities"),
+    staleTime: 60_000,
+    retry: false,
+    enabled,
+  });
   return useQuery({
     queryKey: adminKeys.systemResources(),
     queryFn: () => v2("GET /api/v2/admin/system/resources"),
+    select: (data) =>
+      capabilities.data?.state === "available" && capabilities.data.instance_attribution
+        ? data
+        : { ...data, attribution: undefined },
     refetchInterval: SYSTEM_RESOURCES_REFRESH_MS,
     staleTime: SYSTEM_RESOURCES_REFRESH_MS,
     retry: false,

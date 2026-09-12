@@ -118,6 +118,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchsync/providers/simkl"
 	"github.com/Silo-Server/silo-server/internal/watchsync/providers/trakt"
 	"github.com/Silo-Server/silo-server/internal/worker"
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
 	"github.com/Silo-Server/silo-server/migrations"
 	siloweb "github.com/Silo-Server/silo-server/web"
 )
@@ -436,7 +437,7 @@ func configureOperationalLogging(
 	var operationalWriter opslog.Writer
 	operationalConsumer := opslog.NewConsumer(pool, nil, logStreamHub)
 	if redisCfg.URL != "" {
-		redisClient, redisErr := cache.NewRedisClient(redisCfg)
+		redisClient, redisErr := cache.NewRedisClientForRole(redisCfg, "worker")
 		if redisErr == nil && redisClient != nil {
 			operationalWriter = opslog.NewRedisWriter(redisClient)
 			operationalConsumer = opslog.NewConsumer(pool, redisClient, logStreamHub)
@@ -628,6 +629,9 @@ func normalizeLoadedConfig(cfg *config.Config) {
 
 // main starts the Silo server or a requested maintenance command.
 func main() {
+	if err := telemetry.ConfigureRuntimeMetrics(); err != nil {
+		slog.Warn("runtime metrics configuration failed", "error", err)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "compat-web" {
 		if err := runCompatWebCommand(context.Background(), os.Args[2:]); err != nil {
 			log.Fatalf("compat-web: %v", err)
@@ -667,6 +671,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)
 	}
+	stopDebugListener, err := startBootstrapDebugListener(!*migrateOnly && !*migrateStatus && *migrateDownTo < 0)
+	if err != nil {
+		log.Fatalf("local profiling configuration: %v", err)
+	}
+	defer stopDebugListener()
 
 	// Construct the at-rest credential cipher from SECRET_KEY immediately after
 	// bootstrap, before any settings repo is built. It is threaded explicitly as
@@ -679,11 +688,11 @@ func main() {
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool with default max connections)
 	bootstrapDBCfg := config.DatabaseConfig{URL: bc.DatabaseURL, MaxConnections: 20}
-	pool, err := database.NewPool(ctx, bootstrapDBCfg)
+	pool, err := database.NewPoolForRole(ctx, bootstrapDBCfg, "application")
 	if err != nil {
 		log.Fatalf("database pool: %v", err)
 	}
-	defer pool.Close()
+	defer func() { database.ClosePool(pool) }()
 	slog.Info("connected to PostgreSQL")
 
 	if *migrateStatus {
@@ -827,8 +836,8 @@ func main() {
 
 	// Step 8: Recreate pool if max_connections differs from bootstrap default
 	if cfg.Database.MaxConnections != bootstrapDBCfg.MaxConnections {
-		pool.Close()
-		pool, err = database.NewPool(ctx, cfg.Database)
+		database.ClosePool(pool)
+		pool, err = database.NewPoolForRole(ctx, cfg.Database, "application")
 		if err != nil {
 			log.Fatalf("recreating pool with configured max_connections: %v", err)
 		}
@@ -891,6 +900,8 @@ func main() {
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
+	stopDebugOnCancel := context.AfterFunc(appCtx, stopDebugListener)
+	defer stopDebugOnCancel()
 	var streamTelemetryRegistry *streamtelemetry.Registry
 	var streamTelemetryViewCache *streamtelemetry.ViewCache
 	restartReqCh := make(chan struct{}, 1)
@@ -923,7 +934,7 @@ func main() {
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
-		redisClient, err := cache.NewRedisClient(cfg.Redis)
+		redisClient, err := cache.NewRedisClientForRole(cfg.Redis, "worker")
 		if err != nil || redisClient == nil {
 			slog.Error("redis is required for this mode", "mode", mode, "error", err)
 			os.Exit(1)
@@ -1044,7 +1055,7 @@ func main() {
 
 		_ = operationalWriter
 		_ = opsRepo
-		startStandaloneServer(cfg.Server.Listen, handler, shutdownStandalone)
+		startStandaloneServer(cfg.Server.Listen, handler, appCancel, shutdownStandalone)
 		return
 	}
 
@@ -1098,11 +1109,14 @@ func main() {
 	// Shared Redis client for components needing raw Redis beyond the event
 	// bus (websocket handshake tickets, session listing). Nil on Redis-less
 	// deployments; consumers fall back to in-process implementations.
-	apiRedisClient, apiRedisErr := cache.NewRedisClient(cfg.Redis)
+	if err := workmetrics.StartQueueSampler(appCtx, pool); err != nil {
+		slog.Warn("queue metrics registration failed", "error", err)
+	}
+	apiRedisClient, apiRedisErr := cache.NewRedisClientForRole(cfg.Redis, "api")
 	if apiRedisErr != nil {
 		slog.Warn("redis client init failed; multi-node websocket tickets disabled", "error", apiRedisErr)
 	} else if apiRedisClient != nil {
-		defer func() { _ = apiRedisClient.Close() }()
+		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
 
 	if mode == "" || mode == "integrated" || mode == "api" {
@@ -2256,7 +2270,7 @@ func main() {
 		isMemory := true
 
 		if cfg.RateLimit.Backend == "redis" {
-			redisClient, redisErr := cache.NewRedisClient(cfg.Redis)
+			redisClient, redisErr := cache.NewRedisClientForRole(cfg.Redis, "tasks")
 			if redisErr != nil {
 				log.Fatalf("failed to create Redis client for rate limiting: %v", redisErr)
 			}
@@ -2264,7 +2278,7 @@ func main() {
 				perKeyLimiter = ratelimit.NewRedisLimiter(redisClient)
 				globalLimiter = ratelimit.NewRedisLimiter(redisClient)
 				isMemory = false
-				defer redisClient.Close()
+				defer func() { _ = cache.CloseRedisClient(redisClient) }()
 			}
 		}
 
@@ -2338,12 +2352,12 @@ func main() {
 	activityConsumer := activitylog.NewConsumer(pool, nil, logStreamHub)
 
 	if cfg.Redis.URL != "" {
-		actRedisClient, actRedisErr := cache.NewRedisClient(cfg.Redis)
+		actRedisClient, actRedisErr := cache.NewRedisClientForRole(cfg.Redis, "activity")
 		if actRedisErr == nil && actRedisClient != nil {
 			activityWriter = activitylog.NewRedisWriter(actRedisClient)
 			activityConsumer = activitylog.NewConsumer(pool, actRedisClient, logStreamHub)
 			go activityConsumer.RunRedis(appCtx)
-			defer actRedisClient.Close()
+			defer func() { _ = cache.CloseRedisClient(actRedisClient) }()
 		}
 	}
 
@@ -2857,9 +2871,14 @@ func main() {
 
 	router := api.NewRouter(deps)
 
-	// Step 8: Build the handler the primary port serves — /metrics, the API
-	// router, and the frontend. See newRootHandler.
+	// Step 8: Build the handler the primary port serves — the API router and
+	// frontend. Metrics use a separate opt-in listener; see newRootHandler.
 	rootHandler := newRootHandler(router)
+	stopMetricsListener, err := startMetricsListener(true)
+	if err != nil {
+		log.Fatalf("metrics listener: %v", err)
+	}
+	defer stopMetricsListener()
 
 	// Step 9: Start background workers (if needed).
 	var sessionCleaner *worker.SessionCleaner
@@ -3265,7 +3284,7 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
 // It listens on the given address, handles graceful shutdown on SIGTERM/SIGINT.
-func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(context.Context) error) {
+func startStandaloneServer(addr string, handler http.Handler, appCancel context.CancelFunc, shutdownWork func(context.Context) error) {
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      handler,
@@ -3284,6 +3303,7 @@ func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigCh)
 
 	select {
 	case sig := <-sigCh:
@@ -3291,6 +3311,7 @@ func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(
 	case serverErr := <-errCh:
 		slog.Error("server error, shutting down", "error", serverErr)
 	}
+	appCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -3316,6 +3337,7 @@ func newS3ClientIfConfigured(cfg s3client.BucketConfig) *s3client.Client {
 
 func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 	if s3Public := newS3ClientIfConfigured(s3client.BucketConfig{
+		Role:           "metadata",
 		Endpoint:       cfg.S3.Public.Endpoint,
 		PublicEndpoint: cfg.S3.Public.ReadEndpoint,
 		Region:         cfg.S3.Public.Region,
@@ -3344,6 +3366,7 @@ func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 	}
 
 	if s3Private := newS3ClientIfConfigured(s3client.BucketConfig{
+		Role:      "operational",
 		Endpoint:  cfg.S3.Private.Endpoint,
 		Region:    cfg.S3.Private.Region,
 		Bucket:    cfg.S3.Private.Bucket,
@@ -3364,6 +3387,7 @@ func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 	}
 
 	if s3UserDB := newS3ClientIfConfigured(s3client.BucketConfig{
+		Role:      "userstore",
 		Endpoint:  cfg.S3.UserDB.Endpoint,
 		Region:    cfg.S3.UserDB.Region,
 		Bucket:    cfg.S3.UserDB.Bucket,

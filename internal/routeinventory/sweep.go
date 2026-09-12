@@ -58,6 +58,8 @@ var handlerConsumingCalls = map[string]bool{
 var defaultMuxRegistrars = map[string]bool{methodHandle: true, methodHandleFunc: true}
 
 // defaultMuxImports register on http.DefaultServeMux at init time.
+const profilingImportAlias = "pprof"
+
 var defaultMuxImports = map[string]bool{"net/http/pprof": true, "expvar": true}
 
 type sweeper struct {
@@ -97,7 +99,7 @@ func (s *sweeper) file(file *ast.File) {
 	audited := s.a.set.packages[s.pkg.Dir] != nil
 	for _, spec := range file.Imports {
 		path := strings.Trim(spec.Path.Value, `"`)
-		if defaultMuxImports[path] {
+		if defaultMuxImports[path] && !s.allowedProfilingImport(rel, spec, path) {
 			s.report(spec, "%s imports %s, which registers on http.DefaultServeMux at init; "+
 				"nothing may serve that mux, so the import is refused", rel, path)
 		}
@@ -122,6 +124,21 @@ func (s *sweeper) file(file *ast.File) {
 		allowed := s.a.enteredFuncs[fn] || s.excluded[rel+"#"+name]
 		s.visit(fn, "in "+name, allowed)
 	}
+}
+
+// Importing pprof still initializes DefaultServeMux, which remains forbidden
+// everywhere. Only its named standard handlers in the sealed, inventoried
+// operational listener are permitted; this grants no router/mux exemption.
+func (s *sweeper) allowedProfilingImport(rel string, spec *ast.ImportSpec, path string) bool {
+	if path != "net/http/pprof" || rel != debugServerHandlerFile || spec.Name == nil || spec.Name.Name != profilingImportAlias {
+		return false
+	}
+	for _, listener := range s.a.cfg.Listeners {
+		if listener.ID == ListenerDebug && listener.Dir == internalDebugServerDir && listener.Func == "newHandler" && listener.Constructor == "newMux" && listener.Kind == ListenerKindServeMux && listener.Recv == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // visit applies the refusals to one declaration. Productions are allowed

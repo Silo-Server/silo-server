@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
 // ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
@@ -70,6 +71,7 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	)
 
 	output, err := cmd.Output()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, ctx.Err())
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
 	}
@@ -479,11 +481,14 @@ func probeVideoPacketDuration(
 		return 0, fmt.Errorf("opening ffprobe packet output: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Probe, nil, err, ctx.Err())
 		return 0, fmt.Errorf("starting ffprobe packet scan: %w", err)
 	}
 
 	duration := estimateVideoPacketDuration(stdout, frameRate)
-	if err := cmd.Wait(); err != nil {
+	waitErr := cmd.Wait()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, ctx.Err())
+	if err := waitErr; err != nil {
 		return 0, fmt.Errorf("ffprobe packet scan failed for %s: %w", filePath, err)
 	}
 	return duration, nil

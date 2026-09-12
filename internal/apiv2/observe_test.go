@@ -43,33 +43,19 @@ func TestV1PrefixSkipMatchesDelegation(t *testing.T) {
 	}
 }
 
-func isolateClientLabels(t *testing.T) {
-	t.Helper()
-	clientLabels.Lock()
-	previous := clientLabels.seen
-	clientLabels.seen = map[string]bool{}
-	clientLabels.Unlock()
-	t.Cleanup(func() {
-		clientLabels.Lock()
-		clientLabels.seen = previous
-		clientLabels.Unlock()
-	})
-}
-
 func TestRequestLabelsAreStable(t *testing.T) {
-	isolateClientLabels(t)
 	buf := captureLogs(t)
 	h := newTestHandler(t, parityDeps(false))
 
 	// A public success by a named client.
 	before := counterValue(t, requestsTotal, prometheus.Labels{"api_major": "2", "operation_id": "getSystemInfo", "method": "GET",
-		"status_class": "2xx", "error_code": "none", "auth_class": "public", "client": "Silo Apple TV"})
+		"status_class": "2xx", "error_code": "none", "auth_class": "public", "client": "apple"})
 	rec := do(t, h, http.MethodGet, "/api/v2/system/info", "", map[string]string{"X-Silo-Client": " Silo Apple TV\t", "X-Silo-Client-Version": "1.2.3"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
 	after := counterValue(t, requestsTotal, prometheus.Labels{"api_major": "2", "operation_id": "getSystemInfo", "method": "GET",
-		"status_class": "2xx", "error_code": "none", "auth_class": "public", "client": "Silo Apple TV"})
+		"status_class": "2xx", "error_code": "none", "auth_class": "public", "client": "apple"})
 	if after != before+1 {
 		t.Fatalf("public success series: %v -> %v", before, after)
 	}
@@ -172,20 +158,15 @@ func TestSecretBearingRequestIsNotLogged(t *testing.T) {
 }
 
 func TestClientLabelIsBounded(t *testing.T) {
-	isolateClientLabels(t)
-	for i := 0; i < maxClientLabelValues; i++ {
-		if got := clientLabel("client-" + strings.Repeat("x", i%7) + string(rune('a'+i%26)) + string(rune('a'+i/26))); got == labelOther {
-			t.Fatalf("bucketed before the bound at %d", i)
+	for i := 0; i < 10000; i++ {
+		if got := clientLabel("private-client-" + string(rune(i))); got != labelOther {
+			t.Fatalf("arbitrary client created label %q", got)
 		}
 	}
-	if got := clientLabel("one-too-many"); got != labelOther {
-		t.Fatalf("unbounded client label %q", got)
-	}
-	if got := clientLabel(""); got != labelNone {
-		t.Fatalf("empty client label %q", got)
-	}
-	if got := statusClass(0); got != "abandoned" {
-		t.Fatalf("statusClass(0) = %q", got)
+	for name, want := range map[string]string{"": "none", "Silo Web": "web", "Silo Apple TV": "apple", "Silo iOS": "apple", "Silo Android TV": "android", "Silo Android": "android", "silo web private": "other"} {
+		if got := clientLabel(name); got != want {
+			t.Fatalf("client %q => %q, want %q", name, got, want)
+		}
 	}
 }
 

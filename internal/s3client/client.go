@@ -21,11 +21,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go/middleware"
 )
 
 // ErrNotFound is returned when the requested S3 object does not exist.
@@ -49,6 +52,8 @@ const publicDeliveryProbeTimeout = 5 * time.Second
 // Each bucket may have different credentials and endpoints, allowing per-bucket
 // configuration for metadata, operational, and user-db buckets.
 type BucketConfig struct {
+	// Role is an operational category, never a bucket name or endpoint.
+	Role           string
 	Endpoint       string
 	PublicEndpoint string // optional: public CDN domain for reads (e.g. R2 custom domain)
 	Region         string
@@ -93,7 +98,10 @@ func NewClient(cfg BucketConfig) *Client {
 		region = "us-east-1"
 	}
 
+	role := telemetry.Role(cfg.Role)
 	s3Client := s3.New(s3.Options{
+		APIOptions:   []func(*middleware.Stack) error{observeS3(role)},
+		HTTPClient:   observedHTTPClient{inner: awshttp.NewBuildableClient(), role: role},
 		Region:       region,
 		BaseEndpoint: aws.String(cfg.Endpoint),
 		Credentials: credentials.NewStaticCredentialsProvider(
@@ -104,7 +112,13 @@ func NewClient(cfg BucketConfig) *Client {
 		UsePathStyle: cfg.PathStyle,
 	})
 
-	presignClient := s3.NewPresignClient(s3Client)
+	// URL signing is local work, so it must not appear as a storage call.
+	presignClient := s3.NewPresignClient(s3Client, s3.WithPresignClientFromClientOptions(func(o *s3.Options) {
+		o.APIOptions = append(o.APIOptions, func(stack *middleware.Stack) error {
+			_, _ = stack.Initialize.Remove("SiloObserve")
+			return nil
+		})
+	}))
 
 	tokenParam := cfg.TokenParam
 	if tokenParam == "" {

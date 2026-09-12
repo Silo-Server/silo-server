@@ -29,8 +29,10 @@ type healthResponse struct {
 	// data, nothing here routes on them, and decoding them would make nodepool
 	// depend on the sampler's schema — so a node running a newer build can add
 	// fields without an API-side change.
-	System json.RawMessage `json:"system"`
-	GPU    json.RawMessage `json:"gpu"`
+	System      json.RawMessage `json:"system"`
+	GPU         json.RawMessage `json:"gpu"`
+	Attribution json.RawMessage `json:"attribution"`
+	SampledAt   json.RawMessage `json:"sampled_at"`
 }
 
 // maxHealthResponseBytes bounds a node's whole /health body.
@@ -103,13 +105,17 @@ func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs, egressKb
 func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	system := trimJSONNull(hr.System)
 	gpu := trimJSONNull(hr.GPU)
-	if system == nil && gpu == nil {
+	attribution := trimJSONNull(hr.Attribution)
+	sampledAt := trimJSONNull(hr.SampledAt)
+	if system == nil && gpu == nil && attribution == nil {
 		return nil
 	}
 	payload := struct {
-		System json.RawMessage `json:"system,omitempty"`
-		GPU    json.RawMessage `json:"gpu,omitempty"`
-	}{System: system, GPU: gpu}
+		System      json.RawMessage `json:"system,omitempty"`
+		GPU         json.RawMessage `json:"gpu,omitempty"`
+		Attribution json.RawMessage `json:"attribution,omitempty"`
+		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil

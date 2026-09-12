@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"runtime"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
@@ -23,10 +24,12 @@ type AdminBuildInfo struct {
 }
 type AdminBuildInfoOutput struct{ Body AdminBuildInfo }
 type AdminSystemResources struct {
-	Available bool              `json:"available"`
-	SampledAt *Instant          `json:"sampled_at,omitempty"`
-	System    *AdminSystemStats `json:"system,omitempty"`
-	GPU       []AdminGPUStats   `json:"gpu"`
+	Available   bool                      `json:"available"`
+	SampledAt   *Instant                  `json:"sampled_at,omitempty"`
+	System      *AdminSystemStats         `json:"system,omitempty"`
+	GPU         []AdminGPUStats           `json:"gpu"`
+	Stale       bool                      `json:"stale"`
+	Attribution *AdminResourceAttribution `json:"attribution,omitempty"`
 }
 type AdminSystemStats struct {
 	CPUPct     int              `json:"cpu_pct"`
@@ -60,7 +63,30 @@ type AdminGPUStats struct {
 }
 type AdminSystemResourcesOutput struct{ Body AdminSystemResources }
 
+type AdminResourceCapabilities struct {
+	Capability
+	InstanceAttribution bool `json:"instance_attribution"`
+	ProcessResources    bool `json:"process_resources"`
+	CgroupResources     bool `json:"cgroup_resources"`
+	SampleFreshness     bool `json:"sample_freshness"`
+}
+type AdminResourceCapabilitiesOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         AdminResourceCapabilities
+}
+
 func registerAdminSystem(reg *Registry) {
+	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/system/resources/capabilities", "getAdminResourceCapabilities", "admin-settings", "Discover resource attribution and freshness support. Individual measurements may be unavailable."), Class: ClassActingAdmin}, func(context.Context, *CapabilityInput) (*AdminResourceCapabilitiesOutput, error) {
+		state := StateAvailable
+		if reg.deps.AdminResourceSampler == nil {
+			state = StateNotConfigured
+		} else if runtime.GOOS != "linux" {
+			state = StateUnsupported
+		}
+		return &AdminResourceCapabilitiesOutput{Body: AdminResourceCapabilities{Capability: Capability{State: state}, InstanceAttribution: true, ProcessResources: true, CgroupResources: true, SampleFreshness: true}}, nil
+	})
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/system/build", "getAdminBuildInfo", "admin-settings", "Inspect build metadata; use capabilities for feature detection."), Class: ClassActingAdmin}, getAdminBuildInfo)
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/system/resources", "getAdminSystemResources", "admin-settings", "Read this API host's last resource sample without probing hardware."), Class: ClassActingAdmin}, reg.getAdminSystemResources)
 }
@@ -87,12 +113,14 @@ func getAdminBuildInfo(context.Context, *struct{}) (*AdminBuildInfoOutput, error
 	return &AdminBuildInfoOutput{Body: AdminBuildInfo{Display: b.Display, Revision: b.Revision, Dirty: b.Dirty, VCSTime: vcs, BuildNumber: b.BuildNumber, BuiltAt: built, Available: b.Available}}, nil
 }
 func (reg *Registry) getAdminSystemResources(context.Context, *struct{}) (*AdminSystemResourcesOutput, error) {
-	out := AdminSystemResources{GPU: []AdminGPUStats{}}
+	out := AdminSystemResources{GPU: []AdminGPUStats{}, Stale: true}
 	if reg.deps.AdminResourceSampler == nil {
 		return &AdminSystemResourcesOutput{Body: out}, nil
 	}
 	s := reg.deps.AdminResourceSampler.Snapshot()
 	out.Available = s.Available
+	out.Stale = s.Stale(time.Now())
+	out.Attribution = adminResourceAttribution(s.Attribution)
 	if !s.SampledAt.IsZero() {
 		out.SampledAt = new(NewInstant(s.SampledAt))
 	}
@@ -107,4 +135,20 @@ func (reg *Registry) getAdminSystemResources(context.Context, *struct{}) (*Admin
 		out.GPU = append(out.GPU, AdminGPUStats(g))
 	}
 	return &AdminSystemResourcesOutput{Body: out}, nil
+}
+
+func adminResourceAttribution(a *nodemetrics.ResourceAttribution) *AdminResourceAttribution {
+	if a == nil {
+		return nil
+	}
+	out := &AdminResourceAttribution{
+		InstanceID: a.InstanceID, SampleIntervalSeconds: a.SampleIntervalSeconds, SampleDurationSeconds: a.SampleDurationSeconds,
+		CPU: AdminResourceSource(a.CPU), Memory: AdminResourceSource(a.Memory), Load: AdminResourceSource(a.Load), Network: AdminResourceSource(a.Network),
+		Process: (*AdminProcessStats)(a.Process), CgroupCPU: (*AdminCgroupCPUStats)(a.CgroupCPU), CgroupMemory: (*AdminCgroupMemoryStats)(a.CgroupMemory), Children: (*AdminChildStats)(a.Children),
+		DroppedDiskRoots: a.DroppedDiskRoots,
+	}
+	for _, d := range a.Disks {
+		out.Disks = append(out.Disks, AdminDiskDetails(d))
+	}
+	return out
 }

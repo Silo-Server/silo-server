@@ -1,0 +1,20 @@
+# Replace targets with private main/worker listener addresses. Never add the debug port.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+rule_files:
+  - silo.rules.yml
+scrape_configs:
+  - job_name: silo
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    sample_limit: 20000
+    static_configs:
+      - targets: [silo-api:8080]
+        labels:
+          cluster: example
+          process_role: api
+      - targets: [silo-worker:8080]
+        labels:
+          cluster: example
+          process_role: transcode

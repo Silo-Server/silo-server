@@ -3997,6 +3997,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/system/resources/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover resource attribution and freshness support. Individual measurements may be unavailable. */
+    get: operations["getAdminResourceCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/tasks": {
     parameters: {
       query?: never;
@@ -10772,6 +10789,58 @@ export interface components {
       /** Format: int64 */
       size_bytes: number;
     };
+    AdminCgroupCPUStats: {
+      /** Format: int64 */
+      periods?: number;
+      /** Format: double */
+      pressure_some_pct?: number;
+      /** Format: double */
+      quota_cores?: number;
+      scope: string;
+      /** Format: int64 */
+      throttled_periods?: number;
+      /** Format: double */
+      throttled_seconds?: number;
+      /** Format: double */
+      usage_seconds?: number;
+      version: string;
+    };
+    AdminCgroupMemoryStats: {
+      /** Format: int64 */
+      current_bytes?: number;
+      /** Format: int64 */
+      high_events?: number;
+      /** Format: int64 */
+      limit_bytes?: number;
+      /** Format: int64 */
+      max_events?: number;
+      /** Format: int64 */
+      oom_events?: number;
+      /** Format: int64 */
+      oom_kills?: number;
+      /** Format: double */
+      pressure_full_pct?: number;
+      /** Format: double */
+      pressure_some_pct?: number;
+      scope: string;
+      /** Format: int64 */
+      swap_bytes?: number;
+      version: string;
+      /** Format: int64 */
+      working_set_bytes?: number;
+    };
+    AdminChildStats: {
+      /** Format: double */
+      cpu_seconds: number;
+      /** Format: int64 */
+      resident_bytes: number;
+      /** Format: int64 */
+      sampled: number;
+      truncated: boolean;
+      /** Format: int64 */
+      unavailable: number;
+      workload: string;
+    };
     AdminCollection: {
       backdrop_thumbhash?: string;
       backdrop_url: string;
@@ -11421,6 +11490,13 @@ export interface components {
        * @example 1
        */
       user_id: string;
+    };
+    AdminDiskDetails: {
+      /** Format: int64 */
+      inodes_total?: number;
+      /** Format: int64 */
+      inodes_used?: number;
+      role: string;
     };
     AdminDiskStats: {
       path?: string;
@@ -13499,6 +13575,30 @@ export interface components {
       comment?: string;
       source: string;
     };
+    AdminProcessStats: {
+      /** Format: double */
+      cpu_seconds?: number;
+      /** Format: int64 */
+      go_memory_bytes?: number;
+      /** Format: int64 */
+      goroutines?: number;
+      /** Format: int64 */
+      heap_live_bytes?: number;
+      /** Format: int64 */
+      max_fds?: number;
+      /** Format: int64 */
+      open_fds?: number;
+      /** Format: int64 */
+      read_bytes?: number;
+      /** Format: int64 */
+      resident_bytes?: number;
+      /** Format: int64 */
+      threads?: number;
+      /** Format: int64 */
+      virtual_bytes?: number;
+      /** Format: int64 */
+      write_bytes?: number;
+    };
     AdminRateLimitAuthEndpoint: {
       /** Format: int64 */
       burst: number;
@@ -13710,6 +13810,44 @@ export interface components {
       user_id: string;
       /** Format: int64 */
       window_days: number | null;
+    };
+    AdminResourceAttribution: {
+      cgroup_cpu?: components["schemas"]["AdminCgroupCPUStats"];
+      cgroup_memory?: components["schemas"]["AdminCgroupMemoryStats"];
+      children?: components["schemas"]["AdminChildStats"];
+      cpu: components["schemas"]["AdminResourceSource"];
+      disks?: components["schemas"]["AdminDiskDetails"][];
+      /** Format: int64 */
+      dropped_disk_roots: number;
+      instance_id: string;
+      load: components["schemas"]["AdminResourceSource"];
+      memory: components["schemas"]["AdminResourceSource"];
+      network: components["schemas"]["AdminResourceSource"];
+      process?: components["schemas"]["AdminProcessStats"];
+      /** Format: double */
+      sample_duration_seconds: number;
+      /** Format: double */
+      sample_interval_seconds: number;
+    };
+    AdminResourceCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      cgroup_resources: boolean;
+      instance_attribution: boolean;
+      process_resources: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      sample_freshness: boolean;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    AdminResourceSource: {
+      available: boolean;
+      scope: string;
+      source: string;
     };
     AdminRestartKeys: {
       keys: string[];
@@ -14203,6 +14341,7 @@ export interface components {
       username?: string;
     };
     AdminSystemResources: {
+      attribution?: components["schemas"]["AdminResourceAttribution"];
       available: boolean;
       gpu: components["schemas"]["AdminGPUStats"][];
       /**
@@ -14210,6 +14349,7 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       sampled_at?: string;
+      stale: boolean;
       system?: components["schemas"]["AdminSystemStats"];
     };
     AdminSystemStats: {
@@ -63154,6 +63294,138 @@ export interface operations {
       /** @description Not Acceptable */
       406: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminResourceCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminResourceCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {

@@ -114,7 +114,7 @@ func TestHandleListAPIKeyScopes(t *testing.T) {
 		}
 	})
 
-	t.Run("lists every valid scope with a description", func(t *testing.T) {
+	t.Run("lists the frozen v1 scopes with descriptions", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/scopes", nil)
 		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, TokenType: auth.TokenTypeAccess}))
 		rec := httptest.NewRecorder()
@@ -134,9 +134,9 @@ func TestHandleListAPIKeyScopes(t *testing.T) {
 		if len(resp.Scopes) != len(valid) {
 			t.Fatalf("scopes = %+v, want %d entries", resp.Scopes, len(valid))
 		}
-		for _, scope := range resp.Scopes {
-			if !slices.Contains(valid, scope.Name) {
-				t.Fatalf("scope %q is not accepted by NormalizeAPIKeyScopes", scope.Name)
+		for i, scope := range resp.Scopes {
+			if scope.Name != valid[i] {
+				t.Fatalf("scope %d = %q, want frozen v1 scope %q", i, scope.Name, valid[i])
 			}
 			if strings.TrimSpace(scope.Description) == "" {
 				t.Fatalf("scope %q has no description", scope.Name)

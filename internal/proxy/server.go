@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -465,8 +467,10 @@ type healthResponse struct {
 	// This route takes no credential, so the sample is path-free: disk entries
 	// carry their role and their fill, never where they are mounted. See
 	// nodemetrics.Snapshot.RedactPaths.
-	System *nodemetrics.SystemStats `json:"system,omitempty"`
-	GPU    []nodemetrics.GPUStats   `json:"gpu,omitempty"`
+	System      *nodemetrics.SystemStats         `json:"system,omitempty"`
+	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
+	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
+	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -483,6 +487,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		CapabilitiesHash: s.storedCapabilityHash(),
 		System:           snapshot.System,
 		GPU:              snapshot.GPU,
+		Attribution:      snapshot.Attribution,
+		SampledAt:        snapshot.SampledAt,
 	})
 }
 
@@ -519,6 +525,7 @@ func (s *Server) StartMetricsSampler(ctx context.Context) {
 
 // requireBearer checks Authorization: Bearer {secret} for admin endpoints.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
+	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := s.watcher.Config()
 		auth := r.Header.Get("Authorization")
@@ -1119,7 +1126,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		req.Header.Set("X-Silo-Stream-Token", forwardToken)
 	}
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(s.httpClient, req, "stream")
 	if err != nil {
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
@@ -1160,9 +1167,11 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 }
 
 type statusResponse struct {
-	ActiveSessions int                      `json:"active_sessions"`
-	System         *nodemetrics.SystemStats `json:"system,omitempty"`
-	GPU            []nodemetrics.GPUStats   `json:"gpu,omitempty"`
+	ActiveSessions int                              `json:"active_sessions"`
+	System         *nodemetrics.SystemStats         `json:"system,omitempty"`
+	GPU            []nodemetrics.GPUStats           `json:"gpu,omitempty"`
+	Attribution    *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
+	SampledAt      time.Time                        `json:"sampled_at,omitzero"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -1178,5 +1187,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ActiveSessions: activeSessions,
 		System:         snapshot.System,
 		GPU:            snapshot.GPU,
+		Attribution:    snapshot.Attribution,
+		SampledAt:      snapshot.SampledAt,
 	})
 }

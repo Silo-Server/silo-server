@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -183,8 +184,10 @@ type HealthResponse struct {
 	// This route takes no credential, so the sample is path-free: disk entries
 	// carry their role and their fill, never where they are mounted. See
 	// nodemetrics.Snapshot.RedactPaths.
-	System *nodemetrics.SystemStats `json:"system,omitempty"`
-	GPU    []nodemetrics.GPUStats   `json:"gpu,omitempty"`
+	System      *nodemetrics.SystemStats         `json:"system,omitempty"`
+	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
+	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
+	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
 }
 
 // sessionIdleTTL is how long a job may go without a manifest or segment
@@ -1193,6 +1196,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		CapabilitiesHash: s.storedCapabilityHash(),
 		System:           snapshot.System,
 		GPU:              snapshot.GPU,
+		Attribution:      snapshot.Attribution,
+		SampledAt:        snapshot.SampledAt,
 	})
 }
 
@@ -1432,6 +1437,7 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 
 // requireBearer is middleware that checks for Authorization: Bearer {secret}.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
+	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := s.watcher.Config()
 		if cfg == nil {
@@ -2822,10 +2828,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	snapshot := s.metrics.Snapshot()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(statusResponse{
-		Status:     "ok",
-		ActiveJobs: s.activeJobs.Load(),
-		Sessions:   sessionIDs,
-		System:     snapshot.System,
-		GPU:        snapshot.GPU,
+		Status:      "ok",
+		ActiveJobs:  s.activeJobs.Load(),
+		Sessions:    sessionIDs,
+		System:      snapshot.System,
+		GPU:         snapshot.GPU,
+		Attribution: snapshot.Attribution,
+		SampledAt:   snapshot.SampledAt,
 	})
 }

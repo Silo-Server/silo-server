@@ -21,6 +21,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/google/uuid"
 )
@@ -396,6 +397,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// this ffmpeg produces is strictly newer than the stamp.
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()
 		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
@@ -419,6 +421,7 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	// flushing/logging so slow diagnostics cannot make the allocator count a
 	// process that has already exited.
 	releaseHWDevice()
+	processmetrics.Record(processmetrics.Transcode, cmd.ProcessState, waitErr, ctx.Err())
 	s.flushStderr(ctx)
 	s.mu.Lock()
 	s.running = false
@@ -2998,6 +3001,7 @@ func (s *TranscodeSession) restart(
 	// As in StartTranscode, stamp the generation before the process can write.
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()
 		s.mu.Lock()

@@ -127,10 +127,17 @@ provider may change without changing these canonical project URLs.
 `contracts/api/v2/route-inventory.json` is the enumerated legacy native surface every later
 migration decision is measured against: one row per method+path variant (`GET` and `HEAD`, a
 WebSocket handshake, and each method of a wildcard `Handle` are separate rows) across four
-listeners: the root `http.ServeMux` (`cmd/silo.newRootHandler`), the API router
+native listeners: the root `http.ServeMux` (`cmd/silo.newRootHandler`), the API router
 (`internal/api.NewRouter`), the proxy node and the transcode node (each `(*Server).Handler`). Root
 `/api/` rows delegate to the API listener; `totals` and `route_count` are authoritative;
 `cmd/route-inventory` generates the file from registration source.
+
+The inventory also declares the delegated `api_v2` handler and the separate
+`operational_debug` loopback profiler. The latter registers a finite set of
+standard profile handlers in `internal/debugserver`; its sealed wrapper admits
+GET only and refuses all other method variants represented by the ServeMux
+inventory. Its one named `net/http/pprof` import is allowed only at that
+inventoried construction. Serving `http.DefaultServeMux` remains forbidden.
 
 The contract: each listener entry function returns a sealed `http.Handler` — an unexported struct
 holding the router in an unexported field, with `ServeHTTP` as its only method — built from an
@@ -157,13 +164,20 @@ are evidence, not facts.
 
 ### Migration ledger
 
-`contracts/api/v2/migration.json` records the v2 disposition of every row in the route inventory.
+`contracts/api/v2/migration.json` records the v2 disposition of every native row in the route inventory.
 Its key is the inventory row's listener, method, exact path, and `registration_index`: the
 inventory registers twelve method+path pairs twice, under different middleware or conditions
 (for example a rate-limited and an unlimited variant of the same login route), and each
 registration is a separate operation with its own consumers and disposition, so the index
-disambiguates them in registration order. There is exactly one ledger entry per inventory row and
+disambiguates them in registration order. There is exactly one ledger entry per native inventory row and
 one row per entry, and the entries follow inventory order.
+
+The finite `/debug/pprof/` route set on `operational_debug` is explicitly outside
+native migration decisions and native release-scenario catalogs. It is validated
+by the profiling and route-inventory suites and documented in
+[the profiling runbook](../operations/profiling.md). This exclusion matches the
+exact listener, methods, and supported paths; it cannot hide a profiling path on
+a native listener or an unexpected debug route.
 
 An entry has two kinds of fields. The first kind is copied from the inventory row — `listener`,
 `namespace`, `method`, `path`, `handler`, `handler_kind`, `source_file`, `route_group`,
@@ -344,10 +358,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `contracts/api/v2/breaking-approvals.json`; once `contracts/api/v2/LOCKED` exists no entry
   applies. `TestCommittedArtifactMatchesRouter` reconciles the assembled router with the
   committed artifact plus the closed plugin-content mount inventory, in both directions. The
-  retained `/api/v1/health` and `/api/v1/ready` probes and
-  the unauthenticated `/metrics` endpoints are operator-facing and deliberately absent from the
-  artifact and from generated native clients; deployments restrict their exposure through proxy
-  or network policy.
+  retained `/api/v1/health` and `/api/v1/ready` probes and the opt-in, dedicated `/metrics`
+  listener are operator-facing and deliberately absent from the artifact and from generated
+  native clients; the listener is disabled unless `SILO_METRICS_LISTEN` is set and must bind to
+  a private monitoring address.
 - **The fixtures.** `contracts/api/v2/fixtures/` is generated through the assembled v2 router
   by `TestContractFixtures` in `internal/apiv2` (`make apiv2-fixtures`), never edited: each
   body is what the server answered a synthetic request with a fixed request id and fake
@@ -1102,11 +1116,11 @@ Probe traffic is excluded from request and activity logging. Consumers stay wher
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
 probes, the node pool's health sweep, and the Apple/Android reachability monitors that read the
 identity fields (those clients additionally have `GET /api/v2/system/info` for discovery). No
-root `/health` or `/ready` route is added and no probe is redirected. Existing unauthenticated root
-`/metrics` endpoints on the API, proxy, and transcode-node servers remain operator-facing
-telemetry outside the native client contract. They have no endpoint authentication, so deployments
-must restrict their exposure through proxy/network policy where required. They are inventoried so
-the cutover cannot remove them accidentally. The administrator
+root `/health` or `/ready` route is added and no probe is redirected. The API process's `/metrics`
+endpoint is a dedicated opt-in listener outside the native client contract. It is disabled unless
+`SILO_METRICS_LISTEN` is set and is inventoried separately from the public application listener.
+Proxy and transcode-node metrics remain on their worker listeners and must stay on private
+monitoring networks. The administrator
 upgrade guide must name every external integration and persisted URL class affected by the hard
 cutover, explain how to regenerate it, and provide a post-upgrade verification checklist. The
 server must not redirect old URLs containing tokens or secrets.
@@ -1525,8 +1539,8 @@ empty arrays rather than `null`.
    return `410 Gone` with the existing v1-shaped `client_upgrade_required` error, pointing the
    user toward a v2-capable client and the administrator upgrade guide. They contain no business
    behavior. Version-neutral legacy routes are retired individually and are not aliases into v2.
-   The retained `/api/v1/health` and `/api/v1/ready` probes and operator `/metrics` remain
-   outside the tombstone handlers.
+   The retained `/api/v1/health` and `/api/v1/ready` probes remain outside the tombstone
+   handlers. Operator metrics are served only by the separate opt-in listener.
 6. Remove bridge-only legacy transport code after the 1.0 cutover is established; no updated
    client contains a legacy native transport path to clean up.
 

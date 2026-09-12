@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
 const (
@@ -97,7 +99,7 @@ func Acknowledge(ctx context.Context, client *http.Client, targetURL, jwtSecret,
 	}
 	req.Header.Set("Authorization", "Bearer "+jwtSecret)
 	req.Header.Set(GenerationHeader, generation)
-	resp, err := client.Do(req)
+	resp, err := telemetry.DoTrustedNode(client, req, "stream_ack")
 	if err != nil {
 		return fmt.Errorf("send acknowledgement: %w", err)
 	}

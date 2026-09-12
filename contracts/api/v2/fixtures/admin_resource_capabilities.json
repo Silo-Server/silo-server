@@ -1,0 +1,9 @@
+{
+  "revision": "c2ad5bef8e79e0c72d2ae466a1b7831346f6f4e70b61f96f7196b33237ea053b",
+  "state": "not_configured",
+  "allowed": false,
+  "instance_attribution": true,
+  "process_resources": true,
+  "cgroup_resources": true,
+  "sample_freshness": true
+}

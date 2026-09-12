@@ -68,15 +68,16 @@ func (a *redisSettingsCheckAdapter) Ping(ctx context.Context) error {
 }
 
 func (a *redisSettingsCheckAdapter) Close() error {
-	return a.client.Close()
+	return cache.CloseRedisClient(a.client)
 }
 
 var newAdminS3SettingsCheckClient = func(cfg s3client.BucketConfig) s3SettingsCheckClient {
+	cfg.Role = "checks"
 	return s3client.NewClient(cfg)
 }
 
 var newAdminRedisSettingsCheckClient = func(cfg config.RedisConfig) (redisSettingsCheckClient, error) {
-	client, err := cache.NewRedisClient(cfg)
+	client, err := cache.NewRedisClientForRole(cfg, "checks")
 	if err != nil {
 		return nil, err
 	}

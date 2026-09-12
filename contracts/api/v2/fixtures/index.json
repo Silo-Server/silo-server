@@ -2536,6 +2536,26 @@
       "body_file": "admin_requests_ok.json"
     },
     {
+      "name": "admin_resource_capabilities",
+      "operation_id": "getAdminResourceCapabilities",
+      "scenario": "Administrator discovery reports unavailable sampling when no sampler is configured.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/system/resources/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminResourceCapabilities",
+      "body_file": "admin_resource_capabilities.json"
+    },
+    {
       "name": "admin_section_explicit_null_invalid",
       "operation_id": "createAdminSection",
       "scenario": "Optional section definition fields must be omitted rather than explicitly null.",

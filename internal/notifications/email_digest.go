@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
@@ -75,7 +77,9 @@ func (c *emailChannel) markFailure(ctx context.Context, tx pgx.Tx, profileID str
 // send composes and sends one profile's pending notifications. The
 // destination is re-read under the claim so a mid-pass address removal fails
 // cleanly instead of sending to a stale recipient.
-func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, profileID string, mode string, rows []DeliveryRow) error {
+func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, profileID string, mode string, rows []DeliveryRow) (sendErr error) {
+	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "email")
+	defer func() { finishObservation(deliveryObservationError(ctx, sendErr == nil)) }()
 	email, userID, unsubscribeToken, err := c.prefs.destinationForSend(ctx, tx, profileID)
 	if err != nil {
 		return err

@@ -2,8 +2,10 @@
 // (contracts/api/v2/migration.json) against its JSON Schema and reconciles it
 // with the legacy native route inventory (contracts/api/v2/route-inventory.json).
 //
-// The gate is one entry per inventory row and one inventory row per entry, and
+// The gate is one entry per native inventory row and one row per entry, and
 // every field the ledger copies from the inventory must still agree with it.
+// The finite local operational profiler is separately inventoried and has no
+// native API migration decision; see operationalProfilingRoute.
 // Both artifacts are embedded, so a drift between them fails the build's test
 // run rather than surfacing later as a missing or stale migration decision.
 package contractledger
@@ -417,6 +419,9 @@ func verify(fsys fs.FS) error {
 	invByKey := make(map[Key]inventoryRoute, len(inv.Routes))
 	invOrder := make([]Key, 0, len(inv.Routes))
 	for _, r := range inv.Routes {
+		if operationalProfilingRoute(r) {
+			continue
+		}
 		base := Key{Listener: r.Listener, Method: r.Method, Path: r.Path}
 		k := base
 		k.RegistrationIndex = seen[base]
@@ -470,6 +475,44 @@ func verify(fsys fs.FS) error {
 		return nil
 	}
 	return errors.New("contractledger: ledger and route inventory disagree:\n  " + strings.Join(problems, "\n  "))
+}
+
+// The profiling listener has an explicit operational contract, outside native
+// APIs and their release scenarios. Restrict this exclusion to its exact
+// listener, methods, and profile routes; a similarly named path on any native
+// listener or an unexpected route on the debug listener still needs a decision.
+const operationalDebugListener = "operational_debug"
+
+const (
+	pprofIndexRoute        = "/debug/pprof/"
+	pprofProfileRoute      = "/debug/pprof/profile"
+	pprofTraceRoute        = "/debug/pprof/trace"
+	pprofHeapRoute         = "/debug/pprof/heap"
+	pprofAllocsRoute       = "/debug/pprof/allocs"
+	pprofGoroutineRoute    = "/debug/pprof/goroutine"
+	pprofThreadcreateRoute = "/debug/pprof/threadcreate"
+	pprofBlockRoute        = "/debug/pprof/block"
+	pprofMutexRoute        = "/debug/pprof/mutex"
+)
+
+func operationalProfilingRoute(r inventoryRoute) bool {
+	if r.Listener != operationalDebugListener {
+		return false
+	}
+	switch r.Method {
+	case http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
+		http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace:
+	default:
+		return false
+	}
+	switch r.Path {
+	case pprofIndexRoute, pprofProfileRoute, pprofTraceRoute,
+		pprofHeapRoute, pprofAllocsRoute, pprofGoroutineRoute,
+		pprofThreadcreateRoute, pprofBlockRoute, pprofMutexRoute:
+		return true
+	default:
+		return false
+	}
 }
 
 // fieldDrift compares every copied field of a ledger entry with its inventory

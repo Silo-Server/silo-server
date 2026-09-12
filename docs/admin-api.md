@@ -666,6 +666,51 @@ explaining why it could not be probed. The full report for one node — includin
 `detected_backends`, `boot_id` and `capability_hash` — is what
 `GET /api/v1/admin/nodes` stores per node in `capabilities`.
 
+## `GET /api/v2/admin/system/resources`
+
+Returns the API process's last completed resource sample. The existing `system`
+and `gpu` fields retain their meanings. `stale` is true when no sample exists or
+its age exceeds three sampling intervals. The handler reads an immutable
+snapshot and never probes a device, mount, dependency, or worker.
+
+`GET /api/v2/admin/system/resources/capabilities` advertises
+`instance_attribution`, `process_resources`, `cgroup_resources`, and
+`sample_freshness`. It uses the common capability state, allowed, revision, ETag
+and conditional request conventions. Support does not guarantee each operating
+system source is readable. Both operations require acting administrator
+account authority; a secondary profile does not acquire that authority from
+being on an administrator account.
+
+The additive `attribution` object contains:
+
+| Field | Meaning |
+|---|---|
+| `instance_id` | Random identifier for this sampler lifetime; identifies which process answered through a load balancer without exposing a hostname. |
+| `sample_interval_seconds`, `sample_duration_seconds` | Sampling cadence and duration of the last completed pass. |
+| `cpu`, `memory`, `load`, `network` | Scope, source and availability of each corresponding `system` reading. Scopes include `host`, `virtualized_host`, `cgroup`, and `network_namespace`. |
+| `process` | Silo process RSS, virtual memory, CPU seconds, threads, open FD count/limit, last-GC live Go heap, runtime memory reservation and goroutine count. Linux storage I/O byte counters include waited-for children. Unreadable values are omitted. |
+| `cgroup_cpu` | Usage, capacity in cores, throttling, bandwidth periods and CPU pressure at the selected visible cgroup level. A tighter cpuset can set the reported capacity. |
+| `cgroup_memory` | Raw charge, concrete limit, working set, swap, limit/OOM events and memory pressure. Usage and limit are read from the same visible level. |
+| `children` | Bounded snapshot of live owned FFmpeg children. Reports partial/unavailable and truncated sampling explicitly. CPU totals can decrease when children exit; RSS can count shared pages more than once. |
+| `disks` | Inode counts keyed by the existing disk role, with the matching disk's freshness. |
+| `dropped_disk_roots` | Number of configured roots beyond the bounded disk sampling set. |
+
+Cgroup `scope` is `leaf` or `ancestor`; an ancestor's counters include sibling
+workloads. Limits outside the process's cgroup namespace cannot be observed.
+Pressure values are percentages averaged over ten seconds. Missing counters
+remain absent. Working set is raw charge minus inactive file pages; it is not
+an exact OOM predictor. Process RSS, live Go heap, child RSS and cgroup charge
+overlap and must not be added together or subtracted to infer exact native
+allocations. Linux process I/O includes waited-for children and must not be
+added to child I/O as if they were disjoint counters. The Go runtime memory field describes its reservation, not RSS.
+
+Worker operational health/status responses carry the same attribution plus
+`sampled_at`; the bounded `last_stats` snapshot preserves them for administrator
+node views. A node answering health checks with a stopped sampler remains
+visibly stale. Public operational responses contain disk roles, with paths
+available only on authenticated status and administrator responses. Native
+clients and Jellyfin/ABS do not gain profiling routes through this capability.
+
 ## `GET /api/v1/admin/system/resources`
 
 Reports the **API host's own** current resource sample — the counterpart to the
@@ -689,7 +734,7 @@ nothing and cannot hang regardless of what a mount or a GPU query is doing.
 
 Sampling is Linux-only: `available: false` on macOS or Windows is expected and
 is not an error. History and alerting are Prometheus's job — the same numbers
-are exposed as `streamapp_node_*` gauges on this process's existing `/metrics`
+are exposed as `streamapp_node_*` gauges on this process's dedicated opt-in `/metrics`
 endpoint, with one deliberate difference: `/metrics` is unauthenticated, so its
 disk series are labeled `mount="scratch"` / `mount="library-N"` and the library
 paths themselves appear only here, behind admin auth.

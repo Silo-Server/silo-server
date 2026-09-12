@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
 )
 
 func (s *Service) wakeImportQueue() {
@@ -93,6 +95,7 @@ func (s *Service) failClaim(ctx context.Context, claim RunClaim, summary Executi
 	// Cancellation is durable: worker acknowledgement wins over a simultaneous
 	// provider error, and no summary/terminal write may erase the request.
 	if err := s.repo.acknowledgeRunCancellation(finishCtx, claim); err == nil {
+		workmetrics.FinishContext(ctx, "canceled")
 		s.notifyRunByID(finishCtx, claim.RunID)
 		return
 	}
@@ -109,6 +112,7 @@ func (s *Service) failClaim(ctx context.Context, claim RunClaim, summary Executi
 		}
 		return
 	}
+	workmetrics.FinishContext(ctx, "error")
 	s.notifyRunByID(finishCtx, claim.RunID)
 }
 

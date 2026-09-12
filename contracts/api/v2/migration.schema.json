@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://siloserver.org/contracts/api/v2/migration.schema.json",
   "title": "Silo pre-1.0 native surface to /api/v2 migration ledger",
-  "description": "One entry per row of contracts/api/v2/route-inventory.json. internal/contractledger validates this schema and reconciles the ledger against the inventory in CI.",
+  "description": "One entry per native row of contracts/api/v2/route-inventory.json. The finite operational_debug profiling routes are separately inventoried and excluded from native migration decisions. internal/contractledger validates this schema and reconciles the ledger against the inventory in CI.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "description", "source_inventory", "source_trees", "consumer_method", "field_reference", "totals", "entries"],

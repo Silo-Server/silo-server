@@ -1,5 +1,6 @@
 import type {
   HostDiskStats,
+  ResourceAttribution,
   HostGPUStats,
   HostSystemStats,
   NodeCapabilities,
@@ -846,6 +847,7 @@ export type NodeSystemPresentation =
       memory: ResourceMetric;
       disk: ResourceMetric;
       network: ResourceMetric;
+      processMemory: ResourceMetric | null;
     };
 
 /**
@@ -856,7 +858,7 @@ export type NodeSystemPresentation =
  * predates the check that failed, and a frozen CPU percentage is indis-
  * tinguishable from a live one on screen.
  */
-export function describeNodeSystem(node: StreamNode): NodeSystemPresentation {
+export function describeNodeSystem(node: StreamNode, now = Date.now()): NodeSystemPresentation {
   const system = node.last_stats?.system;
   if (!system) {
     return {
@@ -875,24 +877,64 @@ export function describeNodeSystem(node: StreamNode): NodeSystemPresentation {
         "The last health check did not reach this node, so its most recent resource sample is no longer current.",
     };
   }
-  return describeSystemStats(system);
+  const sampledAt = Date.parse(node.last_stats?.sampled_at ?? "");
+  const checkedAt = Date.parse(node.last_health_check ?? "");
+  const interval = node.last_stats?.attribution?.sample_interval_seconds ?? 5;
+  if (
+    Number.isFinite(sampledAt) &&
+    Number.isFinite(checkedAt) &&
+    (checkedAt - sampledAt > interval * 3000 || now - checkedAt > 90_000)
+  ) {
+    return {
+      kind: "unreported",
+      label: "Stale",
+      title: "The node is answering with an old resource sample.",
+    };
+  }
+  return describeSystemStats(system, node.last_stats?.attribution);
 }
 
 /** Derive the four host readings from one system sample. */
-export function describeSystemStats(system: HostSystemStats): {
+export function describeSystemStats(
+  system: HostSystemStats,
+  attribution?: ResourceAttribution | null,
+): {
   kind: "reported";
   cpu: ResourceMetric;
   memory: ResourceMetric;
   disk: ResourceMetric;
   network: ResourceMetric;
+  processMemory: ResourceMetric | null;
 } {
   return {
     kind: "reported",
-    cpu: describeCPU(system),
-    memory: describeMemory(system),
+    processMemory: attribution ? describeProcessMemory(attribution, false) : null,
+    cpu:
+      attribution?.cpu?.available === false
+        ? mutedMetric("CPU", "The CPU source has no current reading.")
+        : withResourceScope(describeCPU(system), attribution?.cpu?.scope),
+    memory:
+      attribution?.memory?.available === false
+        ? mutedMetric("RAM", "The memory source has no current reading.")
+        : withResourceScope(describeMemory(system), attribution?.memory?.scope),
     disk: describeWorstDisk(system.disks ?? []),
-    network: describeNetwork(system),
+    network:
+      attribution?.network?.available === false
+        ? mutedMetric("Net", "The network source has no current reading.")
+        : describeNetwork(system),
   };
+}
+
+function withResourceScope(metric: ResourceMetric, scope?: string): ResourceMetric {
+  const label =
+    scope === "cgroup"
+      ? "Cgroup"
+      : scope === "host"
+        ? "Host"
+        : scope === "virtualized_host"
+          ? "Container host"
+          : null;
+  return label ? { ...metric, label: `${label} ${metric.label}` } : metric;
 }
 
 function describeCPU(system: HostSystemStats): ResourceMetric {
@@ -1021,6 +1063,10 @@ export type ResourceSamplePresentation =
       gpu: ResourceMetric | null;
       /** When the sample was taken, for a freshness label; null when unstamped. */
       sampledAt: string | null;
+      stale: boolean;
+      instanceID: string | null;
+      processMemory: ResourceMetric | null;
+      heapMemory: ResourceMetric | null;
     };
 
 /**
@@ -1030,6 +1076,7 @@ export type ResourceSamplePresentation =
  */
 export function describeResourceSample(
   resources: SystemResources | undefined | null,
+  now = Date.now(),
 ): ResourceSamplePresentation {
   const system = resources?.system;
   if (!resources || resources.available !== true || !system) {
@@ -1041,10 +1088,42 @@ export function describeResourceSample(
   }
 
   return {
-    ...describeSystemStats(system),
+    ...describeSystemStats(system, resources.attribution),
     kind: "sampled",
+    stale: resources.stale === true || resourceSampleIsOld(resources, now),
+    instanceID: resources.attribution?.instance_id?.trim() || null,
+    processMemory: resources.attribution
+      ? describeProcessMemory(resources.attribution, false)
+      : null,
+    heapMemory: resources.attribution ? describeProcessMemory(resources.attribution, true) : null,
     gpu: describeGPUBusy(resources.gpu ?? []),
     sampledAt: resources.sampled_at?.trim() || null,
+  };
+}
+
+function resourceSampleIsOld(resources: SystemResources, now: number): boolean {
+  if (!resources.attribution) return false;
+  const sampled = Date.parse(resources.sampled_at ?? "");
+  const interval = resources.attribution.sample_interval_seconds ?? 5;
+  return !Number.isFinite(sampled) || now - sampled > interval * 3000;
+}
+
+function describeProcessMemory(attribution: ResourceAttribution, heap: boolean): ResourceMetric {
+  const value = finiteNumber(
+    heap ? attribution.process?.heap_live_bytes : attribution.process?.resident_bytes,
+  );
+  const label = heap ? "Go live heap" : "Silo process RAM";
+  if (value == null) return mutedMetric(label, "This source could not be measured.");
+  return {
+    label,
+    value: formatFileSize(value, { iecUnits: true, fallback: "0 B" }),
+    detail: heap ? "at the last GC" : "resident memory",
+    title: heap
+      ? "Live Go heap at the last garbage collection. Native allocations and child processes are outside this measurement."
+      : "Resident memory of this Silo process, including native allocations and shared mappings. Child process memory is separate; subtracting Go heap does not give exact native memory.",
+    muted: false,
+    warning: false,
+    fill: null,
   };
 }
 

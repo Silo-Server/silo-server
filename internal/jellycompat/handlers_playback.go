@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -1562,7 +1564,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-		resp, err := http.DefaultClient.Do(httpReq)
+		resp, err := telemetry.DoTrustedNode(http.DefaultClient, httpReq, "transcode_start")
 		if err != nil {
 			return transcodenode.TranscodeStartResponse{}, 0, true, fmt.Errorf("remote transcode start failed: %w", logredact.SanitizeURLError(err))
 		}

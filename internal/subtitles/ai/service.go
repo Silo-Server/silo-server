@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
@@ -276,6 +278,16 @@ func (s *Service) dispatch(job Job) {
 }
 
 func (s *Service) run(ctx context.Context, job *Job) {
+	// Read the committed outcome; publication and cancellation can race and a
+	// failed commit response alone cannot establish the durable state.
+	defer func() {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		if finished, err := s.repo.GetJob(finishCtx, job.ID); err == nil && finished != nil {
+			workmetrics.FinishContext(ctx, string(finished.Status))
+		}
+	}()
+
 	if job.Kind.IsTranscribe() {
 		s.runTranscribe(ctx, job)
 		return

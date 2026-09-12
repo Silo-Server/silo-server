@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
 const (
@@ -132,8 +133,11 @@ func remuxDVProfile(dvProfile int, canStripRPU bool) int {
 // codecs to a new container format without re-encoding.
 type RemuxSession struct {
 	cmd        *exec.Cmd
+	ctx        context.Context
 	cancel     context.CancelFunc
 	outputPipe io.ReadCloser
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // RemuxDVMode makes Profile 7 handling an explicit byte-level recipe choice.
@@ -353,12 +357,14 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	}
 
 	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Remux, nil, err, ctx.Err())
 		cancel()
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
 
 	return &RemuxSession{
 		cmd:        cmd,
+		ctx:        ctx,
 		cancel:     cancel,
 		outputPipe: stdout,
 	}, nil
@@ -386,10 +392,20 @@ func (s *RemuxSession) Abort() {
 // Close stops the ffmpeg process and cleans up all resources.
 // It is safe to call Close multiple times.
 func (s *RemuxSession) Close() error {
-	s.cancel()
-	// Drain the pipe so cmd.Wait does not block.
-	_, _ = io.Copy(io.Discard, s.outputPipe)
-	return s.cmd.Wait()
+	s.closeOnce.Do(func() {
+		contextErr := s.ctx.Err()
+		s.cancel()
+		// The owner drains and waits exactly once, including repeated Close.
+		_, _ = io.Copy(io.Discard, s.outputPipe)
+		s.closeErr = s.cmd.Wait()
+		// Cleanup cancellation must not relabel an already completed FFmpeg
+		// failure. A process killed by this Close has a signal exit instead.
+		if contextErr == nil && s.closeErr != nil && s.cmd.ProcessState != nil && !s.cmd.ProcessState.Exited() {
+			contextErr = context.Canceled
+		}
+		processmetrics.Record(processmetrics.Remux, s.cmd.ProcessState, s.closeErr, contextErr)
+	})
+	return s.closeErr
 }
 
 // containerMIME maps output format names to MIME types for HTTP responses.

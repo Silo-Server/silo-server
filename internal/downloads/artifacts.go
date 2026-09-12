@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -556,8 +558,10 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 }
 
 func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
-	if _, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
+	if count, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
 		slog.WarnContext(ctx, "download artifact lease reclaim failed", "component", "downloads", "error", err)
+	} else {
+		workmetrics.Recovered("downloads", int64(len(count)))
 	}
 
 	// Reconcile downloads stranded in 'preparing' against their artifact's
@@ -801,6 +805,9 @@ func (m *ArtifactManager) drain(ctx context.Context) error {
 // encodeOne runs one claimed job to completion, extending its lease via a
 // heartbeat, and links/notifies the dependent download rows on the outcome.
 func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
+	ctx, observation := workmetrics.Start(ctx, "downloads", a.CreatedAt)
+	defer workmetrics.Profile(ctx)()
+	defer observation.Finish("unknown")
 	hbCtx, cancelHB := context.WithCancel(ctx)
 	defer cancelHB()
 	// heartbeatLoop cancels hbCtx if the lease is lost; PrepareFile runs on hbCtx
@@ -890,6 +897,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
 		return
 	}
+	observation.Finish("success")
 	flipped, err := m.downloads.MarkLinkedDownloadsReady(ctx, a.ID, size)
 	if err != nil {
 		slog.ErrorContext(ctx, "flipping linked downloads ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
@@ -987,6 +995,7 @@ func (m *ArtifactManager) failJob(ctx context.Context, a *Artifact, msg string) 
 		// Lease lost; the current owner is responsible for the job's outcome.
 		return
 	}
+	workmetrics.FinishContext(ctx, "error")
 	if terminal {
 		m.failLinkedDownloads(ctx, a.ID, msg)
 	} else {

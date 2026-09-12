@@ -146,7 +146,7 @@ func newRedisEventBus(redisURL string) *RedisEventBus {
 		opts = &redis.Options{Addr: redisURL}
 	}
 	return &RedisEventBus{
-		client: redis.NewClient(opts),
+		client: instrumentRedis(redis.NewClient(opts), "events"),
 		done:   make(chan struct{}),
 	}
 }
@@ -222,7 +222,7 @@ func (r *RedisEventBus) Close() error {
 			s.cancel()
 		}
 
-		if err := r.client.Close(); err != nil && firstErr == nil {
+		if err := CloseRedisClient(r.client); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	})
@@ -237,13 +237,19 @@ func (r *RedisEventBus) Close() error {
 // Returns nil and no error if no Redis URL or Sentinel config is provided.
 // Returns an error if configuration is present but invalid.
 func NewRedisClient(cfg config.RedisConfig) (*redis.Client, error) {
+	return NewRedisClientForRole(cfg, "application")
+}
+
+// NewRedisClientForRole associates all standalone or Sentinel operations and
+// pool pressure with a bounded operational role.
+func NewRedisClientForRole(cfg config.RedisConfig, role string) (*redis.Client, error) {
 	if cfg.SentinelMaster != "" && len(cfg.SentinelAddresses) > 0 {
-		return redis.NewFailoverClient(&redis.FailoverOptions{
+		return instrumentRedis(redis.NewFailoverClient(&redis.FailoverOptions{
 			MasterName:       cfg.SentinelMaster,
 			SentinelAddrs:    cfg.SentinelAddresses,
 			SentinelPassword: cfg.SentinelPassword,
 			DB:               0,
-		}), nil
+		}), role), nil
 	}
 	if cfg.URL == "" {
 		return nil, nil
@@ -252,5 +258,5 @@ func NewRedisClient(cfg config.RedisConfig) (*redis.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
-	return redis.NewClient(opt), nil
+	return instrumentRedis(redis.NewClient(opt), role), nil
 }

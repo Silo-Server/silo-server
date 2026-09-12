@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -18,13 +17,18 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Observability for the v2 listener. Every v2 request is counted, timed and
 // logged once, here, with labels that are stable across releases and bounded
 // in cardinality: the operation ID (never the raw path), the method folded
 // into the fixed standard set, the status class, the problem type
-// identifier, the credential class, and a capped client identity. The v1 request logger and metrics middleware skip the /api/v2/
+// identifier, the credential class, and a fixed client family. The v1 request logger and metrics middleware skip the /api/v2/
 // subtree so a v2 request is not recorded twice with two label vocabularies.
 //
 // Nothing here logs a URL, a query string, a header value other than the
@@ -53,12 +57,11 @@ const (
 	// authClassAnonymous labels a gated operation that established no identity
 	// (no credential, or one the gate refused).
 	authClassAnonymous = "anonymous"
-	// labelOther replaces a client name once the bounded set is full, and a
-	// request method outside the standard set.
-	labelOther = "other"
-	// maxClientLabelValues bounds the client label's distinct values per
-	// process; anything past it is labelOther. Logs keep the clamped value.
-	maxClientLabelValues = 64
+	// labelOther replaces unknown client names and methods outside the standard set.
+	labelOther          = "other"
+	metricClientWeb     = "web"
+	metricClientApple   = "apple"
+	metricClientAndroid = "android"
 	// maxClientNameLen and maxClientVersionLen clamp the X-Silo-Client and
 	// X-Silo-Client-Version values before they reach a label or a log line.
 	maxClientNameLen    = 64
@@ -66,7 +69,8 @@ const (
 )
 
 var (
-	requestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	requestInFlight = promauto.NewGaugeVec(prometheus.GaugeOpts{Name: "silo_apiv2_in_flight", Help: "Active native API v2 operations, including response streaming."}, []string{labelOperationID})
+	requestsTotal   = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "streamapp_apiv2_requests_total",
 		Help: "Native API v2 requests by operation, status class, problem type, credential class and client.",
 	}, []string{labelAPIMajor, labelOperationID, labelMethod, labelStatusClass, labelErrorCode, labelAuthClass, labelClient})
@@ -121,10 +125,29 @@ func observationFrom(ctx context.Context) *observation {
 func observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		ctx, span := otel.Tracer("silo/apiv2").Start(telemetry.PublicContext(r.Context()), "api.v2.unmatched", trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindServer))
+		if span.IsRecording() {
+			span.SetAttributes(attribute.String("http.request.method", methodLabel(r.Method)))
+		}
+		defer span.End()
+		r = r.WithContext(ctx)
 		o := &observation{operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(sw, r)
+		if span.IsRecording() {
+			span.SetAttributes(attribute.String("operation", o.operationID), attribute.String("error.type", o.errorCode))
+			if sw.status != 0 {
+				span.SetAttributes(attribute.Int("http.response.status_code", sw.status))
+			} else if sw.hijacked {
+				span.SetAttributes(attribute.String("http.response.outcome", "hijacked"))
+			} else {
+				span.SetAttributes(attribute.String("http.response.outcome", "abandoned"))
+			}
+			if sw.status >= 500 {
+				span.SetStatus(codes.Error, "server_error")
+			}
+		}
 		report(r, o, sw.status, sw.hijacked, time.Since(start))
 	})
 }
@@ -250,37 +273,33 @@ func clampLabel(v string, limit int) string {
 	return v
 }
 
-var clientLabels struct {
-	sync.Mutex
-	seen map[string]bool
-}
-
-// clientLabel bounds the client metric label: the first maxClientLabelValues
-// distinct names are labeled as themselves, later ones as "other", and a
-// nameless client as "none". Logs carry the unbucketed clamped value.
+// clientLabel maps only recognized first-party product names into fixed families.
+// Arbitrary self-reported names cannot create metric series or store private text
+// in Prometheus. Logs retain the existing clamped client identity for diagnosis.
 func clientLabel(name string) string {
-	if name == "" {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "":
 		return labelNone
-	}
-	clientLabels.Lock()
-	defer clientLabels.Unlock()
-	if clientLabels.seen == nil {
-		clientLabels.seen = map[string]bool{}
-	}
-	if clientLabels.seen[name] {
-		return name
-	}
-	if len(clientLabels.seen) >= maxClientLabelValues {
+	case "silo web":
+		return metricClientWeb
+	case "silo apple", "silo apple tv", "silo ios", "silo tvos", "silo macos", "silo ipados":
+		return metricClientApple
+	case "silo android", "silo android tv":
+		return metricClientAndroid
+	default:
 		return labelOther
 	}
-	clientLabels.seen[name] = true
-	return name
 }
 
 // observeOperation is the first Huma middleware: the request matched an
 // operation, so the record names it. Nothing after this point can change
 // which operation answered.
 func observeOperation(ctx huma.Context, next func(huma.Context)) {
+	opID := ctx.Operation().OperationID
+	trace.SpanFromContext(ctx.Context()).SetName("api.v2." + opID)
+	active := requestInFlight.WithLabelValues(opID)
+	active.Inc()
+	defer active.Dec()
 	if o := observationFrom(ctx.Context()); o != nil {
 		op := ctx.Operation()
 		o.operationID = op.OperationID

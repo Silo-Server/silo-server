@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -395,7 +397,7 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 		return false
 	}
 	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
-	resp, err := (&http.Client{Timeout: nodeConfigReloadTimeout}).Do(req)
+	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout}, req, "reload")
 	if err != nil {
 		slog.WarnContext(ctx, "node did not reload after an acceleration override change; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "error", logredact.SanitizeURLError(err))
@@ -517,7 +519,7 @@ func (h *NodeHandler) HandleForceReloadNodes(w http.ResponseWriter, r *http.Requ
 				results[idx] = result
 				return
 			}
-			resp, err := client.Do(req)
+			resp, err := telemetry.DoTrustedNode(client, req, "reload")
 			if err != nil {
 				result.Status = "error"
 				result.Error = err.Error()
@@ -564,7 +566,7 @@ func (h *NodeHandler) HandleForceReloadNode(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resp, err := client.Do(req)
+	resp, err := telemetry.DoTrustedNode(client, req, "reload")
 	if err != nil {
 		type forceReloadResponse struct {
 			Results []ForceReloadResult `json:"results"`
@@ -762,7 +764,7 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 	}
 	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
 
-	resp, err := client.Do(req)
+	resp, err := telemetry.DoTrustedNode(client, req, "reprobe")
 	if err != nil {
 		return nodeReprobeResponse{}, logredact.SanitizeURLError(err)
 	}
