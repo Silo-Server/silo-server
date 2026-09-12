@@ -25,13 +25,19 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 Source builds use [docker-compose.yml](docker-compose.yml) only for PostgreSQL
 and Redis; the deploy-oriented stack in the README is separate.
 
+For an existing local database, set `postgres_password` below to its current
+password instead of generating a new one. Changing `.env` does not change the
+password stored in PostgreSQL.
+
 ```sh
-# Create the local bootstrap configuration
+# Create the bootstrap configuration for a new local database
 cp .env.example .env
 chmod 600 .env
-printf '\nSECRET_KEY=%s\nDATABASE_URL=%s\nREDIS_URL=%s\n' \
+postgres_password="$(openssl rand -hex 24)"
+printf '\nPOSTGRES_PASSWORD=%s\nSECRET_KEY=%s\nDATABASE_URL=%s\nREDIS_URL=%s\n' \
+  "$postgres_password" \
   "$(openssl rand -base64 48)" \
-  'postgres://silo:silo@localhost:5432/silo?sslmode=disable' \
+  "postgres://silo:${postgres_password}@localhost:5432/silo?sslmode=disable" \
   'redis://localhost:6379' >> .env
 
 # Start local PostgreSQL and Redis
