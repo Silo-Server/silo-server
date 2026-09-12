@@ -9,6 +9,14 @@ by target relabeling.
 
 Commands assume the repository root is the current directory.
 
+The application listener does not expose metrics. Enable the dedicated listener
+only on a private monitoring address, for example
+`SILO_METRICS_LISTEN=127.0.0.1:9091`, and point Prometheus at
+`http://127.0.0.1:9091/metrics`. The listener is disabled when the variable is
+unset and does not require application credentials; network placement is its
+access boundary. Do not publish the port through a public ingress or host-wide
+port binding.
+
 ```sh
 docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
 docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" -w /etc/prometheus prom/prometheus:v3.5.0 test rules silo.rules.test.yml

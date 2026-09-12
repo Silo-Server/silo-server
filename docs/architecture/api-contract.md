@@ -359,9 +359,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   applies. `TestCommittedArtifactMatchesRouter` reconciles the assembled router with the
   committed artifact plus the typed manual registry of raw handshakes (`apiv2.RawHandshake`,
   empty today), in both directions. The retained `/api/v1/health` and `/api/v1/ready` probes and
-  the unauthenticated `/metrics` endpoints are operator-facing and deliberately absent from the
-  artifact and from generated native clients; deployments restrict their exposure through proxy
-  or network policy.
+  the opt-in, dedicated `/metrics` listener is operator-facing and deliberately absent from the
+  artifact and from generated native clients; it is disabled unless `SILO_METRICS_LISTEN` is set
+  and must bind to a private monitoring address.
 - **The fixtures.** `contracts/api/v2/fixtures/` is generated through the assembled v2 router
   by `TestContractFixtures` in `internal/apiv2` (`make apiv2-fixtures`), never edited: each
   body is what the server answered a synthetic request with a fixed request id and fake
@@ -1116,11 +1116,11 @@ Probe traffic is excluded from request and activity logging. Consumers stay wher
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
 probes, the node pool's health sweep, and the Apple/Android reachability monitors that read the
 identity fields (those clients additionally have `GET /api/v2/system/info` for discovery). No
-root `/health` or `/ready` route is added and no probe is redirected. Existing unauthenticated root
-`/metrics` endpoints on the API, proxy, and transcode-node servers remain operator-facing
-telemetry outside the native client contract. They have no endpoint authentication, so deployments
-must restrict their exposure through proxy/network policy where required. They are inventoried so
-the cutover cannot remove them accidentally. The administrator
+root `/health` or `/ready` route is added and no probe is redirected. The API process's `/metrics`
+endpoint is a dedicated opt-in listener outside the native client contract. It is disabled unless
+`SILO_METRICS_LISTEN` is set and is inventoried separately from the public application listener.
+Proxy and transcode-node metrics remain on their worker listeners and must stay on private
+monitoring networks. The administrator
 upgrade guide must name every external integration and persisted URL class affected by the hard
 cutover, explain how to regenerate it, and provide a post-upgrade verification checklist. The
 server must not redirect old URLs containing tokens or secrets.
@@ -1539,8 +1539,8 @@ empty arrays rather than `null`.
    return `410 Gone` with the existing v1-shaped `client_upgrade_required` error, pointing the
    user toward a v2-capable client and the administrator upgrade guide. They contain no business
    behavior. Version-neutral legacy routes are retired individually and are not aliases into v2.
-   The retained `/api/v1/health` and `/api/v1/ready` probes and operator `/metrics` remain
-   outside the tombstone handlers.
+   The retained `/api/v1/health` and `/api/v1/ready` probes remain outside the tombstone
+   handlers. Operator metrics are served only by the separate opt-in listener.
 6. Remove bridge-only legacy transport code after the 1.0 cutover is established; no updated
    client contains a legacy native transport path to clean up.
 

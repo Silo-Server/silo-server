@@ -43,6 +43,7 @@ const (
 	ListenerProxy         = "proxy"
 	ListenerTranscodeNode = "transcode_node"
 	ListenerDebug         = "operational_debug"
+	ListenerMetrics       = "operational_metrics"
 )
 
 // Listener kinds select the router model the walk applies to an entry point.

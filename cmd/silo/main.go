@@ -2871,9 +2871,14 @@ func main() {
 
 	router := api.NewRouter(deps)
 
-	// Step 8: Build the handler the primary port serves — /metrics, the API
-	// router, and the frontend. See newRootHandler.
+	// Step 8: Build the handler the primary port serves — the API router and
+	// frontend. Metrics use a separate opt-in listener; see newRootHandler.
 	rootHandler := newRootHandler(router)
+	stopMetricsListener, err := startMetricsListener(true)
+	if err != nil {
+		log.Fatalf("metrics listener: %v", err)
+	}
+	defer stopMetricsListener()
 
 	// Step 9: Start background workers (if needed).
 	var sessionCleaner *worker.SessionCleaner

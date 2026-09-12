@@ -1,7 +1,10 @@
 package main
 
 import (
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
@@ -41,5 +44,22 @@ func TestRouteInventoryMatchesRootListener(t *testing.T) {
 	if len(unobserved) > 0 {
 		t.Errorf("the inventory claims %d root route(s) the real listener does not register; "+
 			"run `make route-inventory`:\n  %v", len(unobserved), unobserved)
+	}
+}
+
+func TestRootListenerDoesNotServeMetrics(t *testing.T) {
+	apiStub := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	newRootMux(apiStub).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	body, err := io.ReadAll(rec.Result().Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "# HELP ") {
+		t.Fatal("public root listener still serves Prometheus metrics")
 	}
 }

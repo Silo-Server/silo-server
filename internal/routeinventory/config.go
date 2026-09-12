@@ -54,10 +54,18 @@ func DefaultConfig(root string) Config {
 		Listeners: []ListenerSpec{
 			debugListenerSpec(),
 			{
+				ID:          ListenerMetrics,
+				Kind:        ListenerKindServeMux,
+				Description: "Optional operator metrics listener, separate from every client-facing port.",
+				Dir:         cmdSiloDir,
+				Func:        "newMetricsHandler",
+				Constructor: "newMetricsMux",
+			},
+			{
 				ID:   ListenerRoot,
 				Kind: ListenerKindServeMux,
-				Description: "Process root listener on the primary port: the http.ServeMux that serves /metrics, " +
-					"delegates /api/ to the API listener, and serves the frontend at /.",
+				Description: "Process root listener on the primary port: the http.ServeMux that delegates /api/ " +
+					"to the API listener and serves the frontend at /; metrics use a separate opt-in listener.",
 				Dir:         cmdSiloDir,
 				Func:        rootHandlerFunc,
 				Constructor: rootHandlerCtor,

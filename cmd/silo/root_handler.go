@@ -3,15 +3,13 @@ package main
 import (
 	"net/http"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"github.com/Silo-Server/silo-server/internal/server"
 )
 
 // newRootHandler builds the handler the primary port serves.
 //
 // The API router is not the process's outermost handler: this http.ServeMux is.
-// It answers /metrics itself, hands /api/ to the API listener, and serves the
+// It hands /api/ to the API listener and serves the
 // frontend everywhere else. Those registrations are routes like any other, so
 // they are enumerated here — in one small function the route inventory can walk
 // — rather than inline in main(), where nothing would notice a fourth
@@ -43,8 +41,9 @@ func (h sealedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.h.S
 // generator walks this function; every registration must be reachable from it.
 func newRootMux(apiRouter http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
-	// Prometheus metrics are not behind auth.
-	mux.Handle("/metrics", promhttp.Handler())
+	// Keep the public listener explicit: a disabled metrics listener must not
+	// fall through to the SPA shell and look like a successful scrape.
+	mux.Handle("/metrics", http.NotFoundHandler())
 	mux.Handle("/api/", apiRouter)
 	mux.Handle("/", server.FrontendHandler())
 	return mux

@@ -734,7 +734,7 @@ nothing and cannot hang regardless of what a mount or a GPU query is doing.
 
 Sampling is Linux-only: `available: false` on macOS or Windows is expected and
 is not an error. History and alerting are Prometheus's job — the same numbers
-are exposed as `streamapp_node_*` gauges on this process's existing `/metrics`
+are exposed as `streamapp_node_*` gauges on this process's dedicated opt-in `/metrics`
 endpoint, with one deliberate difference: `/metrics` is unauthenticated, so its
 disk series are labeled `mount="scratch"` / `mount="library-N"` and the library
 paths themselves appear only here, behind admin auth.

@@ -320,10 +320,12 @@ process. These boundaries are recorded in the PR follow-up checklist.
 
 ## Deployment and retention
 
-`/metrics` remains an unauthenticated operational endpoint on the main and worker
-listeners. Restrict external ingress to that path in the deployment proxy or
-network policy. Do not publish the loopback profiler through container ports,
-a public Service, ingress or a native API proxy.
+The main application listener does not serve `/metrics`. Metrics are disabled unless
+the operator sets `SILO_METRICS_LISTEN` to an explicit address. The dedicated listener
+is an unauthenticated operational endpoint, so bind it to an internal monitoring
+network or a loopback address and do not publish it through a public Service or
+ingress. Prometheus should scrape that listener directly. Do not publish the loopback
+profiler through container ports, a public Service, ingress or a native API proxy.
 
 [Monitoring operations](../operations/monitoring.md) includes scrape, dashboard,
 alert and failure-exercise examples. Prometheus owns metric retention; the OTLP

@@ -34,9 +34,12 @@ no-store` and can contain symbols, paths, and stack information. Keep them in
 private incident artifacts and delete them after incident review.
 
 Do not publish the profiling port with Docker, ingress, a public proxy, or a
-load-balanced service. Each capture describes one process. The existing main
-listener `/metrics` endpoint remains unauthenticated; restrict access to it in the
-deployment's reverse proxy or network policy when that listener is public.
+load-balanced service. Each capture describes one process. The main application
+listener does not serve `/metrics`. Metrics are disabled by default and can be
+enabled on a separate operator listener with
+`SILO_METRICS_LISTEN=127.0.0.1:9091`. The dedicated listener is unauthenticated;
+bind it only to a loopback or private monitoring network. Prometheus can scrape
+`http://127.0.0.1:9091/metrics` when it shares that network namespace.
 
 ## Collecting bounded captures
 
