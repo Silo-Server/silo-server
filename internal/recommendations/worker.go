@@ -28,9 +28,19 @@ type Worker struct {
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
 	profileRefreshPending map[string]struct{}
+	profileRefreshDone    map[string]time.Time
 	cancelFunc            context.CancelFunc
 	embeddingsJobTimeout  time.Duration
 }
+
+// profileRefreshMinInterval is the per-profile cooldown between full
+// recommendation refreshes. Playback progress updates arrive every few seconds
+// during an active stream and each one requests a refresh; without a cooldown
+// the worker regenerates every For You row (several pgvector ANN queries) in a
+// continuous loop for the whole session. Debounced requests are not lost: the
+// profile stays marked stale and the 5-minute stalenessLoop sweep re-requests
+// it once the cooldown has passed.
+const profileRefreshMinInterval = 5 * time.Minute
 
 const tasteProfileRefreshSubjectsQuery = `
 	SELECT DISTINCT user_id, profile_id FROM user_ratings
@@ -56,6 +66,7 @@ func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, r
 		running:               make(map[JobName]bool),
 		profileRefreshCh:      make(chan profileRefreshRequest, 256),
 		profileRefreshPending: make(map[string]struct{}),
+		profileRefreshDone:    make(map[string]time.Time),
 		embeddingsJobTimeout:  embeddingsJobTimeout,
 	}
 
@@ -193,6 +204,10 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 
 	w.mu.Lock()
 	if _, exists := w.profileRefreshPending[key]; exists {
+		w.mu.Unlock()
+		return
+	}
+	if done, ok := w.profileRefreshDone[key]; ok && time.Since(done) < profileRefreshMinInterval {
 		w.mu.Unlock()
 		return
 	}
@@ -524,10 +539,19 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case req := <-w.profileRefreshCh:
-			if err := w.refreshProfile(ctx, req.userID, req.profileID); err != nil {
+			err := w.refreshProfile(ctx, req.userID, req.profileID)
+			if err != nil {
 				slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", req.userID, "profile_id", req.profileID, "error", err)
 			}
-			w.clearProfileRefreshPending(profileRefreshKey(req.userID, req.profileID))
+			key := profileRefreshKey(req.userID, req.profileID)
+			w.mu.Lock()
+			// Only a successful refresh starts the cooldown; a failed one may be
+			// retried immediately.
+			if err == nil {
+				w.profileRefreshDone[key] = time.Now()
+			}
+			delete(w.profileRefreshPending, key)
+			w.mu.Unlock()
 		}
 	}
 }
