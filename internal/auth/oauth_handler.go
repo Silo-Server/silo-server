@@ -88,10 +88,43 @@ var ErrMissingInstallID = errors.New("install_id required")
 
 // HandleInit serves POST /api/v1/auth/oauth/{install_id}/init.
 func (h *OAuthHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
+	authorizeURL, ok := h.beginAuthorize(w, r)
+	if !ok {
+		return
+	}
+	http.Redirect(w, r, authorizeURL, http.StatusFound)
+}
+
+// HandleStart serves POST /api/v1/auth/oauth/{install_id}/start and returns the
+// IdP authorize URL as JSON instead of redirecting to it.
+//
+// The SPA cannot use HandleInit's redirect. Its login button submitted a form to
+// /init and let the 302 carry the browser to the IdP, but the frontend is served
+// with `form-action 'self'` (see internal/server/frontend.go), and browsers
+// enforce form-action across redirects. The cross-origin hop was blocked with no
+// console error and no navigation: the server logged a clean 302 while the IdP
+// never saw the request, so every external identity provider looked like a dead
+// button. Handing the URL back as JSON lets the SPA navigate with
+// window.location, which form-action does not govern.
+func (h *OAuthHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
+	authorizeURL, ok := h.beginAuthorize(w, r)
+	if !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		AuthorizeURL string `json:"authorize_url"`
+	}{AuthorizeURL: authorizeURL})
+}
+
+// beginAuthorize mints the OAuth state, asks the plugin for an authorize URL and
+// stores the pending session. It writes its own error response and reports false
+// when it did, so callers only decide how to hand back the URL.
+func (h *OAuthHandler) beginAuthorize(w http.ResponseWriter, r *http.Request) (string, bool) {
 	installID, err := strconv.Atoi(chi.URLParam(r, "install_id"))
 	if err != nil || installID <= 0 {
 		http.Error(w, "invalid install_id", http.StatusBadRequest)
-		return
+		return "", false
 	}
 
 	next := normalizeOAuthNext(r.URL.Query().Get("next"))
@@ -99,13 +132,13 @@ func (h *OAuthHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	client, _, err := h.deps.ResolveClient(r.Context(), installID)
 	if err != nil {
 		http.Error(w, "auth plugin unavailable", http.StatusBadGateway)
-		return
+		return "", false
 	}
 
 	nonce, err := randomHex(16)
 	if err != nil {
 		http.Error(w, "rand failure", http.StatusInternalServerError)
-		return
+		return "", false
 	}
 
 	now := time.Now().UTC()
@@ -124,11 +157,11 @@ func (h *OAuthHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.WarnContext(r.Context(), "oauth init_authorize failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Error(w, "plugin init_authorize failed", http.StatusBadGateway)
-		return
+		return "", false
 	}
 	if resp.GetAuthorizeUrl() == "" {
 		http.Error(w, "plugin returned empty authorize_url", http.StatusBadGateway)
-		return
+		return "", false
 	}
 
 	psBytes, _ := json.Marshal(resp.GetProviderState().AsMap())
@@ -145,10 +178,10 @@ func (h *OAuthHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	if err := h.deps.Store.Insert(r.Context(), sess); err != nil {
 		slog.WarnContext(r.Context(), "oauth session insert failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Error(w, "store insert failed", http.StatusInternalServerError)
-		return
+		return "", false
 	}
 
-	http.Redirect(w, r, resp.GetAuthorizeUrl(), http.StatusFound)
+	return resp.GetAuthorizeUrl(), true
 }
 
 // HandleCallback serves GET /api/v1/auth/oauth/{install_id}/callback.

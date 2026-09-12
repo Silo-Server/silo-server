@@ -70,6 +70,7 @@ export default function Login() {
   const [provider, setProvider] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [startingDeviceLogin, setStartingDeviceLogin] = useState(false);
+  const [startingOauth, setStartingOauth] = useState<number | null>(null);
   const [deviceSession, setDeviceSession] = useState<DeviceLoginStartResponse | null>(null);
   const [deviceStatusMessage, setDeviceStatusMessage] = useState("");
   const [devicePolling, setDevicePolling] = useState(false);
@@ -244,6 +245,26 @@ export default function Login() {
     }
   }
 
+  // The IdP hop is a scripted navigation, not a form submit. Submitting a form
+  // to /init and following its 302 is blocked by the app's `form-action 'self'`
+  // CSP the moment the redirect leaves this origin — silently, with no console
+  // error — so the button appeared dead for every external provider.
+  async function handleStartOauth(installationId: number | undefined) {
+    if (!installationId) return;
+    setStartingOauth(installationId);
+    try {
+      const data = await api<{ authorize_url: string }>(
+        `/auth/oauth/${installationId}/start${nextParam}`,
+        { method: "POST" },
+      );
+      if (!data?.authorize_url) throw new Error("Server returned no authorize URL");
+      window.location.assign(data.authorize_url);
+    } catch (error) {
+      setStartingOauth(null);
+      toast.error(error instanceof Error ? error.message : "Could not start sign-in");
+    }
+  }
+
   async function handleStartDeviceLogin() {
     setStartingDeviceLogin(true);
     try {
@@ -283,16 +304,17 @@ export default function Login() {
           {oauthProviders.length > 0 && (
             <div className="space-y-2">
               {oauthProviders.map((entry) => (
-                <form
+                <Button
                   key={entry.id}
-                  method="post"
-                  action={`/api/v1/auth/oauth/${entry.installation_id}/init${nextParam}`}
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start gap-3"
+                  disabled={startingOauth !== null}
+                  onClick={() => void handleStartOauth(entry.installation_id)}
                 >
-                  <Button type="submit" variant="outline" className="w-full justify-start gap-3">
-                    {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
-                    <span>{entry.display_name}</span>
-                  </Button>
-                </form>
+                  {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
+                  <span>{entry.display_name}</span>
+                </Button>
               ))}
               <div className="text-muted-foreground flex items-center gap-2 pt-2 text-xs">
                 <div className="bg-border h-px flex-1" />

@@ -82,7 +82,7 @@ type LoginProviderInfo struct {
 	// auth_provider.v1 plugins that ship an icon (icon_url manifest field).
 	IconURL string `json:"icon_url,omitempty"`
 	// InstallationID is non-zero when the provider is backed by a plugin.
-	// The login UI uses it to build /api/v1/auth/oauth/{install_id}/init URLs.
+	// The login UI uses it to build /api/v1/auth/oauth/{install_id}/start URLs.
 	InstallationID int `json:"installation_id,omitempty"`
 }
 
