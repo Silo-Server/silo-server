@@ -13,7 +13,7 @@ import {
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
-import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions } from "@/hooks/queries/admin/stats";
 import { useBuildInfo } from "@/hooks/queries/admin/system";
 import { cn } from "@/lib/utils";
 
@@ -32,8 +32,8 @@ interface AdminSidebarProps {
 }
 
 function useSessionCount() {
-  const { data: sessions = [] } = useAdminSessions();
-  return sessions.length;
+  const { data } = useAdminLiveSessions(false);
+  return data?.sessions.length ?? 0;
 }
 
 export default function AdminSidebar({ onNavigate, embedded = false }: AdminSidebarProps) {

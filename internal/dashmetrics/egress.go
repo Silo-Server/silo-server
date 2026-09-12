@@ -27,6 +27,12 @@ type egressDelta struct {
 // session growth is playback egress and transfer growth is download egress. A
 // route added to either class is classified automatically.
 //
+// ClassProbe transfers are excluded from both totals. A bandwidth probe's bytes
+// are filler that belongs to no media file (§4.2), and counting them made a
+// Jellyfin client's pre-play speed test read as a megabyte of delivered media.
+// A record with no class at all comes from an un-upgraded publisher and is
+// treated as an ordinary transfer.
+//
 // Counters only ever grow, but a session can be pruned and re-created under the
 // same id, and a restarted registry starts from zero. A shrinking counter is
 // therefore read as a fresh start and contributes nothing rather than a
@@ -55,7 +61,7 @@ func computeEgressDelta(prev map[string]int64, snapshot streamtelemetry.Snapshot
 	}
 
 	for _, transfer := range snapshot.Transfers {
-		if transfer.Role != streamtelemetry.RoleViewerEgress {
+		if transfer.Role != streamtelemetry.RoleViewerEgress || transfer.Class == streamtelemetry.ClassProbe {
 			continue
 		}
 		grown := record("transfer:"+transfer.ID, transfer.BytesAccepted)

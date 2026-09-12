@@ -58,3 +58,44 @@ func ClientInfoFromRequest(r *http.Request) ClientInfo {
 		UserAgent: r.UserAgent(),
 	}.Normalized()
 }
+
+// ReportedSessions implements streamtelemetry.ReportedSessionSource.
+//
+// It is what makes the merged telemetry view complete: without it the view holds
+// only sessions that moved bytes through an observed route family, and every
+// consumer had to reconcile that set against the legacy store at read time. With
+// it, a session a client claims but nothing is delivering for is simply a row in
+// the one view carrying Reported with no bytes.
+//
+// This reports CLAIMS, never measurements. No byte count and no client address
+// crosses this boundary: viewer bytes and viewer IP belong exclusively to the
+// outermost viewer edge (§2.5), and the session manager only knows what the
+// client told it. Session.ClientIP in particular is a resolved request address
+// held for display, not evidence that anything was delivered to it.
+func (m *SessionManager) ReportedSessions() []streamtelemetry.ReportedSession {
+	if m == nil {
+		return nil
+	}
+	sessions := m.AllSessions()
+	reported := make([]streamtelemetry.ReportedSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		reported = append(reported, streamtelemetry.ReportedSession{
+			SessionID:   session.ID,
+			Subject:     streamtelemetry.UserSubject(session.UserID),
+			ProfileID:   session.ProfileID,
+			MediaFileID: session.MediaFileID,
+			PlayMethod:  string(session.PlayMethod),
+			StartedAt:   session.StartedAt,
+			Paused:      session.IsPaused,
+			// Position is the client's own report. It is the field that made the
+			// legacy store over-report liveness in the first place (#666), so it
+			// travels as reported state and is never treated as activity.
+			PositionSeconds: session.Position,
+			RealtimeAlive:   session.HasRealtimeConnection,
+		})
+	}
+	return reported
+}

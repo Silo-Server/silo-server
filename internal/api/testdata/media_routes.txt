@@ -139,6 +139,7 @@ POST /api/v1/admin/server/restart	non-media
 GET /api/v1/admin/server/status	non-media
 GET /api/v1/admin/sessions	non-media
 GET /api/v1/admin/sessions/capabilities	non-media
+GET /api/v1/admin/sessions/live	non-media
 POST /api/v1/admin/sessions/{session_id}/message	non-media
 POST /api/v1/admin/sessions/{session_id}/pause	non-media
 POST /api/v1/admin/sessions/{session_id}/resume	non-media

@@ -77,6 +77,16 @@ func (o *Observation) outcome(ctxErr error, completed bool) httpstream.StreamOut
 	o.mu.Lock()
 	err := o.firstWriteErr
 	o.mu.Unlock()
+	// A cut transfer never completed, whatever the write path managed to record.
+	// The entry guards in observedWriter.Write and ReadFrom return before any
+	// write is attempted, so firstWriteErr can still be nil here; classifying on
+	// that alone would report a deliberately severed stream as a full delivery.
+	// A cut is reported as client_gone rather than a distinct outcome: the
+	// StreamOutcome set is on the wire (codec.go) and read by admin consumers,
+	// and the severed connection is what both sides actually observe.
+	if o.cut.Load() && err == nil && ctxErr == nil {
+		return httpstream.OutcomeClientGone
+	}
 	return httpstream.ClassifyOutcome(err, ctxErr)
 }
 

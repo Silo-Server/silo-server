@@ -86,12 +86,24 @@ func (h *StreamTelemetryParityHandler) HandleGetStreamTelemetryParity(w http.Res
 		return
 	}
 
-	telemetry := streamtelemetry.LiveSessionsFromGlobalView(view)
+	telemetry := telemetrySideFromView(view, status)
 	response.Sources = append(response.Sources,
 		h.comparePostgres(ctx, telemetry),
 		h.compareNodeSessions(ctx, telemetry),
 	)
 	writeJSON(w, http.StatusOK, response)
+}
+
+// telemetrySideFromView pairs the projection with the health of the build it
+// came from. Both comparisons must be handed the same side: two sources
+// disagreeing about how complete the view was would be a defect in the report,
+// not a finding.
+func telemetrySideFromView(view streamtelemetry.GlobalMonitoringView, status streamtelemetry.ViewCacheStatus) streamtelemetry.TelemetrySide {
+	return streamtelemetry.TelemetrySide{
+		Sessions:     streamtelemetry.LiveSessionsFromGlobalView(view),
+		ViewComplete: view.Complete,
+		ViewStale:    status.Stale,
+	}
 }
 
 // describeView surfaces the completeness flag alongside the diff on purpose. A
@@ -122,7 +134,7 @@ func describeView(view streamtelemetry.GlobalMonitoringView, status streamteleme
 	return response
 }
 
-func (h *StreamTelemetryParityHandler) comparePostgres(ctx context.Context, telemetry []streamtelemetry.LiveSession) paritySourceResponse {
+func (h *StreamTelemetryParityHandler) comparePostgres(ctx context.Context, telemetry streamtelemetry.TelemetrySide) paritySourceResponse {
 	const source = "playback_sessions_sync"
 	if h.Pool == nil {
 		return paritySourceResponse{Source: source, Error: "database not configured"}
@@ -134,7 +146,7 @@ func (h *StreamTelemetryParityHandler) comparePostgres(ctx context.Context, tele
 		SELECT session_id, user_id, COALESCE(profile_id, ''), COALESCE(media_file_id, 0),
 		       COALESCE(play_method, ''), COALESCE(reporting_node, ''), started_at
 		FROM playback_sessions_sync
-		LIMIT $1`, parityScanLimit)
+		LIMIT $1`, parityScanLimit+1)
 	if err != nil {
 		return paritySourceResponse{Source: source, Error: err.Error()}
 	}
@@ -163,11 +175,19 @@ func (h *StreamTelemetryParityHandler) comparePostgres(ctx context.Context, tele
 		return paritySourceResponse{Source: source, Error: err.Error()}
 	}
 
-	report := streamtelemetry.CompareLiveSessions(source, telemetry, legacy, streamtelemetry.DefaultParityLimit)
-	return paritySourceResponse{Source: source, Available: true, Report: &report}
+	legacySide := streamtelemetry.LegacySide{Sessions: legacy}
+	response := paritySourceResponse{Source: source, Available: true}
+	if len(legacy) > parityScanLimit {
+		legacySide.Sessions = legacy[:parityScanLimit]
+		legacySide.Truncated = true
+		response.Notes = append(response.Notes, "scan truncated at the record limit; the report is partial")
+	}
+	report := streamtelemetry.CompareLiveSessions(source, telemetry, legacySide, streamtelemetry.DefaultParityLimit)
+	response.Report = &report
+	return response
 }
 
-func (h *StreamTelemetryParityHandler) compareNodeSessions(ctx context.Context, telemetry []streamtelemetry.LiveSession) paritySourceResponse {
+func (h *StreamTelemetryParityHandler) compareNodeSessions(ctx context.Context, telemetry streamtelemetry.TelemetrySide) paritySourceResponse {
 	const source = "node_sessions_redis"
 	if h.Redis == nil {
 		return paritySourceResponse{Source: source, Error: "redis not configured"}
@@ -205,7 +225,10 @@ func (h *StreamTelemetryParityHandler) compareNodeSessions(ctx context.Context, 
 		// Never let a capped read pass as a complete one.
 		response.Notes = append(response.Notes, "scan truncated at the record limit; the report is partial")
 	}
-	report := streamtelemetry.CompareLiveSessions(source, telemetry, legacy, streamtelemetry.DefaultParityLimit)
+	legacySide := streamtelemetry.LegacySide{
+		Sessions: legacy, Truncated: result.Truncated, Lossy: result.Undecodable > 0,
+	}
+	report := streamtelemetry.CompareLiveSessions(source, telemetry, legacySide, streamtelemetry.DefaultParityLimit)
 	response.Report = &report
 	return response
 }

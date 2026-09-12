@@ -42,6 +42,18 @@ func ForwardReadFrom(inner http.ResponseWriter, self io.Writer, src io.Reader, c
 // CopyChunked drives rf.ReadFrom in slices of chunk bytes, calling record after
 // each slice. A non-positive chunk performs a single unbounded transfer.
 func CopyChunked(rf io.ReaderFrom, src io.Reader, chunk int64, record func(n int64, err error)) (int64, error) {
+	return CopyChunkedUntil(rf, src, chunk, record, nil)
+}
+
+// CopyChunkedUntil is CopyChunked with a per-slice continuation check. When stop
+// returns a non-nil error between slices, the copy ends with that error and the
+// bytes transferred so far.
+//
+// A slice is the finest granularity available on this path: the kernel drives
+// sendfile to completion and never calls back into Go, so nothing can interrupt
+// a transfer already in flight. Callers that need to abort a stream get slice
+// latency, not chunk latency.
+func CopyChunkedUntil(rf io.ReaderFrom, src io.Reader, chunk int64, record func(n int64, err error), stop func() error) (int64, error) {
 	if chunk <= 0 {
 		n, err := rf.ReadFrom(src)
 		if record != nil {
@@ -58,6 +70,17 @@ func CopyChunked(rf io.ReaderFrom, src io.Reader, chunk int64, record func(n int
 	if lr, ok := src.(*io.LimitedReader); ok {
 		var total int64
 		for lr.N > 0 {
+			if stop != nil {
+				if err := stop(); err != nil {
+					// The stop error is the transfer's first write error. Without
+					// recording it the wrapper's accounting stays clean and the
+					// cut classifies as a completed delivery.
+					if record != nil {
+						record(0, err)
+					}
+					return total, err
+				}
+			}
 			sliceSize := min(chunk, lr.N)
 			slice := &io.LimitedReader{R: lr.R, N: sliceSize}
 			n, err := rf.ReadFrom(slice)
@@ -78,6 +101,14 @@ func CopyChunked(rf io.ReaderFrom, src io.Reader, chunk int64, record func(n int
 
 	var total int64
 	for {
+		if stop != nil {
+			if err := stop(); err != nil {
+				if record != nil {
+					record(0, err)
+				}
+				return total, err
+			}
+		}
 		n, err := rf.ReadFrom(io.LimitReader(src, chunk))
 		total += n
 		if record != nil {

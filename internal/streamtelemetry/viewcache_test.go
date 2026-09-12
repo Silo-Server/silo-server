@@ -170,3 +170,18 @@ func TestViewCacheDefaultsTTL(t *testing.T) {
 		t.Fatalf("negative TTL = %s, want %s", got, DefaultViewTTL)
 	}
 }
+
+// clone exists so two readers of the cached view cannot mutate each other's
+// copy. Advisories is a top-level slice and has to be copied like the others; a
+// missed one aliases silently and only shows up as cross-reader corruption.
+func TestGlobalMonitoringViewCloneCopiesAdvisories(t *testing.T) {
+	source := GlobalMonitoringView{
+		IncompleteReasons: []string{"publisher_truncated"},
+		Advisories:        []string{"publisher_transfer_capacity"},
+	}
+	first, second := source.clone(), source.clone()
+	first.Advisories[0] = "mutated"
+	if second.Advisories[0] != "publisher_transfer_capacity" || source.Advisories[0] != "publisher_transfer_capacity" {
+		t.Fatalf("advisories aliased across clones: source=%v other=%v", source.Advisories, second.Advisories)
+	}
+}

@@ -154,3 +154,57 @@ func TestCompressExceptBypassPreservesReaderFromAndKeptRouteCompresses(t *testin
 		t.Fatalf("kept route headers: encoding=%q vary=%q", recorder.Header().Get("Content-Encoding"), recorder.Header().Get("Vary"))
 	}
 }
+
+// The stop error is the transfer's first write error, and returning it is not
+// enough: streamtelemetry's observedWriter learns what happened to a transfer
+// exclusively through record, so a cut that never reached the callback left the
+// wrapper's accounting clean and the severed stream classified as a completed
+// delivery. Both loops are exercised because the *io.LimitedReader path is a
+// separate loop from the plain one and a fix applied to one is not applied to
+// the other.
+func TestCopyChunkedUntilRecordsTheStopError(t *testing.T) {
+	tests := []struct {
+		name    string
+		limited bool
+	}{
+		{name: "limited reader", limited: true},
+		{name: "plain reader"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			wantErr := errors.New("cut")
+			// Stop lets the first slice through so the assertion covers a stop
+			// mid-transfer, which is what an operator ending a session produces.
+			calls := 0
+			stop := func() error {
+				calls++
+				if calls == 1 {
+					return nil
+				}
+				return wantErr
+			}
+			src := io.Reader(bytes.NewReader(make([]byte, 12)))
+			if test.limited {
+				src = &io.LimitedReader{R: src, N: 12}
+			}
+			fake := &recordingReaderFrom{}
+			type record struct {
+				n   int64
+				err error
+			}
+			var records []record
+			n, err := CopyChunkedUntil(fake, src, 4, func(n int64, err error) {
+				records = append(records, record{n: n, err: err})
+			}, stop)
+			if !errors.Is(err, wantErr) || n != 4 {
+				t.Fatalf("CopyChunkedUntil = n=%d err=%v, want 4 and the stop error", n, err)
+			}
+			if len(records) != 2 {
+				t.Fatalf("records = %+v, want the slice and the stop error", records)
+			}
+			if last := records[1]; last.n != 0 || !errors.Is(last.err, wantErr) {
+				t.Fatalf("final record = (%d,%v), want (0,%v)", last.n, last.err, wantErr)
+			}
+		})
+	}
+}

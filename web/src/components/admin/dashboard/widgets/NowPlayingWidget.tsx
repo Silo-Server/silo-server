@@ -1,9 +1,12 @@
+import { useState } from "react";
 import { Link } from "react-router";
 import { Pause, Play } from "lucide-react";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions } from "@/hooks/queries/admin/stats";
+import { SessionDeliveryBadges } from "@/components/SessionDeliveryBadges";
+import { describeLiveSessionsSource } from "@/lib/sessionTelemetry";
 import {
   activityMethodMeta,
   classifyActivityMethod,
@@ -16,13 +19,29 @@ import { useReportCollapsed } from "../widgetChrome";
 import { SessionProfilePill } from "./SessionProfilePill";
 
 export function NowPlayingWidget() {
-  const sessionsQuery = useAdminSessions();
-  const sessions = sessionsQuery.data ?? [];
+  // Sessions a client reports as playing but which have delivered nothing are
+  // hidden by default. The operator can reveal them, so nothing is ever
+  // unrecoverably hidden — but the default list answers "who is actually
+  // receiving video?" rather than "who says they are watching?".
+  const [showHiddenSessions, setShowHiddenSessions] = useState(false);
+  const sessionsQuery = useAdminLiveSessions(showHiddenSessions);
+  const sessions = sessionsQuery.data?.sessions ?? [];
+  const source = describeLiveSessionsSource(sessionsQuery.data);
+  // Mirrors the server's own suppression: an incomplete view is blindness
+  // rather than disagreement, and a stale one is blindness about NOW.
+  const viewBlind =
+    !(sessionsQuery.data?.view_complete ?? false) || (sessionsQuery.data?.view_stale ?? false);
 
   // Only a successful, genuinely empty load earns the strip. A skeleton or an
   // error keeps its full height: shrinking the widget to announce a failure
-  // would hide the failure.
-  const isIdle = !sessionsQuery.isLoading && !sessionsQuery.error && sessions.length === 0;
+  // would hide the failure. An empty list with rows held back is not idle
+  // either: collapsing it would put the reveal control out of reach.
+  const isIdle =
+    !sessionsQuery.isLoading &&
+    !sessionsQuery.error &&
+    sessions.length === 0 &&
+    !source.canRevealHidden &&
+    (sessionsQuery.data?.telemetry_enabled === false || source.trustworthy);
   useReportCollapsed(isIdle);
 
   if (isIdle) {
@@ -44,16 +63,46 @@ export function NowPlayingWidget() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-3 flex shrink-0 items-center justify-between">
-        <div className="text-base font-bold">Now Playing</div>
-        {sessions.length > 0 && (
+      <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="text-base font-bold">Now Playing</div>
+          {source.label ? (
+            <span
+              title={source.detail}
+              className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${
+                source.trustworthy
+                  ? "border-primary/20 bg-primary/10 text-primary"
+                  : "border-border/60 bg-muted/30 text-muted-foreground"
+              }`}
+            >
+              {source.label}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-3">
+          {source.canRevealHidden ? (
+            <button
+              type="button"
+              onClick={() => setShowHiddenSessions((shown) => !shown)}
+              className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+            >
+              {showHiddenSessions
+                ? "Hide sessions delivering nothing"
+                : `Show ${source.hiddenCount} delivering nothing`}
+            </button>
+          ) : null}
+          {/* The count is of the rows actually rendered, so it must not be
+              stated when there are none: the widget stays mounted with an empty
+              list whenever every session is classified as delivering nothing,
+              and "View all 0 streams" reads as a broken page rather than as a
+              filter the operator can lift. */}
           <Link
             to="/admin/activity"
             className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
           >
-            View all {sessions.length} streams ›
+            {sessions.length > 0 ? `View all ${sessions.length} streams ›` : "View activity ›"}
           </Link>
-        )}
+        </div>
       </div>
       {/* The stream cards scroll inside the widget: a short widget shows two of
           them rather than spilling out of its row. */}
@@ -67,12 +116,13 @@ export function NowPlayingWidget() {
         ) : sessionsQuery.error ? (
           <SectionError message="Failed to load streams." />
         ) : (
-          /* The empty case never reaches here — it returned the collapsed strip
-             above — so this branch always has at least one stream to show. */
+          /* The list can legitimately be empty here: every session may be held
+             back as delivering nothing, and the widget stays mounted so the
+             reveal control above remains reachable. */
           <>
             <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
               {sessions.slice(0, 4).map((session) => (
-                <StreamCard key={session.session_id} session={session} />
+                <StreamCard key={session.session_id} session={session} viewBlind={viewBlind} />
               ))}
             </div>
             {sessions.length > 4 && (
@@ -90,7 +140,7 @@ export function NowPlayingWidget() {
   );
 }
 
-function StreamCard({ session }: { session: AdminSession }) {
+function StreamCard({ session, viewBlind }: { session: AdminSession; viewBlind: boolean }) {
   const isEpisode =
     session.series_name && session.season_number != null && session.episode_number != null;
   const title = isEpisode
@@ -191,6 +241,16 @@ function StreamCard({ session }: { session: AdminSession }) {
             <SessionProfilePill label={session.profile_name || session.profile_id} />
           )}
         </div>
+
+        {/* Measured delivery. Absent entirely for a session telemetry has no
+            record of, which is itself the signal. */}
+        {session.telemetry ? (
+          <SessionDeliveryBadges session={session} viewBlind={viewBlind} />
+        ) : (
+          <div className="text-muted-foreground mb-1.5 text-[10px] italic">
+            no byte flow measured
+          </div>
+        )}
 
         {/* User */}
         <div className="mt-auto flex items-center gap-1.5">

@@ -21,26 +21,30 @@ type RouteActivityView struct {
 }
 
 type SessionView struct {
-	Subject                     Subject
-	ProfileID                   string
-	SessionID                   string
-	MediaFileID                 int
-	PlayMethod                  string
-	MediaFileIDs                []int
-	MediaFileIDsOverflowed      bool
-	PlayMethods                 []string
-	PlayMethodsOverflowed       bool
-	StartedAt                   time.Time
-	StartedAtSource             StartedAtSource
-	StartedAtDegraded           bool
-	BytesAccepted               int64 // pre-compression at the enrollment point; see package documentation.
-	LastByteAccepted            time.Time
-	LastObservationEnd          time.Time
-	OpenObservations            int
-	RealtimeConnectionAlive     bool
-	RequestCount                int64
-	Routes                      []RouteActivityView
-	RoutesOverflowed            bool
+	Subject                 Subject
+	ProfileID               string
+	SessionID               string
+	MediaFileID             int
+	PlayMethod              string
+	MediaFileIDs            []int
+	MediaFileIDsOverflowed  bool
+	PlayMethods             []string
+	PlayMethodsOverflowed   bool
+	StartedAt               time.Time
+	StartedAtSource         StartedAtSource
+	StartedAtDegraded       bool
+	BytesAccepted           int64 // pre-compression at the enrollment point; see package documentation.
+	LastByteAccepted        time.Time
+	LastObservationEnd      time.Time
+	OpenObservations        int
+	RealtimeConnectionAlive bool
+	RequestCount            int64
+	Routes                  []RouteActivityView
+	RoutesOverflowed        bool
+	// ObservationsOverflowed marks a byte total short because this session's own
+	// observation table was full. Per-session degradation, never a completeness
+	// claim: see Registry.dropSessionObservation.
+	ObservationsOverflowed      bool
 	ViewerIPs                   []string
 	ViewerIPsOverflowed         bool
 	DeviceIDs                   []string
@@ -56,16 +60,74 @@ type SessionView struct {
 	HasIdentityConflict         bool
 	IdentityConflicts           []IdentityConflict
 	IdentityConflictsOverflowed bool
+	// MeasurementPruned marks a contribution the publisher no longer measures:
+	// its observations went idle for longer than Retention and were retired, and
+	// what remains is bounded memory of what it delivered. Live quantities are
+	// zero by construction, so nothing about it can read as activity.
+	MeasurementPruned bool
+
+	// Reported marks a session a playback session manager told us about, as
+	// opposed to one observed delivering bytes. It is the OTHER half of the
+	// picture: a session with Reported true and no bytes is a client claiming to
+	// watch something nothing is being sent for (#666), and a session with bytes
+	// and Reported false is delivery nobody has claimed.
+	//
+	// A reporting publisher contributes no bytes and no viewer IPs. Those belong
+	// exclusively to the outermost viewer edge (§2.5), and a session manager is
+	// not one — it knows what a client said, not what left the building.
+	Reported                bool
+	ReportedPaused          bool
+	ReportedPositionSeconds float64
+	// ReportedAt is when the reporting publisher captured this state. The merge
+	// takes the newest, so a session that moved between processes reads as its
+	// current owner reports it.
+	ReportedAt time.Time
+}
+
+// tombstoneViewOf returns the small frozen view worth retaining after an idle
+// session is removed. The caller holds s.mu.
+func tombstoneViewOf(s *logicalSession) (SessionView, bool) {
+	if s.lastSweptBytes == 0 {
+		return SessionView{}, false
+	}
+	view := SessionView{
+		Subject: s.subject, ProfileID: s.profileID, SessionID: s.sessionID,
+		MediaFileID: s.mediaFileID, PlayMethod: s.playMethod,
+		StartedAt: s.startedAt, StartedAtSource: s.startedAtSource, StartedAtDegraded: s.startedDegraded,
+		BytesAccepted: s.lastSweptBytes, LastByteAccepted: s.lastByteAccepted,
+		LastObservationEnd: s.lastObservationEnd, RequestCount: s.requestCount,
+		RoutesOverflowed: s.routesOverflowed, ObservationsOverflowed: s.observationsOverflowed,
+		MeasurementPruned: true,
+	}
+	for _, route := range s.routes {
+		if route.LastSweptBytes == 0 {
+			continue
+		}
+		view.Routes = append(view.Routes, RouteActivityView{
+			Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class,
+			CapRelevant: route.CapRelevant, Requests: route.Requests, BytesAccepted: route.LastSweptBytes,
+			LastByteAccepted: route.LastByteAccepted, LastObservationEnd: route.LastObservationEnd,
+		})
+	}
+	sort.Slice(view.Routes, func(i, j int) bool {
+		return routeViewKey(view.Routes[i]) < routeViewKey(view.Routes[j])
+	})
+	return view, true
 }
 
 type TransferView struct {
-	ID                 string
-	Subject            Subject
-	ProfileID          string
-	MediaFileID        int
-	Method             string
-	Pattern            string
-	Role               Role
+	ID          string
+	Subject     Subject
+	ProfileID   string
+	MediaFileID int
+	Method      string
+	Pattern     string
+	Role        Role
+	// Class says what the bytes were: a real transfer, or ClassProbe filler that
+	// belongs to no media file. §4.2 keeps the probe observed and cap-exempt, and
+	// a consumer totalling delivered bytes must exclude it — which it can only do
+	// if the class travels with the record.
+	Class              Class
 	BytesAccepted      int64
 	LastByteAccepted   time.Time
 	LastObservationEnd time.Time
@@ -76,21 +138,73 @@ type TransferView struct {
 	Client             ClientVariant
 	UserAgent          string
 	Outcomes           map[httpstream.StreamOutcome]int64
+	// Overflowed marks a per-subject catch-all row: one principal exceeded
+	// MaxTransfersPerSubject and its further transfer identities fold here. Only
+	// Subject, Role, Class, BytesAccepted, RequestCount, Outcomes and the
+	// timestamps mean anything on such a row; every other identity field is
+	// deliberately zero.
+	Overflowed bool
 }
 
+// PublisherCoverage is a publisher's own statement of what its configuration
+// lets it see. It exists because absence on the wire used to be read
+// optimistically: a snapshot that said nothing about its coverage was merged as
+// though it covered everything, so an un-upgraded publisher and a fully
+// upgraded one were indistinguishable to BuildGlobalView.
+//
+// Declared is the tri-state discriminator, and it is the whole point of the
+// type. A zero PublisherCoverage means the publisher said nothing because its
+// binary predates the field. That is never the same as declaring empty
+// coverage, and it resolves to an incomplete view so no-delivery and unclaimed-
+// idle classification stay suppressed while the fleet's evidence is uncertain.
+//
+// PublisherCoverage deliberately carries no role. Whether a publisher measures
+// or reports is positional, decided by the #reported id suffix just as merge
+// provenance is, so a buggy or compromised publisher cannot declare its way out
+// of family expectations. It also carries no route-enrollment claim: enrollment
+// is enforced by each family's manifest test because route declarations do not
+// exist until after publishers start and are mutable package-global test state.
+type PublisherCoverage struct {
+	// Declared distinguishes an explicit coverage statement from the zero value
+	// decoded from an older publisher. Unknown coverage makes the global view
+	// incomplete because treating mixed-version silence as full coverage would
+	// re-enable ghost classification over a fleet the reader cannot fully see.
+	Declared bool
+	// ConfiguredFamilies is the set of route families this publisher's config
+	// observes: SILO_STREAM_TELEMETRY_FAMILIES resolved against AllFamilies. It
+	// is deliberately not derived from routes the process mounted: a transcode
+	// node mounts one family while its config can observe all five, so mounted
+	// routes would make every non-API publisher look partial. Under a declaration
+	// an empty set means it observes none; it never means all, because that
+	// optimistic interpretation is the ambiguity this declaration removes.
+	ConfiguredFamilies []Family
+}
+
+// Snapshot is one publisher's bounded telemetry state at a single instant.
 type Snapshot struct {
-	PublisherID              string
-	NodeID                   string
-	PublisherEpoch           int64
-	Sequence                 uint64
-	CapturedAt               time.Time
-	Sessions                 []SessionView
-	Transfers                []TransferView
-	Truncated                bool
-	DroppedObservations      int64
-	DroppedBytes             int64
-	UnattributedObservations int64
-	UnattributedBytes        int64
+	PublisherID string
+	// ReportingPublisherID names this process's reporting companion, when it runs
+	// one. It is what lets BuildGlobalView tell "this process has no sessions to
+	// report" from "this process's reporter has not been seen yet". Empty means
+	// an explicit "no reporter" only when Coverage.Declared; an un-upgraded
+	// publisher's silence says nothing about whether a companion should exist.
+	ReportingPublisherID string
+	Coverage             PublisherCoverage
+	NodeID               string
+	PublisherEpoch       int64
+	Sequence             uint64
+	CapturedAt           time.Time
+	Sessions             []SessionView
+	Transfers            []TransferView
+	Truncated            bool
+	DroppedObservations  int64
+	// TransfersTruncated is transfer-table blindness, deliberately kept apart from
+	// Truncated so it cannot become a completeness claim. See Registry.dropTransfer.
+	TransfersTruncated          bool
+	DroppedTransferObservations int64
+	DroppedBytes                int64
+	UnattributedObservations    int64
+	UnattributedBytes           int64
 }
 
 func sessionViewOf(s *logicalSession) SessionView {
@@ -103,7 +217,8 @@ func sessionViewOf(s *logicalSession) SessionView {
 		BytesAccepted: s.lastSweptBytes, LastByteAccepted: s.lastByteAccepted,
 		LastObservationEnd: s.lastObservationEnd, OpenObservations: s.openObservations,
 		RealtimeConnectionAlive: s.realtimeAlive, RequestCount: s.requestCount,
-		RoutesOverflowed: s.routesOverflowed, ViewerIPsOverflowed: s.viewerIPs.overflowed,
+		RoutesOverflowed: s.routesOverflowed, ObservationsOverflowed: s.observationsOverflowed,
+		ViewerIPsOverflowed: s.viewerIPs.overflowed,
 		DeviceIDsOverflowed: s.deviceIDs.overflowed, ClientVariantsOverflowed: s.clientVariants.overflowed,
 		UserAgentsOverflowed: s.userAgents.overflowed, TokenIssuedAtsOverflowed: s.tokenIssuedAts.overflowed,
 		TokenIssuedAtSources: cloneTokenSources(s.tokenIssuedSources),
@@ -155,15 +270,17 @@ func sessionViewOf(s *logicalSession) SessionView {
 
 func transferViewOf(t *transfer) TransferView {
 	return TransferView{ID: t.id, Subject: t.subject, ProfileID: t.profileID, MediaFileID: t.mediaFileID,
-		Method: t.capture.Method, Pattern: t.capture.Pattern, Role: t.route.Role,
+		Method: t.capture.Method, Pattern: t.capture.Pattern, Role: t.route.Role, Class: t.route.Class,
 		BytesAccepted: t.lastSweptBytes, LastByteAccepted: t.lastByteAccepted,
 		LastObservationEnd: t.lastObservationEnd, OpenObservations: t.openObservations,
 		RequestCount: t.requestCount, ViewerIP: t.capture.ViewerIP, DeviceID: t.capture.DeviceID,
-		Client: t.capture.Client, UserAgent: t.capture.UserAgent, Outcomes: cloneOutcomes(t.outcomes)}
+		Client: t.capture.Client, UserAgent: t.capture.UserAgent, Outcomes: cloneOutcomes(t.outcomes),
+		Overflowed: t.overflow}
 }
 
 func cloneSnapshot(source Snapshot) Snapshot {
 	destination := source
+	destination.Coverage.ConfiguredFamilies = append([]Family(nil), source.Coverage.ConfiguredFamilies...)
 	destination.Sessions = make([]SessionView, len(source.Sessions))
 	for i := range source.Sessions {
 		destination.Sessions[i] = source.Sessions[i]

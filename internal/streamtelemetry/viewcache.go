@@ -58,6 +58,11 @@ type ViewCache struct {
 	status    ViewCacheStatus
 	refreshes int64
 	failures  int64
+	// rates carries per-session delivery rate across builds. The merged view is
+	// a level, not a rate, so the only place a rate can come from is the delta
+	// between two consecutive builds — and this is the one component that sees
+	// both.
+	rates map[string]rateSample
 }
 
 // NewViewCache returns a cache over registry's global view. A non-positive ttl
@@ -131,9 +136,11 @@ func (c *ViewCache) View(ctx context.Context) (GlobalMonitoringView, ViewCacheSt
 			c.status.LastError = err.Error()
 		} else {
 			c.refreshes++
+			refreshedAt := now()
 			c.view = view.clone()
+			c.updateRatesLocked(c.view, refreshedAt)
 			c.status.Available = true
-			c.status.RefreshedAt = now()
+			c.status.RefreshedAt = refreshedAt
 			c.status.Refreshes = c.refreshes
 			c.status.LastError = ""
 		}
@@ -143,6 +150,45 @@ func (c *ViewCache) View(ctx context.Context) (GlobalMonitoringView, ViewCacheSt
 		c.mu.Unlock()
 		return served, status
 	}
+}
+
+// Live returns the per-session byte facts behind the merged view.
+//
+// It no longer decides whether the caller may trust the list. That question
+// existed because telemetry only saw sessions that moved bytes through an
+// observed route family, so an absent session was ambiguous — "no bytes flowed"
+// or "nobody was looking" — and subtracting against it could erase live viewers.
+// Each API process now publishes its session manager as a reporting publisher,
+// so the view holds every session anyone knows about and an absent session simply
+// means absent. What is left is the ordinary freshness contract, returned
+// alongside so a caller can still tell a complete view from a degraded one.
+func (c *ViewCache) Live(ctx context.Context) (LiveSnapshot, GlobalMonitoringView, ViewCacheStatus) {
+	view, status := c.View(ctx)
+	snapshot := LiveSnapshot{}
+	if !status.Available {
+		return snapshot, view, status
+	}
+
+	snapshot = LiveByteFactsFromGlobalView(view)
+	c.mu.Lock()
+	// View releases c.mu before returning, so a concurrent build can swap in a
+	// rate table for the NEXT generation while the projection above is still
+	// running over this one. Attaching those rates would report a kbps computed
+	// across an interval the returned byte levels do not span. Refreshes is
+	// bumped only on a successful build, so it is exactly the view generation:
+	// if it moved, this response goes out without rates, which renders as "not
+	// yet known" rather than as a wrong number.
+	if c.status.Refreshes == status.Refreshes {
+		for sessionID, facts := range snapshot {
+			if sample, ok := c.rates[sessionID]; ok && sample.known {
+				facts.DeliveryRateKbps = sample.kbps
+				facts.RateAvailable = true
+				snapshot[sessionID] = facts
+			}
+		}
+	}
+	c.mu.Unlock()
+	return snapshot, view, status
 }
 
 func (c *ViewCache) build(ctx context.Context) (GlobalMonitoringView, error) {
@@ -176,6 +222,7 @@ func (c *ViewCache) snapshotLocked(age time.Duration, forceStale bool) (GlobalMo
 func (v GlobalMonitoringView) clone() GlobalMonitoringView {
 	out := v
 	out.IncompleteReasons = append([]string(nil), v.IncompleteReasons...)
+	out.Advisories = append([]string(nil), v.Advisories...)
 	out.Publishers = append([]PublisherStatus(nil), v.Publishers...)
 	out.MissingPublishers = append([]PublisherRef(nil), v.MissingPublishers...)
 	out.Sessions = append([]GlobalSessionView(nil), v.Sessions...)

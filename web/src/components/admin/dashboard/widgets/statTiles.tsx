@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Activity, Film, Gauge, HardDrive, Tv, UserCheck, Users, Zap } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAdminSessions, useAdminStats } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions, useAdminStats } from "@/hooks/queries/admin/stats";
 import {
   useAdminPlaybackActivity,
   useAdminTimeseries,
@@ -53,8 +53,11 @@ function StatTile({
 }
 
 export function ActiveStreamsStatWidget() {
-  const sessionsQuery = useAdminSessions();
-  const sessionCount = sessionsQuery.data?.length ?? 0;
+  // include_idle stays OFF: it also reveals unclaimed-idle rows, which are ENDED
+  // sessions the registry still remembers, and an "active streams" count must
+  // not carry them.
+  const sessionsQuery = useAdminLiveSessions(false);
+  const sessionCount = sessionsQuery.data?.sessions.length ?? 0;
   return (
     <StatTile
       label="Active Streams"
@@ -88,8 +91,8 @@ export function EgressNowStatWidget() {
 }
 
 export function TranscodeShareStatWidget() {
-  const sessionsQuery = useAdminSessions();
-  const sessions = sessionsQuery.data ?? [];
+  const sessionsQuery = useAdminLiveSessions(false);
+  const sessions = sessionsQuery.data?.sessions ?? [];
   // Same reduction the activity page uses: the server-computed
   // effective_play_method when present, otherwise the per-stream decisions.
   // Audio-only transcodes stay out of the count — this tile is about the

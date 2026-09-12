@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types";
 import { useIPUsers } from "@/hooks/queries/admin/ips";
-import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions } from "@/hooks/queries/admin/stats";
 import {
   activityMethodMeta,
   classifyActivityMethod,
@@ -62,6 +62,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
+import { describeLiveSessionsSource } from "@/lib/sessionTelemetry";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
@@ -75,7 +76,18 @@ function routeSortValue(session: AdminSession): string {
 }
 
 export default function AdminActivity() {
-  const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
+  // Live-only by default, matching the dashboard: an ended-but-still-measured or
+  // claimed-but-undelivered row is not something streaming now. The reveal control
+  // below exists because the dashboard links here with a live count — without it an
+  // operator moved from a page that can show the withheld rows to one that could not.
+  const [showHiddenSessions, setShowHiddenSessions] = useState(false);
+  const {
+    data: liveSessions,
+    isLoading,
+    refetch: refresh,
+  } = useAdminLiveSessions(showHiddenSessions);
+  const sessions = liveSessions?.sessions ?? [];
+  const sessionsSource = describeLiveSessionsSource(liveSessions);
   const { connectionState } = useRealtimeEvents();
   const pageActivity = usePageActivity();
   const error = undefined;
@@ -274,6 +286,22 @@ export default function AdminActivity() {
               Realtime Updates
             </div>
             <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
+            {sessionsSource.canRevealHidden ? (
+              <button
+                type="button"
+                onClick={() => setShowHiddenSessions((shown) => !shown)}
+                className="text-muted-foreground hover:text-primary block w-full text-right text-[11px] transition-colors"
+              >
+                {showHiddenSessions
+                  ? "Hide sessions delivering nothing"
+                  : `Show ${sessionsSource.hiddenCount} delivering nothing`}
+              </button>
+            ) : null}
+            {sessionsSource.label ? (
+              <span className="text-muted-foreground text-[11px]" title={sessionsSource.detail}>
+                {sessionsSource.label}
+              </span>
+            ) : null}
             {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
           </div>
         </div>
