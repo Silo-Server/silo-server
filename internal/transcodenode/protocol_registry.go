@@ -1,6 +1,8 @@
 package transcodenode
 
 import (
+	"time"
+
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
@@ -8,11 +10,13 @@ import (
 )
 
 type statusResponse struct {
-	Status     string                   `json:"status"`
-	ActiveJobs int32                    `json:"active_jobs"`
-	Sessions   []string                 `json:"sessions"`
-	System     *nodemetrics.SystemStats `json:"system,omitempty"`
-	GPU        []nodemetrics.GPUStats   `json:"gpu,omitempty"`
+	Status      string                           `json:"status"`
+	ActiveJobs  int32                            `json:"active_jobs"`
+	Sessions    []string                         `json:"sessions"`
+	System      *nodemetrics.SystemStats         `json:"system,omitempty"`
+	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
+	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
+	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
 }
 
 // ProtocolReads preserves this listener's status shape independently of the

@@ -33,7 +33,9 @@ describe("admin system v2 consumers", () => {
   });
 
   it("keeps unsampled resources distinct from a zero sample", async () => {
-    mocks.v2.mockResolvedValueOnce({ available: false, gpu: [] });
+    mocks.v2
+      .mockResolvedValueOnce({ state: "unavailable", instance_attribution: false })
+      .mockResolvedValueOnce({ available: false, gpu: [] });
     const { result } = renderHook(() => useSystemResources(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual({ available: false, gpu: [] });

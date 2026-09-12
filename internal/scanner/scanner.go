@@ -2740,7 +2740,8 @@ func (s *Scanner) processFile(
 	assignment fileRootAssignment,
 	groupAssignment fileGroupAssignment,
 	subtitleCache *externalSubtitleDirCache,
-) (fileAction, []string, error) {
+) (resultAction fileAction, resultWarnings []string, resultErr error) {
+	defer func() { observeFile(resultAction, resultErr) }()
 	// Stat the file.
 	info, err := os.Stat(filePath)
 	if err != nil {

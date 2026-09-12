@@ -178,7 +178,7 @@ function NodeLoadBlock({ node }: { node: StreamNode }) {
       <UnitLabel>Load</UnitLabel>
       {system.kind === "unreported" ? (
         <p className="text-muted-foreground text-xs" title={system.title}>
-          No resource sample
+          {system.label === "Stale" ? "Stale resource sample" : "No resource sample"}
         </p>
       ) : (
         <div className={METRIC_GRID}>
@@ -186,6 +186,7 @@ function NodeLoadBlock({ node }: { node: StreamNode }) {
           <NodeMetricRow metric={system.memory} />
           <NodeMetricRow metric={system.disk} />
           <NodeMetricRow metric={system.network} />
+          {system.processMemory ? <NodeMetricRow metric={system.processMemory} /> : null}
         </div>
       )}
     </div>

@@ -10,6 +10,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
@@ -141,7 +144,7 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 // transaction so an event is never marked processed without durable
 // deliveries; reprocessing after a crash is harmless because delivery inserts
 // dedupe. Returns the number of events handled (fanned out + suppressed).
-func (w *FanoutWorker) processBatch(ctx context.Context) (int, error) {
+func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr error) {
 	started := time.Now()
 	settle := w.settings.SettleDelay(ctx)
 	maxBurst := w.settings.MaxSeriesBurst(ctx)
@@ -160,6 +163,9 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
+	ctx, observation := workmetrics.Start(ctx, "notifications", time.Time{})
+	defer workmetrics.Profile(ctx)()
+	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
 	// Non-episode kinds (movies, audiobooks, ebooks) have no per-profile
 	// interest and never fan out; mark them processed immediately so retention
 	// reclaims them. This must happen before the burst cap: flat item events

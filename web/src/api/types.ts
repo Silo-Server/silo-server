@@ -3816,6 +3816,8 @@ export interface HostGPUStats {
  * predating resource sampling.
  */
 export interface NodeLastStats {
+  sampled_at?: string;
+  attribution?: ResourceAttribution | null;
   system?: HostSystemStats | null;
   gpu?: HostGPUStats[] | null;
 }
@@ -3826,7 +3828,37 @@ export interface NodeLastStats {
  * (non-Linux, no sampler, or before the first sample lands), in which case the
  * rest is absent.
  */
+export interface ResourceSource {
+  scope?: string;
+  source?: string;
+  available?: boolean;
+}
+
+export interface ResourceAttribution {
+  instance_id?: string;
+  sample_interval_seconds?: number;
+  cpu?: ResourceSource;
+  memory?: ResourceSource;
+  load?: ResourceSource;
+  network?: ResourceSource;
+  process?: {
+    resident_bytes?: number | null;
+    heap_live_bytes?: number | null;
+    open_fds?: number | null;
+    max_fds?: number | null;
+    goroutines?: number | null;
+  } | null;
+  cgroup_memory?: {
+    scope?: string;
+    current_bytes?: number | null;
+    limit_bytes?: number | null;
+    pressure_some_pct?: number | null;
+  } | null;
+}
+
 export interface SystemResources {
+  stale?: boolean;
+  attribution?: ResourceAttribution | null;
   available?: boolean;
   sampled_at?: string;
   system?: HostSystemStats | null;

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -60,7 +62,7 @@ func (h *NodeHandler) forceReloadAdminNode(ctx context.Context, node *nodepool.N
 	}
 	// A redirect is a second dispatch, never part of this nonretryable command.
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := client.Do(req)
+	resp, err := telemetry.DoTrustedNode(client, req, "reload")
 	if err != nil {
 		return result
 	}

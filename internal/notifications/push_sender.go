@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -242,12 +244,14 @@ func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, 
 	return updated
 }
 
-func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) pushSendResult {
+func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) (result pushSendResult) {
+	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "push")
+	defer func() { finishObservation(deliveryObservationError(ctx, result.OK)) }()
 	credential, err := s.prepareRelayCredential(ctx)
 	if err != nil {
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	result := s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
+	result = s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
 	if result.HTTPStatus != http.StatusUnauthorized || result.UpstreamReason != "token_expired" {
 		if result.HTTPStatus == http.StatusUnauthorized {
 			_ = s.markReregistrationRequired(ctx, credential)

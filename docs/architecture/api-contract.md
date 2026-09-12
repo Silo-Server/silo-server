@@ -127,10 +127,17 @@ provider may change without changing these canonical project URLs.
 `contracts/api/v2/route-inventory.json` is the enumerated legacy native surface every later
 migration decision is measured against: one row per method+path variant (`GET` and `HEAD`, a
 WebSocket handshake, and each method of a wildcard `Handle` are separate rows) across four
-listeners: the root `http.ServeMux` (`cmd/silo.newRootHandler`), the API router
+native listeners: the root `http.ServeMux` (`cmd/silo.newRootHandler`), the API router
 (`internal/api.NewRouter`), the proxy node and the transcode node (each `(*Server).Handler`). Root
 `/api/` rows delegate to the API listener; `totals` and `route_count` are authoritative;
 `cmd/route-inventory` generates the file from registration source.
+
+The inventory also declares the delegated `api_v2` handler and the separate
+`operational_debug` loopback profiler. The latter registers a finite set of
+standard profile handlers in `internal/debugserver`; its sealed wrapper admits
+GET only and refuses all other method variants represented by the ServeMux
+inventory. Its one named `net/http/pprof` import is allowed only at that
+inventoried construction. Serving `http.DefaultServeMux` remains forbidden.
 
 The contract: each listener entry function returns a sealed `http.Handler` — an unexported struct
 holding the router in an unexported field, with `ServeHTTP` as its only method — built from an
@@ -157,13 +164,20 @@ are evidence, not facts.
 
 ### Migration ledger
 
-`contracts/api/v2/migration.json` records the v2 disposition of every row in the route inventory.
+`contracts/api/v2/migration.json` records the v2 disposition of every native row in the route inventory.
 Its key is the inventory row's listener, method, exact path, and `registration_index`: the
 inventory registers twelve method+path pairs twice, under different middleware or conditions
 (for example a rate-limited and an unlimited variant of the same login route), and each
 registration is a separate operation with its own consumers and disposition, so the index
-disambiguates them in registration order. There is exactly one ledger entry per inventory row and
+disambiguates them in registration order. There is exactly one ledger entry per native inventory row and
 one row per entry, and the entries follow inventory order.
+
+The finite `/debug/pprof/` route set on `operational_debug` is explicitly outside
+native migration decisions and native release-scenario catalogs. It is validated
+by the profiling and route-inventory suites and documented in
+[the profiling runbook](../operations/profiling.md). This exclusion matches the
+exact listener, methods, and supported paths; it cannot hide a profiling path on
+a native listener or an unexpected debug route.
 
 An entry has two kinds of fields. The first kind is copied from the inventory row — `listener`,
 `namespace`, `method`, `path`, `handler`, `handler_kind`, `source_file`, `route_group`,

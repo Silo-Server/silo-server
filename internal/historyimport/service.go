@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -308,6 +310,9 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		}
 
 	}
+	ctx, observation := workmetrics.Start(ctx, "history_import", run.CreatedAt)
+	defer workmetrics.Profile(ctx)()
+	defer observation.Finish("unknown")
 	summary := ExecutionSummary{
 		Warnings:         []string{},
 		UnmatchedSamples: []UnmatchedSample{},
@@ -450,6 +455,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		slog.Error("history import: failed to complete run", "run_id", run.ID, "error", err)
 		return
 	}
+	observation.Finish("success")
 	s.notifyRunByID(ctx, run.ID)
 	slog.Info(
 		"history import: completed",
@@ -645,6 +651,7 @@ func (s *Service) persistClaimProgress(ctx context.Context, claim RunClaim, summ
 	s.notifyRunByID(ctx, claim.RunID)
 }
 func (s *Service) persistClaimProgressMaybe(ctx context.Context, claim RunClaim, summary ExecutionSummary, processed, total int) {
+	workmetrics.Progress("history_import")
 	if processed == total || processed%25 == 0 {
 		s.persistClaimProgress(ctx, claim, summary)
 	}

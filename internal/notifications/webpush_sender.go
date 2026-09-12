@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	webpush "github.com/SherClockHolmes/webpush-go"
 )
 
@@ -201,6 +203,8 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 }
 
 func (s *webPushSender) send(ctx context.Context, sub *WebPushSubscription, message []byte, publicKey, privateKey string) (status int, retryAfter time.Duration, err error) {
+	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "web_push")
+	defer func() { finishObservation(deliveryObservationError(ctx, err == nil && status >= 200 && status < 300)) }()
 	resp, err := webpush.SendNotificationWithContext(ctx, message, &webpush.Subscription{
 		Endpoint: sub.Endpoint,
 		Keys:     webpush.Keys{P256dh: sub.P256dh, Auth: sub.Auth},

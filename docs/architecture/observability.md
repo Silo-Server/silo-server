@@ -1,4 +1,4 @@
-# Observability (OpenTelemetry logs + traces)
+# Observability
 
 Silo emits structured **logs** and distributed **traces** via OpenTelemetry (OTLP),
 in addition to the existing stderr and `opslog` database pipeline. The feature is
@@ -6,8 +6,7 @@ in addition to the existing stderr and `opslog` database pipeline. The feature i
 server behaves exactly as before (stderr + `opslog` only).
 
 **Metrics are not part of OpenTelemetry here.** They remain on Prometheus
-(`client_golang`, the `/metrics` endpoint, and the domain metrics in
-`internal/api/middleware`). See [Metrics](#metrics-stay-on-prometheus) below.
+(`client_golang`, the `/metrics` endpoint, and instruments registered by their owning packages). See [Metrics](#metrics-stay-on-prometheus) below.
 
 ## Enabling it
 
@@ -22,7 +21,7 @@ Telemetry turns on when **either** `SILO_OTEL_ENABLED` is truthy **or**
 | `OTEL_SERVICE_NAME` | `service.name` resource attribute. | `silo-server` |
 | `OTEL_SERVICE_VERSION` | `service.version` resource attribute. | unset |
 | `OTEL_TRACES_SAMPLER` | `always_on`, `always_off`, `traceidratio`, `parentbased_always_on`, `parentbased_always_off`, or `parentbased_traceidratio`. Unsupported values (e.g. `jaeger_remote`) fall back to the default. | `parentbased_traceidratio` |
-| `OTEL_TRACES_SAMPLER_ARG` | Trace-id ratio for the ratio-based samplers (0–1; clamps >1 to 1). | `1.0` |
+| `OTEL_TRACES_SAMPLER_ARG` | Trace-id ratio for the ratio-based samplers (0–1; clamps >1 to 1). | `0.01` |
 
 The node identity is attached as the `service.instance.id` resource attribute, so
 multiple Silo nodes sharing one `service.name` stay distinguishable in the backend.
@@ -41,7 +40,7 @@ and keeps running with telemetry disabled rather than crash-looping.
 The bootstrap lives in `internal/telemetry` (`Setup` in `telemetry.go`). When enabled
 it builds one shared `resource.Resource`, a `TracerProvider` (sampler per
 `OTEL_TRACES_SAMPLER`, batched OTLP exporter), a `LoggerProvider` (batched OTLP exporter), and the W3C
-`TraceContext + Baggage` propagator. Shutdown is deferred in `cmd/silo/main.go` with a
+`TraceContext` propagator. Shutdown is deferred in `cmd/silo/main.go` with a
 flush timeout so buffered spans/logs drain on exit.
 
 ### Log handler chain
@@ -208,3 +207,126 @@ would re-introduce a custom sink the OTLP + runtime split already covers.
   (DB connect, migrations, tuning) reach stderr only, matching existing `opslog` behavior.
 - **Per-subsystem trace propagation into plugins** is a follow-up owned by
   `silo-plugin-sdk`; this repo instruments only the host side.
+
+
+## Profiling and resource boundaries
+
+Every serving process can enable a separate literal-loopback profiling listener
+with `SILO_DEBUG_LISTEN=127.0.0.1:6060`. It is disabled by default, binds before
+PostgreSQL connection, and never participates in readiness. Invalid addresses
+fail bootstrap; an occupied debug port reports an error while the workload
+continues. Migration and utility commands do not start the listener.
+[Profiling operations](../operations/profiling.md) describes capture limits,
+namespace access, private artifacts, cancellation and native profiling.
+
+The native API exposes administrator summaries at
+`GET /api/v2/admin/system/resources` and capability discovery at
+`GET /api/v2/admin/system/resources/capabilities`. Raw profiles stay outside
+OpenAPI. The resource response identifies the sampled API process with a random
+instance ID, which matters when a load balancer sends successive requests to
+different replicas. Workers attach the same attribution to authenticated health
+transport. Frozen v1 resource fields retain their existing meaning.
+
+| Measurement | Population and limits |
+| --- | --- |
+| Go heap/runtime | This Go runtime; excludes FFmpeg, plugins and native allocations such as libvips. |
+| Process CPU/RSS/FDs/threads | This process. RSS and Go memory cannot be subtracted to measure native allocation exactly. |
+| Linux process I/O | Kernel process counters can include I/O of children already waited for. These overlap child lifecycle/cgroup accounting. |
+| Cgroup CPU/memory | All members of the reported leaf or visible ancestor. Memory includes cache and native/child allocations; ancestor limits outside the namespace are unavailable. |
+| Live owned children | Bounded FFmpeg sampling, validated by PID/start time. CPU is a changing sum of live lifetime totals, not a counter. RSS can count shared pages repeatedly. |
+| Completed children | Existing process owner's Wait/ProcessState CPU and peak RSS. Peaks are distributions, not concurrent usage. Short-lived processes are counted here. |
+| Host/network/GPU | Scope and source accompany samples. Whole-device/host readings include unrelated tenants and must not be summed per container. |
+| Filesystem | Sampled capacity and inode use per bounded role. Check availability and freshness before using a value. |
+
+Resource and queue collectors read snapshots. Hardware probes and database
+sampling run in bounded background work, never in HTTP handlers or scrapes.
+Missing sources omit values; stale snapshots carry explicit timestamps and flags.
+Use node-exporter, a container exporter, GPU vendor exporters and dependency
+exporters for device latency, network drops, host pressure, PostgreSQL locks/WAL,
+Redis evictions and object-store capacity. Silo measures the calls it owns.
+
+## Instrumentation ownership
+
+[The workload catalog](../operations/workload-metrics.md) identifies each queue
+and execution boundary. Attempt counters belong to the executing process and
+are summed across replicas. Shared database queue gauges are sampled by each API
+process and use `max by (cluster, queue, state)`, never a replica sum. Queue age
+includes retry backoff; it is not the age of the oldest immediately runnable job.
+A recent aggregate progress update cannot establish progress for every concurrent
+job. Use the administrator job state when investigating a specific stall.
+
+`streamapp_userdb_pool_open`, `streamapp_userdb_pool_evictions_total` and
+`streamapp_scanner_files_total` now have producers in their owning packages. The
+former middleware declarations had no production writers. The unwritten
+`streamapp_userdb_restore_duration_seconds`,
+`streamapp_playback_active_sessions`, `streamapp_reconciliation_lag_seconds`,
+`streamapp_matcher_resolved_total` and `streamapp_litestream_sync_errors_total`
+placeholders are omitted rather than used as health signals. Existing playback,
+stream telemetry, matcher queue and workload metrics provide measured coverage;
+the placeholder Litestream implementation cannot report replication health.
+
+Names and units of existing measured metrics are preserved. New application
+instruments use `silo_`; Go/process collectors retain upstream names. One
+`silo_build_info` series holds revision and Go version. The runtime collector adds
+only GC, scheduler, memory classes, CPU classes and synchronization families.
+Audit the emitted families when upgrading Go.
+
+## Trace trust, privacy and cost
+
+Native v2 requests start fresh server traces. Public trace IDs, sampling flags
+and baggage cannot select the local sampling decision. The enabled default is
+1%; use 100% only during a bounded investigation. Authenticated worker HTTP calls
+propagate W3C trace context without baggage; redirects cannot forward internal
+credentials or trace context to another destination. Plugin host gRPC spans use
+fixed SDK operation names. Plugins need SDK extraction before their internal
+spans can join those traces.
+
+Dependency spans record finite Postgres statement classes, Redis commands,
+S3 operations, notification sends and configured pool roles. They exclude SQL, bind arguments,
+keys, object names, URLs, request bodies and arbitrary error messages. Workload
+spans use fixed categories. Asynchronous attempts link an initiating trace when
+available and start their own trace; durable job identity is not a metric label.
+Persisted queues do not currently retain initiating trace context across restarts.
+
+API metric client labels are `web`, `apple`, `android`, `other`, or `none`.
+Unmatched legacy routes and unknown HTTP methods fold into fixed values.
+No provider or user identity may allocate a new series. Histograms are bounded
+by operation categories and fixed buckets; no per-job histogram is permitted.
+Review the product of dimensions for every added metric.
+
+Trace batches hold at most 2,048 spans (512 per export); log batches use bounded
+SDK queues. Export calls have a five-second budget. SDK queues are nonblocking
+and may discard telemetry under pressure. `silo_otel_export_records_total`
+reports exporter outcomes; `silo_otel_finished_spans_total` counts sampled spans
+that ended. Their difference includes queued, exporting and dropped spans, so
+it is not an instantaneous drop count. Inspect it after a drain and monitor
+collector/backend self-metrics. There is no OTel MeterProvider.
+
+## Client experience and plugin coordination
+
+Server response bytes and first playable segments do not establish first frame
+or rebuffering on a client. Apple already emits first-frame route events through
+its v1 bridge; its rebuffer counter remains local. Android has a route-event DTO
+and API/repository methods, but its first-frame and buffering callbacks currently
+update local player state. Neither native app consumes administrator resource
+DTOs, so the additive resource response needs no native model migration.
+
+The API v2 program must coordinate capability-gated first-frame and rebuffer
+reporting with both native apps, including v2 route-event migration and retry/
+deduplication semantics. Third-party Jellyfin/ABS player experience remains
+unknown unless their protocol supplies evidence. The plugin SDK owns trace
+extraction and internal plugin spans; the host's Go heap cannot profile a plugin
+process. These boundaries are recorded in the PR follow-up checklist.
+
+## Deployment and retention
+
+`/metrics` remains an unauthenticated operational endpoint on the main and worker
+listeners. Restrict external ingress to that path in the deployment proxy or
+network policy. Do not publish the loopback profiler through container ports,
+a public Service, ingress or a native API proxy.
+
+[Monitoring operations](../operations/monitoring.md) includes scrape, dashboard,
+alert and failure-exercise examples. Prometheus owns metric retention; the OTLP
+backend owns trace/log retention. Profiles remain private incident artifacts
+with deliberate deletion. Silo adds no time-series database or automatic profile
+upload. Dashmetrics retains its existing bounded summary behavior.

@@ -271,7 +271,6 @@ PATCH /api/v2/admin/sections/{id}	non-media
 POST /api/v2/admin/server/restart	non-media
 GET /api/v2/admin/server/status	non-media
 GET /api/v2/admin/sessions	non-media
-GET /api/v2/admin/sessions/summary	non-media
 GET /api/v2/admin/sessions/capabilities	non-media
 GET /api/v2/admin/sessions/command-capabilities	non-media
 GET /api/v2/admin/sessions/summary	non-media
@@ -308,6 +307,7 @@ GET /api/v2/admin/subtitles/{id}/download	non-media
 GET /api/v2/admin/system/build	non-media
 GET /api/v2/admin/system/hw-accel	non-media
 GET /api/v2/admin/system/resources	non-media
+GET /api/v2/admin/system/resources/capabilities	non-media
 GET /api/v2/admin/tasks	non-media
 GET /api/v2/admin/tasks/{key}	non-media
 POST /api/v2/admin/tasks/{key}/cancel	non-media
@@ -1438,6 +1438,7 @@ GET /api/v2/admin/subtitles/{id}/download	non-media
 GET /api/v2/admin/system/build	non-media
 GET /api/v2/admin/system/hw-accel	non-media
 GET /api/v2/admin/system/resources	non-media
+GET /api/v2/admin/system/resources/capabilities	non-media
 GET /api/v2/admin/tasks	non-media
 GET /api/v2/admin/tasks/{key}	non-media
 POST /api/v2/admin/tasks/{key}/cancel	non-media

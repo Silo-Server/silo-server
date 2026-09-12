@@ -7,6 +7,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
 )
 
 // taskWorker wraps a Task with in-memory runtime state and trigger management.
@@ -124,6 +127,7 @@ type progressReporter struct {
 }
 
 func (p *progressReporter) Report(percent float64, message string) {
+	workmetrics.Progress(p.worker.task.Key())
 	p.worker.mu.Lock()
 	p.worker.progress = percent
 	p.worker.progressMessage = message
@@ -164,9 +168,12 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	w.notify()
 	defer cancel()
 
+	execCtx, observation := workmetrics.Start(execCtx, w.task.Key(), time.Time{})
+	defer observation.Finish("unknown")
 	reporter := &progressReporter{worker: w}
 	startedAt := time.Now()
-	err := w.task.Execute(execCtx, reporter)
+	var err error
+	workmetrics.Do(execCtx, func(ctx context.Context) { err = w.task.Execute(ctx, reporter) })
 	completedAt := time.Now()
 
 	result := &ExecutionResult{
@@ -177,10 +184,12 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 		ResultData:  reporter.resultData,
 	}
 
+	metricOutcome := telemetry.Outcome(err)
 	w.mu.Lock()
 	switch {
 	case w.state == TaskStateCancelling:
 		result.Status = "cancelled"
+		metricOutcome = "canceled"
 	case err != nil:
 		result.Status = "failed"
 		result.ErrorMessage = err.Error()
@@ -196,6 +205,7 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	w.progressMessage = ""
 	w.mu.Unlock()
 	w.notify()
+	observation.Finish(metricOutcome)
 
 	return result
 }

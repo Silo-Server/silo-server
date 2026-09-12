@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
 )
 
 const (
@@ -124,6 +126,7 @@ func (r *Runner) reapStaleJobs() {
 		return
 	}
 	if n > 0 {
+		workmetrics.Recovered("ai", n)
 		r.logger.Info("reset stale jobs", "jobs", r.label, "count", n)
 	}
 }
@@ -134,6 +137,7 @@ func (r *Runner) reapStaleJobs() {
 // receive a context derived from the application context that is cancelled by
 // Cancel(id) or server shutdown.
 func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(ctx context.Context)) {
+	queuedAt := time.Now()
 	runCtx, cancel := context.WithCancel(r.baseCtx)
 	r.mu.Lock()
 	r.cancels[id] = cancel
@@ -174,7 +178,16 @@ func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(
 			}
 			return
 		}
-		run(runCtx)
+		workload := "ai"
+		switch r.label {
+		case "subtitle ai":
+			workload = "subtitles"
+		case "metadata translation":
+			workload = "metadata"
+		}
+		runCtx, observation := workmetrics.Start(runCtx, workload, queuedAt)
+		defer observation.Finish("unknown")
+		workmetrics.Do(runCtx, run)
 	}()
 }
 

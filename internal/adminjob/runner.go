@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -43,6 +45,8 @@ const (
 )
 
 type Runner struct {
+	observation         *workmetrics.Run
+	workCtx             context.Context
 	repo                *Repository
 	exporter            *catalogseed.Service
 	store               ArtifactStore
@@ -168,9 +172,13 @@ func (r *Runner) runNext() {
 	if job == nil {
 		return
 	}
+	workCtx, observation := workmetrics.Start(context.Background(), "admin", job.RequestedAt)
+	defer workmetrics.Profile(workCtx)()
+	defer observation.Finish("unknown")
 	// Each execution owns a repository fenced to this durable claim. Recovery
 	// increments its generation; an old worker cannot publish another outcome.
 	r = &Runner{
+		observation: observation, workCtx: workCtx,
 		repo: r.repo.withClaim(job), exporter: r.exporter, store: r.store,
 		itemRefresh: r.itemRefresh, libraryRefresh: r.libraryRefresh, libraryDelete: r.libraryDelete,
 		imageCacheCleanup: r.imageCacheCleanup, templateBundleApply: r.templateBundleApply,
@@ -214,7 +222,7 @@ func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), deleteLibraryTimeout)
+	ctx, cancel := context.WithTimeout(r.executionContext(), deleteLibraryTimeout)
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
@@ -297,7 +305,7 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), imageCacheCleanupTimeout)
+	ctx, cancel := context.WithTimeout(r.executionContext(), imageCacheCleanupTimeout)
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
@@ -347,7 +355,7 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), libraryRefreshTimeout)
+	ctx, cancel := context.WithTimeout(r.executionContext(), libraryRefreshTimeout)
 	defer cancel()
 	go func() {
 		ticker := time.NewTicker(r.heartbeatInterval)
@@ -432,7 +440,7 @@ func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), templateBundleApplyTimeout)
+	ctx, cancel := context.WithTimeout(r.executionContext(), templateBundleApplyTimeout)
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
@@ -484,7 +492,7 @@ func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
 }
 
 func (r *Runner) requeueStaleJobs() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.executionContext(), 30*time.Second)
 	defer cancel()
 
 	if requeued, err := r.repo.RequeueStaleRunning(ctx, time.Now().UTC().Add(-r.staleAfter)); err != nil {
@@ -508,7 +516,7 @@ func (r *Runner) executeCatalogExport(job *models.AdminJob) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), jobTimeoutLong)
+	ctx, cancel := context.WithTimeout(r.executionContext(), jobTimeoutLong)
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
@@ -561,7 +569,7 @@ func (r *Runner) executeCatalogExport(job *models.AdminJob) {
 		job.ID+".json.gz",
 	))
 
-	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	uploadCtx, uploadCancel := context.WithTimeout(r.executionContext(), 30*time.Minute)
 	defer uploadCancel()
 	if err := r.repo.UpdateProgress(uploadCtx, job.ID, lastProgress.Total, lastProgress.Total, "Uploading catalog export"); err != nil {
 		slog.Warn("admin jobs: failed to mark upload phase", "job_id", job.ID, "error", err)
@@ -599,7 +607,7 @@ func (r *Runner) executeCatalogImport(job *models.AdminJob) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), jobTimeoutLong)
+	ctx, cancel := context.WithTimeout(r.executionContext(), jobTimeoutLong)
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
@@ -680,7 +688,7 @@ func (r *Runner) executeCatalogImport(job *models.AdminJob) {
 		return
 	}
 
-	completeCtx, completeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	completeCtx, completeCancel := context.WithTimeout(r.executionContext(), 30*time.Second)
 	defer completeCancel()
 	if err := r.repo.Complete(completeCtx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
@@ -747,7 +755,7 @@ func (r *Runner) executeItemRefresh(job *models.AdminJob) {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(r.executionContext())
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
@@ -832,7 +840,7 @@ func containsPhase(value, phase string) bool {
 }
 
 func (r *Runner) cleanupExpired() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(r.executionContext(), 5*time.Minute)
 	defer cancel()
 
 	jobs, err := r.repo.ListExpired(ctx, time.Now().UTC(), 50)
@@ -855,7 +863,7 @@ func (r *Runner) cleanupExpired() {
 }
 
 func (r *Runner) publishJobByID(ctx context.Context, eventType notifications.Type, id string) {
-	if r == nil || r.realtimeHub == nil || r.repo == nil || id == "" {
+	if r == nil || r.repo == nil || id == "" {
 		return
 	}
 
@@ -871,7 +879,20 @@ func (r *Runner) publishJobByID(ctx context.Context, eventType notifications.Typ
 }
 
 func (r *Runner) publishJob(ctx context.Context, eventType notifications.Type, job *models.AdminJob) {
-	if r == nil || r.realtimeHub == nil || job == nil {
+	if r == nil || job == nil {
+		return
+	}
+	if r.observation != nil {
+		switch job.Status {
+		case StatusCancelled, StatusCompleted, StatusFailed:
+			r.observation.Finish(job.Status)
+		default:
+			if eventType == notifications.TypeJobProgress {
+				workmetrics.Progress("admin")
+			}
+		}
+	}
+	if r.realtimeHub == nil {
 		return
 	}
 	// Cancellation may win the terminal database transition even when the
@@ -894,7 +915,7 @@ func (r *Runner) publishJob(ctx context.Context, eventType notifications.Type, j
 }
 
 func (r *Runner) failJob(id string, current, total int, message, errorMessage string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.executionContext(), 30*time.Second)
 	defer cancel()
 
 	if err := r.repo.Fail(ctx, id, FailJobInput{
@@ -911,7 +932,7 @@ func (r *Runner) failJob(id string, current, total int, message, errorMessage st
 }
 
 func (r *Runner) cancelJob(id string, current, total int, message string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.executionContext(), 30*time.Second)
 	defer cancel()
 	if err := r.repo.UpdateProgress(ctx, id, current, total, message); err != nil {
 		slog.Warn("admin jobs: failed to update cancellation progress", "job_id", id, "error", err)
@@ -921,9 +942,19 @@ func (r *Runner) cancelJob(id string, current, total int, message string) {
 		slog.Warn("admin jobs: failed to mark job cancelled", "job_id", id, "error", err)
 		return
 	}
+	if r.observation != nil {
+		r.observation.Finish(job.Status)
+	}
 	if r.realtimeHub != nil {
 		if err := r.realtimeHub.PublishJob(ctx, notifications.TypeJobCancelled, job); err != nil {
 			slog.Warn("admin jobs: failed to publish job cancellation", "job_id", id, "error", err)
 		}
 	}
+}
+
+func (r *Runner) executionContext() context.Context {
+	if r.workCtx != nil {
+		return r.workCtx
+	}
+	return context.Background()
 }

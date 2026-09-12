@@ -33,6 +33,8 @@ const (
 	internalAPIV2Dir         = "internal/apiv2"
 	internalProxyDir         = "internal/proxy"
 	internalTranscodeNodeDir = "internal/transcodenode"
+	internalDebugServerDir   = "internal/debugserver"
+	debugServerHandlerFile   = "internal/debugserver/handlers.go"
 )
 
 // DefaultConfig describes the legacy native HTTP surface: the listeners Silo
@@ -50,6 +52,7 @@ func DefaultConfig(root string) Config {
 	return Config{
 		Root: root,
 		Listeners: []ListenerSpec{
+			debugListenerSpec(),
 			{
 				ID:   ListenerRoot,
 				Kind: ListenerKindServeMux,
@@ -96,6 +99,7 @@ func DefaultConfig(root string) Config {
 			},
 		},
 		AuditDirs: []string{
+			internalDebugServerDir,
 			internalAPIDir,
 			"internal/api/handlers",
 			internalAPIV2Dir,
@@ -117,6 +121,19 @@ func DefaultConfig(root string) Config {
 					"out of scope for the native v2 migration",
 			},
 		},
+	}
+}
+
+// The operational profiler is separate from all native and compatibility
+// listeners, and never contributes operations to native OpenAPI.
+func debugListenerSpec() ListenerSpec {
+	return ListenerSpec{
+		ID:          ListenerDebug,
+		Kind:        ListenerKindServeMux,
+		Description: "Optional literal-loopback operational profiling listener, separate from every client-facing port.",
+		Dir:         internalDebugServerDir,
+		Func:        "newHandler",
+		Constructor: "newMux",
 	}
 }
 

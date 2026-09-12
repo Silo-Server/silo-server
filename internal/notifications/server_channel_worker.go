@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -151,7 +154,7 @@ func (w *serverChannelWorker) runPass(ctx context.Context) {
 // watermark, group, send, and advance the watermark — all in one transaction
 // so the watermark commits only with the outcome it describes. Returns
 // whether a post went out.
-func (w *serverChannelWorker) processChannel(ctx context.Context, channelID string, batchAge time.Duration) (bool, error) {
+func (w *serverChannelWorker) processChannel(ctx context.Context, channelID string, batchAge time.Duration) (sent bool, runErr error) {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin server channel sweep tx: %w", err)
@@ -180,6 +183,9 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 		return false, nil
 	}
 
+	ctx, observation := workmetrics.Start(ctx, "notification_delivery", time.Time{})
+	defer workmetrics.Profile(ctx)()
+	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
 	// The watermark passes everything fetched — including events filtered by
 	// the channel's kind toggles and events past the staleness horizon — so
 	// skipped events are never re-read. It only ever moves forward.

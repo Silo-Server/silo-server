@@ -25,7 +25,14 @@ export function ServerResourcesWidget() {
       <CardHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="text-sm font-bold">Server resources</CardTitle>
         {sampledLabel ? (
-          <span className="text-muted-foreground text-[11px]">Sampled {sampledLabel}</span>
+          <span
+            className={cn(
+              "text-[11px]",
+              sample.kind === "sampled" && sample.stale ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {sample.kind === "sampled" && sample.stale ? "Stale · " : ""}Sampled {sampledLabel}
+          </span>
         ) : null}
       </CardHeader>
       <CardContent className="min-h-0 flex-1">
@@ -40,11 +47,25 @@ export function ServerResourcesWidget() {
             {sample.title}
           </div>
         ) : (
-          <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <ResourceMetricBox metric={sample.cpu} />
-            <ResourceMetricBox metric={sample.memory} />
-            <ResourceMetricBox metric={sample.disk} />
-            <ResourceMetricBox metric={sample.gpu ?? sample.network} />
+          <div className="space-y-2">
+            {sample.instanceID ? (
+              <div className="text-muted-foreground text-[11px]" title={sample.instanceID}>
+                API instance {sample.instanceID.slice(0, 8)}
+              </div>
+            ) : null}
+            <div
+              className={cn(
+                "grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3",
+                sample.stale && "opacity-60",
+              )}
+            >
+              <ResourceMetricBox metric={sample.cpu} />
+              <ResourceMetricBox metric={sample.memory} />
+              <ResourceMetricBox metric={sample.disk} />
+              <ResourceMetricBox metric={sample.gpu ?? sample.network} />
+              {sample.processMemory ? <ResourceMetricBox metric={sample.processMemory} /> : null}
+              {sample.heapMemory ? <ResourceMetricBox metric={sample.heapMemory} /> : null}
+            </div>
           </div>
         )}
       </CardContent>

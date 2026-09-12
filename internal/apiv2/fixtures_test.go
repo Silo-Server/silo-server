@@ -1705,6 +1705,7 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "list_admin_users_exact_identity", operationID: opListAdminUsers, method: http.MethodGet, path: Prefix + "/admin/users?identity=LAURA%40example.test", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminUserCollection", scenario: "An exact identity filter matches case-insensitively before account pagination."},
 		{name: "admin_playback_summary", operationID: "getAdminPlaybackSummary", method: "GET", path: Prefix + "/admin/sessions/summary?user_id=7&limit=1", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminPlaybackSummaryOutputBody", scenario: "A bounded account activity sample omits diagnostic identifiers and network metadata."},
+		{name: "admin_resource_capabilities", operationID: "getAdminResourceCapabilities", scenario: "Administrator discovery reports unavailable sampling when no sampler is configured.", method: "GET", path: Prefix + "/admin/system/resources/capabilities", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/AdminResourceCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}},
 	}...)
 }
 

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
@@ -16,6 +18,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
+
+const scanRunUnknown = "unknown"
 
 const (
 	defaultPollInterval      = 2 * time.Second
@@ -290,6 +294,7 @@ func (s *Service) requeueStale() {
 	if failed, err := s.repo.FailStaleDirect(ctx, staleBefore); err != nil {
 		slog.Warn("scan queue: failed to abandon stale direct runs", "error", err)
 	} else if failed > 0 {
+		workmetrics.Recovered("scan", int64(failed))
 		slog.Info("scan queue: failed abandoned direct runs", "count", failed)
 	}
 
@@ -299,6 +304,7 @@ func (s *Service) requeueStale() {
 		return
 	}
 	if requeued > 0 {
+		workmetrics.Recovered("scan", int64(requeued))
 		slog.Info("scan queue: requeued stale runs", "count", requeued)
 	}
 }
@@ -349,6 +355,9 @@ func (s *Service) process(run *models.ScanRun) {
 
 	ctx, cancel := context.WithCancel(s.appCtx)
 	defer cancel()
+	ctx, observation := workmetrics.Start(ctx, "scan", run.RequestedAt)
+	defer workmetrics.Profile(ctx)()
+	defer observation.Finish(scanRunUnknown)
 	ctx = scanbatch.WithRunID(ctx, run.ID)
 	s.trackRunning(run.ID, run.MediaFolderID, cancel)
 	defer s.untrackRunning(run.ID)
@@ -362,13 +371,13 @@ func (s *Service) process(run *models.ScanRun) {
 	folder, err := s.folders.GetByID(ctx, run.MediaFolderID)
 	switch {
 	case errors.Is(err, catalog.ErrFolderNotFound):
-		s.cancelRun(run.ID)
+		observation.Finish(s.cancelRun(run.ID))
 		return
 	case err != nil:
-		s.failRun(run.ID, fmt.Errorf("load library for scan: %w", err))
+		observation.Finish(s.failRun(run.ID, fmt.Errorf("load library for scan: %w", err)))
 		return
 	case folder == nil || !folder.Enabled:
-		s.cancelRun(run.ID)
+		observation.Finish(s.cancelRun(run.ID))
 		return
 	}
 
@@ -385,11 +394,11 @@ func (s *Service) process(run *models.ScanRun) {
 	}
 	switch {
 	case errors.Is(err, context.Canceled):
-		s.cancelRun(run.ID)
+		observation.Finish(s.cancelRun(run.ID))
 	case err != nil:
-		s.failRun(run.ID, err)
+		observation.Finish(s.failRun(run.ID, err))
 	default:
-		s.completeRun(run.ID, result)
+		observation.Finish(s.completeRun(run.ID, result))
 	}
 }
 
@@ -436,6 +445,7 @@ func (r *scanProgressReporter) Report(update libraryingest.ProgressUpdate) {
 		return
 	}
 	if run != nil {
+		workmetrics.Progress("scan")
 		slog.Info("scan queue: progress",
 			"scan_id", run.ID,
 			"library_id", run.MediaFolderID,
@@ -492,42 +502,54 @@ func (s *Service) heartbeatLoop(ctx context.Context, runID string, stop <-chan s
 	}
 }
 
-func (s *Service) cancelRun(runID string) {
+func (s *Service) cancelRun(runID string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	run, changed, err := s.repo.MarkCancelled(ctx, runID)
 	if err != nil {
 		slog.Warn("scan queue: failed to mark cancelled", "scan_id", runID, "error", err)
-		return
+		return scanRunUnknown
 	}
 	if changed {
 		s.publish(context.Background(), "scan.cancelled", run)
 	}
+	if run == nil {
+		return scanRunUnknown
+	}
+	return run.Status
 }
 
-func (s *Service) failRun(runID string, runErr error) {
+func (s *Service) failRun(runID string, runErr error) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	run, err := s.repo.Fail(ctx, runID, errString(runErr))
 	if err != nil {
 		slog.Warn("scan queue: failed to mark failed", "scan_id", runID, "error", err)
-		return
+		return scanRunUnknown
 	}
 	s.publish(context.Background(), "scan.failed", run)
+	if run == nil {
+		return scanRunUnknown
+	}
+	return run.Status
 }
 
-func (s *Service) completeRun(runID string, result *libraryingest.Result) {
+func (s *Service) completeRun(runID string, result *libraryingest.Result) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	run, err := s.repo.Complete(ctx, runID, scanResultFromIngest(result))
 	if err != nil {
 		slog.Warn("scan queue: failed to mark completed", "scan_id", runID, "error", err)
-		return
+		return scanRunUnknown
 	}
 	s.publish(context.Background(), "scan.completed", run)
+	if run == nil {
+		return scanRunUnknown
+	}
+	return run.Status
 }
 
 func (s *Service) publish(ctx context.Context, eventName string, run *models.ScanRun) {

@@ -2554,6 +2554,149 @@
         ],
         "type": "object"
       },
+      "AdminCgroupCPUStats": {
+        "additionalProperties": false,
+        "properties": {
+          "periods": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pressure_some_pct": {
+            "format": "double",
+            "type": "number"
+          },
+          "quota_cores": {
+            "format": "double",
+            "type": "number"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "throttled_periods": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "throttled_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "usage_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "AdminCgroupMemoryStats": {
+        "additionalProperties": false,
+        "properties": {
+          "current_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "high_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oom_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oom_kills": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pressure_full_pct": {
+            "format": "double",
+            "type": "number"
+          },
+          "pressure_some_pct": {
+            "format": "double",
+            "type": "number"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "swap_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          },
+          "working_set_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "AdminChildStats": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "resident_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sampled": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unavailable": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "workload": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workload",
+          "sampled",
+          "unavailable",
+          "truncated",
+          "resident_bytes",
+          "cpu_seconds"
+        ],
+        "type": "object"
+      },
       "AdminCollection": {
         "additionalProperties": false,
         "properties": {
@@ -4338,6 +4481,28 @@
           "app_version",
           "app_build",
           "playback_session_ids"
+        ],
+        "type": "object"
+      },
+      "AdminDiskDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "inodes_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "inodes_used": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
         ],
         "type": "object"
       },
@@ -10352,6 +10517,66 @@
         ],
         "type": "object"
       },
+      "AdminProcessStats": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "go_memory_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "goroutines": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "heap_live_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_fds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "open_fds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "read_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "resident_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "threads": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "virtual_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "write_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "AdminRateLimitAuthEndpoint": {
         "additionalProperties": false,
         "properties": {
@@ -10978,6 +11203,132 @@
           "max_requests",
           "window_days",
           "approval_mode"
+        ],
+        "type": "object"
+      },
+      "AdminResourceAttribution": {
+        "additionalProperties": false,
+        "properties": {
+          "cgroup_cpu": {
+            "$ref": "#/components/schemas/AdminCgroupCPUStats"
+          },
+          "cgroup_memory": {
+            "$ref": "#/components/schemas/AdminCgroupMemoryStats"
+          },
+          "children": {
+            "$ref": "#/components/schemas/AdminChildStats"
+          },
+          "cpu": {
+            "$ref": "#/components/schemas/AdminResourceSource"
+          },
+          "disks": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDiskDetails"
+            },
+            "type": "array"
+          },
+          "dropped_disk_roots": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "load": {
+            "$ref": "#/components/schemas/AdminResourceSource"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/AdminResourceSource"
+          },
+          "network": {
+            "$ref": "#/components/schemas/AdminResourceSource"
+          },
+          "process": {
+            "$ref": "#/components/schemas/AdminProcessStats"
+          },
+          "sample_duration_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "sample_interval_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "instance_id",
+          "sample_interval_seconds",
+          "sample_duration_seconds",
+          "cpu",
+          "memory",
+          "load",
+          "network",
+          "dropped_disk_roots"
+        ],
+        "type": "object"
+      },
+      "AdminResourceCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "cgroup_resources": {
+            "type": "boolean"
+          },
+          "instance_attribution": {
+            "type": "boolean"
+          },
+          "process_resources": {
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "sample_freshness": {
+            "type": "boolean"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance_attribution",
+          "process_resources",
+          "cgroup_resources",
+          "sample_freshness",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminResourceSource": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "source",
+          "available"
         ],
         "type": "object"
       },
@@ -12514,6 +12865,9 @@
       "AdminSystemResources": {
         "additionalProperties": false,
         "properties": {
+          "attribution": {
+            "$ref": "#/components/schemas/AdminResourceAttribution"
+          },
           "available": {
             "type": "boolean"
           },
@@ -12530,13 +12884,17 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "stale": {
+            "type": "boolean"
+          },
           "system": {
             "$ref": "#/components/schemas/AdminSystemStats"
           }
         },
         "required": [
           "available",
-          "gpu"
+          "gpu",
+          "stale"
         ],
         "type": "object"
       },
@@ -96188,6 +96546,205 @@
         "x-silo-class": "acting_admin"
       }
     },
+    "/api/v2/admin/system/resources/capabilities": {
+      "get": {
+        "operationId": "getAdminResourceCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminResourceCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover resource attribution and freshness support. Individual measurements may be unavailable.",
+        "tags": [
+          "admin-settings"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
+      }
+    },
     "/api/v2/admin/tasks": {
       "get": {
         "operationId": "listAdminTasks",
@@ -179572,6 +180129,171 @@
         ],
         "type": "object"
       },
+      "nodemetrics_CgroupCPUStats": {
+        "additionalProperties": false,
+        "properties": {
+          "periods": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pressure_some_pct": {
+            "format": "double",
+            "type": "number"
+          },
+          "quota_cores": {
+            "format": "double",
+            "type": "number"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "throttled_periods": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "throttled_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "usage_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "nodemetrics_CgroupMemoryStats": {
+        "additionalProperties": false,
+        "properties": {
+          "current_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "high_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oom_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oom_kills": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pressure_full_pct": {
+            "format": "double",
+            "type": "number"
+          },
+          "pressure_some_pct": {
+            "format": "double",
+            "type": "number"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "swap_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          },
+          "working_set_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "nodemetrics_ChildStats": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "resident_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sampled": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unavailable": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "workload": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workload",
+          "sampled",
+          "unavailable",
+          "truncated",
+          "resident_bytes",
+          "cpu_seconds"
+        ],
+        "type": "object"
+      },
+      "nodemetrics_DiskDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "inodes_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "inodes_used": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
       "nodemetrics_DiskStats": {
         "additionalProperties": false,
         "properties": {
@@ -179646,6 +180368,147 @@
           "device",
           "sessions",
           "source"
+        ],
+        "type": "object"
+      },
+      "nodemetrics_ProcessStats": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "go_memory_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "goroutines": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "heap_live_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_fds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "open_fds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "read_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "resident_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "threads": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "virtual_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "write_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "nodemetrics_ResourceAttribution": {
+        "additionalProperties": false,
+        "properties": {
+          "cgroup_cpu": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_CgroupCPUStats"
+          },
+          "cgroup_memory": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_CgroupMemoryStats"
+          },
+          "children": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ChildStats"
+          },
+          "cpu": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceSource"
+          },
+          "disks": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_DiskDetails"
+            },
+            "type": "array"
+          },
+          "dropped_disk_roots": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "load": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceSource"
+          },
+          "memory": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceSource"
+          },
+          "network": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceSource"
+          },
+          "process": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ProcessStats"
+          },
+          "sample_duration_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "sample_interval_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "instance_id",
+          "sample_interval_seconds",
+          "sample_duration_seconds",
+          "cpu",
+          "memory",
+          "load",
+          "network",
+          "dropped_disk_roots"
+        ],
+        "type": "object"
+      },
+      "nodemetrics_ResourceSource": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "source",
+          "available"
         ],
         "type": "object"
       },
@@ -179895,11 +180758,18 @@
             "format": "int64",
             "type": "integer"
           },
+          "attribution": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceAttribution"
+          },
           "gpu": {
             "items": {
               "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_GPUStats"
             },
             "type": "array"
+          },
+          "sampled_at": {
+            "format": "date-time",
+            "type": "string"
           },
           "system": {
             "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_SystemStats"
@@ -179998,11 +180868,18 @@
             "format": "int32",
             "type": "integer"
           },
+          "attribution": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceAttribution"
+          },
           "gpu": {
             "items": {
               "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_GPUStats"
             },
             "type": "array"
+          },
+          "sampled_at": {
+            "format": "date-time",
+            "type": "string"
           },
           "sessions": {
             "items": {

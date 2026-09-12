@@ -207,6 +207,7 @@ func (s *Sampler) cgroupCPU(now time.Time, pinned int) (cgroupCPUSample, float64
 		if err != nil {
 			continue
 		}
+		s.cgroupCPUDetails = sampleCgroupCPU(binding, paths, quota, usage)
 		return cgroupCPUSample{usageNS: usage, at: now, valid: true}, quota
 	}
 	return cgroupCPUSample{}, 0

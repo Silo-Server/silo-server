@@ -30,6 +30,10 @@ func osStatfs(path string) (fsStats, error) {
 		return fsStats{}, err
 	}
 	stats := fsCapacity(st.Blocks, st.Bfree, st.Bavail, uint64(st.Bsize))
+	stats.InodesTotal = st.Files
+	if st.Ffree <= st.Files {
+		stats.InodesUsed = st.Files - st.Ffree
+	}
 	stats.FSID = formatFSID(int64(st.Fsid.Val[0]), int64(st.Fsid.Val[1]))
 	return stats, nil
 }

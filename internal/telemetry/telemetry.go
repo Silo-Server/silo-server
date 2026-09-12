@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -84,7 +85,8 @@ func Setup(ctx context.Context, cfg Config) (*Providers, func(context.Context) e
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
-		sdktrace.WithBatcher(traceExp),
+		sdktrace.WithSpanProcessor(spanCompletionCounter{}),
+		sdktrace.WithBatcher(measuredTraceExporter{traceExp}, sdktrace.WithMaxQueueSize(2048), sdktrace.WithMaxExportBatchSize(512), sdktrace.WithExportTimeout(5*time.Second)),
 		sdktrace.WithSampler(newSampler(cfg)),
 	)
 	shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
@@ -99,7 +101,7 @@ func Setup(ctx context.Context, cfg Config) (*Providers, func(context.Context) e
 	}
 	lp := sdklog.NewLoggerProvider(
 		sdklog.WithResource(res),
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(measuredLogExporter{logExp}, sdklog.WithMaxQueueSize(2048), sdklog.WithExportTimeout(5*time.Second))),
 	)
 	shutdownFuncs = append(shutdownFuncs, lp.Shutdown)
 
@@ -107,10 +109,7 @@ func Setup(ctx context.Context, cfg Config) (*Providers, func(context.Context) e
 	// them last preserves the "install nothing on failure" invariant.
 	otel.SetTracerProvider(tp)
 	global.SetLoggerProvider(lp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	shutdown := newIdempotentShutdown(shutdownFuncs)
 
@@ -130,7 +129,9 @@ func buildResource(ctx context.Context, cfg Config) (*resource.Resource, error) 
 	}
 	return resource.New(ctx,
 		resource.WithFromEnv(),
-		resource.WithProcess(),
+		resource.WithProcessPID(),
+		resource.WithProcessRuntimeName(),
+		resource.WithProcessRuntimeVersion(),
 		resource.WithHost(),
 		resource.WithAttributes(attrs...),
 	)
