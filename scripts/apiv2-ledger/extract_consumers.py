@@ -224,6 +224,41 @@ def first_string_literal(args):
     return None
 
 
+def first_argument(args):
+    """Return the first call argument without inspecting nested arguments."""
+    depth = 0
+    quote = None
+    escaped = False
+    for i, c in enumerate(args):
+        if quote:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == quote:
+                quote = None
+            continue
+        if c in "\"'`":
+            quote = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth = max(0, depth - 1)
+        elif c == "," and depth == 0:
+            return args[:i]
+    return args
+
+
+def v2_operation_literals(args, operation_vars):
+    """Extract every statically known operation key from a v2 call."""
+    expr = first_argument(args).strip()
+    quoted = re.findall(r"[\"'`]([A-Z]+\s+/api/v2(?:/[^\"'`]*)?)['\"`]", expr)
+    if quoted:
+        return quoted
+    var = re.fullmatch(r"(\w+)", expr)
+    return operation_vars.get(var.group(1), []) if var else []
+
+
 def templates_in(line):
     """Yield the body of every top-level template literal on a line (nesting-aware)."""
     i = 0
@@ -315,13 +350,7 @@ def web_scan():
             if strip_comment(lines[line - 1]) == "":
                 continue
             if fn == "v2":
-                first = args.lstrip()
-                lit = first_string_literal(first) if first[:1] in ('"', "'", "`") else None
-                literals = [lit] if lit is not None else []
-                if not literals:
-                    var = re.match(r"(\w+)\s*(?:,|$)", first)
-                    if var:
-                        literals = operation_vars.get(var.group(1), [])
+                literals = v2_operation_literals(args, operation_vars)
             else:
                 lit = first_string_literal(args)
                 literals = [lit] if lit is not None else []
