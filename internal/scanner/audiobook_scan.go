@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"golang.org/x/sync/errgroup"
 )
 
 type filesystemRootContentFinder interface {
@@ -225,42 +225,11 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string
 			scan.rootErr = fmt.Errorf("root is not a directory after symlink resolution")
 		}
 		if statErr == nil && scan.rootErr == nil {
-			walkErr := filepath.WalkDir(cleanRoot, func(path string, d fs.DirEntry, walkErr error) error {
-				if err := ctx.Err(); err != nil {
-					return err
+			if err := walkAudiobookRoot(ctx, &scan, cleanRoot); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil, err
 				}
-				if walkErr != nil {
-					scan.walkFailures++
-					slog.WarnContext(ctx, "audiobook scan: walk error", "component", "scanner", "path", path, "error", walkErr)
-					return nil
-				}
-				if !d.IsDir() {
-					return nil
-				}
-				entries, err := os.ReadDir(path)
-				if err != nil {
-					scan.walkFailures++
-					slog.WarnContext(ctx, "audiobook scan: read dir failed", "component", "scanner", "path", path, "error", err)
-					return nil
-				}
-				hadAudio := false
-				for _, e := range entries {
-					if !e.IsDir() && SupportsAudioFile(e.Name()) {
-						scan.seenPaths[filepath.Join(path, e.Name())] = true
-						hadAudio = true
-					}
-				}
-				if hadAudio {
-					scan.candidates = append(scan.candidates, path)
-					return filepath.SkipDir
-				}
-				return nil
-			})
-			if walkErr != nil {
-				if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
-					return nil, walkErr
-				}
-				scan.rootErr = fmt.Errorf("walk root: %w", walkErr)
+				scan.rootErr = fmt.Errorf("walk root: %w", err)
 			}
 		}
 		if scan.failed() {
@@ -274,6 +243,69 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string
 		scans = append(scans, scan)
 	}
 	return scans, nil
+}
+
+// walkAudiobookRoot discovers candidate book folders under root with a
+// level-parallel breadth-first traversal: every directory of the current
+// depth is listed concurrently (bounded workers), then the next depth is
+// processed. On a network filesystem the traversal is latency-bound, so this
+// beats a serial walk roughly by the worker factor. Each directory is listed
+// exactly once — a directory containing audio files becomes a candidate and
+// is not descended into, mirroring the previous filepath.SkipDir behavior
+// (which also listed every interior directory twice: once by the callback,
+// once by WalkDir to descend).
+func walkAudiobookRoot(ctx context.Context, scan *audiobookRootScan, root string) error {
+	workers := 4 * audiobookScanWorkers()
+	var mu sync.Mutex
+	level := []string{root}
+	for len(level) > 0 {
+		var next []string
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(workers)
+		for _, dir := range level {
+			g.Go(func() error {
+				if err := gctx.Err(); err != nil {
+					return err
+				}
+				entries, err := os.ReadDir(dir)
+				if err != nil {
+					mu.Lock()
+					scan.walkFailures++
+					mu.Unlock()
+					slog.WarnContext(ctx, "audiobook scan: read dir failed", "component", "scanner", "path", dir, "error", err)
+					return nil
+				}
+				hadAudio := false
+				var subdirs []string
+				for _, e := range entries {
+					if e.IsDir() {
+						subdirs = append(subdirs, filepath.Join(dir, e.Name()))
+						continue
+					}
+					if SupportsAudioFile(e.Name()) {
+						mu.Lock()
+						scan.seenPaths[filepath.Join(dir, e.Name())] = true
+						mu.Unlock()
+						hadAudio = true
+					}
+				}
+				mu.Lock()
+				if hadAudio {
+					// One book = one folder: do not descend into candidates.
+					scan.candidates = append(scan.candidates, dir)
+				} else {
+					next = append(next, subdirs...)
+				}
+				mu.Unlock()
+				return nil
+			})
+		}
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		level = next
+	}
+	return nil
 }
 
 func splitAudiobookReconcileRoots(scans []audiobookRootScan) (roots []string, seenPaths map[string]bool, sawFiles bool) {
@@ -988,13 +1020,21 @@ func (s *Scanner) upsertAudiobookMediaFiles(
 			BaseType:           "audiobook",
 			IdentityConfidence: audiobookIdentityConfidence(book, af),
 			FilePath:           af.Path,
-			Chapters:           chapters,
-			ProbeSource:        "local",
-			Duration:           af.Duration,
-			Bitrate:            af.Bitrate,
-			CodecAudio:         af.CodecAudio,
-			Container:          af.Container,
-			AudioChannels:      af.AudioChannels,
+			// Size/mtime make audiobookFolderShouldSkip's unchanged check
+			// possible on the next scan; without them every rescan re-probes
+			// and re-upserts each book.
+			FileSize:      af.Size,
+			Chapters:      chapters,
+			ProbeSource:   "local",
+			Duration:      af.Duration,
+			Bitrate:       af.Bitrate,
+			CodecAudio:    af.CodecAudio,
+			Container:     af.Container,
+			AudioChannels: af.AudioChannels,
+		}
+		if !af.ModTime.IsZero() {
+			modifiedAt := normalizeFileModifiedAt(af.ModTime)
+			mf.FileModifiedAt = &modifiedAt
 		}
 		if partTotal > 1 {
 			mf.PresentationKind = "multipart"
