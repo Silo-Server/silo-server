@@ -1,8 +1,8 @@
 {
-  "title": "Silo resource and performance overview",
+  "title": "Silo observability metric catalog",
   "uid": "silo-observability",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "tags": [
     "silo"
   ],
@@ -467,7 +467,7 @@
     {
       "id": 14,
       "type": "timeseries",
-      "title": "OTLP exporter outcomes",
+      "title": "Finished OTLP spans",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -475,8 +475,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (signal, outcome) (rate(silo_otel_export_records_total[5m]))",
-          "legendFormat": "{{signal}} {{outcome}}"
+          "expr": "rate(silo_otel_finished_spans_total[5m])",
+          "legendFormat": "finished spans"
         }
       ],
       "gridPos": {
@@ -496,7 +496,8 @@
           "displayMode": "table",
           "placement": "bottom"
         }
-      }
+      },
+      "description": "Rate of spans completed by the OTLP pipeline. This does not identify users."
     },
     {
       "id": 15,
@@ -633,6 +634,787 @@
           "placement": "bottom"
         }
       }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Active API v2 operations",
+      "description": "Active native API operations, including long-lived playback control sockets.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(silo_apiv2_in_flight)",
+          "legendFormat": "all operations"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Playback route decisions",
+      "description": "Aggregate routing decisions. This is not a unique-user count.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (workload, execution, egress, outcome) (rate(silo_playback_routing_decisions_total[5m]))",
+          "legendFormat": "{{workload}} {{execution}} {{egress}} {{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Active direct streams",
+      "description": "Original-file direct streams currently being served.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "silo_direct_stream_active",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 80,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Direct stream throughput",
+      "description": "Original-file response body throughput.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(silo_direct_stream_bytes_sent_total[5m])",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 80,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Direct stream faults and resumes",
+      "description": "Invalid ranges and successful byte-range resumes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(silo_direct_stream_invalid_range_total[5m])",
+          "legendFormat": "invalid range"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(silo_direct_stream_range_resumes_total[5m])",
+          "legendFormat": "range resume"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 88,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Live FFmpeg processes",
+      "description": "Current live child processes owned by Silo for FFmpeg work.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "silo_resource_children_sampled{workload=\"ffmpeg\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 88,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Live FFmpeg CPU time",
+      "description": "Lifetime CPU seconds of sampled live FFmpeg children; this gauge can fall when children exit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "silo_resource_children_cpu_seconds{workload=\"ffmpeg\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 96,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Transcode exits",
+      "description": "Completed transcode subprocesses by bounded outcome.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(silo_subprocess_exits_total{workload=\"transcode\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 96,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Transcode peak RSS p95",
+      "description": "Peak resident memory of completed transcode children. This is not current concurrent RSS.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, workload) (rate(silo_subprocess_peak_rss_bytes_bucket{workload=\"transcode\"}[5m])))",
+          "legendFormat": "{{workload}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 104,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "GPU sessions",
+      "description": "Active GPU workloads pinned to each device.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance, device) (streamapp_node_gpu_sessions)",
+          "legendFormat": "{{instance}} {{device}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 104,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "API request rate by auth and status",
+      "description": "Aggregate traffic by authentication class and status class; no user identifiers are exported.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (auth_class, status_class) (rate(streamapp_apiv2_requests_total[5m]))",
+          "legendFormat": "{{auth_class}} {{status_class}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 112,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "API error rate by operation",
+      "description": "Native API client-visible errors by operation and bounded problem code.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation_id, error_code) (rate(streamapp_apiv2_requests_total{status_class=~\"4xx|5xx\"}[5m]))",
+          "legendFormat": "{{operation_id}} {{error_code}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 112,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Playback API traffic",
+      "description": "Playback lifecycle and progress traffic; counts requests rather than unique users.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation_id) (rate(streamapp_apiv2_requests_total{operation_id=~\"startPlayback|stopPlayback|replanPlayback|reportPlaybackRouteEvent|updatePlaybackProgress\"}[5m]))",
+          "legendFormat": "{{operation_id}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 120,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Active background work",
+      "description": "Work attempts currently executing in this process.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (workload) (silo_work_active)",
+          "legendFormat": "{{workload}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 120,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Work queue wait p95",
+      "description": "Time from durable request to attempt start, including retries.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, workload) (rate(silo_work_queue_wait_seconds_bucket[5m])))",
+          "legendFormat": "{{workload}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 128,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Redis pool connections",
+      "description": "Live Redis pool connections and pending states by role.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "silo_redis_pool_connections",
+          "legendFormat": "{{role}} {{state}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 128,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "Redis pool wait time",
+      "description": "Cumulative pool wait time since the current Redis client was created.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "silo_redis_pool_wait_seconds",
+          "legendFormat": "{{role}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 136,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "S3 body throughput",
+      "description": "S3 body bytes consumed by role and direction, including retries.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (role, direction) (rate(silo_s3_body_bytes_total[5m]))",
+          "legendFormat": "{{role}} {{direction}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 136,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 37,
+      "type": "timeseries",
+      "title": "S3 body errors",
+      "description": "S3 body read errors excluding EOF.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (role, direction) (rate(silo_s3_body_errors_total[5m]))",
+          "legendFormat": "{{role}} {{direction}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 144,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "Resource source health",
+      "description": "Whether each supported resource source has a current reading.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "silo_resource_source_available",
+          "legendFormat": "{{resource}} {{scope}} {{source}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 144,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 39,
+      "type": "timeseries",
+      "title": "Cgroup CPU throttling",
+      "description": "CPU time spent throttled by the cgroup.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(silo_cgroup_cpu_throttled_seconds_total[5m])",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 152,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Cgroup pressure",
+      "description": "Some pressure percentages reported by the cgroup.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "silo_cgroup_cpu_pressure_some_percent",
+          "legendFormat": "cpu some"
+        },
+        {
+          "refId": "B",
+          "expr": "silo_cgroup_memory_pressure_some_percent",
+          "legendFormat": "memory some"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 152,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
     }
-  ]
+  ],
+  "description": "Operator metric catalog for Silo. Panels use aggregate, bounded labels; user and profile identifiers are intentionally excluded from Prometheus metrics."
 }
