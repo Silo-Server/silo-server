@@ -170,6 +170,24 @@ func TestSelectAudioTrack_SeriesPrefCrossFormat(t *testing.T) {
 	}
 }
 
+func TestSelectAudioTrack_SeriesPrefIndexKeepsRegionalVariant(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "en", Codec: "aac", Channels: 2, Title: "Commentary"},
+		{Language: "en-US", Codec: "eac3", Channels: 6, Title: "English 5.1", Default: true},
+	}
+
+	// Preference saved before regional subtags were preserved: bare "en" for
+	// the track at index 1. The saved index must still win over the bare
+	// "en" commentary track at index 0.
+	pref := &playback.AudioTrackPreference{
+		AudioTrackIndex: 1,
+		AudioLanguage:   "en",
+	}
+	if got := playback.SelectAudioTrack(tracks, "", pref); got != 1 {
+		t.Fatalf("SelectAudioTrack() = %d, want saved index 1", got)
+	}
+}
+
 func TestSelectAudioTrack_PrefersExactTrackSignatureOverIndexFallback(t *testing.T) {
 	tracks := []models.AudioTrack{
 		{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Title: "English Stereo", Default: true},

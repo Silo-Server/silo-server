@@ -1,6 +1,6 @@
 import { getLanguageName } from "@/lib/languageNames";
 
-export { getLanguageName, normalizeLanguageCode } from "@/lib/languageNames";
+export { canonicalLanguageTag, getLanguageName, normalizeLanguageCode } from "@/lib/languageNames";
 
 const COMMON_LANGUAGE_CODES = [
   "en",

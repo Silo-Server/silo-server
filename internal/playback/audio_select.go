@@ -65,9 +65,12 @@ func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPr
 			return idx
 		}
 
-		// 2. Series preference: try exact index+language match.
+		// 2. Series preference: honor the saved index when its track is still
+		// the same language. Saved preferences may carry a bare tag while the
+		// scanner now preserves regional subtags, so any compatible match keeps
+		// the index rather than falling through to a different track.
 		if seriesPref.AudioTrackIndex >= 0 && seriesPref.AudioTrackIndex < len(tracks) {
-			if langMatchRank(tracks[seriesPref.AudioTrackIndex].Language, seriesPref.AudioLanguage) == 0 {
+			if langMatch(tracks[seriesPref.AudioTrackIndex].Language, seriesPref.AudioLanguage) {
 				return seriesPref.AudioTrackIndex
 			}
 		}

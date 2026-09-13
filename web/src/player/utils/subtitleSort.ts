@@ -49,10 +49,6 @@ function languageMatchRank(candidate: string | undefined | null, preferred: stri
   return candidateTag.includes("-") ? 2 : 1;
 }
 
-function sameLanguage(track: PlayerSubtitleInfo, language: string): boolean {
-  return sameLanguageCode(track.language, language);
-}
-
 function subtitleTrackMatchesSignature(
   track: PlayerSubtitleInfo,
   signature: PlayerSubtitleTrackSignature | null,
@@ -139,10 +135,10 @@ function findPreferredSubtitleIndexWithSignature(
   let bestPriority = Infinity;
 
   for (const track of tracks) {
-    if (!track || !sameLanguage(track, language)) continue;
-    const priority = trackPriority(track);
+    if (!track) continue;
     const languageRank = languageMatchRank(track.language, language);
     if (languageRank < 0) continue;
+    const priority = trackPriority(track);
     const score = scoreSignatureFallback(track, signature);
     if (
       bestTrack === null ||
