@@ -10,11 +10,19 @@ import (
 )
 
 type stubAccountUsers struct {
-	createFn func(context.Context, models.CreateUserInput) (*models.User, error)
-	deleteFn func(context.Context, int) error
+	createFn        func(context.Context, models.CreateUserInput) (*models.User, error)
+	createInitialFn func(context.Context, models.CreateUserInput) (*models.User, error)
+	deleteFn        func(context.Context, int) error
 }
 
 func (s stubAccountUsers) Create(ctx context.Context, input models.CreateUserInput) (*models.User, error) {
+	return s.createFn(ctx, input)
+}
+
+func (s stubAccountUsers) CreateInitial(ctx context.Context, input models.CreateUserInput) (*models.User, error) {
+	if s.createInitialFn != nil {
+		return s.createInitialFn(ctx, input)
+	}
 	return s.createFn(ctx, input)
 }
 
