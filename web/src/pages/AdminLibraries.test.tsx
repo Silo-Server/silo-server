@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -89,6 +91,17 @@ import AdminLibraries from "./AdminLibraries";
 const renderPage = () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <AdminLibraries />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+};
+
+const renderInteractivePage = () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <AdminLibraries />
@@ -241,6 +254,8 @@ describe("AdminLibraries", () => {
 
     expect(markup).toContain("Ambiguous Roots");
     expect(markup).toContain("Scanner roots that stay visible");
+    expect(markup).toContain("text-amber-500");
+    expect(markup).toContain("bg-amber-500/10");
   });
 
   it("shows metadata matcher pending and parked counts", () => {
@@ -310,11 +325,96 @@ describe("AdminLibraries", () => {
 
   it("renders the collapsed Ambiguous Roots section when no roots exist", () => {
     // Default useLibraryRoots mock returns { data: [], isLoading: false }. The
-    // section itself still renders because it is gated on libraries.length.
+    // section itself still renders because it is gated on libraries.length, but
+    // uses neutral styling instead of an amber warning when count is 0.
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");
     expect(markup).toContain("Scanner roots that stay visible");
+    expect(markup).toContain("text-muted-foreground");
+    expect(markup).toContain("bg-muted/50");
+  });
+
+  it("renders a loading placeholder for Ambiguous Roots while loading", () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      data: [],
+      isLoading: true,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Ambiguous Roots");
+    expect(markup).toContain("Scanner roots that stay visible");
+    expect(markup).toContain("Loading count");
+    expect(markup).toContain("bg-muted/50");
+  });
+
+  it("queries ambiguous roots for the effective selected library", () => {
+    mocks.useAdminLibraries.mockReturnValue({
+      data: [
+        {
+          id: 42,
+          name: "Television",
+          paths: ["/media/tv"],
+          type: "tv",
+          enabled: true,
+          last_scanned_at: null,
+          scan_warning_code: null,
+          scan_warning_at: null,
+          scan_warning_message: null,
+        },
+      ],
+      isLoading: false,
+    });
+
+    renderPage();
+
+    expect(mocks.useLibraryRoots).toHaveBeenCalledWith(42, "ambiguous");
+  });
+
+  it("renders an error indicator for Ambiguous Roots when query fails", () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: true,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Ambiguous Roots");
+    expect(markup).toContain("Error loading count");
+    expect(markup).toContain("bg-destructive/10");
+  });
+
+  it("renders a loading table row when Ambiguous Roots is expanded while loading", async () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      data: [],
+      isLoading: true,
+    });
+
+    renderInteractivePage();
+
+    const trigger = screen.getByRole("button", { name: /ambiguous roots/i });
+    await userEvent.click(trigger);
+
+    expect(screen.getByText("Loading ambiguous roots for this library.")).toBeInTheDocument();
+  });
+
+  it("renders an error table row when Ambiguous Roots is expanded on query failure", async () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: true,
+    });
+
+    renderInteractivePage();
+
+    const trigger = screen.getByRole("button", { name: /ambiguous roots/i });
+    await userEvent.click(trigger);
+
+    expect(
+      screen.getByText("Failed to load ambiguous roots for this library."),
+    ).toBeInTheDocument();
   });
 
   it("renders Stale External IDs collapsed by default", () => {
