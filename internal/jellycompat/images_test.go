@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
@@ -567,7 +568,7 @@ func TestHandlePersonImageClampsLargeRequestToProfileLadder(t *testing.T) {
 	req = withImageRouteParams(req, routeID, "Primary")
 	rec := httptest.NewRecorder()
 
-	h.handlePersonImage(rec, req, routeID, "Primary", 287)
+	h.handlePersonImage(rec, req, &Session{}, routeID, "Primary", 287)
 
 	if got := compatRequestImageSize(req, "Primary"); got != compatLargeImageSize {
 		t.Fatalf("compatRequestImageSize = %q, want %q", got, compatLargeImageSize)
@@ -665,4 +666,57 @@ func withImageRouteParams(r *http.Request, routeID, imageType string) *http.Requ
 	routeCtx.URLParams.Add("id", routeID)
 	routeCtx.URLParams.Add("imageType", imageType)
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+func (r fakeImagePersonRepo) EnsureAccessible(_ context.Context, id int64, filter catalog.AccessFilter) error {
+	if r.person == nil || r.person.ID != id || (filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0) {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func TestPersonImageRechecksViewerBeforeSharedCache(t *testing.T) {
+	codec := NewResourceIDCodec()
+	routeID := codec.EncodeIntID(EncodedIDPerson, 287)
+	resolver := &recordingImageResolver{}
+	detail := &catalog.DetailService{}
+	detail.SetImageResolver(resolver)
+	h := &ImagesHandler{codec: codec, images: NewImageCache(time.Hour, time.Now), personRepo: fakeImagePersonRepo{person: &models.Person{ID: 287, PhotoPath: "tmdb/people/287/profile/original.abc123.webp"}}, detailSvc: detail,
+		accessFilter: func(_ context.Context, _ int, profileID string) catalog.AccessFilter {
+			if profileID == "visible" {
+				return catalog.AccessFilter{}
+			}
+			return catalog.AccessFilter{AllowedLibraryIDs: []int{}}
+		}}
+	request := func(profile string, authenticated bool, tag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag="+tag, nil)
+		req = withImageRouteParams(req, routeID, "Primary")
+		if authenticated {
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{StreamAppUserID: 7, ProfileID: profile}))
+		}
+		rr := httptest.NewRecorder()
+		h.HandleItemImage(rr, req)
+		return rr
+	}
+	first := request("visible", true, "")
+	if first.Code != http.StatusFound {
+		t.Fatalf("visible first=%d %s", first.Code, first.Body.String())
+	}
+	if _, ok := h.images.LookupSized(routeID, "Primary", "", compatCardImageSize); !ok {
+		t.Fatal("authorized request did not warm shared cache")
+	}
+	legacyTag := tagValue(first.Header().Get("Location"))
+	for _, tc := range []struct {
+		profile       string
+		authenticated bool
+		tag           string
+	}{{"hidden", true, ""}, {"", false, ""}, {"hidden", true, legacyTag}, {"", false, legacyTag}} {
+		rr := request(tc.profile, tc.authenticated, tc.tag)
+		if rr.Code != http.StatusNotFound || rr.Header().Get("Location") != "" {
+			t.Fatalf("cache disclosure for %+v: status=%d location=%q", tc, rr.Code, rr.Header().Get("Location"))
+		}
+	}
+	if rr := request("visible", true, ""); rr.Code != http.StatusFound {
+		t.Fatalf("authorized cache hit=%d", rr.Code)
+	}
 }

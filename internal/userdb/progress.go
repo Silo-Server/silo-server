@@ -252,6 +252,17 @@ func MarkWatchedBatch(
 	}
 	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
 
+	written, err := markWatchedBatchTx(ctx, tx, profileID, targets, entries)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit mark watched batch: %w", err)
+	}
+	return written, nil
+}
+
+func markWatchedBatchTx(ctx context.Context, tx *sql.Tx, profileID string, targets []userstore.MarkWatchedTarget, entries []userstore.WatchHistoryEntry) ([]userstore.WatchHistoryEntry, error) {
 	now := nowUTC()
 	seen := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
@@ -271,6 +282,13 @@ func MarkWatchedBatch(
 			profileID, mediaItemID, duration, now, now, profileID, mediaItemID,
 		); err != nil {
 			return nil, fmt.Errorf("marking watched batch: %w", err)
+		}
+		if target.EventAt != nil {
+			// Keep the explicit date separate from updated_at stamping, within this
+			// same transaction. This also preserves a repeated historical date.
+			if _, err := tx.ExecContext(ctx, "UPDATE watch_progress SET event_at = ? WHERE profile_id = ? AND media_item_id = ?", target.EventAt.UTC().Format(time.RFC3339Nano), profileID, mediaItemID); err != nil {
+				return nil, fmt.Errorf("setting batch progress date: %w", err)
+			}
 		}
 	}
 
@@ -302,9 +320,6 @@ func MarkWatchedBatch(
 		written = append(written, entry)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit mark watched batch: %w", err)
-	}
 	return written, nil
 }
 
@@ -693,6 +708,12 @@ func AddHistory(db *sql.DB, entry WatchHistoryEntry) error {
 }
 
 func AddVisibleHistory(db *sql.DB, entry WatchHistoryEntry) (WatchHistoryEntry, error) {
+	return addVisibleHistory(context.Background(), db, entry)
+}
+
+func addVisibleHistory(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, entry WatchHistoryEntry) (WatchHistoryEntry, error) {
 	if entry.ID == "" {
 		entry.ID = generateUUID()
 	}
@@ -706,7 +727,7 @@ func AddVisibleHistory(db *sql.DB, entry WatchHistoryEntry) (WatchHistoryEntry, 
 	if err != nil {
 		return entry, fmt.Errorf("marshaling watch identity: %w", err)
 	}
-	if err := db.QueryRow(addVisibleHistorySQL,
+	if err := db.QueryRowContext(ctx, addVisibleHistorySQL,
 		entry.ID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.WatchedAt,
 		entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
 		entry.ProfileID, entry.MediaItemID,
@@ -934,6 +955,17 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 	}
 	defer tx.Rollback()
 
+	if err := removeHistoryItems(context.Background(), tx, profileID, mediaItemIDs, removedAt); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit remove history items: %w", err)
+	}
+	return nil
+}
+
+func removeHistoryItems(ctx context.Context, tx *sql.Tx, profileID string, mediaItemIDs []string, removedAt time.Time) error {
 	removedAtText := removedAt.UTC().Format(time.RFC3339)
 	targetValues := make([]string, len(mediaItemIDs))
 	watermarkArgs := make([]any, 0, len(mediaItemIDs)+5)
@@ -942,7 +974,7 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 		watermarkArgs = append(watermarkArgs, mediaItemID)
 	}
 	watermarkArgs = append(watermarkArgs, removedAtText, removedAtText, profileID, profileID, removedAtText)
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		WITH target(media_item_id) AS (
 			VALUES `+strings.Join(targetValues, ",")+`
 		),
@@ -982,7 +1014,7 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 		placeholders[i] = "?"
 		args = append(args, mediaItemID)
 	}
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM watch_history
 		WHERE profile_id = ?
 		  AND media_item_id IN (`+strings.Join(placeholders, ",")+`)
@@ -999,7 +1031,7 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 	progressArgs := make([]any, 0, len(mediaItemIDs)+1)
 	progressArgs = append(progressArgs, profileID)
 	progressArgs = append(progressArgs, args[1:1+len(mediaItemIDs)]...)
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM watch_progress
 		WHERE profile_id = ?
 		  AND media_item_id IN (`+strings.Join(placeholders, ",")+`)
@@ -1007,9 +1039,6 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 		return fmt.Errorf("deleting removed progress rows: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit remove history items: %w", err)
-	}
 	return nil
 }
 

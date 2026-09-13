@@ -123,7 +123,9 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	if item.SeasonCount != nil {
 		seasonCount := *item.SeasonCount
 		dto.ChildCount = seasonCount
-		dto.RecursiveItemCount = seasonCount
+		if item.EpisodeCount == nil {
+			dto.RecursiveItemCount = seasonCount
+		}
 		dto.SeasonCount = seasonCount
 	}
 	primaryPath, primaryThumbhash := listItemPrimaryImageSeedParts(item)
@@ -175,9 +177,6 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	if allFields || fields["productionlocations"] {
 		dto.ProductionLocations = append([]string{}, item.Countries...)
 	}
-	if allFields || fields["criticrating"] {
-		dto.CriticRating = item.RatingTMDB
-	}
 	if allFields || fields["mediasourcecount"] {
 		// The list path has no version data, so assume matched playable items
 		// have exactly one source. Unmatched/file-missing items leave this
@@ -205,82 +204,6 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	}
 
 	return dto
-}
-
-// stubDetailPerson, stubDetailMediaSource, and stubDetailMediaStream are the
-// single placeholder elements injected into a list-mapped DTO by
-// stubDetailListFields when the client requested a detail-only Fields value
-// but the endpoint (currently Resume) deliberately skips the per-item
-// GetItemDetail fetch. Using a non-empty single-element slice keeps the
-// field present in JSON regardless of the omitempty tag, so strict client
-// deserializers see the same shape they'd get from a populated catalog
-// (every real item has at least one media source, stream, and cast/crew
-// entry — the empty-array case never happens in practice, so we should not
-// rely on omitempty doing anything useful for these fields).
-//
-// The values are minimal: each carries the required (non-omitempty) fields
-// only. Clients that consume this data downstream will see a single source
-// with a stub ID, a single Video stream at index 0, and a single placeholder
-// person. The stub is a FALLBACK, not a no-op: Infuse and SenPlayer build
-// their Continue Watching rows from the listing's MediaSources, so pages
-// within the detail-upgrade cap get real sources (upgradeProgressPageToDetail)
-// and only overflow/error entries see the stub — which must therefore still
-// look playable and serialize collections as empty, never null.
-var (
-	stubDetailPerson      = personDTO{ID: "0", Name: ""}
-	stubDetailMediaSource = mediaSourceDTO{ID: "0"}
-	stubDetailMediaStream = mediaStreamDTO{Index: 0, Type: "Video"}
-)
-
-// stubDetailListFields sets the four detail-only fields on a list-mapped DTO
-// to single-element placeholder slices when the client requested them via
-// Fields=People|Chapters|MediaStreams|MediaSources. Used by the Resume/NextUp
-// scan phase, which deliberately skips per-item GetItemDetail fanout; the
-// returned page is then re-mapped through the real detail path
-// (upgradeProgressPageToDetail), so these stubs reach clients only for
-// entries past the detail-upgrade cap or whose detail fetch failed.
-func stubDetailListFields(dto *baseItemDTO, fields map[string]bool) {
-	if len(fields) == 0 {
-		return
-	}
-	if fields["people"] && dto.People == nil {
-		dto.People = []personDTO{stubDetailPerson}
-	}
-	if fields["chapters"] && dto.Chapters == nil {
-		// Constructed fresh per call because map values are reference-typed
-		// and could be mutated by downstream code.
-		dto.Chapters = []map[string]any{{"Name": "", "StartPositionTicks": int64(0)}}
-	}
-	if fields["mediastreams"] && dto.MediaStreams == nil {
-		dto.MediaStreams = []mediaStreamDTO{stubDetailMediaStream}
-	}
-	if fields["mediasources"] && dto.MediaSources == nil {
-		// The stub must still look PLAYABLE: some clients (SenPlayer) decide
-		// whether to render a Resume row entry from the listing's
-		// MediaSources, and an all-false playability stub makes them drop
-		// every item. Keep the stub ID ("0" — never a registered media source
-		// owner) but mirror the shape detailMediaSourceDTO produces; the real
-		// source set is still refetched via /Items/{id}/PlaybackInfo on play.
-		src := stubDetailMediaSource
-		src.Protocol = "File"
-		src.Type = "Default"
-		src.VideoType = "VideoFile"
-		src.Name = dto.Name
-		src.RunTimeTicks = dto.RunTimeTicks
-		src.SupportsTranscoding = true
-		src.SupportsDirectStream = true
-		src.SupportsDirectPlay = true
-		src.SupportsProbing = true
-		src.TranscodingSubProtocol = "hls"
-		src.MediaStreams = []mediaStreamDTO{stubDetailMediaStream}
-		// Real servers never serialize these as JSON null (always []/{});
-		// strict client deserializers fail the whole response on a null
-		// array, which empties the Resume/NextUp rows entirely.
-		src.Formats = []string{}
-		src.RequiredHTTPHeaders = map[string]string{}
-		src.MediaAttachments = []map[string]any{}
-		dto.MediaSources = []mediaSourceDTO{src}
-	}
 }
 
 // itemFromDetail maps a detail payload into a full baseItemDTO, including every
@@ -373,7 +296,6 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 	dto.OriginalTitle = firstNonEmpty(item.OriginalTitle, item.Title)
 	dto.SortName = firstNonEmpty(item.SortTitle, item.OriginalTitle, item.Title)
 	dto.ForcedSortName = dto.SortName
-	dto.CriticRating = item.RatingTMDB
 	dto.Studios = m.namePairs(item.Studios, EncodedIDStudio)
 	dto.ProductionLocations = append([]string{}, item.Countries...)
 	if item.Tagline != "" {

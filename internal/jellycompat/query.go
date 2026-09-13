@@ -26,6 +26,14 @@ type itemsQuery struct {
 	specificCollectionIDs  []string
 	itemTypes              []string
 	genreName              string
+	genres                 []string
+	years                  []int
+	recursive              bool
+	disableImages          bool
+	disableUserData        bool
+	enableImageTypes       map[string]bool
+	seasonNumber           *int
+	totalOverride          *int
 	isFavorite             bool
 	isResumable            bool
 	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
@@ -59,9 +67,29 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		namePrefix:             strings.TrimSpace(firstNonEmpty(q.Get("NameStartsWith"), q.Get("StartsWith"))),
 		maxOfficialRating:      strings.TrimSpace(q.Get("MaxOfficialRating")),
 		sort:                   mapSortBy(q.Get("SortBy")),
+		recursive:              parseBool(q.Get("Recursive"), false),
+		disableImages:          !parseBool(q.Get("EnableImages"), true),
+		disableUserData:        !parseBool(q.Get("EnableUserData"), true),
 		order:                  mapSortOrder(q.Get("SortOrder")),
 	}
 
+	result.genres = splitNonemptyGenres(q.Get("Genres"))
+	for year := range strings.SplitSeq(q.Get("Years"), ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(year)); err == nil && n > 0 {
+			result.years = append(result.years, n)
+		}
+	}
+	if raw := q.Get("Season"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			result.seasonNumber = new(n)
+		}
+	}
+	if raw := q.Get("EnableImageTypes"); raw != "" {
+		result.enableImageTypes = map[string]bool{}
+		for kind := range strings.SplitSeq(raw, ",") {
+			result.enableImageTypes[strings.ToLower(strings.TrimSpace(kind))] = true
+		}
+	}
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
 		if libraryID, err := codec.DecodeIntID(EncodedIDLibrary, parentID); err == nil {
 			result.parentLibraryID = int(libraryID)
@@ -92,8 +120,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		for part := range strings.SplitSeq(genreIDs, ",") {
 			decoded, err := codec.DecodeStringID(EncodedIDGenre, strings.TrimSpace(part))
 			if err == nil && decoded != "" {
-				result.genreName = decoded
-				break
+				result.genres = append(result.genres, decoded)
 			}
 		}
 	}
@@ -127,6 +154,12 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.isFavorite = hasFilter(q.Get("Filters"), "IsFavorite") || parseBool(q.Get("IsFavorite"), false)
 	result.isResumable = hasFilter(q.Get("Filters"), "IsResumable")
 
+	if hasFilter(q.Get("Filters"), "IsPlayed") {
+		result.isPlayed = new(true)
+	}
+	if hasFilter(q.Get("Filters"), "IsUnplayed") {
+		result.isPlayed = new(false)
+	}
 	// IsPlayed filter.
 	if isPlayedRaw := q.Get("IsPlayed"); isPlayedRaw != "" {
 		val := strings.EqualFold(isPlayedRaw, "true") || isPlayedRaw == "1"
@@ -227,6 +260,25 @@ func buildLatestBrowseParams(query itemsQuery) url.Values {
 
 func buildBrowseParams(query itemsQuery) url.Values {
 	params := url.Values{}
+	if query.isPlayed != nil || query.isFavorite || query.isResumable {
+		params.Set("compose_state", "true")
+	}
+	if len(query.genres) > 0 {
+		params.Set("genres", strings.Join(query.genres, "|"))
+	}
+	if len(query.years) > 0 {
+		values := make([]string, len(query.years))
+		for i, year := range query.years {
+			values[i] = strconv.Itoa(year)
+		}
+		params.Set("years", strings.Join(values, ","))
+	}
+	if query.searchTerm != "" {
+		params.Set("search_term", query.searchTerm)
+	}
+	if len(query.specificIDs) > 0 {
+		params.Set("content_ids", strings.Join(query.specificIDs, ","))
+	}
 	params.Set("limit", strconv.Itoa(query.limit))
 	params.Set("offset", strconv.Itoa(query.startIndex))
 	if len(query.itemTypes) > 0 {
@@ -248,6 +300,12 @@ func buildBrowseParams(query itemsQuery) url.Values {
 		params.Set("order", query.order)
 	}
 	params.Set("include_total", strconv.FormatBool(query.enableTotalRecordCount))
+	if query.isFavorite {
+		params.Set("is_favorite", "true")
+	}
+	if query.isResumable {
+		params.Set("is_resumable", "true")
+	}
 	if query.personID > 0 {
 		params.Set("person_id", strconv.FormatInt(query.personID, 10))
 	}
@@ -486,12 +544,7 @@ func parseRequestedFields(raw string) map[string]bool {
 // mediasources is listed because BrowseRepository does not yet project
 // per-file media metadata. When the LATERAL JOIN against media_files lands
 // (catalog SQL performance overhaul plan §3.2 part b), it can be removed.
-var fieldsRequiringDetail = map[string]struct{}{
-	"people":       {},
-	"chapters":     {},
-	"mediastreams": {},
-	"mediasources": {},
-}
+var fieldsRequiringDetail = parseRequestedFields("RemoteTrailers,ProviderIds,People,Chapters,MediaStreams,MediaSources")
 
 // fieldsServedByList enumerates Fields values that mapping.go's itemFromList
 // can populate — gated by `if allFields || fields[X]` blocks. Anything outside
@@ -613,4 +666,10 @@ func (q caseInsensitiveQuery) Values(key string) []string {
 		return q.raw[orig]
 	}
 	return nil
+}
+
+// hasIntersectingFilters selects catalog predicate composition before specialized
+// rails can discard filters. Unfiltered rails keep their episode-aware semantics.
+func (q itemsQuery) hasIntersectingFilters() bool {
+	return len(q.genres) > 0 || len(q.years) > 0 || q.genreName != "" || q.personID > 0 || q.requireBackdrop || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
 }

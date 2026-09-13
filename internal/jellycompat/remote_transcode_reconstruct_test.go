@@ -1284,8 +1284,10 @@ func TestRemoteTranscodeStartTimeoutCoversColdProbePreflightAndReadiness(t *test
 		t.Fatalf("bounded remote transcode start timeout = %v, want %v", got, maxWant)
 	}
 	fallbackWant := compatRemoteNodeProbeFallbackTimeout + playback.ManifestStartupTimeout + tonemap.SourcePreflightTimeout(100) + transcodenode.TranscodeStartReadinessTimeout
-	if got := handler.remoteTranscodeStartTimeout(request, 0); got != fallbackWant {
-		t.Fatalf("missing-budget remote transcode start timeout = %v, want %v", got, fallbackWant)
+	// Hardware discovery may price the local cold probe above the two-minute
+	// minimum (for example on a Linux host with multiple render devices).
+	if got := handler.remoteTranscodeStartTimeout(request, 0); got < fallbackWant || got > maxWant {
+		t.Fatalf("missing-budget remote transcode start timeout = %v, want within [%v, %v]", got, fallbackWant, maxWant)
 	}
 }
 

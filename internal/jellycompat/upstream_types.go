@@ -173,7 +173,10 @@ type upstreamProgress struct {
 }
 
 type upstreamItemFiltersResponse struct {
-	Genres []string `json:"genres"`
+	Genres          []string `json:"genres"`
+	Studios         []string `json:"studios"`
+	OfficialRatings []string `json:"official_ratings"`
+	Years           []int    `json:"years"`
 }
 
 // upstreamProfile represents a user profile from the store.

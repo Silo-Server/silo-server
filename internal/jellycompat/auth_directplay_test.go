@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +13,7 @@ import (
 // directPlayRouter wraps the probe handler in PlaybackSessionAuth and mounts it
 // on a chi router so RoutePattern() and URLParam("id") are populated exactly as
 // they are in production. The same handler also fronts /Items/{id}/Download to
-// prove the new token-less fallback does NOT leak into that route.
+// check that playback grants remain scoped to their negotiated item.
 func directPlayRouter(t *testing.T, sessions *SessionStore, playback *PlaybackSessionStore, keyAuth *AdminAPIKeyAuthenticator, reached *bool) *chi.Mux {
 	t.Helper()
 	probe := PlaybackSessionAuth(sessions, playback, keyAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +24,70 @@ func directPlayRouter(t *testing.T, sessions *SessionStore, playback *PlaybackSe
 	r.Handle("/Videos/{id}/stream", probe)
 	r.Handle("/Videos/{id}/stream.{container}", probe)
 	r.Handle("/Items/{id}/Download", probe)
+	r.Handle("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", probe)
 	return r
+}
+
+func TestPlaybackSessionAuth_ExplicitPlaybackGrant(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, token string
+		want              int
+	}{
+		{"item ID alone", "/Videos/item123/stream.mkv", "", http.StatusUnauthorized},
+		{"source ID alone", "/Videos/item123/stream?mediaSourceId=src9", "", http.StatusUnauthorized},
+		{"login token", "/Videos/item123/stream.mkv", "compat-tok", http.StatusOK},
+		{"playback grant", "/Videos/item123/stream.mkv?playSessionId=ps1", "", http.StatusOK},
+		{"selected source grant", "/Videos/item123/stream.mkv?PlaySessionId=ps1&MediaSourceId=src9", "", http.StatusOK},
+		{"foreign source", "/Videos/item123/stream.mkv?PlaySessionId=ps1&MediaSourceId=other", "", http.StatusUnauthorized},
+		{"foreign item", "/Videos/other/stream.mkv?PlaySessionId=ps1", "", http.StatusUnauthorized},
+		{"foreign download", "/Items/other/Download?PlaySessionId=ps1", "", http.StatusUnauthorized},
+		{"own subtitle", "/Videos/item123/src9/Subtitles/2/stream.vtt?PlaySessionId=ps1", "", http.StatusOK},
+		{"foreign subtitle source", "/Videos/item123/other/Subtitles/2/stream.vtt?PlaySessionId=ps1", "", http.StatusUnauthorized},
+		{"invalid token cannot fall back", "/Videos/item123/stream.mkv?PlaySessionId=ps1", "invalid", http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				sessions, playback := seedDirectPlaySession(t, fixedNow)
+				var reached bool
+				router := directPlayRouter(t, sessions, playback, nil, &reached)
+				req := httptest.NewRequest(method, tc.path, nil)
+				if tc.token != "" {
+					req.Header.Set("X-Emby-Token", tc.token)
+				}
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				if rec.Code != tc.want || reached != (tc.want == http.StatusOK) {
+					t.Fatalf("%s status=%d reached=%v, want %d; %s", method, rec.Code, reached, tc.want, rec.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestPlaybackSessionAuth_ExpiredRevokedAndTerminalGrants(t *testing.T) {
+	for _, state := range []string{"expired", "revoked", "terminal"} {
+		t.Run(state, func(t *testing.T) {
+			now := fixedNow()
+			sessions, playback := seedDirectPlaySession(t, func() time.Time { return now })
+			switch state {
+			case "expired":
+				now = now.Add(2 * time.Hour)
+			case "revoked":
+				sessions.Delete("compat-tok")
+			case "terminal":
+				if err := playback.HideFromRouting("ps1", "compat-tok"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var reached bool
+			router := directPlayRouter(t, sessions, playback, nil, &reached)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/Videos/item123/stream.mkv?PlaySessionId=ps1", nil))
+			if rec.Code != http.StatusUnauthorized || reached {
+				t.Fatalf("status=%d reached=%v, want 401 without handler", rec.Code, reached)
+			}
+		})
+	}
 }
 
 // seedDirectPlaySession registers a resolvable compat session plus the
@@ -44,12 +108,8 @@ func seedDirectPlaySession(t *testing.T, clock func() time.Time) (*SessionStore,
 	return sessions, playback
 }
 
-// TestPlaybackSessionAuth_DirectPlayNoToken: stock Jellyfin Android TV requests
-// the stream with no auth header, no api_key/ApiKey, and no PlaySessionId. The
-// negotiated PlaybackSession for the item authorizes it — across both stream
-// route patterns and both lookup branches (by mediaSourceId, and by route item
-// id when mediaSourceId is absent).
-func TestPlaybackSessionAuth_DirectPlayNoToken(t *testing.T) {
+// Knowing an item or media-source ID must never grant another viewer's session.
+func TestPlaybackSessionAuth_DirectPlayRequiresAuthority(t *testing.T) {
 	now := fixedNow()
 	clock := func() time.Time { return now }
 
@@ -72,11 +132,11 @@ func TestPlaybackSessionAuth_DirectPlayNoToken(t *testing.T) {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
 			}
-			if !reached {
-				t.Fatal("expected inner handler to be reached via PlaybackSession fallback")
+			if reached {
+				t.Fatal("item/source identifiers must not authorize the handler")
 			}
 		})
 	}
@@ -168,4 +228,10 @@ func TestPlaybackSessionAuth_DownloadNotLoosened(t *testing.T) {
 	if reached {
 		t.Fatal("download route must not be served via the direct-play fallback")
 	}
+}
+
+func requestWithCompatRouteItem(req *http.Request, itemID string) *http.Request {
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", itemID)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }
