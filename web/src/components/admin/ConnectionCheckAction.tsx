@@ -58,7 +58,9 @@ type ConnectionCheckKind = Parameters<
  * State for one `ConnectionCheckAction`: runs the server-side probe for
  * `kind` against the form's staged values for `keys` and keeps the last
  * result, mapping a transport failure onto the same `{ success, message }`
- * shape the probe returns.
+ * shape the probe returns. The result is tied to the values that were
+ * tested: edit any of them and it disappears, and a response for a draft
+ * that has since changed is dropped rather than shown beside the new one.
  */
 export function useConnectionCheck(
   kind: ConnectionCheckKind,
@@ -66,16 +68,27 @@ export function useConnectionCheck(
   keys: string[],
 ) {
   const mutation = useCheckAdminSettingsConnection();
-  const [result, setResult] = useState<ConnectionCheckResponse | null>(null);
+  const [checked, setChecked] = useState<{
+    signature: string;
+    result: ConnectionCheckResponse;
+  } | null>(null);
+  const body = form.buildConnectionCheckRequest(keys);
+  const signature = JSON.stringify(body.values);
   async function run() {
+    let result: ConnectionCheckResponse;
     try {
-      setResult(await mutation.mutateAsync({ kind, body: form.buildConnectionCheckRequest(keys) }));
+      result = await mutation.mutateAsync({ kind, body });
     } catch (error) {
-      setResult({
+      result = {
         success: false,
         message: error instanceof Error ? error.message : "Connection check failed.",
-      });
+      };
     }
+    setChecked({ signature, result });
   }
-  return { run, result, isPending: mutation.isPending };
+  return {
+    run,
+    result: checked?.signature === signature ? checked.result : null,
+    isPending: mutation.isPending,
+  };
 }

@@ -30,12 +30,12 @@ export const WIZARD_STEP_LABELS: Record<WizardStepId, string> = {
 };
 
 export function useWizardSteps() {
-  const { user, settingsReady, stepDone, visiting } = useWizardContext();
+  const { user, profile, settingsReady, stepDone, visiting } = useWizardContext();
 
-  // The account counts as done once a user exists and the next step has its
-  // data, so the swap from the account form is a single frame.
+  // The account counts as done once a user and profile exist and the next
+  // step has its data, so the swap from the account form is a single frame.
   const complete: Record<WizardStepId, boolean> = {
-    account: !!user && settingsReady,
+    account: !!user && !!profile && settingsReady,
     ...stepDone,
     done: false,
   };

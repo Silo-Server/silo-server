@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { listProfiles } from "@/hooks/queries/profiles";
@@ -6,7 +6,7 @@ import type { Library, Profile } from "@/api/types";
 import { fetchAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { useSubtitleProviders } from "@/hooks/queries/admin/subtitles";
-import { useAuth } from "@/hooks/useAuth";
+import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
 import {
   clearSetupWizardStorage,
   createEmptySetupWizardFlags,
@@ -25,6 +25,11 @@ interface WizardContextValue {
 
   // Queries
   profiles: Profile[];
+  /** The household profile list has been read at least once. */
+  profilesLoaded: boolean;
+  /** The household profile list could not be read; the wizard cannot continue without it. */
+  profilesError: boolean;
+  retryProfiles: () => void;
   /**
    * The shared settings snapshot has arrived (or failed, or cannot load
    * because no profile is selected). The account step stays on screen until
@@ -88,8 +93,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   // one other read a step needs on entry; it is cheap and 30s fresh.
   const settingsQuery = useAdminServerSettings();
   useSubtitleProviders(isAdmin && profile !== null);
-  const settingsReady =
-    profile === null || settingsQuery.data !== undefined || settingsQuery.isError;
+  const settingsReady = settingsQuery.data !== undefined || settingsQuery.isError;
 
   const profilesQuery = useQuery({
     queryKey: ["setup-wizard", "profiles"],
@@ -97,6 +101,18 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     enabled: !!user,
     retry: shouldRetrySetupQuery,
   });
+
+  // Account creation selects the default profile itself, but that lookup can
+  // fail on a flaky connection. This query is the wizard's own retryable
+  // path to the same profile, so a stalled account step can always recover.
+  const profileList = profilesQuery.data;
+  useEffect(() => {
+    if (!user || profile || !profileList) return;
+    // The sole profile when there is one, otherwise the first without a PIN:
+    // the wizard runs as the admin and cannot answer a PIN prompt here.
+    const chosen = getBootstrapProfile(profileList) ?? profileList.find((p) => !p.has_pin);
+    if (chosen) selectProfile(chosen);
+  }, [user, profile, profileList, selectProfile]);
 
   const librariesQuery = useQuery({
     queryKey: ["setup-wizard", "libraries"],
@@ -133,6 +149,9 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         refreshSetupStatus,
         selectProfile,
         profiles: profilesQuery.data ?? [],
+        profilesLoaded: profilesQuery.data !== undefined,
+        profilesError: profilesQuery.isError,
+        retryProfiles: () => void profilesQuery.refetch(),
         settingsReady,
         libraries: librariesQuery.data ?? [],
         librariesLoading: isAdmin && librariesQuery.isPending,

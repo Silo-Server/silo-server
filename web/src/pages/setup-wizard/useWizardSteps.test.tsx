@@ -13,6 +13,7 @@ vi.mock("./WizardContext", () => ({
 function context(overrides: Partial<Parameters<typeof useWizardContextMock>[0]> = {}) {
   useWizardContextMock.mockReturnValue({
     user: { id: 1, role: "admin" },
+    profile: { id: "p1" },
     settingsReady: true,
     stepDone: createEmptySetupWizardFlags(),
     visiting: null,
@@ -40,6 +41,12 @@ describe("useWizardSteps", () => {
 
   it("holds the account step until the settings snapshot is ready", () => {
     context({ settingsReady: false });
+    const { result } = renderHook(() => useWizardSteps());
+    expect(result.current.currentStep).toBe("account");
+  });
+
+  it("holds the account step until a profile is selected", () => {
+    context({ profile: null });
     const { result } = renderHook(() => useWizardSteps());
     expect(result.current.currentStep).toBe("account");
   });

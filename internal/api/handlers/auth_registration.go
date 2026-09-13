@@ -125,9 +125,6 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 	if in.Username == "" || in.Email == "" || in.Password == "" {
 		return TokenPairView{}, apiError(http.StatusBadRequest, "bad_request", "Username, email, and password are required")
 	}
-	if err := validateRegistrationEmail(in.Email); err != nil {
-		return TokenPairView{}, err
-	}
 	if err := validateRegistrationPassword(in.Password); err != nil {
 		return TokenPairView{}, err
 	}
@@ -159,9 +156,6 @@ func (h *AuthHandler) Signup(ctx context.Context, in RegistrationInput) (TokenPa
 	in.Email = auth.NormalizeEmail(in.Email)
 	if in.Username == "" || in.Email == "" || in.Password == "" || in.InviteCode == "" {
 		return TokenPairView{}, apiError(http.StatusBadRequest, "bad_request", "Username, email, password, and invite code are required")
-	}
-	if err := validateRegistrationEmail(in.Email); err != nil {
-		return TokenPairView{}, err
 	}
 	if err := validateRegistrationPassword(in.Password); err != nil {
 		return TokenPairView{}, err
@@ -213,15 +207,6 @@ func (h *AuthHandler) PluginLaunchToken(claims *auth.Claims, profileID string) (
 
 // PluginAccessCookieName is the cookie the plugin launch issues.
 const PluginAccessCookieName = auth.PluginAccessCookieName
-
-// validateRegistrationEmail rejects an address that is not a real mailbox.
-// The message names the field so v2 can render it at body.email.
-func validateRegistrationEmail(email string) error {
-	if _, err := auth.ValidateEmail(email); err != nil {
-		return &APIError{Status: http.StatusBadRequest, Code: "invalid_email", Message: "Enter a valid email address, like name@example.com", Field: "email"}
-	}
-	return nil
-}
 
 func validateRegistrationPassword(password string) error {
 	switch err := auth.ValidateNewPassword(password); {

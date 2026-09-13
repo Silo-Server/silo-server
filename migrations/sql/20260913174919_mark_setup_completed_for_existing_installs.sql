@@ -12,5 +12,6 @@ ON CONFLICT (key) DO NOTHING;
 
 -- +goose Down
 -- +goose StatementBegin
-DELETE FROM server_settings WHERE key = 'setup.completed';
+-- Intentionally empty: a backfilled row is indistinguishable from one the
+-- wizard or an admin wrote, so it is left in place.
 -- +goose StatementEnd

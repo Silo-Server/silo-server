@@ -60,7 +60,10 @@ function mockStep(values: Record<string, string> = {}, dirtyCount = 0, loadState
     discard: vi.fn(),
     isSaving: false,
     sensitiveConfigured: [],
-    buildConnectionCheckRequest: vi.fn(),
+    buildConnectionCheckRequest: (keys: string[]) => ({
+      values: Object.fromEntries(keys.map((key) => [key, formValues[key] ?? ""])),
+      dirty_keys: [],
+    }),
   });
   return { markDone, save, setValue, setSummary };
 }

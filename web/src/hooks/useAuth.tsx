@@ -373,22 +373,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function initialize() {
       try {
-        const [status, availableProviders] = await Promise.all([
+        // Independent reads: a failed provider list must not blank the setup
+        // status, or an admin visiting /setup during that outage would see
+        // the finished wizard again.
+        const [status, availableProviders] = await Promise.allSettled([
           v2("GET /api/v2/system/setup"),
           v2("GET /api/v2/auth/providers"),
         ]);
         if (cancelled) {
           return;
         }
-        setSetupRequired(status.needs_setup);
-        setSetupCompleted(status.wizard_completed === true);
-        setProviders(availableProviders.items ?? []);
-      } catch {
-        if (!cancelled) {
+        if (status.status === "fulfilled") {
+          setSetupRequired(status.value.needs_setup);
+          setSetupCompleted(status.value.wizard_completed === true);
+        } else {
           setSetupRequired(false);
           setSetupCompleted(false);
-          setProviders([]);
         }
+        setProviders(
+          availableProviders.status === "fulfilled" ? (availableProviders.value.items ?? []) : [],
+        );
       } finally {
         if (!cancelled) {
           setSetupLoading(false);

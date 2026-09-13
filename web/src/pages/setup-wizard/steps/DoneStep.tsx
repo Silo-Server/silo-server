@@ -31,22 +31,26 @@ export function DoneStep() {
   const updateSettings = useUpdateServerSettings();
   const [finishing, setFinishing] = useState(false);
 
-  function completeSetup(destination: string) {
+  async function completeSetup(destination: string) {
     setFinishing(true);
+    // Record on the server that setup finished before throwing away the
+    // local step markers: if the write fails the admin stays here with their
+    // progress intact and can try again (the mutation shows the error).
+    try {
+      await updateSettings.mutateAsync({ "setup.completed": "true" });
+    } catch {
+      setFinishing(false);
+      return;
+    }
     const chosenProfile = profile ?? profiles[0] ?? null;
     if (chosenProfile && !profile) {
       selectProfile(chosenProfile);
     }
     clearProgress();
     navigate(destination);
-    // Record on the server that setup finished so /setup will not reopen,
-    // then re-read the public status so the route guard sees it. Leaving is
-    // never blocked on this write: a failure only means the route stays open
-    // until the admin comes back through it, and the mutation shows a toast.
-    void updateSettings
-      .mutateAsync({ "setup.completed": "true" })
-      .then(() => refreshSetupStatus())
-      .catch(() => {});
+    // Re-read the public status once the route has changed so the guard on
+    // /setup sees the marker without racing this navigation.
+    void refreshSetupStatus();
   }
 
   // Only what this visit actually recorded: summaries live in memory, so after
@@ -87,7 +91,7 @@ export function DoneStep() {
             to={link.to}
             onClick={(e) => {
               e.preventDefault();
-              completeSetup(link.to);
+              void completeSetup(link.to);
             }}
           >
             {link.label}
@@ -96,14 +100,14 @@ export function DoneStep() {
       </div>
 
       <div className="setup-actions">
-        <Button onClick={() => completeSetup("/")} disabled={finishing} className="min-w-40">
+        <Button onClick={() => void completeSetup("/")} disabled={finishing} className="min-w-40">
           {finishing ? "Starting…" : "Start using Silo"}
           <ChevronRight className="ml-1 size-4" />
         </Button>
         <Button
           type="button"
           variant="ghost"
-          onClick={() => completeSetup("/admin/libraries")}
+          onClick={() => void completeSetup("/admin/libraries")}
           disabled={finishing}
         >
           Go to admin

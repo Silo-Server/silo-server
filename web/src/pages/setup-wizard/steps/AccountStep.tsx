@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createProfile } from "@/hooks/queries/profiles";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 
 import { StepFrame, StepSkeleton } from "../StepFrame";
@@ -21,7 +22,17 @@ function Field({ id, label, children }: { id: string; label: string; children: R
 }
 
 export function AccountStep() {
-  const { user, setupInitialUser, setSummary } = useWizardContext();
+  const {
+    user,
+    profile,
+    profiles,
+    profilesLoaded,
+    profilesError,
+    retryProfiles,
+    selectProfile,
+    setupInitialUser,
+    setSummary,
+  } = useWizardContext();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,7 +61,26 @@ export function AccountStep() {
   }
 
   // An account already exists and the next step's data is still on its way
-  // (a reload landed here): there is no form to show, only the wait.
+  // (a reload landed here, or the profile lookup after creation failed):
+  // there is no form to show, only the wait or a way to retry it.
+  if (user && profilesError) {
+    return (
+      <StepFrame
+        title="Couldn't load your profile"
+        lede="The account was created, but the household profile it comes with could not be read. Try again to continue setup."
+        onContinue={retryProfiles}
+        continueLabel="Try again"
+      >
+        <div />
+      </StepFrame>
+    );
+  }
+  // The account exists but has no household profile to act as (created
+  // through the API without one). Setup needs a profile for its settings
+  // reads, so make the first one here.
+  if (user && !profile && profilesLoaded && profiles.length === 0) {
+    return <CreateProfileStep username={user.username} onCreated={selectProfile} />;
+  }
   if (user && !submitting) return <StepSkeleton rows={2} />;
 
   return (
@@ -125,6 +155,51 @@ export function AccountStep() {
             ) : null}
           </Field>
         </div>
+      </div>
+    </StepFrame>
+  );
+}
+
+function CreateProfileStep({
+  username,
+  onCreated,
+}: {
+  username: string;
+  onCreated: (profile: Awaited<ReturnType<typeof createProfile>>) => void;
+}) {
+  const [name, setName] = useState(username);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      onCreated(await createProfile({ name: name.trim() || username }));
+    } catch (err) {
+      setSubmitting(false);
+      toast.error(err instanceof Error ? err.message : "Failed to create profile");
+    }
+  }
+
+  return (
+    <StepFrame
+      title="Create your profile"
+      lede="Your account is ready. Profiles keep each household member's watch history and preferences apart; this first one is yours."
+      onSubmit={handleSubmit}
+      continueLabel="Create profile"
+      busyLabel="Creating…"
+      busy={submitting}
+    >
+      <div className="setup-section setup-section-padded">
+        <Field id="setup-profile-name" label="Profile name">
+          <Input
+            id="setup-profile-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            required
+          />
+        </Field>
       </div>
     </StepFrame>
   );

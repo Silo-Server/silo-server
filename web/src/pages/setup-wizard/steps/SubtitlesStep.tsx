@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -56,7 +56,8 @@ interface ProviderDraft {
 function draftFor(config: SubtitleProviderConfig): ProviderDraft {
   return {
     editor: null,
-    loading: false,
+    // A row starts out waiting for its editor; the load clears this.
+    loading: true,
     loadFailed: false,
     enabled: config.enabled,
     apiKey: "",
@@ -205,26 +206,13 @@ export function SubtitlesStep() {
   );
 
   // Editing a provider needs its strong validator, which only the per-provider
-  // read returns. Fetch each one once the list arrives so the switches can be
-  // flipped straight away; a row whose editor fails to load stays read-only.
-  useEffect(() => {
-    if (providerList.length === 0) return;
-    let cancelled = false;
-    setDrafts((prev) => {
-      const next = { ...prev };
-      for (const config of providerList) {
-        if (!next[config.provider_name]) {
-          next[config.provider_name] = { ...draftFor(config), loading: true };
-        }
-      }
-      return next;
-    });
-    for (const config of providerList) {
+  // read returns. Each one is loaded once when the list arrives so the switch
+  // can be flipped straight away, and reloaded after a failed save so a retry
+  // never carries a stale validator. A row whose editor fails to load stays
+  // read-only.
+  const loadEditor = useCallback(
+    (config: SubtitleProviderConfig, isCancelled: () => boolean) => {
       const name = config.provider_name;
-      // A refetched list (after a save) must not re-read editors that are
-      // already loaded or in flight.
-      if (loaded.current.has(name)) continue;
-      loaded.current.add(name);
       let intent;
       try {
         intent = captureProviderEditIntent(name, providers.scope);
@@ -233,11 +221,11 @@ export function SubtitlesStep() {
           ...prev,
           [name]: { ...(prev[name] ?? draftFor(config)), loading: false, loadFailed: true },
         }));
-        continue;
+        return;
       }
       getProviderEditor(intent)
         .then((editor) => {
-          if (cancelled || !providerIntentActive(editor.intent)) return;
+          if (isCancelled() || !providerIntentActive(editor.intent)) return;
           setDrafts((prev) => {
             const current = prev[name] ?? draftFor(config);
             return {
@@ -252,17 +240,30 @@ export function SubtitlesStep() {
           });
         })
         .catch(() => {
-          if (cancelled) return;
+          if (isCancelled()) return;
           setDrafts((prev) => ({
             ...prev,
             [name]: { ...(prev[name] ?? draftFor(config)), loading: false, loadFailed: true },
           }));
         });
+    },
+    [providers.scope],
+  );
+
+  useEffect(() => {
+    if (providerList.length === 0) return;
+    let cancelled = false;
+    for (const config of providerList) {
+      // A refetched list (after a save) must not re-read editors that are
+      // already loaded or in flight.
+      if (loaded.current.has(config.provider_name)) continue;
+      loaded.current.add(config.provider_name);
+      loadEditor(config, () => cancelled);
     }
     return () => {
       cancelled = true;
     };
-  }, [providerList, providers.scope]);
+  }, [providerList, loadEditor]);
 
   const enabledProviders = providerList.filter((p) => drafts[p.provider_name]?.enabled).length;
 
@@ -284,29 +285,56 @@ export function SubtitlesStep() {
       return;
     }
     setSubmitting(true);
-    try {
-      // Each provider is its own resource with its own validator, so the
-      // saves are independent and run together.
-      await Promise.all(
-        changed.map(async (config) => {
-          const name = config.provider_name;
-          const draft = drafts[name]!;
-          await updateProvider.mutateAsync({
-            editor: draft.editor!,
-            config: providerBody(name, draft),
-          });
-          setDrafts((prev) => ({
-            ...prev,
-            [name]: { ...prev[name]!, dirty: false, apiKey: "", username: "", password: "" },
-          }));
-        }),
-      );
+    // Each provider is its own resource with its own validator, so the saves
+    // are independent and run together. A failed one keeps its draft but
+    // reloads its validator, so the retry cannot send a stale If-Match.
+    const results = await Promise.allSettled(
+      changed.map(async (config) => {
+        const name = config.provider_name;
+        const draft = drafts[name]!;
+        await updateProvider.mutateAsync({
+          editor: draft.editor!,
+          config: providerBody(name, draft),
+        });
+        // The save advanced the provider's revision, so the editor held here
+        // is stale. Drop it and read a fresh one in case the step is reopened.
+        setDrafts((prev) => ({
+          ...prev,
+          [name]: {
+            ...prev[name]!,
+            editor: null,
+            loading: true,
+            dirty: false,
+            apiKey: "",
+            username: "",
+            password: "",
+          },
+        }));
+        loadEditor(config, () => false);
+      }),
+    );
+    setSubmitting(false);
+    const failures = results.flatMap((result, i) =>
+      result.status === "rejected" ? [{ config: changed[i]!, reason: result.reason }] : [],
+    );
+    if (failures.length === 0) {
       markDone("subtitles");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save subtitle sources");
-    } finally {
-      setSubmitting(false);
+      return;
     }
+    for (const failure of failures) {
+      setDrafts((prev) => ({
+        ...prev,
+        [failure.config.provider_name]: {
+          ...prev[failure.config.provider_name]!,
+          editor: null,
+          loading: true,
+          loadFailed: false,
+        },
+      }));
+      loadEditor(failure.config, () => false);
+    }
+    const reason = failures[0]!.reason;
+    toast.error(reason instanceof Error ? reason.message : "Failed to save subtitle sources");
   }
 
   if (providers.isLoading) return <StepSkeleton rows={3} />;
