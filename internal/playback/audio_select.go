@@ -23,6 +23,8 @@ type AudioTrackPreference struct {
 
 // langMatchRank prefers an exact BCP-47 tag, then a bare language tag, and
 // finally another regional/script variant of the same language.
+func langMatch(a, b string) bool { return langMatchRank(a, b) >= 0 }
+
 func langMatchRank(candidate, preferred string) int {
 	candidate = lang.CompatibleTag(candidate)
 	preferred = lang.CompatibleTag(preferred)
