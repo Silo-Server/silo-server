@@ -21,10 +21,11 @@ type AudioTrackPreference struct {
 	TrackSignature  *userstore.AudioTrackSignature
 }
 
-// langMatchRank prefers an exact BCP-47 tag, then a bare language tag, and
-// finally another regional/script variant of the same language.
+// langMatch accepts compatible languages for previously saved track selections.
 func langMatch(a, b string) bool { return langMatchRank(a, b) >= 0 }
 
+// langMatchRank prefers an exact BCP-47 tag, then a bare language tag, and
+// finally another regional/script variant of the same language.
 func langMatchRank(candidate, preferred string) int {
 	candidate = lang.CompatibleTag(candidate)
 	preferred = lang.CompatibleTag(preferred)
@@ -50,10 +51,14 @@ func langMatchRank(candidate, preferred string) int {
 // Priority:
 // 1. Series preference exact track signature
 // 2. Series preference index (if track exists at that index with matching language)
-// 3. Series preference language (first track matching that language)
-// 4. Profile preferred language (first track matching)
+// 3. Series preference language (best language match)
+// 4. Profile preferred language (best language match)
 // 5. File's default track (first track with Default: true)
 // 6. First track (index 0)
+//
+// Language matches rank exact tag > bare language > another variant of the same
+// language. Track order breaks ties within a language rank. Saved signatures
+// and compatible saved indices take precedence over language-only preferences.
 func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPref *AudioTrackPreference) int {
 	if len(tracks) == 0 {
 		return 0

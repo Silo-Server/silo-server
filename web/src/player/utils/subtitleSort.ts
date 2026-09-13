@@ -11,7 +11,7 @@ const SOURCE_PRIORITY: Record<string, number> = {
 };
 
 /**
- * Auto-select priority for a track: lower is better. Within the same source
+ * Auto-select priority within the same language rank: lower is better. Within the same source
  * tier, text tracks beat bitmap (PGS) tracks — bitmap is heavier to render
  * and can't be styled — while a bitmap track still wins when it's the only
  * match for the language.
@@ -97,8 +97,9 @@ export function sortSubtitlesBySource(tracks: PlayerSubtitleInfo[]): PlayerSubti
 }
 
 /**
- * Find the best subtitle track index for a given language,
- * preferring external > downloaded > embedded.
+ * Find the best subtitle track index for a given language: exact tag, then
+ * bare language, then another variant of the same language. Within a language
+ * rank, prefer external > downloaded > embedded, then text over bitmap.
  * Returns the track's backend index (track.index) or -1 if no match.
  */
 export function findPreferredSubtitleIndex(tracks: PlayerSubtitleInfo[], language: string): number {
