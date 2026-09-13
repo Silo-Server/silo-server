@@ -50,7 +50,7 @@ export function normalizeStreamDecision(decision?: string): string {
  * Classify a session into a single activity "method" bucket for aggregation and
  * filtering:
  *   - video is re-encoded            -> "transcode" (video transcode)
- *   - only audio is re-encoded       -> "audio"     (audio transcode)
+ *   - only audio is re-encoded       -> "direct_stream"
  *   - streams only repackaged/copied -> "remux"     (incl. video-copy HLS)
  *   - nothing touched                -> "direct"
  *   - nothing known                  -> "unknown"
@@ -73,7 +73,7 @@ export function classifyActivityMethod(session: AdminSession): string {
   // unrecognized play_method on a legacy row); don't invent an audio
   // transcode from the bare transcode_audio flag.
   if (audioDecision === "transcode" && videoDecision !== "") {
-    return "audio";
+    return "direct_stream";
   }
   if (videoDecision === "direct" && audioDecision === "direct") {
     return "direct";
@@ -85,17 +85,17 @@ export function classifyActivityMethod(session: AdminSession): string {
 }
 
 // Display order for the activity method buckets. Escalates by cost and keeps the
-// audio-transcode tag AFTER the video-transcode tag in the Play Method line and
-// the Server Activity popover; unknown sorts last.
-const ACTIVITY_METHOD_ORDER = ["direct", "remux", "transcode", "audio", "unknown"];
+// direct-stream tag between remux and video transcode, matching Jellyfin's
+// lowest-to-highest server-work ordering; unknown sorts last.
+const ACTIVITY_METHOD_ORDER = ["direct", "remux", "direct_stream", "transcode", "unknown"];
 
 function activityMethodRank(method: string): number {
   const index = ACTIVITY_METHOD_ORDER.indexOf(method);
   return index === -1 ? ACTIVITY_METHOD_ORDER.length : index;
 }
 
-/** Sort comparator for activity method keys, audio last. Falls back to
- * alphabetical for anything outside the known order. */
+/** Sort comparator for activity method keys. Falls back to alphabetical for
+ * anything outside the known order. */
 export function compareActivityMethods(a: string, b: string): number {
   const diff = activityMethodRank(a) - activityMethodRank(b);
   return diff !== 0 ? diff : a.localeCompare(b);
@@ -104,6 +104,8 @@ export function compareActivityMethods(a: string, b: string): number {
 export interface ActivityMethodMeta {
   /** Human label ("Direct Play"); the bucket key itself is the short tag. */
   label: string;
+  /** Explain the whole-session scope without implying every stream is direct. */
+  description: string;
   /** Solid swatch class for distribution bars and legend dots. */
   swatchClass: string;
   /** Tinted badge classes for the per-row method tag. */
@@ -117,21 +119,25 @@ export interface ActivityMethodMeta {
 const ACTIVITY_METHOD_META: Record<string, ActivityMethodMeta> = {
   direct: {
     label: "Direct Play",
+    description: "The original file is delivered without modification.",
     swatchClass: "bg-success",
     badgeClass: "bg-success/10 text-success border-success/15",
   },
   remux: {
     label: "Remux",
+    description: "Audio and video are copied into a streaming container without re-encoding.",
     swatchClass: "bg-info",
     badgeClass: "bg-info/10 text-info border-info/15",
   },
-  transcode: {
-    label: "Transcode",
+  direct_stream: {
+    label: "Direct Stream",
+    description: "Video is copied without re-encoding; audio is transcoded.",
     swatchClass: "bg-warning",
     badgeClass: "bg-warning/10 text-warning border-warning/15",
   },
-  audio: {
-    label: "Audio Transcode",
+  transcode: {
+    label: "Transcode",
+    description: "Video is re-encoded; audio may be copied or transcoded.",
     swatchClass: "bg-destructive",
     badgeClass: "bg-destructive/10 text-destructive border-destructive/15",
   },
@@ -139,6 +145,7 @@ const ACTIVITY_METHOD_META: Record<string, ActivityMethodMeta> = {
 
 const UNKNOWN_ACTIVITY_METHOD_META: ActivityMethodMeta = {
   label: "Unknown",
+  description: "The server has not reported a recognized playback method.",
   swatchClass: "bg-muted-foreground",
   badgeClass: "bg-surface text-muted-foreground border-border",
 };
@@ -149,7 +156,7 @@ export function activityMethodMeta(method: string): ActivityMethodMeta {
 }
 
 /**
- * Badge classes for a per-stream decision value (direct/copy/remux/hls/
+ * Badge classes for a component decision value (direct/copy/remux/hls/
  * transcode). Copy and HLS are repackaging, so they share the remux tint.
  */
 export function decisionBadgeClass(decision: string): string {
@@ -362,27 +369,35 @@ export function formatSourceContainerSummary(session: AdminSession): string {
 }
 
 export function formatDeliveredContainerSummary(session: AdminSession): string {
-  switch (normalizeContainerDecision(session.play_method)) {
-    case "direct":
-      return formatSourceContainerSummary(session);
-    case "remux":
-      return "Remux";
-    case "hls":
-      return "HLS";
-    default:
-      return formatSourceContainerSummary(session);
+  if (normalizeContainerDecision(session.play_method) === "direct") {
+    return formatSourceContainerSummary(session);
   }
+  const container = session.output_container?.trim().toLowerCase();
+  if (container) {
+    const label =
+      container === "fmp4"
+        ? "fMP4"
+        : container === "mpegts"
+          ? "MPEG-TS"
+          : formatContainer(container) || "Unknown output container";
+    return session.output_protocol === "hls" ? `${label} (HLS)` : label;
+  }
+  return session.output_protocol === "hls"
+    ? "Unknown output container (HLS)"
+    : "Unknown output container";
 }
 
 export function formatContainerDetail(session: AdminSession): string {
   const source = formatSourceContainerSummary(session);
+  if (session.output_container && normalizeContainerDecision(session.play_method) !== "direct") {
+    return `${source} → ${formatDeliveredContainerSummary(session)}`;
+  }
   switch (normalizeContainerDecision(session.play_method)) {
     case "direct":
       return "Original container";
     case "remux":
-      return `${source} → Remux`;
     case "hls":
-      return `${source} → HLS`;
+      return "Repackaged for streaming; output container not reported";
     default:
       return "—";
   }
@@ -430,7 +445,7 @@ export function formatVideoDetail(session: AdminSession): string {
     return target ? `Output → ${target}` : "Transcoding";
   }
   if (decision === "copy") {
-    return "Video stream copied";
+    return "Copied without re-encoding";
   }
   if (decision === "direct") {
     return "No video conversion";
@@ -484,7 +499,7 @@ export function formatAudioDetail(session: AdminSession): string {
     return target ? `→ ${target}` : "Audio Transcode";
   }
   if (decision === "copy") {
-    return "Audio stream copied";
+    return "Copied without re-encoding";
   }
   if (decision === "direct") {
     return "No audio conversion";
