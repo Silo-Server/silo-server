@@ -22,10 +22,29 @@ type AudioTrackPreference struct {
 }
 
 func langMatch(a, b string) bool {
-	if a == "" || b == "" {
-		return false
+	return langMatchRank(a, b) >= 0
+}
+
+// langMatchRank prefers an exact BCP-47 tag, then a bare language tag, and
+// finally another regional/script variant of the same language.
+func langMatchRank(candidate, preferred string) int {
+	candidate = lang.CompatibleTag(candidate)
+	preferred = lang.CompatibleTag(preferred)
+	if candidate == "" || preferred == "" {
+		return -1
 	}
-	return lang.Canonical(a) == lang.Canonical(b)
+	if candidate == preferred {
+		return 0
+	}
+	candidateBase := lang.PrimaryLanguage(candidate)
+	preferredBase := lang.PrimaryLanguage(preferred)
+	if candidateBase == "" || candidateBase != preferredBase {
+		return -1
+	}
+	if !strings.Contains(candidate, "-") {
+		return 1
+	}
+	return 2
 }
 
 // SelectAudioTrack determines which audio track to use based on preferences.
@@ -57,20 +76,16 @@ func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPr
 
 		// 3. Series preference: fall back to language match.
 		if seriesPref.AudioLanguage != "" {
-			for i, t := range tracks {
-				if langMatch(t.Language, seriesPref.AudioLanguage) {
-					return i
-				}
+			if idx := bestLanguageTrack(tracks, seriesPref.AudioLanguage); idx >= 0 {
+				return idx
 			}
 		}
 	}
 
 	// 4. Profile language preference.
 	if preferredLang != "" {
-		for i, t := range tracks {
-			if langMatch(t.Language, preferredLang) {
-				return i
-			}
+		if idx := bestLanguageTrack(tracks, preferredLang); idx >= 0 {
+			return idx
 		}
 	}
 
@@ -83,6 +98,16 @@ func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPr
 
 	// 6. First track.
 	return 0
+}
+
+func bestLanguageTrack(tracks []models.AudioTrack, preferred string) int {
+	best, bestRank := -1, 3
+	for i, track := range tracks {
+		if rank := langMatchRank(track.Language, preferred); rank >= 0 && rank < bestRank {
+			best, bestRank = i, rank
+		}
+	}
+	return best
 }
 
 // MatchAudioTrackAcrossVersions maps a selection made against one file's

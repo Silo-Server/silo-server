@@ -86,6 +86,20 @@ func TestSelectAudioTrack_NoTracks(t *testing.T) {
 	}
 }
 
+func TestSelectAudioTrack_PrefersExactRegionalTag(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "en-GB"},
+		{Language: "en"},
+		{Language: "en-US"},
+	}
+	if got := playback.SelectAudioTrack(tracks, "en-US", nil); got != 2 {
+		t.Fatalf("SelectAudioTrack(en-US) = %d, want exact en-US track 2", got)
+	}
+	if got := playback.SelectAudioTrack(tracks, "en-AU", nil); got != 1 {
+		t.Fatalf("SelectAudioTrack(en-AU) = %d, want generic en track 1", got)
+	}
+}
+
 func TestSelectAudioTrack_NoDefaultFallsToFirst(t *testing.T) {
 	tracks := []models.AudioTrack{
 		{Language: "ja", Codec: "aac"},
