@@ -22,3 +22,18 @@ func TestConvertProbeDataCanonicalizesSubtitleLanguageTags(t *testing.T) {
 		}
 	}
 }
+
+func TestConvertProbeDataPreservesAudioLanguageTags(t *testing.T) {
+	raw := &ffprobeOutput{Streams: []ffprobeStream{
+		{CodecType: "audio", CodecName: "aac", Tags: map[string]string{"language": "pt-BR"}},
+		{CodecType: "audio", CodecName: "aac", Tags: map[string]string{"language": "pt-PT"}},
+		{CodecType: "audio", CodecName: "aac", Tags: map[string]string{"language": "zh-Hant"}},
+	}}
+	got := convertProbeData(raw).AudioTracks
+	want := []string{"pt-BR", "pt-PT", "zh-Hant"}
+	for i, track := range got {
+		if track.Language != want[i] {
+			t.Errorf("track %d language = %q, want %q", i, track.Language, want[i])
+		}
+	}
+}

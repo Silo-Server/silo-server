@@ -183,15 +183,17 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 			track := AudioTrackInfo{
 				Title:         firstNonEmpty(s.Tags["title"], s.CodecLongName, strings.ToUpper(s.CodecName)),
 				EmbeddedTitle: s.Tags["title"],
-				Language:      lang.Canonical(s.Tags["language"]),
-				Codec:         s.CodecName,
-				Profile:       s.Profile,
-				Layout:        s.ChannelLayout,
-				Channels:      s.Channels,
-				Bitrate:       parseNumeric(s.BitRate) / 1000,
-				SampleRate:    parseNumeric(s.SampleRate),
-				BitDepth:      parseBitDepth(s),
-				Default:       s.Disposition.Default == 1,
+				// Preserve BCP 47 region and script subtags (for example pt-BR
+				// versus pt-PT) just as we do for subtitle tracks.
+				Language:   lang.CompatibleTag(s.Tags["language"]),
+				Codec:      s.CodecName,
+				Profile:    s.Profile,
+				Layout:     s.ChannelLayout,
+				Channels:   s.Channels,
+				Bitrate:    parseNumeric(s.BitRate) / 1000,
+				SampleRate: parseNumeric(s.SampleRate),
+				BitDepth:   parseBitDepth(s),
+				Default:    s.Disposition.Default == 1,
 			}
 			pd.AudioTracks = append(pd.AudioTracks, track)
 			if pd.CodecAudio == "" {
