@@ -188,6 +188,28 @@ func TestSelectAudioTrack_SeriesPrefIndexKeepsRegionalVariant(t *testing.T) {
 	}
 }
 
+func TestSelectAudioTrack_SignaturePrefersExactRegionalTag(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "en-GB", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
+		{Language: "en-US", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
+	}
+	sig := func(language string) *userstore.AudioTrackSignature {
+		return &userstore.AudioTrackSignature{Language: language, Title: "English 5.1", Codec: "eac3", Layout: "5.1", Channels: 6}
+	}
+
+	// A regional signature must not settle for the earlier variant.
+	pref := &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en-US", TrackSignature: sig("en-US")}
+	if got := playback.SelectAudioTrack(tracks, "", pref); got != 1 {
+		t.Fatalf("en-US signature: SelectAudioTrack() = %d, want 1", got)
+	}
+
+	// A legacy bare-language signature still matches a regional track.
+	pref = &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en", TrackSignature: sig("en")}
+	if got := playback.SelectAudioTrack(tracks, "", pref); got != 0 {
+		t.Fatalf("bare en signature: SelectAudioTrack() = %d, want 0", got)
+	}
+}
+
 func TestSelectAudioTrack_PrefersExactTrackSignatureOverIndexFallback(t *testing.T) {
 	tracks := []models.AudioTrack{
 		{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Title: "English Stereo", Default: true},
