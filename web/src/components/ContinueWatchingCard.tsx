@@ -341,29 +341,30 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               {episodeMeta}
             </ViewTransitionLink>
           )}
-          {showMetadata && premiereBadge && (
-            <div className="mt-1">
-              <span
-                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
-                  premiereBadge,
-                )}`}
-              >
-                {upcomingBadgeLabel(premiereBadge)}
-              </span>
+          {showMetadata && (timeLeftLabel || premiereBadge) && (
+            <div className="flex items-center gap-1.5">
+              {timeLeftLabel &&
+                (timeLeftLabel === "\u00A0" ? (
+                  <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
+                ) : (
+                  <ViewTransitionLink
+                    to={isMangaChapter ? card.watchHref : card.itemHref}
+                    className="text-muted-foreground block w-fit truncate text-xs hover:underline"
+                  >
+                    {timeLeftLabel}
+                  </ViewTransitionLink>
+                ))}
+              {premiereBadge && (
+                <span
+                  className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                    premiereBadge,
+                  )}`}
+                >
+                  {upcomingBadgeLabel(premiereBadge)}
+                </span>
+              )}
             </div>
           )}
-          {showMetadata &&
-            timeLeftLabel &&
-            (timeLeftLabel === "\u00A0" ? (
-              <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
-            ) : (
-              <ViewTransitionLink
-                to={isMangaChapter ? card.watchHref : card.itemHref}
-                className="text-muted-foreground block w-fit text-xs hover:underline"
-              >
-                {timeLeftLabel}
-              </ViewTransitionLink>
-            ))}
         </div>
       ) : null}
     </div>

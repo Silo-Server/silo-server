@@ -440,7 +440,13 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	// /authorize never issues a refresh token (the client already holds one),
 	// so there is nothing to return in the body.
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, a.UserID, access, "", false))
+	displayName := a.UserID
+	if h.deps.UsernameResolver != nil {
+		if resolved := h.deps.UsernameResolver(r.Context(), a.UserID, a.ProfileID); resolved != "" {
+			displayName = resolved
+		}
+	}
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, displayName, access, "", false))
 }
 
 // setRefreshCookie writes the ABS refresh_token cookie exactly as real ABS
@@ -590,13 +596,19 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	// full envelope (not a thin token map) so a strict client can decode it
 	// with the same model it uses for login. The rotated refresh token goes
 	// in the body when the client sent x-refresh-token (mobile), otherwise as
-	// the refresh_token cookie. No displayName is available at refresh time —
-	// loginEnvelope falls back to the userID for username.
+	// the refresh_token cookie. Resolve the display name from the authenticated
+	// principal so clients show the username rather than the internal user ID.
 	returnRefreshInBody := strings.TrimSpace(r.Header.Get("x-refresh-token")) != ""
 	if !returnRefreshInBody {
 		setRefreshCookie(w, r, refresh, refreshTTL)
 	}
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, claims.UserID, "", access, refresh, returnRefreshInBody))
+	displayName := claims.UserID
+	if h.deps.UsernameResolver != nil {
+		if resolved := h.deps.UsernameResolver(r.Context(), claims.UserID, claims.ProfileID); resolved != "" {
+			displayName = resolved
+		}
+	}
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, claims.UserID, displayName, access, refresh, returnRefreshInBody))
 }
 
 // handleLogout — POST /logout (and /api/logout, /abs/api/logout, /abs/api/auth/logout)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,8 @@ import (
 )
 
 const defaultBaseURL = "https://api.trakt.tv"
+
+const traktMediaShows = "shows"
 
 type Provider struct {
 	client  *http.Client
@@ -209,12 +212,12 @@ func (p *Provider) FetchWatched(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemoteWatch, error) {
-	var movies []traktWatchedMovie
-	if err := p.do(ctx, http.MethodGet, "/sync/watched/movies", cfg, conn.AccessToken, nil, &movies); err != nil {
+	movies, err := fetchWatchedPages[traktWatchedMovie](ctx, p, cfg, conn, "movies")
+	if err != nil {
 		return nil, err
 	}
-	var shows []traktWatchedShow
-	if err := p.do(ctx, http.MethodGet, "/sync/watched/shows", cfg, conn.AccessToken, nil, &shows); err != nil {
+	shows, err := fetchWatchedPages[traktWatchedShow](ctx, p, cfg, conn, traktMediaShows)
+	if err != nil {
 		return nil, err
 	}
 
@@ -256,6 +259,29 @@ func (p *Provider) FetchWatched(
 		}
 	}
 	return rows, nil
+}
+
+// fetchWatchedPages requests explicit pagination for Trakt's watched endpoints.
+// Stop on an empty page: Trakt may apply a smaller limit than requested,
+// particularly for shows with season progress, so a short page is not the end.
+func fetchWatchedPages[T any](ctx context.Context, p *Provider, cfg watchsync.ServerConfig, conn watchsync.Connection, kind string) ([]T, error) {
+	query := url.Values{"limit": {"250"}}
+	if kind == traktMediaShows {
+		// Season and episode watched data is no longer included by default.
+		query.Set("extended", "progress")
+	}
+	var rows []T
+	for page := 1; ; page++ {
+		query.Set("page", strconv.Itoa(page))
+		var batch []T
+		if err := p.do(ctx, http.MethodGet, "/sync/watched/"+kind+"?"+query.Encode(), cfg, conn.AccessToken, nil, &batch); err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			return rows, nil
+		}
+		rows = append(rows, batch...)
+	}
 }
 
 func (p *Provider) FetchProgress(

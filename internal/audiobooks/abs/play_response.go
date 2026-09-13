@@ -270,27 +270,23 @@ func buildSiloAudioTracks(
 	return tracks
 }
 
-// buildSiloChapters extracts chapters from the first media file that has them.
-// ABS expects chapters as a flat list spanning the whole book; for multi-file
-// audiobooks we only use the first file's chapters (most single-file M4B
-// audiobooks have embedded chapters; multi-MP3 sets rarely do).
-func buildSiloChapters(files []*models.MediaFile) []map[string]any {
+// buildSiloChapters builds the shared item-detail and playback chapter timeline.
+// File-relative timestamps use the same cumulative durations as audio tracks.
+func buildSiloChapters(files []*models.MediaFile) []ChapterABS {
+	chapters := make([]ChapterABS, 0)
+	offset := float64(0)
 	for _, f := range files {
-		if len(f.Chapters) == 0 {
-			continue
-		}
-		chapters := make([]map[string]any, 0, len(f.Chapters))
-		for i, c := range f.Chapters {
-			chapters = append(chapters, map[string]any{
-				"id":    i,
-				"start": c.StartSeconds,
-				"end":   c.EndSeconds,
-				"title": c.Title,
+		for _, c := range f.Chapters {
+			chapters = append(chapters, ChapterABS{
+				ID:    len(chapters),
+				Start: offset + c.StartSeconds,
+				End:   offset + c.EndSeconds,
+				Title: c.Title,
 			})
 		}
-		return chapters
+		offset += float64(f.Duration)
 	}
-	return []map[string]any{}
+	return chapters
 }
 
 // buildSiloPlayMediaMetadata builds the playbackSession.mediaMetadata object
@@ -385,7 +381,7 @@ func buildSiloPlayLibraryItem(
 	contentID string,
 	mediaMetadata map[string]any,
 	audioTracks []AudioTrack,
-	chapters []map[string]any,
+	chapters []ChapterABS,
 	totalDuration float64,
 	baseURL string,
 ) map[string]any {
