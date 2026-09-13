@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { Navigate } from "react-router";
 import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,7 @@ export function AccountStep() {
     profile,
     profiles,
     profilesLoaded,
+    profilesNeedPin,
     profilesError,
     retryProfiles,
     selectProfile,
@@ -80,6 +82,11 @@ export function AccountStep() {
   // reads, so make the first one here.
   if (user && !profile && profilesLoaded && profiles.length === 0) {
     return <CreateProfileStep username={user.username} onCreated={selectProfile} />;
+  }
+  // Every profile is PIN-locked, so the wizard cannot act as one on its own.
+  // The picker owns PIN entry; it brings the admin back here afterwards.
+  if (user && !profile && profilesNeedPin) {
+    return <Navigate to="/profiles?redirect=%2Fsetup" replace />;
   }
   if (user && !submitting) return <StepSkeleton rows={2} />;
 

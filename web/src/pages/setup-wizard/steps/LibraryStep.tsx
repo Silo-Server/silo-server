@@ -111,9 +111,15 @@ export function LibraryStep() {
       title="Add your media"
       lede="Point Silo at the folders your files live in. Each library holds one kind of media and scans on its own schedule."
       onContinue={() => markDone("library")}
-      disabled={libraries.length === 0}
+      // An open editor holds edits Continue would not submit; the editor's
+      // own Add / Save / Cancel closes it first.
+      disabled={libraries.length === 0 || activeEditor.mode !== "closed"}
       onSkip={() => markDone("library")}
-      footnote="Metadata languages, providers, and extras live in Admin › Libraries."
+      footnote={
+        activeEditor.mode !== "closed" && libraries.length > 0
+          ? "Save or cancel the open library editor to continue."
+          : "Metadata languages, providers, and extras live in Admin › Libraries."
+      }
     >
       {libraries.length > 0 ? (
         <StepSection title="Your libraries">

@@ -27,6 +27,11 @@ interface WizardContextValue {
   profiles: Profile[];
   /** The household profile list has been read at least once. */
   profilesLoaded: boolean;
+  /**
+   * Every household profile has a PIN, so the wizard cannot pick one itself;
+   * the admin has to unlock one on the profile picker first.
+   */
+  profilesNeedPin: boolean;
   /** The household profile list could not be read; the wizard cannot continue without it. */
   profilesError: boolean;
   retryProfiles: () => void;
@@ -153,6 +158,10 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         selectProfile,
         profiles: profilesQuery.data ?? [],
         profilesLoaded: profilesQuery.data !== undefined,
+        profilesNeedPin:
+          profileList !== undefined &&
+          profileList.length > 0 &&
+          profileList.every((p) => p.has_pin),
         profilesError: profilesQuery.isError,
         retryProfiles: () => void profilesQuery.refetch(),
         settingsReady,

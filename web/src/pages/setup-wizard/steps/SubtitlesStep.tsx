@@ -230,6 +230,7 @@ export function SubtitlesStep() {
       try {
         intent = captureProviderEditIntent(name, providers.scope);
       } catch {
+        loaded.current.delete(name);
         setDrafts((prev) => ({
           ...prev,
           [name]: { ...(prev[name] ?? draftFor(config)), loading: false, loadFailed: true },
@@ -238,7 +239,11 @@ export function SubtitlesStep() {
       }
       getProviderEditor(intent)
         .then((editor) => {
-          if (isCancelled() || !providerIntentActive(editor.intent)) return;
+          if (isCancelled() || !providerIntentActive(editor.intent)) {
+            // Let the next list refresh issue a replacement read.
+            loaded.current.delete(name);
+            return;
+          }
           setDrafts((prev) => {
             const current = prev[name] ?? draftFor(config);
             return {
@@ -253,7 +258,10 @@ export function SubtitlesStep() {
           });
         })
         .catch(() => {
-          if (isCancelled()) return;
+          if (isCancelled()) {
+            loaded.current.delete(name);
+            return;
+          }
           setDrafts((prev) => ({
             ...prev,
             [name]: { ...(prev[name] ?? draftFor(config)), loading: false, loadFailed: true },

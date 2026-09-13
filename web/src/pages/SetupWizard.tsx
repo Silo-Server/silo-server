@@ -3,12 +3,14 @@ import { Navigate } from "react-router";
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useHasUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import "@/styles/admin-settings.css";
 import "@/styles/setup-wizard.css";
 
 import { WizardProvider, useWizardContext } from "./setup-wizard/WizardContext";
 import { useWizardSteps } from "./setup-wizard/useWizardSteps";
 import type { WizardStepId } from "./setup-wizard/useWizardSteps";
+import type { SkippableStep } from "./setup-wizard/setupStorage";
 import { StepRail } from "./setup-wizard/StepRail";
 import { AccountStep } from "./setup-wizard/steps/AccountStep";
 import { ServerStep } from "./setup-wizard/steps/ServerStep";
@@ -46,6 +48,19 @@ function StepContent({ step }: { step: WizardStepId }) {
 function WizardContent() {
   const { summaries, visit } = useWizardContext();
   const { steps, currentStep } = useWizardSteps();
+  // The setup route mounts no router guard, so unsaved edits on the current
+  // step would be lost silently on a rail click. Ask first, the way the admin
+  // pages do through their guard.
+  const hasUnsavedChanges = useHasUnsavedChanges();
+  function visitStep(id: SkippableStep) {
+    if (
+      hasUnsavedChanges &&
+      !window.confirm("Leave this step? Your unsaved changes will be lost.")
+    ) {
+      return;
+    }
+    visit(id);
+  }
 
   return (
     <div className="setup-shell">
@@ -58,7 +73,7 @@ function WizardContent() {
               <span className="setup-brand-sub">First-run setup</span>
             </span>
           </div>
-          <StepRail steps={steps} summaries={summaries} onVisit={visit} />
+          <StepRail steps={steps} summaries={summaries} onVisit={visitStep} />
         </aside>
         <main className="setup-panel">
           {/* Keyed on the step so the entrance runs once per step change. */}

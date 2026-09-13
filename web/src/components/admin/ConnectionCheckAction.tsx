@@ -73,7 +73,10 @@ export function useConnectionCheck(
     result: ConnectionCheckResponse;
   } | null>(null);
   const body = form.buildConnectionCheckRequest(keys);
-  const signature = JSON.stringify(body.values);
+  // The whole request, not just the values: a blank secret means "keep the
+  // stored one" or "clear it" depending on whether the key is dirty, and the
+  // probe answers differently for each.
+  const signature = JSON.stringify(body);
   async function run() {
     let result: ConnectionCheckResponse;
     try {
