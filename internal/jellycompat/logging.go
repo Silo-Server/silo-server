@@ -25,6 +25,23 @@ type loggingResponseWriter struct {
 	status int
 }
 
+type debugRequestBody struct {
+	body io.ReadCloser
+	buf  bytes.Buffer
+}
+
+func (b *debugRequestBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+	if remaining := debugMaxBodyCapture - b.buf.Len(); n > 0 && remaining > 0 {
+		_, _ = b.buf.Write(p[:min(n, remaining)])
+	}
+	return n, err
+}
+
+func (b *debugRequestBody) Close() error {
+	return b.body.Close()
+}
+
 func (w *loggingResponseWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
@@ -205,10 +222,10 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 			}
 
 			// Capture request body for POST/PUT/PATCH.
-			var reqBody []byte
+			var capturedBody *debugRequestBody
 			if r.Body != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch) {
-				reqBody, _ = io.ReadAll(io.LimitReader(r.Body, debugMaxBodyCapture))
-				r.Body = io.NopCloser(bytes.NewReader(reqBody))
+				capturedBody = &debugRequestBody{body: r.Body}
+				r.Body = capturedBody
 			}
 
 			start := time.Now()
@@ -218,6 +235,10 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 
 			reqID := middleware.GetReqID(r.Context())
 			status := statusOrDefault(dw.status)
+			var reqBody []byte
+			if capturedBody != nil {
+				reqBody = capturedBody.buf.Bytes()
+			}
 
 			mu.Lock()
 			defer mu.Unlock()

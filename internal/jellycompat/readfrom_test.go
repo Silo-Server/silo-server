@@ -81,3 +81,17 @@ func TestDebugLogMiddlewareReadFromLogsTextAndMedia(t *testing.T) {
 		})
 	}
 }
+
+func TestDebugLogMiddlewareDoesNotTruncateRequestBody(t *testing.T) {
+	body := strings.Repeat("x", debugMaxBodyCapture+1)
+	var got []byte
+	var log bytes.Buffer
+	handler := newDebugLogMiddleware(&log, "")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if string(got) != body {
+		t.Fatalf("downstream body length = %d, want %d", len(got), len(body))
+	}
+}

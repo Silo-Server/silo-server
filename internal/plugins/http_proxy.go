@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -15,7 +14,12 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
+	"github.com/Silo-Server/silo-server/internal/requestbody"
 )
+
+// Keep opaque plugin request bodies below the default 4 MiB gRPC receive
+// envelope, leaving headroom for protobuf fields and forwarded metadata.
+const maxPluginRouteBodyBytes = 3 << 20
 
 type httpRouteClient interface {
 	Handle(ctx context.Context, req *pluginv1.HandleHTTPRequest) (*pluginv1.HandleHTTPResponse, error)
@@ -111,6 +115,15 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 		p.serveResolvedAsset(w, r, installationID, strings.TrimPrefix(routePath, "/"))
 		return
 	}
+	body, err := requestbody.Read(w, r, maxPluginRouteBodyBytes)
+	if err != nil {
+		if requestbody.IsTooLarge(err) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "could not read request body", http.StatusBadRequest)
+		return
+	}
 
 	capabilityID, err := p.resolveHTTPRoutesCapability(r.Context(), installationID)
 	if err != nil {
@@ -125,7 +138,6 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 		return
 	}
 
-	body, _ := io.ReadAll(r.Body)
 	headers := forwardedRequestHeaders(r.Header)
 	if _, _, userID, contextProfileID := pluginAccessUserFromContext(r.Context()); userID > 0 {
 		headers["X-Silo-User-Id"] = strconv.Itoa(userID)
