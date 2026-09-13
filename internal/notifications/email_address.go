@@ -9,10 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	netmail "net/mail"
 	"strings"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/auth"
 
 	"github.com/Silo-Server/silo-server/internal/mail"
 )
@@ -71,10 +70,11 @@ func (s *System) RequestEmailAddress(ctx context.Context, userID int, profileID,
 	if s == nil || s.EmailPrefs == nil {
 		return ErrEmailInvalidAddress
 	}
-	address, err := auth.ValidateEmail(address)
-	if err != nil {
+	parsed, err := netmail.ParseAddress(strings.TrimSpace(address))
+	if err != nil || parsed.Address != strings.TrimSpace(address) {
 		return ErrEmailInvalidAddress
 	}
+	address = parsed.Address
 	profile := s.lookupProfile(ctx, userID, profileID)
 	if profile == nil || profile.IsChild {
 		return ErrEmailChildProfile

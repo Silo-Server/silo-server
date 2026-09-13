@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	netmail "net/mail"
 	"strings"
 	"time"
 
@@ -143,10 +144,11 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 }
 
 func (s *Service) send(ctx context.Context, input SendInput, sourceID *int64) (*SendResult, error) {
-	email, err := auth.ValidateEmail(input.Email)
-	if err != nil {
+	parsed, err := netmail.ParseAddress(strings.TrimSpace(input.Email))
+	if err != nil || parsed.Address != strings.TrimSpace(input.Email) {
 		return nil, ErrInvalidEmail
 	}
+	email := parsed.Address
 
 	inviter, err := s.users.GetByID(ctx, int(input.InvitedBy))
 	if err != nil {

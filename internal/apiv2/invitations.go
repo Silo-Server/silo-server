@@ -309,6 +309,9 @@ func registerInvitations(reg *Registry) {
 		if createProfile && !svc.SupportsDefaultProfile() {
 			return nil, invitationProblem(auth.ErrTransactionalProfileUnavailable, false)
 		}
+		if p := invalidEmailProblem(in.Body.Email); p != nil {
+			return nil, p
+		}
 		input := invitations.SendInput{Email: in.Body.Email, Role: in.Body.Role, CreateProfile: createProfile, ShowTour: showTour, Note: in.Body.Note, InvitedBy: int64(claimsFrom(ctx).UserID)}
 		if in.Body.AccessGroupID != nil {
 			id, p := invitationID(*in.Body.AccessGroupID)

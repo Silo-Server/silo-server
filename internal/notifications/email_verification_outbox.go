@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	netmail "net/mail"
 	"strings"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/auth"
 
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -55,10 +54,11 @@ func (r *EmailPrefsRepository) QueueVerification(ctx context.Context, in EmailVe
 	if err != nil || id.String() != in.ID || in.UserID <= 0 || strings.TrimSpace(in.ProfileID) == "" {
 		return empty, ErrEmailInvalidAddress
 	}
-	address, err := auth.ValidateEmail(in.Address)
-	if err != nil {
+	parsed, err := netmail.ParseAddress(strings.TrimSpace(in.Address))
+	if err != nil || parsed.Address != strings.TrimSpace(in.Address) {
 		return empty, ErrEmailInvalidAddress
 	}
+	address := parsed.Address
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return empty, err

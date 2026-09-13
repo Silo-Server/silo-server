@@ -94,18 +94,31 @@ function ProviderRow({
   const canonical = draft.editor?.body ?? config;
   const hasCredentials = isOpenSubtitles ? canonical.has_credentials : canonical.has_api_key;
   const test = useTestSubtitleProvider();
-  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  // The result is kept with the exact credentials it tested and shown only
+  // while the draft still matches them, so editing a field clears it and a
+  // late response for an older draft is never shown against the new one.
+  const [tested, setTested] = useState<{
+    signature: string;
+    result: { success: boolean; error?: string };
+  } | null>(null);
+  const signature = JSON.stringify(providerBody(name, draft));
+  const testResult = tested?.signature === signature ? tested.result : null;
 
   function runTest() {
-    setTestResult(null);
+    const body = providerBody(name, draft);
+    const testedSignature = JSON.stringify(body);
     test.mutate(
-      { provider: name, config: providerBody(name, draft) },
+      { provider: name, config: body },
       {
-        onSuccess: (result) => setTestResult({ success: result.success, error: result.error }),
+        onSuccess: (result) =>
+          setTested({
+            signature: testedSignature,
+            result: { success: result.success, error: result.error },
+          }),
         onError: (err) =>
-          setTestResult({
-            success: false,
-            error: err instanceof Error ? err.message : "Test failed",
+          setTested({
+            signature: testedSignature,
+            result: { success: false, error: err instanceof Error ? err.message : "Test failed" },
           }),
       },
     );

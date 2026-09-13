@@ -114,10 +114,13 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     if (chosen) selectProfile(chosen);
   }, [user, profile, profileList, selectProfile]);
 
+  // Acting-admin reads need a selected profile, same as the settings and
+  // provider queries above; starting earlier would burn the retries before
+  // the profile arrives and leave the Library step showing an empty list.
   const librariesQuery = useQuery({
     queryKey: ["setup-wizard", "libraries"],
     queryFn: ({ signal }) => fetchAdminLibraries(signal),
-    enabled: isAdmin,
+    enabled: isAdmin && profile !== null,
     retry: shouldRetrySetupQuery,
   });
 
@@ -154,7 +157,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         retryProfiles: () => void profilesQuery.refetch(),
         settingsReady,
         libraries: librariesQuery.data ?? [],
-        librariesLoading: isAdmin && librariesQuery.isPending,
+        librariesLoading: isAdmin && profile !== null && librariesQuery.isPending,
         refetchLibraries: () => void librariesQuery.refetch(),
         stepDone,
         markDone,

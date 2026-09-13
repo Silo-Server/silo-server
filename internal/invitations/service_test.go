@@ -264,9 +264,6 @@ func TestSendRejectsExistingAccountAndBadInput(t *testing.T) {
 	if _, err := svc.Send(context.Background(), SendInput{Email: "not-an-email", InvitedBy: 1}); !errors.Is(err, ErrInvalidEmail) {
 		t.Errorf("bad address: err = %v, want ErrInvalidEmail", err)
 	}
-	if _, err := svc.Send(context.Background(), SendInput{Email: "someone@siloserver", InvitedBy: 1}); !errors.Is(err, ErrInvalidEmail) {
-		t.Errorf("dotless domain: err = %v, want ErrInvalidEmail", err)
-	}
 }
 
 func TestSendAdminRoleRequiresAdminInviter(t *testing.T) {

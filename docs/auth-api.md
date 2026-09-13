@@ -92,16 +92,14 @@ does not require If-Match.
 
 ## Email addresses
 
-Every v2 write that stores an account or notification address (`setupServer`,
-`signup`, administrator account create and update, emailed invitations, and the
-per-profile notification address) runs the same check
-(`internal/auth.ValidateEmail`): one bare mailbox, no display name or comments,
-and a domain containing a dot with text on both sides. A bare hostname such as
-`admin@siloserver` is refused with a `422 validation_failed` problem at
-`body.email` (invitations and the notification address use their existing
-error shapes with the same rule). The web client applies the same check before
-sending. The frozen `/api/v1` setup, signup, and administrator account routes
-keep their previous, looser acceptance.
+Every v2 write that stores an account address (`setupServer`, `signup`,
+administrator account create and update, and emailed invitations) runs the
+same check (`internal/auth.ValidateEmail`): one bare mailbox, no display name
+or comments, and a domain containing a dot with text on both sides. A bare
+hostname such as `admin@siloserver` is refused with a `422 validation_failed`
+problem at `body.email`. The web client applies the same check before sending.
+The frozen `/api/v1` routes, and the v1-only per-profile notification address,
+keep their previous `net/mail` acceptance.
 
 ## Login sessions on v2
 

@@ -120,7 +120,7 @@ func TestInvitationValidationAndCapability(t *testing.T) {
 	f := fixtureInvitations()
 	h := invitationTestHandler(f)
 	path := Prefix + "/admin/invitations"
-	for _, body := range []string{`{"email":"a@example.invalid","create_profile":null}`, `{"email":"a@example.invalid","show_tour":null}`, `{"email":"a@example.invalid","library_ids":null}`, `{"email":"a@example.invalid","access_group_id":"9999999999999999999999"}`, `{"email":"a@example.invalid","library_ids":["9999999999999999999999"]}`} {
+	for _, body := range []string{`{"email":"a@example.invalid","create_profile":null}`, `{"email":"a@example.invalid","show_tour":null}`, `{"email":"a@example.invalid","library_ids":null}`, `{"email":"a@example.invalid","access_group_id":"9999999999999999999999"}`, `{"email":"a@example.invalid","library_ids":["9999999999999999999999"]}`, `{"email":"someone@intranet"}`} {
 		requireProblem(t, do(t, h, http.MethodPost, path, body, actingRequestAdmin), TypeValidationFailed)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, path+"/9999999999999999999999", "", actingRequestAdmin), TypeValidationFailed)
