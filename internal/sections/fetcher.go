@@ -18,7 +18,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -1094,124 +1093,6 @@ func (f *Fetcher) FetchItemsByContentIDs(ctx context.Context, contentIDs []strin
 // (series title, season/episode numbers). Non-episode content IDs are silently ignored.
 func (f *Fetcher) FetchEpisodesByContentIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	return f.fetchEpisodeTargetsByContentIDs(ctx, contentIDs, nil, nil, filter)
-}
-
-// ListOverlaySummaries batches file lookups for section cards and derives the
-// compact overlay summary per content ID.
-func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]*models.OverlaySummary, error) {
-	summaries := make(map[string]*models.OverlaySummary, len(contentIDs))
-	if len(contentIDs) == 0 {
-		return summaries, nil
-	}
-
-	rows, err := f.pool.Query(ctx, `
-		SELECT content_id, episode_id, file_path, resolution, codec_audio, audio_tracks, hdr, video_tracks,
-		       codec_video, audio_channels, container, subtitle_tracks, external_subtitles, edition_key
-		FROM media_files
-		WHERE (content_id = ANY($1) OR episode_id = ANY($1)) AND missing_since IS NULL
-		ORDER BY content_id ASC, episode_id ASC, id ASC
-	`, contentIDs)
-	if err != nil {
-		return nil, fmt.Errorf("querying overlay summaries: %w", err)
-	}
-	defer rows.Close()
-
-	requested := make(map[string]struct{}, len(contentIDs))
-	for _, contentID := range contentIDs {
-		requested[contentID] = struct{}{}
-	}
-
-	grouped := make(map[string][]*models.MediaFile, len(contentIDs))
-	for rows.Next() {
-		var contentID string
-		var episodeID *string
-		var filePath string
-		var resolution *string
-		var codecAudio *string
-		var audioTracksJSON []byte
-		var hdr bool
-		var videoTracksJSON []byte
-		var codecVideo *string
-		var audioChannels *int
-		var container *string
-		var subtitleTracksJSON []byte
-		var externalSubtitlesJSON []byte
-		var editionKey *string
-
-		if err := rows.Scan(
-			&contentID, &episodeID, &filePath, &resolution, &codecAudio, &audioTracksJSON, &hdr, &videoTracksJSON,
-			&codecVideo, &audioChannels, &container, &subtitleTracksJSON, &externalSubtitlesJSON, &editionKey,
-		); err != nil {
-			return nil, fmt.Errorf("scanning overlay summary row: %w", err)
-		}
-
-		file := &models.MediaFile{
-			ContentID: contentID,
-			FilePath:  filePath,
-			HDR:       hdr,
-		}
-		if episodeID != nil {
-			file.EpisodeID = *episodeID
-		}
-		if resolution != nil {
-			file.Resolution = *resolution
-		}
-		if codecAudio != nil {
-			file.CodecAudio = *codecAudio
-		}
-		if codecVideo != nil {
-			file.CodecVideo = *codecVideo
-		}
-		if audioChannels != nil {
-			file.AudioChannels = *audioChannels
-		}
-		if container != nil {
-			file.Container = *container
-		}
-		if editionKey != nil {
-			file.EditionKey = *editionKey
-		}
-		if len(audioTracksJSON) > 0 {
-			if err := json.Unmarshal(audioTracksJSON, &file.AudioTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay audio tracks: %w", err)
-			}
-		}
-		if len(videoTracksJSON) > 0 {
-			if err := json.Unmarshal(videoTracksJSON, &file.VideoTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay video tracks: %w", err)
-			}
-		}
-		if len(subtitleTracksJSON) > 0 {
-			if err := json.Unmarshal(subtitleTracksJSON, &file.SubtitleTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay subtitle tracks: %w", err)
-			}
-		}
-		if len(externalSubtitlesJSON) > 0 {
-			if err := json.Unmarshal(externalSubtitlesJSON, &file.ExternalSubtitles); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay external subtitles: %w", err)
-			}
-		}
-
-		groupKey := contentID
-		if episodeID != nil {
-			if _, ok := requested[*episodeID]; ok {
-				groupKey = *episodeID
-			}
-		}
-		grouped[groupKey] = append(grouped[groupKey], file)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating overlay summary rows: %w", err)
-	}
-
-	for contentID, files := range grouped {
-		files = catalog.FilterMediaFilesByAccess(files, filter)
-		if summary := overlays.BuildSummary(files); summary != nil {
-			summaries[contentID] = summary
-		}
-	}
-
-	return summaries, nil
 }
 
 // userAgnosticSectionFetch is the signature shared by every fetch helper whose

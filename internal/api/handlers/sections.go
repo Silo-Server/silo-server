@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 
@@ -1093,7 +1094,6 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
 
-	overlaySummaries := make(map[string]*models.OverlaySummary)
 	contentIDs := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, section := range withItems {
@@ -1108,24 +1108,39 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 			contentIDs = append(contentIDs, item.ContentID)
 		}
 	}
-	if len(contentIDs) > 0 && h.fetcher != nil {
-		summaries, err := h.fetcher.ListOverlaySummaries(ctx, contentIDs, viewerAccess)
-		if err != nil {
-			slog.ErrorContext(ctx, "loading overlay summaries", "component", "api", "error", err)
-		} else {
-			overlaySummaries = summaries
-		}
-	}
 
-	resp := homeSectionsResponse{
-		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
-	}
 	allItems := make([]*models.MediaItem, 0)
 	for _, s := range withItems {
 		allItems = append(allItems, s.Items...)
 	}
+
+	// These lookups read shared inputs and own separate results. Wait before
+	// assembling cards so v1 and v2 both pay the slowest lookup, not their sum.
+	overlaySummaries := make(map[string]*models.OverlaySummary)
 	playTargets := map[string]string{}
-	if h.playableTargets != nil {
+	var userStates map[string]*itemUserStateResponse
+	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
+	var episodeMeta map[string]sections.SectionItemMeta
+	var mangaChapterMeta map[string]sections.SectionItemMeta
+
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		if len(contentIDs) == 0 || h.fetcher == nil {
+			return
+		}
+		summaries, err := h.fetcher.ListOverlaySummaries(ctx, contentIDs, viewerAccess)
+		if err != nil {
+			slog.ErrorContext(ctx, "loading overlay summaries", "component", "api", "error", err)
+			return
+		}
+		overlaySummaries = summaries
+	})
+
+	wg.Go(func() {
+		if h.playableTargets == nil {
+			return
+		}
 		inputs := make([]catalog.PlayableTargetInput, 0, len(allItems))
 		for _, item := range allItems {
 			if item == nil || item.ContentID == "" {
@@ -1150,14 +1165,21 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 		})
 		if err != nil {
 			slog.WarnContext(ctx, "resolving section playable targets", "component", "api", "error", err)
-		} else {
-			playTargets = resolvedTargets
+			return
 		}
+		playTargets = resolvedTargets
+	})
+
+	wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
+	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
+	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
+
+	wg.Wait()
+
+	resp := homeSectionsResponse{
+		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
 	}
-	userStates := h.listSectionItemUserStates(ctx, allItems)
-	imageURLs := h.resolveSectionItemImageURLs(ctx, withItems, size)
-	episodeMeta := h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess)
-	mangaChapterMeta := h.listSectionMangaChapterItemMeta(ctx, allItems)
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
 		for _, item := range s.Items {
