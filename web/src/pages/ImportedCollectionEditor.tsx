@@ -51,7 +51,9 @@ import {
   queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
 import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
+import { UserCollectionSyncScheduleField } from "@/components/collections/UserCollectionSyncScheduleField";
 import { changedSortConfig, sortConfigToSelectValue } from "@/lib/collectionSortConfig";
+import { userCollectionScheduleRequestValue } from "@/lib/userCollectionSyncSchedule";
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 
 import { isCollectionReadOnly } from "./userCollectionsShared";
@@ -126,6 +128,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const initialWatchFilter = initialDisplayFilters.watch;
   const initialMediaFilter = initialDisplayFilters.media;
   const initialDefaultSort = sortConfigToSelectValue(collection.sort_config);
+  const initialSyncSchedule = collection.sync_schedule ?? "";
 
   const [name, setName] = useState(collection.name);
   const [description, setDescription] = useState(initialDescription);
@@ -144,6 +147,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const [maxItemsInput, setMaxItemsInput] = useState(
     initialMaxItems != null ? String(initialMaxItems) : "",
   );
+  const [syncSchedule, setSyncSchedule] = useState(initialSyncSchedule);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -177,6 +181,9 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
 
   const isPending = updateMutation.isPending;
   const isSyncing = syncMutation.isPending;
+  const scheduleCapabilities = collectionCapabilities?.user_collection_sync_schedule;
+  const scheduleEditable = scheduleCapabilities?.editable === true;
+  const allowCustomCron = scheduleCapabilities?.custom_cron === true;
 
   const trimmedPosterSource = posterSourceUrl.trim();
   const posterDirty = posterFile !== null || trimmedPosterSource !== "";
@@ -184,6 +191,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const sourceUrlDirty = isMDBList && trimmedSourceUrl !== initialSourceUrl;
   const maxItemsDirty = parsedMaxItems !== initialMaxItems;
   const descriptionDirty = description !== initialDescription;
+  const syncScheduleDirty = syncSchedule !== initialSyncSchedule;
   const dirtyParts = [
     name.trim() !== collection.name,
     descriptionDirty,
@@ -196,6 +204,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
     includeOnServer !== (collection.include_in_server_collections ?? false),
     sourceUrlDirty,
     maxItemsDirty,
+    syncScheduleDirty,
     posterDirty,
   ];
   const dirtyCount = dirtyParts.filter(Boolean).length;
@@ -228,6 +237,9 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
     if (maxItemsDirty) {
       body.max_items = parsedMaxItems ?? 0;
     }
+    if (syncScheduleDirty) {
+      body.sync_schedule = userCollectionScheduleRequestValue(syncSchedule, allowCustomCron);
+    }
     updateMutation.mutate(
       { id: collection.id, body, poster: posterFile },
       {
@@ -251,6 +263,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
     setIncludeOnServer(collection.include_in_server_collections ?? false);
     setSourceUrlInput(initialSourceUrl);
     setMaxItemsInput(initialMaxItems != null ? String(initialMaxItems) : "");
+    setSyncSchedule(initialSyncSchedule);
     setPosterFile(null);
     setPosterSourceUrl("");
   }
@@ -461,12 +474,19 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
                   </p>
                 )}
               </div>
-              <div className="space-y-2">
-                <FieldLabel>Sync schedule</FieldLabel>
-                <ScheduleReadout schedule={collection.sync_schedule} />
+              <div>
+                <UserCollectionSyncScheduleField
+                  value={syncSchedule}
+                  onChange={setSyncSchedule}
+                  allowCustomCron={allowCustomCron}
+                  disabled={readOnly || !scheduleEditable}
+                  label="Sync schedule"
+                  inputId="imported-collection-sync-schedule"
+                />
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  Set when imported. Recreate the collection from a {theme.label} template to change
-                  it.
+                  {allowCustomCron
+                    ? "Server admins can use the same presets and custom cron schedules as server collections."
+                    : "Automatic sync is limited to daily, weekly, or monthly intervals."}
                 </p>
               </div>
             </div>
@@ -909,35 +929,6 @@ function PresetReadout({
       </span>
     </div>
   );
-}
-
-function ScheduleReadout({ schedule }: { schedule?: string }) {
-  return (
-    <div className="border-border/60 bg-muted/20 flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
-      <div className="inline-flex items-center gap-2">
-        <CalendarClock className="text-muted-foreground h-3.5 w-3.5" />
-        <span className="text-sm font-medium">{prettySchedule(schedule)}</span>
-      </div>
-      <span className="text-muted-foreground inline-flex items-center gap-1 text-[10px] font-semibold tracking-[0.16em] uppercase">
-        <Lock className="h-3 w-3" />
-        Locked
-      </span>
-    </div>
-  );
-}
-
-function prettySchedule(schedule?: string): string {
-  if (!schedule) return "Manual";
-  switch (schedule) {
-    case "daily":
-      return "Every day";
-    case "weekly":
-      return "Every week";
-    case "monthly":
-      return "Every month";
-    default:
-      return schedule.charAt(0).toUpperCase() + schedule.slice(1);
-  }
 }
 
 function SpecRow({

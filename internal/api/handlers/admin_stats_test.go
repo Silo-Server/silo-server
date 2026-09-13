@@ -32,14 +32,14 @@ func TestMergeWatchProviderStatsIncludesRegisteredProvidersWithoutActivity(t *te
 			DisplayName:  "Trakt",
 			Capabilities: watchsync.Capabilities{ExportWatched: true, ScrobblePlayback: true},
 		},
-		{Key: "mdblist", DisplayName: "MDBList"},
+		{Key: mdblistSourceKey, DisplayName: "MDBList"},
 	}, nil)
 
 	if len(merged) != 2 {
 		t.Fatalf("expected 2 providers, got %d: %+v", len(merged), merged)
 	}
 
-	mdblist := providerStatsByKey(t, merged, "mdblist")
+	mdblist := providerStatsByKey(t, merged, mdblistSourceKey)
 	if !mdblist.Registered {
 		t.Fatalf("registered provider should be marked registered: %+v", mdblist)
 	}

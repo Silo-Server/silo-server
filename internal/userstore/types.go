@@ -280,7 +280,10 @@ type UpdateCollectionSyncStateInput struct {
 	Message    string
 	ItemCount  int
 	LastSyncAt time.Time
-	NextSyncAt *time.Time
+	// ExpectedSyncSchedule is the schedule captured when the sync began. Stores
+	// must preserve next_sync_at when the persisted schedule has since changed.
+	ExpectedSyncSchedule *string
+	NextSyncAt           *time.Time
 }
 
 type CollectionItemReplacement struct {

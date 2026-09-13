@@ -1401,6 +1401,11 @@ export interface CollectionCapabilitiesResponse {
    * "library" and "user" may be assumed.
    */
   sort_preference_kinds?: string[];
+  user_collection_sync_schedule?: {
+    editable: boolean;
+    presets: string[];
+    custom_cron: boolean;
+  };
 }
 
 export interface QueryRule {
@@ -1528,6 +1533,8 @@ export interface UpdateCollectionRequest {
   include_in_server_collections?: boolean;
   poster_source_url?: string;
   group_id?: string | null;
+  /** Empty disables automatic sync; accepted values are advertised by collection capabilities. */
+  sync_schedule?: string;
 }
 
 export interface LibraryCollection {
@@ -1753,16 +1760,15 @@ export interface ImportTraktCollectionResponse {
   sync_run?: LibraryCollectionSyncRun;
 }
 
-// User-facing imports omit library_ids / featured / visibility (server-wide
-// concerns). sync_schedule is restricted to a fixed set so we can guarantee
-// the >=24h minimum interval without parsing user-supplied cron.
-export type UserCollectionSyncSchedule = "" | "daily" | "weekly" | "monthly";
+// Regular accounts use these bounded personal-collection cadence labels.
+// Server admins may instead submit cron values advertised by capabilities.
+export type UserCollectionSyncSchedule = "daily" | "weekly" | "monthly";
 
 export interface UserImportSharedFields {
   title: string;
   description?: string;
   limit?: number;
-  sync_schedule?: UserCollectionSyncSchedule;
+  sync_schedule?: string;
   is_shared?: boolean;
   poster_url?: string;
   /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */

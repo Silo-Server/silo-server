@@ -50,8 +50,8 @@ export default function CollectionEditor() {
         <div className="mt-10 sm:mt-12">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{collection.name}</h1>
           <p className="page-subtitle mt-1 text-sm sm:text-base">
-            Edit what's local — name, libraries, sharing. Source-managed details (URL, schedule,
-            item ordering) are locked.
+            Edit its display, source settings, sync schedule, and sharing. Imported item membership
+            and source ordering remain provider-managed.
           </p>
         </div>
         <ImportedCollectionEditor

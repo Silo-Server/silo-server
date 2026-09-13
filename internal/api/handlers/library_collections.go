@@ -2678,7 +2678,7 @@ func (h *LibraryCollectionHandler) createMDBListCollection(
 		Slug:               slugifyCollectionName(req.Title),
 		Title:              req.Title,
 		Description:        req.Description,
-		CollectionType:     "mdblist",
+		CollectionType:     mdblistSourceKey,
 		SortConfig:         json.RawMessage(sortConfig),
 		Visibility:         "visible",
 		Featured:           req.Featured,
