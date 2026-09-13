@@ -3,6 +3,7 @@ package sections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -191,8 +192,8 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 	if _, ok := resolvedListGet(genreKey); !ok {
 		t.Fatal("generation-independent entry must survive repeated invalidations")
 	}
-	// A further invalidation cannot extend an unrefreshed fallback.
-	clock = clock.Add(resolvedListInvalidationGrace)
+	// Idle scopes retain only their original lifetime across invalidations.
+	clock = clock.Add(resolvedListTTL)
 	InvalidateResolvedListCache()
 	resolvedListCacheMu.RLock()
 	size := len(resolvedListCache)
@@ -947,6 +948,8 @@ func TestResolvedListCacheScanRefreshServesBoundedMembership(t *testing.T) {
 	oldKey := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
 	resolvedListSet(oldKey, mediaItems("old"), 1, now)
 	InvalidateResolvedListCache()
+	// No readers during this interval: a scan must not make an idle scope cold.
+	now = now.Add(2 * time.Minute)
 	key := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
@@ -1005,6 +1008,20 @@ func TestResolvedListCacheScanGraceExpiresAfterFailedRefresh(t *testing.T) {
 	resolvedListSet(key, mediaItems("old"), 1, now)
 	InvalidateResolvedListCache()
 	key = resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	_, _, err := getOrRefresh(t.Context(), key, now, func(context.Context) ([]*models.MediaItem, int, error) {
+		return nil, 0, errors.New("test refresh failure")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(2*time.Second, func() bool {
+		resolvedListRefreshMu.Lock()
+		defer resolvedListRefreshMu.Unlock()
+		_, running := resolvedListRefreshing[key]
+		return !running
+	}) {
+		t.Fatal("failed refresh did not finish")
+	}
 	// Even when refreshes have produced no replacement, the grace deadline is
 	// a hard boundary. A blocking load must supply the result after it.
 	items, _, err := getOrRefresh(t.Context(), key, now.Add(resolvedListInvalidationGrace), staticLoader(mediaItems("fresh"), nil))

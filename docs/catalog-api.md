@@ -65,7 +65,8 @@ Recently-added section membership is shared only within the same library and
 access scope. Scan-complete events are coalesced into invalidations at most once
 per 30 seconds; invalidation requests a refresh on the next read. While
 one background rebuild runs, readers may use the previous membership for at most
-30 seconds, capped by its original expiry. Repeated scans and failed refreshes
+30 seconds from the first read after invalidation, capped by its original expiry.
+An idle scope retains that original expiry until a reader requests the refresh. Repeated scans and failed refreshes
 cannot extend that deadline. Cold or expired membership requires a fresh build;
 an older in-flight build cannot replace the current generation. Badge summaries
 and per-profile playability are recomputed during this grace period.
