@@ -354,12 +354,18 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 		return nil, err
 	}
 
-	response, err := client.GetImages(ctx, &pluginv1.GetImagesRequest{
+	pluginRequest := &pluginv1.GetImagesRequest{
 		ProviderId:  providerID,
 		ItemType:    req.ContentType,
 		ProviderIds: providerIDs,
 		Language:    req.Language,
-	})
+	}
+	if req.SeasonNumber != nil {
+		seasonNumber := int32(*req.SeasonNumber)
+		pluginRequest.SeasonNumber = &seasonNumber
+	}
+
+	response, err := client.GetImages(ctx, pluginRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +379,10 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 			Language:   image.GetLanguage(),
 			Width:      int(image.GetWidth()),
 			Height:     int(image.GetHeight()),
+		}
+		if image.SeasonNumber != nil {
+			seasonNumber := int(image.GetSeasonNumber())
+			ri.SeasonNumber = &seasonNumber
 		}
 		// Extract rating from the metadata struct if the plugin provided it.
 		if md := image.GetMetadata(); md != nil {

@@ -279,6 +279,72 @@ func TestApplyBestImagesLogoLanguageFallbacks(t *testing.T) {
 	}
 }
 
+func TestApplyBestImagesUsesWordmarkLogoCandidates(t *testing.T) {
+	tests := []struct {
+		name     string
+		images   []RemoteImage
+		wantLogo string
+	}{
+		{
+			name: "illustrated TVDB clear-art cannot beat a TMDB wordmark",
+			images: []RemoteImage{
+				{ProviderID: "tvdb", URL: "tvdb://illustrated-clear-art.png", Type: ImageLogo, Language: "en", Rating: 10},
+				{ProviderID: "tmdb", URL: "tmdb://wordmark.png", Type: ImageLogo, Language: "en", Rating: 6},
+			},
+			wantLogo: "tmdb://wordmark.png",
+		},
+		{
+			name: "TVDB clear-art alone leaves the logo empty",
+			images: []RemoteImage{
+				{ProviderID: "tvdb", URL: "tvdb://illustrated-clear-art.png", Type: ImageLogo, Language: "en", Rating: 10},
+			},
+		},
+		{
+			name: "local sidecar remains authoritative",
+			images: []RemoteImage{
+				{ProviderID: "nfo", URL: "file:///media/shows/Example/logo.png", Type: ImageLogo},
+				{ProviderID: "tmdb", URL: "tmdb://wordmark.png", Type: ImageLogo, Language: "en", Rating: 10},
+			},
+			wantLogo: "file:///media/shows/Example/logo.png",
+		},
+		{
+			name: "highest-rated TMDB wordmark wins within the language tier",
+			images: []RemoteImage{
+				{ProviderID: "tmdb", URL: "tmdb://lower-rated.png", Type: ImageLogo, Language: "en", Rating: 6},
+				{ProviderID: "tmdb", URL: "tmdb://top-rated.png", Type: ImageLogo, Language: "en", Rating: 9},
+			},
+			wantLogo: "tmdb://top-rated.png",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := &models.MediaItem{}
+			applyBestImages(item, tt.images, MergeFillEmpty, "en")
+			if item.LogoPath != tt.wantLogo {
+				t.Fatalf("LogoPath = %q, want %q", item.LogoPath, tt.wantLogo)
+			}
+		})
+	}
+}
+
+func TestApplyBestImagesClearsRejectedTVDBLogoOnManualRefresh(t *testing.T) {
+	existing := &models.MediaItem{
+		LogoPath:       "tvdb/series/123/logo/original.webp",
+		LogoSourcePath: "tvdb://artwork/illustrated-clear-art.png",
+	}
+	item := *existing
+
+	applyBestImages(&item, []RemoteImage{
+		{ProviderID: "tvdb", URL: "tvdb://artwork/another-clear-art.png", Type: ImageLogo, Language: "en", Rating: 10},
+	}, MergeReplaceUnlocked, "en")
+	prepareItemImagesForQueue(&item, existing)
+
+	if item.LogoPath != "" || item.LogoSourcePath != "" {
+		t.Fatalf("rejected TVDB logo survived manual refresh: path=%q source=%q", item.LogoPath, item.LogoSourcePath)
+	}
+}
+
 func TestApplyBestImagesFallsBackToLanguageTaggedBackgrounds(t *testing.T) {
 	// Language-neutral backgrounds are preferred, but an item whose backdrops
 	// are all language-tagged must still get one rather than none.

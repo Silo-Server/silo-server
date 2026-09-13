@@ -34,19 +34,18 @@ export default function ImageSelectorTab({ item, enabled }: ImageSelectorTabProp
   const { data, isLoading, isError } = useItemImages(item.content_id, enabled);
   const applyMutation = useApplyItemImage();
 
-  const images = data?.images ?? [];
   const current = data?.current;
   const providerErrors = data?.provider_errors;
 
   const tabConfig = IMAGE_TABS.find((t) => t.key === activeTab)!;
 
   const filteredImages = useMemo(() => {
-    let result = images.filter((img) => img.type === activeTab);
+    let result = (data?.images ?? []).filter((img) => img.type === activeTab);
     if (textlessOnly && activeTab !== "logo") {
       result = result.filter((img) => img.language === "");
     }
     return result;
-  }, [images, activeTab, textlessOnly]);
+  }, [data?.images, activeTab, textlessOnly]);
 
   // The "current" image for this tab. We first check session-local applied
   // images (which use original_url), then fall back to the server's stored
@@ -93,6 +92,16 @@ export default function ImageSelectorTab({ item, enabled }: ImageSelectorTabProp
       <div className="bg-muted/50 text-muted-foreground shrink-0 rounded-lg px-3 py-2 text-[11px]">
         Image changes apply immediately and are not affected by Cancel.
       </div>
+
+      {item.type === "season" && (
+        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          <AlertCircle className="size-3.5 shrink-0" />
+          <span>
+            Only seeing one poster? Check for plugin updates and update TMDB and TVDB to load full
+            season artwork galleries.
+          </span>
+        </div>
+      )}
 
       {/* Image type tabs */}
       <div className="flex shrink-0 items-center gap-1">
