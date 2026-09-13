@@ -86,6 +86,20 @@ func TestSelectAudioTrack_NoTracks(t *testing.T) {
 	}
 }
 
+func TestSelectAudioTrack_PrefersExactRegionalTag(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "en-GB"},
+		{Language: "en"},
+		{Language: "en-US"},
+	}
+	if got := playback.SelectAudioTrack(tracks, "en-US", nil); got != 2 {
+		t.Fatalf("SelectAudioTrack(en-US) = %d, want exact en-US track 2", got)
+	}
+	if got := playback.SelectAudioTrack(tracks, "en-AU", nil); got != 1 {
+		t.Fatalf("SelectAudioTrack(en-AU) = %d, want generic en track 1", got)
+	}
+}
+
 func TestSelectAudioTrack_NoDefaultFallsToFirst(t *testing.T) {
 	tracks := []models.AudioTrack{
 		{Language: "ja", Codec: "aac"},
@@ -153,6 +167,46 @@ func TestSelectAudioTrack_SeriesPrefCrossFormat(t *testing.T) {
 	got = playback.SelectAudioTrack(tracks, "en", pref2)
 	if got != 2 {
 		t.Errorf("series pref ja fallback: got %d, want 2", got)
+	}
+}
+
+func TestSelectAudioTrack_SeriesPrefIndexKeepsRegionalVariant(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "en", Codec: "aac", Channels: 2, Title: "Commentary"},
+		{Language: "en-US", Codec: "eac3", Channels: 6, Title: "English 5.1", Default: true},
+	}
+
+	// Preference saved before regional subtags were preserved: bare "en" for
+	// the track at index 1. The saved index must still win over the bare
+	// "en" commentary track at index 0.
+	pref := &playback.AudioTrackPreference{
+		AudioTrackIndex: 1,
+		AudioLanguage:   "en",
+	}
+	if got := playback.SelectAudioTrack(tracks, "", pref); got != 1 {
+		t.Fatalf("SelectAudioTrack() = %d, want saved index 1", got)
+	}
+}
+
+func TestSelectAudioTrack_SignaturePrefersExactRegionalTag(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "en-GB", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
+		{Language: "en-US", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
+	}
+	sig := func(language string) *userstore.AudioTrackSignature {
+		return &userstore.AudioTrackSignature{Language: language, Title: "English 5.1", Codec: "eac3", Layout: "5.1", Channels: 6}
+	}
+
+	// A regional signature must not settle for the earlier variant.
+	pref := &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en-US", TrackSignature: sig("en-US")}
+	if got := playback.SelectAudioTrack(tracks, "", pref); got != 1 {
+		t.Fatalf("en-US signature: SelectAudioTrack() = %d, want 1", got)
+	}
+
+	// A legacy bare-language signature still matches a regional track.
+	pref = &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en", TrackSignature: sig("en")}
+	if got := playback.SelectAudioTrack(tracks, "", pref); got != 0 {
+		t.Fatalf("bare en signature: SelectAudioTrack() = %d, want 0", got)
 	}
 }
 

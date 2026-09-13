@@ -87,6 +87,23 @@ describe("sortSubtitlesBySource", () => {
 });
 
 describe("findPreferredSubtitleIndex", () => {
+  it("prefers an exact regional tag over generic and other regional tracks", () => {
+    const tracks = [
+      makeSub({ index: 0, language: "en-GB" }),
+      makeSub({ index: 1, language: "en" }),
+      makeSub({ index: 2, language: "en-US" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en-US")).toBe(2);
+  });
+
+  it("falls back to a generic language before another region", () => {
+    const tracks = [
+      makeSub({ index: 0, language: "en-GB" }),
+      makeSub({ index: 1, language: "en" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en-US")).toBe(1);
+  });
+
   it("prefers external over embedded for same language", () => {
     const tracks = [
       makeSub({ index: 0, source: "embedded", language: "en" }),
