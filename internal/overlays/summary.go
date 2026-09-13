@@ -49,6 +49,31 @@ func BuildSummary(files []*models.MediaFile) *Summary {
 	return summary
 }
 
+// BestFile returns the file a summary is derived from: the highest resolution,
+// then the richest dynamic-range metadata, then the earliest file in the slice.
+//
+// It is exported because the same choice is also made in SQL, by
+// sections.overlaySummaryQuery, so that a card backed by thousands of files
+// (every episode of a series shares the series content_id) can be reduced to one
+// row inside PostgreSQL instead of being shipped here in full. The two rankings
+// must agree; TestOverlaySummarySQLRankingMatchesGo pins that.
+func BestFile(files []*models.MediaFile) *models.MediaFile {
+	return bestFile(files)
+}
+
+// ResolutionRank exposes the resolution ordering used by BestFile so the SQL
+// mirror can be tested against it.
+func ResolutionRank(value string) int { return resolutionRank(value) }
+
+// RangeRank exposes the dynamic-range ordering used by BestFile so the SQL
+// mirror can be tested against it.
+func RangeRank(file *models.MediaFile) int {
+	if file == nil {
+		return 0
+	}
+	return rangeRank(file)
+}
+
 func bestFile(files []*models.MediaFile) *models.MediaFile {
 	var best *models.MediaFile
 	bestRes := -1

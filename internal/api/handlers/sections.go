@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -589,23 +591,79 @@ func (h *SectionHandler) HandleLibraryLayout(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// slowHomeSectionsThreshold is the phase-timing alarm for GET /home/sections.
+// It is deliberately well below the endpoint's typical duration: a threshold set
+// at the middle of the distribution almost never fires and reports nothing about
+// where the time went.
+const slowHomeSectionsThreshold = 500 * time.Millisecond
+
+// sectionPhaseTimer records how long each phase of a sections request took.
+// Without it the endpoint is one opaque duration: FetchAll has its own alarm,
+// but the response-enrichment pass that follows it had no timing at all.
+type sectionPhaseTimer struct {
+	start  time.Time
+	last   time.Time
+	phases []any
+}
+
+func newSectionPhaseTimer() *sectionPhaseTimer {
+	now := time.Now()
+	return &sectionPhaseTimer{start: now, last: now}
+}
+
+func (t *sectionPhaseTimer) mark(name string) {
+	now := time.Now()
+	t.phases = append(t.phases, name+"_ms", now.Sub(t.last).Milliseconds())
+	t.last = now
+}
+
+// log emits the whole breakdown as one line: WARN past the threshold, DEBUG
+// below it, so the phases are always available without making a slow request
+// indistinguishable from a fast one.
+func (t *sectionPhaseTimer) log(ctx context.Context, attrs ...any) {
+	total := time.Since(t.start)
+	all := append([]any{"total_ms", total.Milliseconds()}, attrs...)
+	all = append(all, t.phases...)
+	if total >= slowHomeSectionsThreshold {
+		slog.WarnContext(ctx, "slow home sections request", all...)
+		return
+	}
+	slog.DebugContext(ctx, "home sections timing", all...)
+}
+
 // HandleHomeSections handles GET /home/sections
 func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Request) {
 	if !rejectInvalidImageSize(w, r) {
 		return
 	}
+	timer := newSectionPhaseTimer()
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(r)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load sections")
 		return
 	}
+	timer.mark("resolve")
 
 	userID := apimw.GetUserID(r.Context())
 	resolved = h.maybeInjectNextUp(r.Context(), resolved, userID)
+	timer.mark("next_up")
+
 	withItems := h.fetcher.FetchAll(r.Context(), resolved, nil, libraryIDs, userID, profileID, accessFilter)
+	timer.mark("fetch_all")
+
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	writeJSON(w, http.StatusOK, h.buildSectionsResponse(r, withItems, nil))
+	response := h.buildSectionsResponse(r, withItems, nil)
+	timer.mark("build_response")
+
+	writeJSON(w, http.StatusOK, response)
+	timer.mark("write")
+
+	itemCount := 0
+	for _, section := range withItems {
+		itemCount += len(section.Items)
+	}
+	timer.log(r.Context(), "section_count", len(withItems), "item_count", itemCount)
 }
 
 // HandleHomeSectionItems handles GET /home/sections/{id}/items
@@ -1257,7 +1315,6 @@ type sectionItemImageURLs struct {
 func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sections.SectionWithItems, libraryID *int) homeSectionsResponse {
 	deduplicateSectionItems(r.Context(), withItems)
 
-	overlaySummaries := make(map[string]*models.OverlaySummary)
 	contentIDs := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, section := range withItems {
@@ -1272,24 +1329,50 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 			contentIDs = append(contentIDs, item.ContentID)
 		}
 	}
-	if len(contentIDs) > 0 && h.fetcher != nil {
-		summaries, err := h.fetcher.ListOverlaySummaries(r.Context(), contentIDs, requestAccessFilter(r))
-		if err != nil {
-			slog.ErrorContext(r.Context(), "loading overlay summaries", "component", "api", "error", err)
-		} else {
-			overlaySummaries = summaries
-		}
-	}
 
-	resp := homeSectionsResponse{
-		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
-	}
 	allItems := make([]*models.MediaItem, 0)
 	for _, s := range withItems {
 		allItems = append(allItems, s.Items...)
 	}
+
+	// The six enrichment lookups below are independent of one another — they are
+	// only combined when the cards are assembled — but each is a database round
+	// trip over every card on the page. Run serially they added up to the larger
+	// half of a home request, so they run together. Concurrency stays at six,
+	// matching the fan-out FetchAll already takes, so peak pool usage per request
+	// is unchanged (the two phases never overlap).
+	overlaySummaries := make(map[string]*models.OverlaySummary)
 	playTargets := map[string]string{}
-	if h.playableTargets != nil {
+	var userStates map[string]*itemUserStateResponse
+	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
+	var episodeMeta map[string]sections.SectionItemMeta
+	var mangaChapterMeta map[string]sections.SectionItemMeta
+
+	var wg sync.WaitGroup
+	run := func(fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fn()
+		}()
+	}
+
+	run(func() {
+		if len(contentIDs) == 0 || h.fetcher == nil {
+			return
+		}
+		summaries, err := h.fetcher.ListOverlaySummaries(r.Context(), contentIDs, requestAccessFilter(r))
+		if err != nil {
+			slog.ErrorContext(r.Context(), "loading overlay summaries", "component", "api", "error", err)
+			return
+		}
+		overlaySummaries = summaries
+	})
+
+	run(func() {
+		if h.playableTargets == nil {
+			return
+		}
 		inputs := make([]catalog.PlayableTargetInput, 0, len(allItems))
 		for _, item := range allItems {
 			if item == nil || item.ContentID == "" {
@@ -1314,14 +1397,21 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 		})
 		if err != nil {
 			slog.WarnContext(r.Context(), "resolving section playable targets", "component", "api", "error", err)
-		} else {
-			playTargets = resolvedTargets
+			return
 		}
+		playTargets = resolvedTargets
+	})
+
+	run(func() { userStates = h.listSectionItemUserStates(r, allItems) })
+	run(func() { imageURLs = h.resolveSectionItemImageURLs(r.Context(), withItems, requestImageSize(r)) })
+	run(func() { episodeMeta = h.listSectionEpisodeItemMeta(r.Context(), withItems, requestAccessFilter(r)) })
+	run(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(r.Context(), allItems) })
+
+	wg.Wait()
+
+	resp := homeSectionsResponse{
+		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
 	}
-	userStates := h.listSectionItemUserStates(r, allItems)
-	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems, requestImageSize(r))
-	episodeMeta := h.listSectionEpisodeItemMeta(r.Context(), withItems, requestAccessFilter(r))
-	mangaChapterMeta := h.listSectionMangaChapterItemMeta(r.Context(), allItems)
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
 		for _, item := range s.Items {
