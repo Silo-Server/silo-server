@@ -1,5 +1,8 @@
-import type { ConnectionCheckResponse } from "@/api/types";
+import { useState } from "react";
+
+import type { AdminSettingsConnectionCheckRequest, ConnectionCheckResponse } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
 
 type Props = {
   onClick: () => void | Promise<void>;
@@ -45,4 +48,34 @@ export function ConnectionCheckAction({
       ) : null}
     </div>
   );
+}
+
+type ConnectionCheckKind = Parameters<
+  ReturnType<typeof useCheckAdminSettingsConnection>["mutateAsync"]
+>[0]["kind"];
+
+/**
+ * State for one `ConnectionCheckAction`: runs the server-side probe for
+ * `kind` against the form's staged values for `keys` and keeps the last
+ * result, mapping a transport failure onto the same `{ success, message }`
+ * shape the probe returns.
+ */
+export function useConnectionCheck(
+  kind: ConnectionCheckKind,
+  form: { buildConnectionCheckRequest: (keys: string[]) => AdminSettingsConnectionCheckRequest },
+  keys: string[],
+) {
+  const mutation = useCheckAdminSettingsConnection();
+  const [result, setResult] = useState<ConnectionCheckResponse | null>(null);
+  async function run() {
+    try {
+      setResult(await mutation.mutateAsync({ kind, body: form.buildConnectionCheckRequest(keys) }));
+    } catch (error) {
+      setResult({
+        success: false,
+        message: error instanceof Error ? error.message : "Connection check failed.",
+      });
+    }
+  }
+  return { run, result, isPending: mutation.isPending };
 }

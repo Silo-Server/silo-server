@@ -51,9 +51,13 @@ var contractDigest = func() string {
 // ContractDigest is the SHA-256 (hex) of the embedded OpenAPI artifact.
 func ContractDigest() string { return contractDigest }
 
-// SetupStatus reports whether the server still needs its first administrator.
+// SetupStatus reports whether the server still needs its first administrator
+// and whether the first-run wizard has already been completed.
 type SetupStatus struct {
 	NeedsSetup bool `json:"needs_setup" doc:"True until the first administrator account exists" example:"false"`
+	// WizardCompleted is additive: older clients that only read needs_setup
+	// keep working, and a server without a settings store reports false.
+	WizardCompleted bool `json:"wizard_completed" doc:"True once the first-run setup wizard has been finished; the web client refuses to reopen it afterwards" example:"true"`
 }
 
 // SetupStatusOutput is the getSetupStatus response.
@@ -84,7 +88,16 @@ func (reg *Registry) getSetupStatus(ctx context.Context, _ *struct{}) (*SetupSta
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
-	return &SetupStatusOutput{Body: SetupStatus{NeedsSetup: needsSetup}}, nil
+	status := SetupStatus{NeedsSetup: needsSetup}
+	// The marker only matters once an account exists; a fresh install has
+	// nothing to complete yet. A settings read failure degrades to "not
+	// completed" rather than failing public discovery.
+	if !needsSetup {
+		if completed, err := reg.deps.Accounts.SetupWizardCompleted(ctx); err == nil {
+			status.WizardCompleted = completed
+		}
+	}
+	return &SetupStatusOutput{Body: status}, nil
 }
 
 func getSystemInfo(_ context.Context, _ *struct{}) (*SystemInfoOutput, error) {

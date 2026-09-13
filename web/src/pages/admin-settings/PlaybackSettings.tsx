@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
-import { useHWAccelDetection, type HWAccelInfo } from "@/hooks/queries/admin/system";
+import { useHWAccelDetection } from "@/hooks/queries/admin/system";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,10 @@ import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
   CHAPTER_THUMBNAIL_EXECUTION_DEFAULT,
+  HW_ACCEL_OPTIONS,
   buildHWDeviceRows,
   chapterThumbnailExecutionOptions,
+  describeDetection,
   hasUsableTranscodeNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
@@ -322,14 +324,7 @@ export default function PlaybackSettings() {
           <SettingField
             label="Hardware acceleration"
             type="select"
-            options={[
-              { value: "auto", label: "Auto" },
-              { value: "qsv", label: "Intel Quick Sync (QSV)" },
-              { value: "vaapi", label: "VA-API" },
-              { value: "nvenc", label: "NVIDIA NVENC" },
-              { value: "videotoolbox", label: "VideoToolbox (macOS)" },
-              { value: "none", label: "Software" },
-            ]}
+            options={HW_ACCEL_OPTIONS}
             description="Auto picks the best device this server can see."
             status={hwAccelStatus}
             value={hwAccel}
@@ -635,34 +630,4 @@ export default function PlaybackSettings() {
       />
     </div>
   );
-}
-
-function formatResolved(resolved: string): string {
-  switch (resolved) {
-    case "qsv":
-      return "Intel Quick Sync (QSV)";
-    case "vaapi":
-      return "VA-API";
-    case "nvenc":
-      return "NVIDIA NVENC";
-    case "videotoolbox":
-      return "VideoToolbox (macOS)";
-    case "none":
-      return "Software";
-    default:
-      return resolved;
-  }
-}
-
-/**
- * One-line detection result, e.g. "Detected VA-API on renderD128". Returns
- * undefined while nothing has been probed yet so the caller can show its own
- * "detecting" state instead of an empty phrase.
- */
-function describeDetection(detection: HWAccelInfo | undefined): string | undefined {
-  if (!detection) return undefined;
-  if (detection.resolved === "none") return "No supported graphics hardware found";
-  const device = detection.render_devices?.[0];
-  const onNode = detection.source === "transcode_node" ? " (transcode node)" : "";
-  return `Detected ${formatResolved(detection.resolved)}${device ? ` on ${device}` : ""}${onNode}`;
 }

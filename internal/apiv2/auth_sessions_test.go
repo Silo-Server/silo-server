@@ -145,6 +145,12 @@ func TestSetupServer(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.email" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
+	// A bare hostname is a legal address on paper but never what a sign-up
+	// form means; it is refused at the member, same as a missing one.
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/setup", `{"username":"admin","email":"admin@siloserver","password":"password"}`, nil), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.email" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
 	deps := pilotDeps(nil, nil)
 	deps.Sessions = &fakeSessionService{setupDone: true}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/setup", body, nil), TypeConflict)

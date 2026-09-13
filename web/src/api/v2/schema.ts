@@ -23431,6 +23431,11 @@ export interface components {
        * @example false
        */
       needs_setup: boolean;
+      /**
+       * @description True once the first-run setup wizard has been finished; the web client refuses to reopen it afterwards
+       * @example true
+       */
+      wizard_completed: boolean;
     };
     SignupInputBody: {
       /**

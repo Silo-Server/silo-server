@@ -148,8 +148,8 @@ This migration does not introduce generation guards or promise safe replay.
 
 Mobile push delivery (`notifications.apple_push_delivery_enabled` and
 `notifications.android_push_delivery_enabled`) defaults to on for new installs.
-The setup wizard shows the relay privacy disclosure and lets the administrator
-turn it off before finishing setup. When delivery is on and no relay credential
+The setup wizard offers the relay privacy disclosure beside the toggle and lets
+the administrator turn it off before finishing setup. When delivery is on and no relay credential
 is stored, the push sender self-registers with the configured relay on the
 first send; the explicit register endpoint remains for choosing a relay origin
 or rotating the credential. Servers that already had an account before this

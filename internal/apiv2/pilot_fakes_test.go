@@ -27,12 +27,17 @@ import (
 // in-memory answers with the same shapes and *handlers.APIError failures.
 
 type fakeAccounts struct {
-	needsSetup bool
-	users      map[int]handlers.UserView
-	err        error
+	needsSetup      bool
+	wizardCompleted bool
+	wizardErr       error
+	users           map[int]handlers.UserView
+	err             error
 }
 
 func (f fakeAccounts) NeedsSetup(context.Context) (bool, error) { return f.needsSetup, f.err }
+func (f fakeAccounts) SetupWizardCompleted(context.Context) (bool, error) {
+	return f.wizardCompleted, f.wizardErr
+}
 
 func (f fakeAccounts) CurrentUser(_ context.Context, claims *auth.Claims) (handlers.UserView, error) {
 	if f.err != nil {

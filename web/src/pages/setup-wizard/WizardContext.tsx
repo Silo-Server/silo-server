@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { listProfiles } from "@/hooks/queries/profiles";
 import type { Library, Profile } from "@/api/types";
 import { fetchAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
+import { useSubtitleProviders } from "@/hooks/queries/admin/subtitles";
 import { useAuth } from "@/hooks/useAuth";
 import {
   clearSetupWizardStorage,
@@ -17,14 +19,18 @@ interface WizardContextValue {
   // Auth-derived
   user: ReturnType<typeof useAuth>["user"];
   profile: ReturnType<typeof useAuth>["profile"];
-  setupRequired: boolean;
   setupInitialUser: ReturnType<typeof useAuth>["setupInitialUser"];
+  refreshSetupStatus: ReturnType<typeof useAuth>["refreshSetupStatus"];
   selectProfile: ReturnType<typeof useAuth>["selectProfile"];
 
   // Queries
   profiles: Profile[];
-  profilesLoading: boolean;
-  refetchProfiles: () => void;
+  /**
+   * The shared settings snapshot has arrived (or failed, or cannot load
+   * because no profile is selected). The account step stays on screen until
+   * this is true so the first settings step lands drawn, not as a skeleton.
+   */
+  settingsReady: boolean;
   libraries: Library[];
   librariesLoading: boolean;
   refetchLibraries: () => void;
@@ -33,6 +39,18 @@ interface WizardContextValue {
   stepDone: Record<SkippableStep, boolean>;
   markDone: (step: SkippableStep) => void;
   clearProgress: () => void;
+
+  /**
+   * Short summaries of what each finished step chose, shown on the rail
+   * ("NVIDIA NVENC", "2 libraries"). Kept in memory only: they are a courtesy
+   * for the current visit, not state the wizard depends on.
+   */
+  summaries: Partial<Record<SkippableStep | "account", string>>;
+  setSummary: (step: SkippableStep | "account", summary: string | undefined) => void;
+
+  /** A completed step the admin reopened from the rail, if any. */
+  visiting: SkippableStep | null;
+  visit: (step: SkippableStep | null) => void;
 }
 
 const WizardCtx = createContext<WizardContextValue | null>(null);
@@ -51,7 +69,8 @@ function shouldRetrySetupQuery(failureCount: number, error: unknown) {
 }
 
 export function WizardProvider({ children }: { children: ReactNode }) {
-  const { user, profile, setupRequired, setupInitialUser, selectProfile } = useAuth();
+  const { user, profile, setupRequired, setupInitialUser, selectProfile, refreshSetupStatus } =
+    useAuth();
   const isAdmin = user?.role === "admin";
 
   const [stepDone, setStepDone] = useState<Record<SkippableStep, boolean>>(() => {
@@ -61,6 +80,16 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     }
     return readSetupWizardFlags();
   });
+  const [summaries, setSummaries] = useState<WizardContextValue["summaries"]>({});
+  const [visiting, setVisiting] = useState<SkippableStep | null>(null);
+
+  // Every settings step reads the same snapshot, so one warm copy here means
+  // no step after the first ever shows a skeleton. The provider list is the
+  // one other read a step needs on entry; it is cheap and 30s fresh.
+  const settingsQuery = useAdminServerSettings();
+  useSubtitleProviders(isAdmin && profile !== null);
+  const settingsReady =
+    profile === null || settingsQuery.data !== undefined || settingsQuery.isError;
 
   const profilesQuery = useQuery({
     queryKey: ["setup-wizard", "profiles"],
@@ -69,23 +98,30 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     retry: shouldRetrySetupQuery,
   });
 
-  const profileComplete = (profilesQuery.data ?? []).length > 0;
-
   const librariesQuery = useQuery({
     queryKey: ["setup-wizard", "libraries"],
     queryFn: ({ signal }) => fetchAdminLibraries(signal),
-    enabled: isAdmin && profileComplete,
+    enabled: isAdmin,
     retry: shouldRetrySetupQuery,
   });
 
   const markDone = useCallback((step: SkippableStep) => {
     writeSetupWizardFlag(step, true);
     setStepDone((prev) => ({ ...prev, [step]: true }));
+    setVisiting(null);
   }, []);
 
   const clearProgress = useCallback(() => {
     clearSetupWizardStorage();
     setStepDone(createEmptySetupWizardFlags());
+    setVisiting(null);
+  }, []);
+
+  const setSummary = useCallback((step: SkippableStep | "account", summary: string | undefined) => {
+    setSummaries((prev) => {
+      if (prev[step] === summary) return prev;
+      return { ...prev, [step]: summary };
+    });
   }, []);
 
   return (
@@ -93,18 +129,21 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         profile,
-        setupRequired,
         setupInitialUser,
+        refreshSetupStatus,
         selectProfile,
         profiles: profilesQuery.data ?? [],
-        profilesLoading: !!user && profilesQuery.isPending,
-        refetchProfiles: () => void profilesQuery.refetch(),
+        settingsReady,
         libraries: librariesQuery.data ?? [],
-        librariesLoading: isAdmin && profileComplete && librariesQuery.isPending,
+        librariesLoading: isAdmin && librariesQuery.isPending,
         refetchLibraries: () => void librariesQuery.refetch(),
         stepDone,
         markDone,
         clearProgress,
+        summaries,
+        setSummary,
+        visiting,
+        visit: setVisiting,
       }}
     >
       {children}

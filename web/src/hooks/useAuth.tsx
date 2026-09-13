@@ -32,6 +32,10 @@ interface AuthState {
   loading: boolean;
   setupLoading: boolean;
   setupRequired: boolean;
+  /** The first-run wizard was finished on this server; /setup must not reopen. */
+  setupCompleted: boolean;
+  /** Re-reads the public setup status, e.g. after the wizard records completion. */
+  refreshSetupStatus: () => Promise<void>;
   providers: AuthProviderOption[];
   isImpersonating: boolean;
   login: (username: string, password: string, provider?: string) => Promise<void>;
@@ -201,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [setupLoading, setSetupLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
+  const [setupCompleted, setSetupCompleted] = useState(false);
   const [providers, setProviders] = useState<AuthProviderOption[]>([]);
   const isImpersonating = Boolean(user?.impersonation?.active);
   const soleProfileBootstrapRef = useRef<string | null>(null);
@@ -318,6 +323,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [clearActiveAuthState, clearAuthState, restoreAdminUser]);
 
+  const refreshSetupStatus = useCallback(async () => {
+    try {
+      const status = await v2("GET /api/v2/system/setup");
+      setSetupRequired(status.needs_setup);
+      setSetupCompleted(status.wizard_completed === true);
+    } catch {
+      // Keep the last known status; the next app load re-reads it.
+    }
+  }, []);
+
   const logout = useCallback(() => {
     // Fire and forget the server logout
     if (getAccessToken()) {
@@ -366,10 +381,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         setSetupRequired(status.needs_setup);
+        setSetupCompleted(status.wizard_completed === true);
         setProviders(availableProviders.items ?? []);
       } catch {
         if (!cancelled) {
           setSetupRequired(false);
+          setSetupCompleted(false);
           setProviders([]);
         }
       } finally {
@@ -479,9 +496,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const tokens = await v2("POST /api/v2/auth/setup", {
         body: { username, email, password, create_default_profile: true },
       });
-      applyAuthenticatedUser(sessionFromTokenPair(tokens));
+      const session = sessionFromTokenPair(tokens);
+      // The default profile is created with the account. Select it in the
+      // same batch as the user so profile-scoped work (the wizard's settings
+      // reads) can start on the first render, instead of waiting for the
+      // sole-profile bootstrap effect to run a render later.
+      setAccessToken(session.access_token);
+      setRefreshToken(session.refresh_token);
+      const created = getBootstrapProfile((await listProfiles().catch(() => null))?.profiles ?? []);
+      applyAuthenticatedUser(session);
+      if (created) selectProfile(created);
     },
-    [applyAuthenticatedUser],
+    [applyAuthenticatedUser, selectProfile],
   );
 
   const signup = useCallback(
@@ -502,6 +528,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         setupLoading,
         setupRequired,
+        setupCompleted,
+        refreshSetupStatus,
         providers,
         isImpersonating,
         login,

@@ -4174,7 +4174,8 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "needs_setup"
+                    "needs_setup",
+                    "wizard_completed"
                   ]
                 },
                 {
@@ -4186,6 +4187,11 @@
                   "pointer": "/needs_setup",
                   "op": "equals",
                   "value": false
+                },
+                {
+                  "pointer": "/wizard_completed",
+                  "op": "type",
+                  "value": "boolean"
                 }
               ]
             }
@@ -4237,7 +4243,8 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "needs_setup"
+                    "needs_setup",
+                    "wizard_completed"
                   ]
                 },
                 {
@@ -4249,6 +4256,11 @@
                   "pointer": "/needs_setup",
                   "op": "equals",
                   "value": false
+                },
+                {
+                  "pointer": "/wizard_completed",
+                  "op": "type",
+                  "value": "boolean"
                 }
               ]
             }
@@ -4300,7 +4312,8 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "needs_setup"
+                    "needs_setup",
+                    "wizard_completed"
                   ]
                 },
                 {
@@ -4312,6 +4325,11 @@
                   "pointer": "/needs_setup",
                   "op": "equals",
                   "value": false
+                },
+                {
+                  "pointer": "/wizard_completed",
+                  "op": "type",
+                  "value": "boolean"
                 }
               ]
             }

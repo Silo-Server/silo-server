@@ -424,6 +424,11 @@ func (h *AuthHandler) NeedsSetup(ctx context.Context) (bool, error) {
 	return h.service.NeedsSetup(ctx)
 }
 
+// SetupWizardCompleted reports whether the first-run wizard was finished.
+func (h *AuthHandler) SetupWizardCompleted(ctx context.Context) (bool, error) {
+	return h.service.SetupWizardCompleted(ctx)
+}
+
 // CurrentUser builds the account view of the authenticated caller. v1 GET
 // /auth/me and v2 getCurrentUser both call it; a failure is an *APIError.
 func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (UserView, error) {

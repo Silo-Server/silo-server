@@ -67,6 +67,7 @@ import { useNavigate } from "react-router";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
+import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
@@ -1182,6 +1183,10 @@ function EditUserForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy.current || conflict || saved) return;
+    if (!isValidEmail(email)) {
+      setError(INVALID_EMAIL_MESSAGE);
+      return;
+    }
     busy.current = true;
     onBusy(true);
     setError("");

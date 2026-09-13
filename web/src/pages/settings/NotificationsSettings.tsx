@@ -20,6 +20,7 @@ import {
   Webhook as WebhookIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import type {
   NotificationChannelMode,
   NotificationEmailPreferences,
@@ -220,6 +221,10 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
   const submit = () => {
     const trimmed = address.trim();
     if (!trimmed || requestAddress.isPending) {
+      return;
+    }
+    if (!isValidEmail(trimmed)) {
+      toast.error(INVALID_EMAIL_MESSAGE);
       return;
     }
     requestAddress.mutate(trimmed, {

@@ -319,6 +319,9 @@ func (reg *Registry) createAdminAccount(ctx context.Context, in *AdminAccountCre
 		return nil, p
 	}
 	b := in.Body
+	if p := invalidEmailProblem(b.Email); p != nil {
+		return nil, p
+	}
 	var libraries []int
 	if policy.LibraryIDs.Value != nil {
 		libraries = *policy.LibraryIDs.Value
@@ -354,6 +357,11 @@ func (reg *Registry) updateAdminAccount(ctx context.Context, in *AdminAccountUpd
 		return nil, p
 	}
 	b := in.Body
+	if b.Email != nil {
+		if p := invalidEmailProblem(*b.Email); p != nil {
+			return nil, p
+		}
+	}
 	input.Username = b.Username
 	input.Email = b.Email
 	input.Password = b.Password

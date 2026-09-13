@@ -107,9 +107,10 @@ export function useAdminRestartKeys() {
   });
 }
 
-export function useAdminServerStatus() {
+export function useAdminServerStatus(enabled = true) {
   return useQuery({
     queryKey: adminKeys.serverStatus(),
+    enabled,
     queryFn: async (): Promise<AdminServerStatus> => {
       const profileContext = captureProfileRequestContext();
       if (!profileContext) throw new StaleApiRequestContextError();

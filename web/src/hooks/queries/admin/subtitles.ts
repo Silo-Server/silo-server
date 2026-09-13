@@ -49,11 +49,12 @@ export function useAdminUpdateDownloadedSubtitle() {
   });
 }
 
-export function useSubtitleProviders() {
+export function useSubtitleProviders(enabled = true) {
   const scope = adminSubtitleListScope();
   const query = useQuery({
     queryKey: [...adminKeys.subtitleProviders(), scope],
     queryFn: ({ signal }) => listSubtitleProviders(scope, signal),
+    enabled,
     retry: false,
     staleTime: ADMIN_STALE_TIME,
   });

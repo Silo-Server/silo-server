@@ -310,6 +310,9 @@ func (reg *Registry) setupServer(ctx context.Context, in *SetupServerInput) (*To
 	if reg.deps.Sessions == nil {
 		return nil, unavailable("account")
 	}
+	if p := invalidEmailProblem(in.Body.Email); p != nil {
+		return nil, p
+	}
 	view, err := reg.deps.Sessions.SetupInitialUser(ctx, reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, "", in.Body.CreateDefaultProfile, in.Body.DefaultProfileName))
 	if err != nil {
 		var apiErr *handlers.APIError
@@ -340,6 +343,9 @@ func (reg *Registry) signup(ctx context.Context, in *SignupInput) (*TokenPairOut
 	if reg.deps.Sessions == nil {
 		return nil, unavailable("account")
 	}
+	if p := invalidEmailProblem(in.Body.Email); p != nil {
+		return nil, p
+	}
 	view, err := reg.deps.Sessions.Signup(ctx, reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, in.Body.InviteCode, in.Body.CreateDefaultProfile, in.Body.DefaultProfileName))
 	if err != nil {
 		var apiErr *handlers.APIError
@@ -349,6 +355,17 @@ func (reg *Registry) signup(ctx context.Context, in *SignupInput) (*TokenPairOut
 		return nil, registrationProblem(err)
 	}
 	return &TokenPairOutput{Body: tokenPairFromView(view)}, nil
+}
+
+// invalidEmailProblem is the contract-level check on an account address: one
+// bare mailbox with a dotted domain (internal/auth.ValidateEmail). It runs
+// before the service so the problem is the same whatever backs it.
+func invalidEmailProblem(email string) *Problem {
+	if _, err := auth.ValidateEmail(email); err != nil {
+		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: locationBody + ".email", Code: codeInvalid, Detail: "Enter a valid email address, like name@example.com."})
+	}
+	return nil
 }
 
 // registrationProblem renders a setup or signup failure: a rejected member

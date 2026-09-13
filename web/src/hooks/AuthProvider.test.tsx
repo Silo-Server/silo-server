@@ -116,7 +116,9 @@ describe("AuthProvider", () => {
     restoreUserSessionMock.mockResolvedValue(null);
     v2Mock.mockImplementation((key: string) => {
       if (key === "GET /api/v2/system/setup") {
-        return Promise.resolve(v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false }));
+        return Promise.resolve(
+          v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false, wizard_completed: false }),
+        );
       }
       if (key === "GET /api/v2/auth/providers") {
         return Promise.resolve(v2Fixture<"GET /api/v2/auth/providers">({ items: [] }));
@@ -128,7 +130,9 @@ describe("AuthProvider", () => {
   it("preserves OAuth login providers returned by the auth providers endpoint", async () => {
     v2Mock.mockImplementation((key: string) => {
       if (key === "GET /api/v2/system/setup") {
-        return Promise.resolve(v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false }));
+        return Promise.resolve(
+          v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false, wizard_completed: false }),
+        );
       }
       if (key === "GET /api/v2/auth/providers") {
         return Promise.resolve(v2Fixture<"GET /api/v2/auth/providers">(listAuthProvidersOk));

@@ -1,3 +1,4 @@
 {
-  "needs_setup": false
+  "needs_setup": false,
+  "wizard_completed": false
 }

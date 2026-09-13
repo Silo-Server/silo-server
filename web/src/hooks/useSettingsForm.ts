@@ -208,6 +208,12 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   return {
     isLoading,
+    /**
+     * True until the snapshot has either arrived or failed. Unlike `isLoading`
+     * this also covers a query that has not been allowed to start yet (no
+     * profile selected), so a form can hold its skeleton through that gap.
+     */
+    isPending: settings == null && !loadError,
     /** True when the settings snapshot could not be read; values are unset. */
     loadError,
     /** True once the settings snapshot is available to read and save against. */

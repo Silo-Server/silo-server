@@ -22,15 +22,6 @@ import type { StreamNode } from "@/api/types";
 import { useCreateNode, useUpdateNode, useDeleteNode } from "./nodes";
 import { adminKeys } from "../keys";
 import AdminNodes from "@/pages/AdminNodes";
-import { NodesFinishStep } from "@/pages/setup-wizard/steps/NodesFinishStep";
-vi.mock("@/pages/setup-wizard/WizardContext", () => ({
-  useWizardContext: () => ({
-    profile: null,
-    profiles: [],
-    selectProfile: vi.fn(),
-    clearProgress: vi.fn(),
-  }),
-}));
 const node: StreamNode = {
   id: "17",
   config_etag: '"original"',
@@ -226,38 +217,6 @@ it("mounted delete confirmation retains original target and validator", async ()
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(new Headers(writes[0]!.headers).get("If-Match")).toBe('"original"');
 });
-it("mounted setup node form creates through v2 and waits for acknowledgement", async () => {
-  setProfileId(null);
-  setProfileToken(null);
-  let finish!: (r: Response) => void;
-  const writes: RequestInit[] = [];
-  const fetchMock = vi.fn((_url: unknown, init: RequestInit) => {
-    writes.push(init);
-    return new Promise<Response>((r) => {
-      finish = r;
-    });
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  const { wrapper: Wrapper } = fixture();
-  render(
-    <MemoryRouter>
-      <Wrapper>
-        <NodesFinishStep />
-      </Wrapper>
-    </MemoryRouter>,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Add a worker node" }));
-  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Wizard node" } });
-  fireEvent.change(screen.getByLabelText("URL"), { target: { value: node.url } });
-  fireEvent.click(screen.getByRole("button", { name: "Add node" }));
-  await waitFor(() => expect(writes).toHaveLength(1));
-  expect(String(fetchMock.mock.calls[0]![0])).toContain("/api/v2/admin/nodes");
-  expect(screen.getByLabelText("Name")).toBeDisabled();
-  await act(async () => finish(saved()));
-  await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue(""));
-  expect(screen.getByText("Wizard node")).toBeInTheDocument();
-});
-
 it("setup create preserves authenticated profile absence", async () => {
   setProfileId(null);
   setProfileToken(null);

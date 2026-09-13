@@ -51,6 +51,7 @@ import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
 
 import { Copy, MailPlus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import { formatDate } from "@/lib/datetime";
 
 // The claim-link box shown after create/resend. min-w-0 + overflow-hidden on
@@ -480,6 +481,7 @@ function CreateInvitationForm({
   const { data: accessGroups = [] } = useAccessGroups();
   const { data: libraries = [] } = useAdminLibraries();
   const [email, setEmail] = useState("");
+  const [emailInvalid, setEmailInvalid] = useState(false);
   const [role, setRole] = useState<"user" | "admin">("user");
   const [accessGroupID, setAccessGroupID] = useState<number | null>(null);
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(null);
@@ -499,6 +501,10 @@ function CreateInvitationForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy.current || needsReload || (!defaultProfile && createProfile)) return;
+    if (!isValidEmail(email)) {
+      setEmailInvalid(true);
+      return;
+    }
     busy.current = true;
     onBusy(true);
     setError("");
@@ -583,11 +589,21 @@ function CreateInvitationForm({
           id="invitation-email"
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (emailInvalid) setEmailInvalid(false);
+          }}
           placeholder="them@example.com"
+          aria-invalid={emailInvalid || undefined}
+          aria-describedby={emailInvalid ? "invitation-email-error" : undefined}
           autoFocus
           required
         />
+        {emailInvalid ? (
+          <p id="invitation-email-error" className="text-destructive text-xs">
+            {INVALID_EMAIL_MESSAGE}
+          </p>
+        ) : null}
         <p className="text-muted-foreground text-xs">
           This becomes both the destination and their sign-in username.
         </p>

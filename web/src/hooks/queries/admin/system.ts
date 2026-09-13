@@ -39,6 +39,13 @@ export interface NodeHWAccel {
   error?: string;
 }
 
+export interface ToneMapCapability {
+  mode: string;
+  backend: string;
+  filter: string;
+  source_kinds: string[];
+}
+
 export interface HWAccelInfo {
   resolved: string;
   render_devices: string[];
@@ -46,6 +53,8 @@ export interface HWAccelInfo {
   intel_detected: boolean;
   source: "local" | "transcode_node";
   node_url?: string;
+  /** Validated tone-map executors on this server or its transcode nodes. */
+  tone_map_capabilities?: ToneMapCapability[];
   /** Per-node inventories when transcode nodes are registered. */
   nodes?: NodeHWAccel[];
 }

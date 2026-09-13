@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"sort"
 	"time"
 	"unicode/utf8"
@@ -411,6 +412,20 @@ func (s *Service) Signup(
 
 	// Log them in to create a session and return tokens.
 	return s.Login(ctx, username, password, deviceName, ip)
+}
+
+// SetupWizardCompleted reports whether the first-run setup wizard recorded
+// its completion. It is meaningful only once an account exists; before that
+// there is nothing to have completed.
+func (s *Service) SetupWizardCompleted(ctx context.Context) (bool, error) {
+	if s.settings == nil {
+		return false, nil
+	}
+	value, err := s.settings.Get(ctx, config.SetupCompletedSettingKey)
+	if err != nil {
+		return false, fmt.Errorf("checking setup completion: %w", err)
+	}
+	return value == "true", nil
 }
 
 // IsSignupEnabled reports whether public signups are enabled.

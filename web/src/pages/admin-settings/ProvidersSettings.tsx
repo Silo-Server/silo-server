@@ -46,6 +46,7 @@ import {
 } from "@/hooks/queries/admin/subtitles";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { sortSubtitleProviders } from "@/lib/subtitleProviders";
 
 import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
@@ -144,8 +145,6 @@ const SUBTITLE_PROVIDERS: Record<string, SubtitleProviderPresentation> = {
     monogramClass: "bg-violet-500/20 text-violet-700 dark:text-violet-300",
   },
 };
-
-const SUBTITLE_PROVIDER_ORDER = ["opensubtitles", "subdl", "subsource"];
 
 function presentationFor(providerName: string): SubtitleProviderPresentation {
   return (
@@ -600,14 +599,7 @@ export default function ProvidersSettings() {
   const offlineMarkerMode =
     markerMode === "off" ? "Off" : markerMode === "local" ? "Detect on this server" : null;
 
-  const providers = [...(data?.providers ?? [])].sort((a, b) => {
-    const ai = SUBTITLE_PROVIDER_ORDER.indexOf(a.provider_name);
-    const bi = SUBTITLE_PROVIDER_ORDER.indexOf(b.provider_name);
-    if (ai === -1 && bi === -1) return 0;
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
+  const providers = sortSubtitleProviders(data?.providers ?? []);
 
   if (form.isLoading || isLoading) {
     return (

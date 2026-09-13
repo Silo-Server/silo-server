@@ -733,6 +733,7 @@ type AccountService interface {
 	AuthorizePasswordChange(context.Context, *auth.Claims, string) error
 	ChangePassword(context.Context, *auth.Claims, string, string) error
 	NeedsSetup(ctx context.Context) (bool, error)
+	SetupWizardCompleted(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
 }
 

@@ -35638,10 +35638,18 @@
               false
             ],
             "type": "boolean"
+          },
+          "wizard_completed": {
+            "description": "True once the first-run setup wizard has been finished; the web client refuses to reopen it afterwards",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
-          "needs_setup"
+          "needs_setup",
+          "wizard_completed"
         ],
         "type": "object"
       },

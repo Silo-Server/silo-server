@@ -79,6 +79,7 @@ import {
   setAssignedPermission,
 } from "@/lib/permissions";
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
+import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -682,6 +683,10 @@ function UserForm({
       (!user && createDefaultProfile && !capabilities.data.default_profile)
     )
       return;
+    if (!isValidEmail(email)) {
+      setError(INVALID_EMAIL_MESSAGE);
+      return;
+    }
     busy.current = true;
     onBusy(true);
     setError("");

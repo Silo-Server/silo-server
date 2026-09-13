@@ -128,3 +128,40 @@ function detectedDevices(
   // Older nodes report only render_devices paths.
   return (detection.render_devices ?? []).map((path) => ({ path, description: "GPU" }));
 }
+
+/** The `playback.hw_accel` choices, in the order the select shows them. */
+export const HW_ACCEL_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  { value: "qsv", label: "Intel Quick Sync (QSV)" },
+  { value: "vaapi", label: "VA-API" },
+  { value: "nvenc", label: "NVIDIA NVENC" },
+  { value: "videotoolbox", label: "VideoToolbox (macOS)" },
+  { value: "none", label: "Software" },
+];
+
+/** Human name for a resolved hardware-acceleration backend. */
+export function formatResolved(resolved: string): string {
+  return HW_ACCEL_OPTIONS.find((option) => option.value === resolved)?.label ?? resolved;
+}
+
+/**
+ * One-line detection result, e.g. "Detected VA-API on renderD128". Returns
+ * undefined while nothing has been probed yet so the caller can show its own
+ * "detecting" state instead of an empty phrase.
+ */
+export function describeDetection(detection: HWAccelInfo | undefined): string | undefined {
+  if (!detection) return undefined;
+  if (detection.resolved === "none") return "No supported graphics hardware found";
+  const device = detection.render_devices?.[0];
+  const onNode = detection.source === "transcode_node" ? " (transcode node)" : "";
+  return `Detected ${formatResolved(detection.resolved)}${device ? ` on ${device}` : ""}${onNode}`;
+}
+
+/**
+ * Whether the probed executor inventory contains a validated hardware tone
+ * mapper. The server only lists capabilities it has actually verified, so an
+ * empty or missing list means hardware HDR-to-SDR is not available here.
+ */
+export function hasHardwareToneMapCapability(detection: HWAccelInfo | undefined): boolean {
+  return (detection?.tone_map_capabilities ?? []).some((cap) => cap.mode === "hardware");
+}

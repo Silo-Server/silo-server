@@ -1563,6 +1563,17 @@ a 412 asks the administrator to reload and review. Draft hydration includes
 validator and authority identity so edits cannot carry into another profile's
 otherwise identical configuration.
 
+### Setup completion marker
+
+`setup.completed` is an ordinary boolean server setting. The web setup wizard
+writes it as `true` from its final screen, and the public `GET
+/api/v2/system/setup` response reports it as `wizard_completed` (only once
+`needs_setup` is false). The web client redirects `/setup` to the admin area
+whenever it is true. The migration that introduced the key set it for every
+install that already had an account, since those had finished or abandoned
+setup on a build that could not record it. Clearing it through the settings
+API reopens the wizard for the next admin visit; nothing else reads it.
+
 ### Settings discovery
 
 `GET /api/v2/admin/settings/{key}` returns one visible stored value and its

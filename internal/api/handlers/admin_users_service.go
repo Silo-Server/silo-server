@@ -76,9 +76,16 @@ func validateAdminPassword(password string) error {
 	}
 	return nil
 }
+
+// invalidEmailMessage is what every account form shows for a malformed address.
+const invalidEmailMessage = "Enter a valid email address, like name@example.com"
+
 func validateAdminIdentity(username, email, role string) error {
 	if username == "" || email == "" {
 		return apiError(422, "validation_failed", "Username and email are required")
+	}
+	if _, err := auth.ValidateEmail(email); err != nil {
+		return fieldError("email", invalidEmailMessage)
 	}
 	if role != roleAdmin && role != models.RoleUser {
 		return fieldError("role", "Role must be admin or user")
@@ -171,6 +178,9 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		value := auth.NormalizeEmail(*input.Email)
 		if value == "" {
 			return 0, fieldError("email", "Email is required")
+		}
+		if _, err := auth.ValidateEmail(value); err != nil {
+			return 0, fieldError("email", invalidEmailMessage)
 		}
 		input.Email = new(value)
 	}

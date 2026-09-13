@@ -1207,7 +1207,7 @@ service layer as its v1 handler; v1 stays byte-identical and fully served.
 
 | Operation | v2 | v1 | Proves |
 | --- | --- | --- | --- |
-| `getSetupStatus` | `GET /api/v2/system/setup` | `GET /api/v1/auth/setup` | `public` discovery |
+| `getSetupStatus` | `GET /api/v2/system/setup` | `GET /api/v1/auth/setup` | `public` discovery; v2 adds `wizard_completed` (the `setup.completed` marker the web wizard writes on its last screen, so the client refuses to reopen `/setup`) |
 | `getCurrentUser` | `GET /api/v2/account/me` | `GET /api/v1/auth/me` | `authenticated`, no profile |
 | `listProgress` | `GET /api/v2/progress` | `GET /api/v1/progress/` | `profile_scoped` read with query parameters and cursor pagination |
 | `updateProfile` | `PATCH /api/v2/profiles/{id}` | `PUT /api/v1/profiles/{id}` | `profile_scoped` JSON mutation with a path parameter |
