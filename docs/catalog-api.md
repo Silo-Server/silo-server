@@ -59,8 +59,16 @@ file, so a restricted profile's badge describes a file that profile can access.
 
 Each section response reads current committed file metadata. Badge summaries have
 no result cache: a subsequent request sees file updates, removals, and library
-moves. This does not push updates into a client's existing cards or change when
-section membership refreshes.
+moves. Clients must fetch again to update their existing cards.
+
+Recently-added section membership is shared only within the same library and
+access scope. Scan-complete events are coalesced into invalidations at most once
+per 30 seconds; invalidation requests a refresh on the next read. While
+one background rebuild runs, readers may use the previous membership for at most
+30 seconds, capped by its original expiry. Repeated scans and failed refreshes
+cannot extend that deadline. Cold or expired membership requires a fresh build;
+an older in-flight build cannot replace the current generation. Badge summaries
+and per-profile playability are recomputed during this grace period.
 
 ## V2 personal-list pagination
 

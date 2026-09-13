@@ -3,6 +3,7 @@ package sections
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -181,7 +182,7 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 
 	// The new generation caches normally and is itself released by the next bump.
 	newKey := resolvedListCacheKey(recent, nil, []int{1}, catalog.AccessFilter{})
-	prime(newKey)
+	resolvedListSet(newKey, mediaItems("refreshed"), 1, clock)
 	clock = clock.Add(resolvedListInvalidationInterval)
 	InvalidateResolvedListCache()
 	if _, ok := resolvedListGet(newKey); ok {
@@ -190,11 +191,14 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 	if _, ok := resolvedListGet(genreKey); !ok {
 		t.Fatal("generation-independent entry must survive repeated invalidations")
 	}
+	// A further invalidation cannot extend an unrefreshed fallback.
+	clock = clock.Add(resolvedListInvalidationGrace)
+	InvalidateResolvedListCache()
 	resolvedListCacheMu.RLock()
 	size := len(resolvedListCache)
 	resolvedListCacheMu.RUnlock()
 	if size != 1 {
-		t.Fatalf("cache holds %d entries after two bumps, want 1 (the generation-independent rail)", size)
+		t.Fatalf("cache holds %d entries after three bumps, want 1 (the generation-independent rail)", size)
 	}
 }
 
@@ -930,5 +934,105 @@ func TestBlockingRebuildDetachedFromLeaderCancellation(t *testing.T) {
 	// The successful detached build must have been cached for later requests.
 	if _, ok := resolvedListGet("detach-key"); !ok {
 		t.Fatal("detached rebuild did not cache its result")
+	}
+}
+
+// A scan must not make every waiting client pay for the same expensive rebuild.
+func TestResolvedListCacheScanRefreshServesBoundedMembership(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+	now := time.Now()
+	resolvedListNow = func() time.Time { return now }
+	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	oldKey := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(oldKey, mediaItems("old"), 1, now)
+	InvalidateResolvedListCache()
+	key := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	loader := func(context.Context) ([]*models.MediaItem, int, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		return mediaItems("new"), 1, nil
+	}
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	for range 100 {
+		items, _, err := getOrRefresh(t.Context(), key, now, loader)
+		if err != nil || !slices.Equal(itemIDs(items), []string{"old"}) {
+			t.Fatalf("during refresh: %v, %v", itemIDs(items), err)
+		}
+	}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh did not start")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("loaders = %d", calls.Load())
+	}
+	entry, _ := resolvedListGet(key)
+	if !entry.expiresAt.Equal(now.Add(resolvedListInvalidationGrace)) {
+		t.Fatalf("expiry = %s", entry.expiresAt)
+	}
+	otherKey := resolvedListCacheKey(sec, nil, []int{8}, catalog.AccessFilter{})
+	if _, ok := resolvedListGet(otherKey); ok {
+		t.Fatal("fallback crossed a library scope")
+	}
+	close(release)
+	if !waitFor(2*time.Second, func() bool {
+		e, ok := resolvedListGet(key)
+		return ok && len(e.items) > 0 && e.items[0].ContentID == "new"
+	}) {
+		t.Fatal("fresh membership did not replace fallback")
+	}
+}
+
+func TestResolvedListCacheScanGraceExpiresAfterFailedRefresh(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+	now := time.Now()
+	resolvedListNow = func() time.Time { return now }
+	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	key := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(key, mediaItems("old"), 1, now)
+	InvalidateResolvedListCache()
+	key = resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	// Even when refreshes have produced no replacement, the grace deadline is
+	// a hard boundary. A blocking load must supply the result after it.
+	items, _, err := getOrRefresh(t.Context(), key, now.Add(resolvedListInvalidationGrace), staticLoader(mediaItems("fresh"), nil))
+	if err != nil || !slices.Equal(itemIDs(items), []string{"fresh"}) {
+		t.Fatalf("after deadline: %v, %v", itemIDs(items), err)
+	}
+}
+
+func TestResolvedListCacheScanPreservesConcurrentNewGenerationLoad(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+	now := time.Now()
+	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	oldKey := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(oldKey, mediaItems("old"), 1, now)
+	// Reproduce a reader finishing after namespace publication but before the
+	// invalidator has acquired the cache lock to carry fallback entries.
+	generation := resolvedListGeneration.Add(1)
+	current := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(current, mediaItems("fresh"), 1, now)
+	resolvedListInvalidationMu.Lock()
+	dropSupersededResolvedListEntries(generation)
+	resolvedListInvalidationMu.Unlock()
+	entry, ok := resolvedListGet(current)
+	if !ok || !slices.Equal(itemIDs(entry.items), []string{"fresh"}) {
+		t.Fatal("invalidation replaced the completed current-generation load")
+	}
+	if !entry.expiresAt.Equal(now.Add(resolvedListTTL)) {
+		t.Fatal("invalidation shortened a fresh entry's lifetime")
 	}
 }
