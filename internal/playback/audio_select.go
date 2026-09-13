@@ -21,10 +21,6 @@ type AudioTrackPreference struct {
 	TrackSignature  *userstore.AudioTrackSignature
 }
 
-func langMatch(a, b string) bool {
-	return langMatchRank(a, b) >= 0
-}
-
 // langMatchRank prefers an exact BCP-47 tag, then a bare language tag, and
 // finally another regional/script variant of the same language.
 func langMatchRank(candidate, preferred string) int {
@@ -69,7 +65,7 @@ func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPr
 
 		// 2. Series preference: try exact index+language match.
 		if seriesPref.AudioTrackIndex >= 0 && seriesPref.AudioTrackIndex < len(tracks) {
-			if langMatch(tracks[seriesPref.AudioTrackIndex].Language, seriesPref.AudioLanguage) {
+			if langMatchRank(tracks[seriesPref.AudioTrackIndex].Language, seriesPref.AudioLanguage) == 0 {
 				return seriesPref.AudioTrackIndex
 			}
 		}
