@@ -172,6 +172,18 @@ jobs:
         working-directory: .
         run: make verify-settings-bindings-web
 
+  compose:
+    name: Compose credentials
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Verify Compose requires an explicit database password
+        run: python3 scripts/check-compose-credentials.py
+
   docs:
     name: Docs hygiene
     runs-on: ubuntu-latest

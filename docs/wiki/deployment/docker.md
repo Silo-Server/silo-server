@@ -61,6 +61,16 @@ printf '\nPOSTGRES_PASSWORD=%s\nSECRET_KEY=%s\n' \
   "$(openssl rand -hex 24)" "$(openssl rand -base64 48)" >> .env
 ```
 
+Both `docker-compose.yml` and `docker-compose.dev.yml` require a non-empty
+`POSTGRES_PASSWORD`. Compose rejects a missing or empty value before starting
+containers. Copying `.env.example` alone does not configure a password.
+
+For an existing database, set `POSTGRES_PASSWORD` to its current password before
+using the updated Compose files. Changing `.env` does not change the password
+stored in PostgreSQL. Coordinate password rotation with the database role and
+all clients that use it; generating a new value only in `.env` breaks their
+connections.
+
 Set the host path to your media:
 
 ```dotenv
