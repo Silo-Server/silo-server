@@ -17,7 +17,9 @@ export function libraryTypeMeta(type: string) {
 // Keep these aligned with the video scanner and intro-marker library filters.
 export function librarySettingSupport(type: string) {
   const kind = type.trim().toLowerCase();
-  const video = ["movie", "movies", "series", "tv", "show", "tvshows", "mixed"].includes(kind);
+  const video = ["movie", "movies", "series", "tv", "show", "shows", "tvshows", "mixed"].includes(
+    kind,
+  );
   return {
     trailers: video,
     chapterThumbnails: video,
