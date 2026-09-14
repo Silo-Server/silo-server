@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -56,6 +57,14 @@ func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 			result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_transcription", nil, nil)
 			if err != nil || result.Success || result.Message != tc.want {
 				t.Fatalf("result = %+v, err = %v; want %q", result, err, tc.want)
+			}
+			rec := performSettingsCheckRequest(t, h, "/admin/settings/check/ai_transcription", map[string]any{"values": map[string]string{}, "dirty_keys": []string{}})
+			var legacy connectionCheckResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &legacy); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusOK || legacy.Success || legacy.Message != tc.want {
+				t.Fatalf("legacy response = %d %s; want safe diagnostic %q", rec.Code, rec.Body.String(), tc.want)
 			}
 		})
 	}

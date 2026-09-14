@@ -95,8 +95,12 @@ length are different limits. OpenRouter's chat provider-routing preferences do
 not apply to transcription requests.
 
 Generated tracks use the existing subtitle delivery path for Apple, Android,
-and Jellyfin clients. This provider configuration needs no new client fields,
-capability endpoint, or Jellyfin operation.
+and Jellyfin clients. Clients discover configured transcription support through
+GET `/api/v2/subtitles/ai/status`: `transcribe_enabled` reflects the existing
+subtitle service's configuration and engine availability, including OpenRouter.
+The per-file AI probe described above exposes which actions are available for
+that file. These existing capability responses cover this provider configuration;
+Apple, Android, and Jellyfin subtitle delivery require no new fields or operations.
 
 ## Stored tracks and provider search
 

@@ -236,19 +236,22 @@ func checkAITranscriptionConnection(ctx context.Context, cfg *config.Config) con
 	}
 
 	client := newAdminAISettingsCheckClient(aiClientConfig(cfg))
-	checkCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	// Allow the provider's 60-second processing window plus network overhead.
+	checkCtx, cancel := context.WithTimeout(ctx, 80*time.Second)
 	defer cancel()
 	result, err := client.Transcribe(checkCtx, llm.TranscribeRequest{
 		Filename: "silo-connection-check.wav",
 		Audio:    transcriptionCheckWAV,
-		Timeout:  30 * time.Second,
+		Timeout:  75 * time.Second,
 	})
 	if err != nil {
-		return connectionCheckResponse{
-			Success:     false,
-			Message:     fmt.Sprintf("Speech-to-text connection check failed: %v", err),
-			safeMessage: transcriptionCheckFailureMessage(err),
+		message := transcriptionCheckFailureMessage(err)
+		if message == "" {
+			message = "Connection check failed. Verify the submitted settings and provider availability."
 		}
+		// Both the legacy handler and native service consume this result.
+		// Never put provider-controlled error text in the response.
+		return connectionCheckResponse{Success: false, Message: message, safeMessage: message}
 	}
 
 	if result != nil {

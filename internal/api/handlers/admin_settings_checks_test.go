@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -1251,8 +1252,12 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
 		captured = cfg
 		return &fakeAISettingsCheckClient{
-			transcribe: func(_ context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
+			transcribe: func(ctx context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
 				request = req
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) < req.Timeout || time.Until(deadline) > 80*time.Second {
+					t.Fatal("outer check deadline does not cover the transcription request")
+				}
 				return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
 			},
 		}
@@ -1293,7 +1298,7 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 		captured.ASRModel != "whisper-model" {
 		t.Fatalf("captured ASR config = %+v", captured)
 	}
-	if len(request.Audio) == 0 || request.Filename == "" || request.Timeout <= 0 {
+	if len(request.Audio) == 0 || request.Filename == "" || request.Timeout <= 60*time.Second || request.Timeout > 75*time.Second {
 		t.Fatalf("transcription probe request = %+v, want bounded WAV probe", request)
 	}
 }
