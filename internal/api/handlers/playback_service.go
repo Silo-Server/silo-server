@@ -473,16 +473,24 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 		return receipt
 	}
 	if !claimed {
-		for i := 0; i < 20; i++ {
+		for {
 			if replay, _, err := store.StopAttempt(ctx, sessionID, receipt.StopID, nil); err == nil && replay.Finalized {
 				return replay
 			}
-			time.Sleep(25 * time.Millisecond)
+			if !receipt.FinalizingUntil.IsZero() && !time.Now().Before(receipt.FinalizingUntil) {
+				claimed, err = store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(stopFinalizationLease))
+				if err == nil && claimed {
+					break
+				}
+			}
+			timer := time.NewTimer(25 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return receipt
+			case <-timer.C:
+			}
 		}
-		if replay, _, err := store.StopAttempt(ctx, sessionID, receipt.StopID, nil); err == nil {
-			return replay
-		}
-		return receipt
 	}
 	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted)
 	receipt.Finalized = true
