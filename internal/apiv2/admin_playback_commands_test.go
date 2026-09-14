@@ -126,6 +126,22 @@ func TestAdminPlaybackCommandsTransport(t *testing.T) {
 			}
 			f.err = nil
 
+			// A stale refusal carries the winning sequence so the client can
+			// allocate above it; other conflicts do not.
+			f.err = &handlers.AdminPlaybackCommandStaleError{Latest: 12}
+			rec = do(t, h, http.MethodPost, path, tc.body, admin)
+			requireProblem(t, rec, TypeConflict)
+			if got := rec.Header().Get(LatestSequenceHeader); got != "12" {
+				t.Fatalf("%s = %q, want 12", LatestSequenceHeader, got)
+			}
+			f.err = handlers.ErrAdminPlaybackRealtimeRequired
+			rec = do(t, h, http.MethodPost, path, tc.body, admin)
+			requireProblem(t, rec, TypeConflict)
+			if got := rec.Header().Get(LatestSequenceHeader); got != "" {
+				t.Fatalf("%s on a lane conflict = %q", LatestSequenceHeader, got)
+			}
+			f.err = nil
+
 			// Demo mode refuses the mutation for non-owner administrators.
 			demo := pilotDeps(nil, nil)
 			demo.DemoSettings = fakeSettings{demo: true}

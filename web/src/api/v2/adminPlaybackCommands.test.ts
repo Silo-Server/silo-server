@@ -9,15 +9,28 @@ import {
 import {
   allocateAdminPlaybackCommand,
   captureAdminPlaybackCommandAuthority,
+  LATEST_SEQUENCE_HEADER,
+  latestSequenceOf,
+  observeAdminPlaybackSequence,
   sendAdminPlaybackCommand,
 } from "./adminPlaybackCommands";
 
-function response(body: unknown, status = 202) {
+function response(body: unknown, status = 202, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": status >= 400 ? "application/problem+json" : "application/json" },
+    headers: {
+      "Content-Type": status >= 400 ? "application/problem+json" : "application/json",
+      ...headers,
+    },
   });
 }
+
+const staleProblem = {
+  type: "https://siloserver.org/docs/api/v2/problems/conflict",
+  title: "Conflict",
+  status: 409,
+  detail: "The command sequence is behind the session's latest applied command.",
+};
 
 const receipt = {
   command_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -98,17 +111,9 @@ it("surfaces a replayed receipt and refuses a mismatched command identity", asyn
 });
 
 it("throws the stale and conflict problems without retrying", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () =>
-    response(
-      {
-        type: "https://siloserver.org/docs/api/v2/problems/conflict",
-        title: "Conflict",
-        status: 409,
-        detail: "The command sequence is behind the session's latest applied command.",
-      },
-      409,
-    ),
-  );
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockImplementation(async () => response(staleProblem, 409));
   vi.stubGlobal("fetch", fetch);
   await expect(
     sendAdminPlaybackCommand({
@@ -118,6 +123,42 @@ it("throws the stale and conflict problems without retrying", async () => {
     }),
   ).rejects.toMatchObject({ status: 409, problemType: "conflict" });
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("allocates above the latest sequence another administrator applied", async () => {
+  // Another browser, with a clock far ahead of this one, already applied a
+  // command at a sequence this allocator's clock will not reach for a while.
+  const ahead = Date.now() + 60 * 60 * 1000;
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockImplementationOnce(async () =>
+      response(staleProblem, 409, { [LATEST_SEQUENCE_HEADER]: String(ahead) }),
+    )
+    .mockImplementation(async () => response(receipt));
+  vi.stubGlobal("fetch", fetch);
+  const refused = allocateAdminPlaybackCommand("s-skew");
+  expect(refused.sequence).toBeLessThan(ahead);
+  const failure = await sendAdminPlaybackCommand({
+    sessionId: "s-skew",
+    action: "pause",
+    identity: refused,
+  }).catch((error: unknown) => error);
+  expect(latestSequenceOf(failure)).toBe(ahead);
+  // The refusal raised the floor: the next click lands above the winner and
+  // the same intent is applied.
+  const next = allocateAdminPlaybackCommand("s-skew");
+  expect(next.sequence).toBeGreaterThan(ahead);
+  expect(allocateAdminPlaybackCommand("s-other").sequence).toBeLessThan(ahead);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("ignores a floor that is not a positive integer or is behind the allocator", () => {
+  const before = allocateAdminPlaybackCommand("s-floor").sequence;
+  observeAdminPlaybackSequence("s-floor", 1);
+  observeAdminPlaybackSequence("s-floor", -5);
+  observeAdminPlaybackSequence("s-floor", Number.NaN);
+  expect(allocateAdminPlaybackCommand("s-floor").sequence).toBeGreaterThan(before);
+  expect(latestSequenceOf(new Error("plain"))).toBeNull();
 });
 
 it("refuses a superseded authority before and after the request", async () => {

@@ -99,20 +99,31 @@ func TestSequencedCommandRefusesStaleOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, stale := range []int64{5, 9, 1} {
-		if _, err := control.Command(ctx, sequencedInput(session.ID, sequencedCommandC, stale, playback.CommandPause)); !errors.Is(err, ErrAdminPlaybackCommandStale) {
+		_, err := control.Command(ctx, sequencedInput(session.ID, sequencedCommandC, stale, playback.CommandPause))
+		if !errors.Is(err, ErrAdminPlaybackCommandStale) {
 			t.Fatalf("sequence %d err = %v, want stale", stale, err)
 		}
+		// The refusal names the sequence that won, so an administrator whose
+		// allocation runs behind another's can reissue above it.
+		var refusal *AdminPlaybackCommandStaleError
+		if !errors.As(err, &refusal) || refusal.Latest != 9 {
+			t.Fatalf("sequence %d refusal = %#v, want latest 9", stale, err)
+		}
+	}
+	// Reissued above the reported latest, the same intent is applied.
+	if _, err := control.Command(ctx, sequencedInput(session.ID, sequencedCommandC, 10, playback.CommandPause)); err != nil {
+		t.Fatalf("reissue above latest: %v", err)
 	}
 	// The original pause identity still replays its own receipt without dispatch.
 	replay, err := control.Command(ctx, sequencedInput(session.ID, sequencedCommandA, 5, playback.CommandPause))
 	if err != nil || replay.Outcome != AdminPlaybackCommandReplayed {
 		t.Fatalf("replay = %+v, %v", replay, err)
 	}
-	if len(conn.messages) != 2 {
-		t.Fatalf("dispatched %d commands, want exactly pause and resume", len(conn.messages))
+	if len(conn.messages) != 3 {
+		t.Fatalf("dispatched %d commands, want exactly pause, resume and the reissued pause", len(conn.messages))
 	}
 	latest, receipts, ok := control.commandLedgerState(session.ID)
-	if !ok || latest != 9 || receipts != 2 {
+	if !ok || latest != 10 || receipts != 3 {
 		t.Fatalf("ledger = latest %d receipts %d ok %v", latest, receipts, ok)
 	}
 }
@@ -223,11 +234,79 @@ func TestSequencedStopFallsBackWithoutLaneAndDropsLedger(t *testing.T) {
 		t.Fatalf("replay = %+v, %v", replay, err)
 	}
 	waitForPlaybackSessionMissing(t, sessionMgr, session.ID)
+	// The fallback that ended the session drops its ledger itself; no later
+	// command is needed to reclaim it.
+	waitForCommandLedgerGone(t, control, session.ID)
 	if _, err := control.Command(ctx, sequencedInput(session.ID, sequencedCommandA, 4, playback.CommandStop)); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("after fallback err = %v", err)
 	}
 	if _, _, ok := control.commandLedgerState(session.ID); ok {
 		t.Fatal("ledger survived the ended session")
+	}
+}
+
+func waitForCommandLedgerGone(t *testing.T, control *AdminPlaybackControlHandler, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, ok := control.commandLedgerState(sessionID); !ok {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("ledger for %q was not dropped with the session", sessionID)
+}
+
+// A session that ends by any route the command path does not see (a client
+// stop, a liveness reap) must not leave its ledger behind for the process
+// lifetime: the next command on any session sweeps ended ledgers once per
+// interval.
+func TestSequencedLedgerSweepsEndedSessions(t *testing.T) {
+	control, sessionMgr, _, session := newAdminPlaybackControlTestHandler(t)
+	ctx := context.Background()
+	in := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandStop)
+	in.DeadlineMS = int(maxPlaybackControlDeadline / time.Millisecond)
+	if _, err := control.Command(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	other, err := sessionMgr.StartSession(1, "profile-1", 101, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in = sequencedInput(other.ID, sequencedCommandB, 1, playback.CommandStop)
+	in.DeadlineMS = int(maxPlaybackControlDeadline / time.Millisecond)
+	if _, err := control.Command(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if got := control.commandLedgerCount(); got != 2 {
+		t.Fatalf("ledgers = %d, want 2", got)
+	}
+
+	// The first session ends behind the command path's back.
+	if err := sessionMgr.StopSession(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Within the interval nothing is swept; the commanded session is untouched.
+	in = sequencedInput(other.ID, sequencedCommandC, 2, playback.CommandStop)
+	in.DeadlineMS = int(maxPlaybackControlDeadline / time.Millisecond)
+	if _, err := control.Command(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if got := control.commandLedgerCount(); got != 2 {
+		t.Fatalf("ledgers after throttled command = %d, want 2", got)
+	}
+	// Once the interval has elapsed the next command prunes the ended session.
+	control.commandMu.Lock()
+	control.commandSweptAt = time.Now().Add(-2 * adminPlaybackLedgerSweepInterval)
+	control.commandMu.Unlock()
+	if _, err := control.Command(ctx, sequencedInput(other.ID, sequencedCommandC, 2, playback.CommandStop)); err != nil {
+		t.Fatal(err)
+	}
+	if got := control.commandLedgerCount(); got != 1 {
+		t.Fatalf("ledgers after sweep = %d, want 1", got)
+	}
+	if _, _, ok := control.commandLedgerState(other.ID); !ok {
+		t.Fatal("the live session's ledger was swept")
 	}
 }
 

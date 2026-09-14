@@ -213,12 +213,15 @@ export class V2ProblemError extends Error {
   readonly retryAfterSeconds: number | null;
   /** Current validator supplied with a precondition failure; never applied automatically. */
   readonly currentETag: string | null;
+  /** The response headers, for the few problems that carry an operation-specific one. */
+  readonly headers: Headers;
 
   constructor(
     operationId: string,
     problem: Problem,
     retryAfterSeconds: number | null = null,
     currentETag: string | null = null,
+    headers: Headers = new Headers(),
   ) {
     super(problem.detail || problem.title);
     this.name = "V2ProblemError";
@@ -228,6 +231,7 @@ export class V2ProblemError extends Error {
     this.problemType = problemId(problem);
     this.retryAfterSeconds = retryAfterSeconds;
     this.currentETag = currentETag;
+    this.headers = headers;
   }
 }
 
@@ -428,5 +432,11 @@ export async function decodeV2Response<K extends V2OperationKey>(
       "the error response is not a problem document",
     );
   }
-  throw new V2ProblemError(operationId, body, retryAfterSecondsOf(res), res.headers.get("ETag"));
+  throw new V2ProblemError(
+    operationId,
+    body,
+    retryAfterSecondsOf(res),
+    res.headers.get("ETag"),
+    res.headers,
+  );
 }

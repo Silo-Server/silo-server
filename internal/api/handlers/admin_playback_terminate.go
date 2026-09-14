@@ -98,6 +98,9 @@ func (h *AdminPlaybackControlHandler) Terminate(ctx context.Context, in AdminTer
 	}
 	h.playback.markAttemptStoppedServerSide(ctx, in.SessionID)
 	view.AuthorityRevoked = true
+	// The session is gone on this replica; its sequenced command ledger
+	// goes with it (a later command finds no session and answers 404).
+	h.dropCommandLedger(in.SessionID)
 
 	// 2. Best-effort client dismissal on the existing lane. The session is
 	// already removed, so the dispatcher's own session lookup would refuse;
@@ -130,17 +133,43 @@ func (h *AdminPlaybackControlHandler) notifyTerminated(in AdminTerminateInput) (
 	return commandID, AdminTerminateDeliveryDispatched, true
 }
 
+// adminTerminateLock is one session's terminate lock with the number of
+// terminates holding or waiting for it; the entry is removed at zero.
+type adminTerminateLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// terminateLock acquires the per-session terminate lock and returns its
+// release. The map entry is reference counted so a replica does not keep a
+// mutex for every session ever terminated.
 func (h *AdminPlaybackControlHandler) terminateLock(sessionID string) func() {
 	h.terminateMu.Lock()
 	if h.terminateLocks == nil {
-		h.terminateLocks = map[string]*sync.Mutex{}
+		h.terminateLocks = map[string]*adminTerminateLock{}
 	}
-	mu := h.terminateLocks[sessionID]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		h.terminateLocks[sessionID] = mu
+	lock := h.terminateLocks[sessionID]
+	if lock == nil {
+		lock = &adminTerminateLock{}
+		h.terminateLocks[sessionID] = lock
 	}
+	lock.refs++
 	h.terminateMu.Unlock()
-	mu.Lock()
-	return mu.Unlock
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		h.terminateMu.Lock()
+		lock.refs--
+		if lock.refs == 0 && h.terminateLocks[sessionID] == lock {
+			delete(h.terminateLocks, sessionID)
+		}
+		h.terminateMu.Unlock()
+	}
+}
+
+// terminateLockCount is test-only introspection of the lock map size.
+func (h *AdminPlaybackControlHandler) terminateLockCount() int {
+	h.terminateMu.Lock()
+	defer h.terminateMu.Unlock()
+	return len(h.terminateLocks)
 }

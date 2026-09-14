@@ -58833,6 +58833,8 @@ export interface operations {
       /** @description Conflict */
       409: {
         headers: {
+          /** @description On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts. */
+          "X-Silo-Latest-Sequence"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -58990,6 +58992,8 @@ export interface operations {
       /** @description Conflict */
       409: {
         headers: {
+          /** @description On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts. */
+          "X-Silo-Latest-Sequence"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -59147,6 +59151,8 @@ export interface operations {
       /** @description Conflict */
       409: {
         headers: {
+          /** @description On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts. */
+          "X-Silo-Latest-Sequence"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -59304,6 +59310,8 @@ export interface operations {
       /** @description Conflict */
       409: {
         headers: {
+          /** @description On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts. */
+          "X-Silo-Latest-Sequence"?: string;
           [name: string]: unknown;
         };
         content: {

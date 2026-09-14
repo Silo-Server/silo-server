@@ -1751,7 +1751,10 @@ session), plus optional `reason` and `deadline_ms` (bounded to 10000, default
 whole body on retry.
 
 The server keeps one ledger per playback session in the process that serves
-the session's realtime lane and answers deterministically:
+the session's realtime lane. The ledger is bounded per session and released
+with the session: terminate and the stop fallback drop it directly, and a
+throttled sweep on the command path prunes the ledgers of sessions that ended
+by any other route. It answers deterministically:
 
 - A new identity above the latest applied sequence is dispatched once: `202`
   with `{command_id, sequence, outcome: "applied", delivery}`.
@@ -1760,7 +1763,11 @@ the session's realtime lane and answers deterministically:
 - The same `command_id` with different content is `409 idempotency_conflict`.
 - A new identity whose sequence is at or below the latest applied sequence is
   `409 conflict` and is never dispatched, so a delayed retry of a pause that
-  lands after a resume cannot revert the newer state.
+  lands after a resume cannot revert the newer state. The refusal carries the
+  latest applied sequence in the `X-Silo-Latest-Sequence` response header (a
+  decimal integer). Several administrators share one ledger but no counter:
+  a client whose allocation runs behind another's raises its floor above the
+  reported value and reissues; the header is absent on other conflicts.
 - Pause, resume and message require a live realtime lane (`409 conflict`
   otherwise). Stop without a lane answers `delivery: "fallback_scheduled"` and
   the server ends the session after the deadline, as on the bridge.
@@ -1772,7 +1779,8 @@ the session's realtime lane and answers deterministically:
 administrator. Commands enforce the demo restriction; capability reads do not.
 The web session actions send
 pause, resume, stop and message through these operations under captured
-administrator authority and allocate a fresh identity per click; terminate
+administrator authority, allocate a fresh identity per click, and raise the
+allocation floor from a stale refusal's `X-Silo-Latest-Sequence`; terminate
 stays on the bridge.
 
 

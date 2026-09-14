@@ -5,7 +5,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { randomUUID } from "@/lib/uuid";
-import { v2, type V2Result } from "./request";
+import { v2, V2ProblemError, type V2Result } from "./request";
 
 /**
  * Sequenced administrator playback commands (pause, resume, stop, message).
@@ -18,6 +18,13 @@ import { v2, type V2Result } from "./request";
  * than reverting the newer playback state. Sequences are allocated per session
  * from a monotonic clock so two commands issued from this browser never share
  * one, even across reloads within the same millisecond boundary.
+ *
+ * Several administrators may control one session from different browsers, and
+ * they share the server's ledger but no counter: a browser whose clock runs
+ * behind another's allocates below the latest applied sequence and is refused
+ * as stale. The refusal carries that sequence (`X-Silo-Latest-Sequence`), and
+ * `sendAdminPlaybackCommand` records it so the next allocation for the session
+ * lands above it; one refused click, then the UI works again.
  */
 
 export type AdminPlaybackCommandAction = "pause" | "resume" | "stop" | "message";
@@ -40,12 +47,34 @@ const sequencedActions: ReadonlySet<AdminPlaybackCommandAction> = new Set([
 
 const lastSequenceBySession = new Map<string, number>();
 
+/** The response header a stale refusal carries with the session's latest applied sequence. */
+export const LATEST_SEQUENCE_HEADER = "X-Silo-Latest-Sequence";
+
 /** Allocate one ordered command identity for a session. Call once per intended command. */
 export function allocateAdminPlaybackCommand(sessionId: string): AdminPlaybackCommandIdentity {
   const previous = lastSequenceBySession.get(sessionId) ?? 0;
   const sequence = Math.max(previous + 1, Date.now());
   lastSequenceBySession.set(sessionId, sequence);
   return { command_id: randomUUID(), sequence };
+}
+
+/**
+ * Raise the session's allocation floor to a sequence the server reported as
+ * already applied, so the next `allocateAdminPlaybackCommand` is above it.
+ */
+export function observeAdminPlaybackSequence(sessionId: string, latest: number): void {
+  if (!Number.isSafeInteger(latest) || latest < 1) return;
+  const previous = lastSequenceBySession.get(sessionId) ?? 0;
+  if (latest > previous) lastSequenceBySession.set(sessionId, latest);
+}
+
+/** The latest applied sequence a stale refusal reported, or null for any other error. */
+export function latestSequenceOf(error: unknown): number | null {
+  if (!(error instanceof V2ProblemError)) return null;
+  const raw = error.headers.get(LATEST_SEQUENCE_HEADER);
+  if (raw === null) return null;
+  const latest = Number(raw.trim());
+  return Number.isSafeInteger(latest) && latest > 0 ? latest : null;
 }
 
 export function captureAdminPlaybackCommandAuthority() {
@@ -94,34 +123,42 @@ export async function sendAdminPlaybackCommand(
   const path = { session_id: request.sessionId };
   const options = { path, profileContext, retryAuthentication: false } as const;
   let receipt: AdminPlaybackCommandReceipt;
-  switch (request.action) {
-    case "pause":
-      receipt = await v2("POST /api/v2/admin/sessions/{session_id}/pause", {
-        ...options,
-        body: identity,
-      });
-      break;
-    case "resume":
-      receipt = await v2("POST /api/v2/admin/sessions/{session_id}/resume", {
-        ...options,
-        body: identity,
-      });
-      break;
-    case "stop":
-      receipt = await v2("POST /api/v2/admin/sessions/{session_id}/stop", {
-        ...options,
-        body: identity,
-      });
-      break;
-    case "message": {
-      const message = request.message?.trim() ?? "";
-      if (!message) throw new Error("Message is required");
-      receipt = await v2("POST /api/v2/admin/sessions/{session_id}/message", {
-        ...options,
-        body: { ...identity, message, ...(request.title ? { title: request.title } : {}) },
-      });
-      break;
+  try {
+    switch (request.action) {
+      case "pause":
+        receipt = await v2("POST /api/v2/admin/sessions/{session_id}/pause", {
+          ...options,
+          body: identity,
+        });
+        break;
+      case "resume":
+        receipt = await v2("POST /api/v2/admin/sessions/{session_id}/resume", {
+          ...options,
+          body: identity,
+        });
+        break;
+      case "stop":
+        receipt = await v2("POST /api/v2/admin/sessions/{session_id}/stop", {
+          ...options,
+          body: identity,
+        });
+        break;
+      case "message": {
+        const message = request.message?.trim() ?? "";
+        if (!message) throw new Error("Message is required");
+        receipt = await v2("POST /api/v2/admin/sessions/{session_id}/message", {
+          ...options,
+          body: { ...identity, message, ...(request.title ? { title: request.title } : {}) },
+        });
+        break;
+      }
     }
+  } catch (error) {
+    // A stale refusal names the sequence that won; raise this browser's
+    // floor so the next click allocates above it instead of failing again.
+    const latest = latestSequenceOf(error);
+    if (latest !== null) observeAdminPlaybackSequence(request.sessionId, latest);
+    throw error;
   }
   requireAuthority(profileContext);
   if (receipt.command_id !== request.identity.command_id) {

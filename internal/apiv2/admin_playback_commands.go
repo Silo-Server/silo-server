@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -85,7 +86,18 @@ const (
 	adminPlaybackActionResume  = "resume"
 	adminPlaybackActionStop    = "stop"
 	adminPlaybackActionMessage = "message"
+
+	// LatestSequenceHeader carries the session's latest applied sequence on
+	// a stale 409, so a client whose allocation runs behind another
+	// administrator's (or its own earlier clock) can allocate above it.
+	LatestSequenceHeader = "X-Silo-Latest-Sequence"
 )
+
+// latestSequenceResponseHeaders documents LatestSequenceHeader on the 409
+// the sequenced commands answer.
+func latestSequenceResponseHeaders() map[string]*huma.Header {
+	return map[string]*huma.Header{LatestSequenceHeader: {Schema: &huma.Schema{Type: huma.TypeString}, Description: "On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts."}}
+}
 
 func registerAdminPlaybackCommands(reg *Registry) {
 	const root = Prefix + "/admin/sessions"
@@ -148,6 +160,7 @@ func registerAdminPlaybackCommands(reg *Registry) {
 		Register(reg, command, func(ctx context.Context, in *AdminPlaybackSessionCommandInput) (*AdminPlaybackCommandOutput, error) {
 			return apply(ctx, in.SessionID, in.Body, action.command, "", "")
 		})
+		registeredOperation(reg.api.OpenAPI(), command).Responses[strconv.Itoa(http.StatusConflict)].Headers = latestSequenceResponseHeaders()
 	}
 	message := op("/{session_id}/"+adminPlaybackActionMessage, "messageAdminPlaybackSession", "Display a message on a live playback session with an ordered command identity the session applies once.")
 	message.DefaultStatus = http.StatusAccepted
@@ -157,6 +170,7 @@ func registerAdminPlaybackCommands(reg *Registry) {
 	Register(reg, message, func(ctx context.Context, in *AdminPlaybackSessionMessageInput) (*AdminPlaybackCommandOutput, error) {
 		return apply(ctx, in.SessionID, in.Body.AdminPlaybackCommandIdentity, playback.CommandDisplayMessage, in.Body.Title, in.Body.Message)
 	})
+	registeredOperation(reg.api.OpenAPI(), message).Responses[strconv.Itoa(http.StatusConflict)].Headers = latestSequenceResponseHeaders()
 }
 
 // adminPlaybackReplayResponse documents the 200 a replayed identity answers
@@ -173,7 +187,12 @@ func adminPlaybackCommandProblem(err error) *Problem {
 	case errors.Is(err, playback.ErrSessionNotFound):
 		return NewProblem(TypeNotFound, "Playback session not found.")
 	case errors.Is(err, handlers.ErrAdminPlaybackCommandStale):
-		return NewProblem(TypeConflict, "The command sequence is behind the session's latest applied command; allocate a newer sequence.")
+		p := NewProblem(TypeConflict, "The command sequence is behind the session's latest applied command; allocate a newer sequence.")
+		var stale *handlers.AdminPlaybackCommandStaleError
+		if errors.As(err, &stale) {
+			p = p.WithHeader(LatestSequenceHeader, strconv.FormatInt(stale.Latest, 10))
+		}
+		return p
 	case errors.Is(err, handlers.ErrAdminPlaybackCommandConflict):
 		return NewProblem(TypeIdempotencyConflict, "This command identity was already applied with different content.")
 	case errors.Is(err, handlers.ErrAdminPlaybackRealtimeRequired):

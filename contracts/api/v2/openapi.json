@@ -90568,7 +90568,15 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Conflict",
+            "headers": {
+              "X-Silo-Latest-Sequence": {
+                "description": "On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "413": {
             "content": {
@@ -90782,7 +90790,15 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Conflict",
+            "headers": {
+              "X-Silo-Latest-Sequence": {
+                "description": "On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "413": {
             "content": {
@@ -90996,7 +91012,15 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Conflict",
+            "headers": {
+              "X-Silo-Latest-Sequence": {
+                "description": "On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "413": {
             "content": {
@@ -91210,7 +91234,15 @@
                 }
               }
             },
-            "description": "Conflict"
+            "description": "Conflict",
+            "headers": {
+              "X-Silo-Latest-Sequence": {
+                "description": "On a stale refusal, the session's latest applied sequence as a decimal integer; allocate a new command above it. Absent on other conflicts.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "413": {
             "content": {
