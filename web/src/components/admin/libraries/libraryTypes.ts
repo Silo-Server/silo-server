@@ -17,9 +17,17 @@ export function libraryTypeMeta(type: string) {
 // Keep these aligned with the video scanner and intro-marker library filters.
 export function librarySettingSupport(type: string) {
   const kind = type.trim().toLowerCase();
-  const video = ["movie", "movies", "series", "tv", "show", "shows", "tvshows", "mixed"].includes(
-    kind,
-  );
+  // The scanner routes these types to dedicated pipelines; everything else
+  // follows the video pipeline, including custom library types.
+  const video = ![
+    "audiobook",
+    "audiobooks",
+    "ebook",
+    "ebooks",
+    "manga",
+    "podcast",
+    "podcasts",
+  ].includes(kind);
   return {
     trailers: video,
     chapterThumbnails: video,
