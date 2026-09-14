@@ -401,6 +401,12 @@ func (s *AutoUpdateService) autoUpdatePlugin(ctx context.Context, existing *Inst
 		}
 	}
 	if err != nil {
+		// The old process was stopped above and the row still names the old
+		// release. A lazily started plugin comes back on its next RPC, but a
+		// resident only restarts on a lifecycle reconcile, and the run's
+		// end-of-pass notification is skipped when nothing was applied; fire
+		// it here so the supervisor relaunches the old release now.
+		s.notifyChanged(ctx)
 		return fmt.Errorf("install updated plugin %s from %s to %s: %w", pluginID, oldVersion, newVersion, err)
 	}
 

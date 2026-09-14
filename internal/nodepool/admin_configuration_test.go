@@ -97,7 +97,7 @@ func TestAdminNodeConfigurationTransactions(t *testing.T) {
 		}
 	})
 	t.Run("health sample preserves configuration validator", func(t *testing.T) {
-		if err := bridge.UpdateHealth(ctx, node.ID, node.URL, true, 3, 40, nil); err != nil {
+		if err := bridge.UpdateHealth(ctx, node.ID, node.URL, true, 3, 40, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		rows, g, err := store.Snapshot(ctx)

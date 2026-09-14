@@ -23,6 +23,9 @@ func TestPluginLifecycleSeamRefusals(t *testing.T) {
 	if _, err := unwired.ApplyAdminPluginUpdate(t.Context(), 1); !errors.As(err, &apiErr) || apiErr.Status != http.StatusServiceUnavailable {
 		t.Fatalf("apply err = %v", err)
 	}
+	if _, err := unwired.RestartAdminPluginInstallation(t.Context(), 1); !errors.As(err, &apiErr) || apiErr.Status != http.StatusServiceUnavailable {
+		t.Fatalf("restart err = %v", err)
+	}
 	if err := unwired.DeleteAdminPluginInstallation(t.Context(), 1); !errors.As(err, &apiErr) || apiErr.Status != http.StatusServiceUnavailable {
 		t.Fatalf("delete err = %v", err)
 	}

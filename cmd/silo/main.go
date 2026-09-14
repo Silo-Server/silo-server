@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -73,6 +74,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	// Built-in metadata providers self-register into the metadata package's
 	// builtin registry on import; buildProviders resolves their seeded chain
@@ -996,6 +998,7 @@ func main() {
 
 		var handler http.Handler
 		var shutdownStandalone func(context.Context) error
+		var standaloneHooks standaloneServerHooks
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
@@ -1005,6 +1008,13 @@ func main() {
 			registerClientIPConfigReload(watcher, proxyIPResolver)
 			srv.SetClientIPResolver(proxyIPResolver)
 			srv.SetStreamTelemetry(streamTelemetryRegistry)
+			// Network access providers run on this proxy too, one instance per
+			// node with its own overlay identity; see newProxyPluginHost.
+			proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, resolvePluginCacheDir())
+			srv.SetIngressTokens(proxyPlugins.broker.Registry)
+			srv.SetNetworkAccessStatus(proxyPlugins.broker.Status)
+			srv.SetNetworkAccessProviderHost(proxyPlugins.service)
+			standaloneHooks = proxyPlugins.hooks()
 			// Serve header-authenticated sessions: the recipe comes from the
 			// shared grant store central wrote at plan time, and the caller's
 			// own access token is re-checked against the live login session in
@@ -1058,7 +1068,7 @@ func main() {
 
 		_ = operationalWriter
 		_ = opsRepo
-		startStandaloneServer(cfg.Server.Listen, handler, appCancel, shutdownStandalone)
+		startStandaloneServer(cfg.Server.Listen, handler, appCancel, shutdownStandalone, standaloneHooks)
 		return
 	}
 
@@ -1396,11 +1406,55 @@ func main() {
 	var pluginHTTPProxy *plugins.HTTPProxy
 	pluginAutoUpdateDone := make(chan struct{})
 	var pluginAutoUpdater *plugins.AutoUpdateService
+	// Network access providers: ingress tokens issued per plugin start and the
+	// providers' last reported status. Shared by the plugin host (issue,
+	// revoke, status pushes) and all three listeners (token validation).
+	networkAccess := netaccess.NewBroker()
+	deps.NetworkAccess = networkAccess
 	if deps.DB != nil {
 		pluginCacheDir := resolvePluginCacheDir()
 		repositoryStore := plugins.NewRepositoryStore(deps.DB)
 		installationStore := plugins.NewInstallationStore(deps.DB)
 		runtimeConfigStore := plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher)
+		// This process is the api host: its resident plugins keep their
+		// per-instance state (overlay node keys) under the "api" scope.
+		instanceStateStore := plugins.NewInstanceStateStore(deps.DB, deps.SecretCipher).ForScope(plugins.HostScopeAPI)
+		hostInfo := func(ctx context.Context) (pluginhost.HostInfo, error) {
+			live := configWatcher.Config()
+			if live == nil {
+				live = cfg
+			}
+			name, _ := settingsRepo.Get(ctx, branding.KeyServerName)
+			if strings.TrimSpace(name) == "" {
+				name, _ = os.Hostname()
+			}
+			info := pluginhost.HostInfo{
+				PublicBaseURL:       live.Server.PublicURL,
+				PluginContentPrefix: plugins.ContentPrefix,
+				Role:                pluginhost.HostRoleAPI,
+				Name:                name,
+				Listeners: []pluginhost.HostListener{{
+					Name:        pluginhost.ListenerAPI,
+					Address:     pluginhost.LoopbackDialAddress(live.Server.Listen),
+					DefaultPort: pluginhost.DefaultPortAPI,
+				}},
+			}
+			if live.JellyfinCompat.Enabled && live.JellyfinCompat.Listen != "" {
+				info.Listeners = append(info.Listeners, pluginhost.HostListener{
+					Name:        pluginhost.ListenerJellyfin,
+					Address:     pluginhost.LoopbackDialAddress(live.JellyfinCompat.Listen),
+					DefaultPort: pluginhost.DefaultPortJellyfin,
+				})
+			}
+			if absCompatEnabled && live.AudiobookshelfCompat.Listen != "" {
+				info.Listeners = append(info.Listeners, pluginhost.HostListener{
+					Name:        pluginhost.ListenerABS,
+					Address:     pluginhost.LoopbackDialAddress(live.AudiobookshelfCompat.Listen),
+					DefaultPort: pluginhost.DefaultPortABS,
+				})
+			}
+			return info, nil
+		}
 		catalogService := plugins.NewCatalogService(repositoryStore, plugins.CatalogServiceOptions{
 			SiloAPIVersion: plugins.DefaultSiloAPIVersion,
 		})
@@ -1494,6 +1548,9 @@ func main() {
 					return runtimeConfigStore.PutGlobalConfig(ctx, installationID, key, value)
 				},
 			),
+			HostInfo:      hostInfo,
+			InstanceState: instanceStateStore,
+			NetworkAccess: networkAccess,
 			Logger: hclog.New(&hclog.LoggerOptions{
 				Name:   "plugin-host",
 				Level:  hclog.Info,
@@ -1508,6 +1565,10 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
+		// Crashes of resident plugins (network access providers) reach the
+		// supervisor through the host's exit watcher so they restart with
+		// backoff instead of waiting for the next lazy RPC.
+		pluginHost.SetExitHandler(pluginService.HandleResidentExit)
 		if watchProviderRegistry != nil {
 			reloadWatchProviders := func(ctx context.Context) {
 				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService, watchProviderRepo); err != nil {
@@ -1565,6 +1626,13 @@ func main() {
 			pluginHTTPProxy = pluginHTTPProxy.WithUserThemeLookup(plugins.NewPgUserThemeLookup(deps.DB))
 			pluginHTTPProxy = pluginHTTPProxy.WithUserIdentityLookup(plugins.NewPgUserIdentityLookup(deps.DB))
 		}
+		// The admin network access reads name this process as the "api" host
+		// and refresh the shared status cache with what the provider answers.
+		pluginService.SetNetworkAccessHostInfo(hostInfo)
+		pluginService.SetNetworkAccessStatusSink(networkAccess)
+		// Proxy nodes run the same resident installations; every lifecycle
+		// change here is announced so they reconcile at once.
+		pluginService.PublishLifecycleChanges(eventBus)
 		deps.PluginService = pluginService
 		deps.PluginHTTPProxy = pluginHTTPProxy
 		defer func() {
@@ -3013,6 +3081,7 @@ func main() {
 			DB:                   deps.DB,
 			SecretCipher:         dataCipher,
 			ClientIPResolver:     ipResolver,
+			IngressTokens:        networkAccess.Registry,
 			StreamTelemetry:      streamTelemetryRegistry,
 			NodePlanner:          deps.NodePlanner,
 			JWTSecret:            cfg.Auth.JWTSecret,
@@ -3155,7 +3224,7 @@ func main() {
 	var absSrv *http.Server
 	if (mode == "integrated" || mode == "api") && deps.ABSHandler != nil && cfg.AudiobookshelfCompat.Listen != "" {
 		absSrv = newAudiobookshelfListener(cfg.AudiobookshelfCompat.Listen, deps.ABSHandler,
-			apiv2.NewArtworkHandler(deps.Artwork, deps.ArtworkSigner, deps.ArtworkRepair), ipResolver)
+			apiv2.NewArtworkHandler(deps.Artwork, deps.ArtworkSigner, deps.ArtworkRepair), ipResolver, networkAccess.Registry)
 	}
 
 	// Run non-critical startup work in the background so it doesn't delay the
@@ -3183,12 +3252,25 @@ func main() {
 	}
 
 	errCh := make(chan error, 3)
-	go func() {
-		slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
-		if listenErr := srv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
-			errCh <- fmt.Errorf("HTTP server error: %w", listenErr)
+	// Bind before serving so resident plugins, which reverse-proxy to this
+	// listener, are only started once it exists.
+	apiListener, apiListenErr := net.Listen("tcp", cfg.Server.Listen)
+	if apiListenErr != nil {
+		errCh <- fmt.Errorf("HTTP server listen: %w", apiListenErr)
+	} else {
+		go func() {
+			slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
+			if serveErr := srv.Serve(apiListener); serveErr != nil && serveErr != http.ErrServerClosed {
+				errCh <- fmt.Errorf("HTTP server error: %w", serveErr)
+			}
+		}()
+		if pluginService != nil {
+			pluginService.StartResidents(appCtx)
+			if mode == "api" {
+				warnOnMultipleAPIReplicas(appCtx, cache.NewAPIReplicaPresence(apiRedisClient, nodeID), pluginService)
+			}
 		}
-	}()
+	}
 	if compatSrv != nil {
 		go func() {
 			slog.Info("Jellyfin compat server listening", "addr", compatSrv.Addr)
@@ -3226,6 +3308,16 @@ func main() {
 	slog.Info("beginning graceful shutdown")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// 0. Stop resident plugins first: their overlay listeners front the HTTP
+	// servers, so ingress goes away before the servers drain.
+	if pluginService != nil {
+		residentCtx, residentCancel := context.WithTimeout(shutdownCtx, 10*time.Second)
+		if stopErr := pluginService.StopResidents(residentCtx); stopErr != nil {
+			slog.Error("resident plugin shutdown error", "error", stopErr)
+		}
+		residentCancel()
+	}
 
 	// 1. Stop accepting new requests.
 	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
@@ -3312,9 +3404,18 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 	return work(ctx)
 }
 
+// standaloneServerHooks lets a standalone mode run work that must bracket the
+// listener's lifetime: afterListen runs once the address is bound (resident
+// plugins reverse-proxy to it, so they start only then), beforeDrain runs
+// before the HTTP server drains (their overlay ingress goes away first).
+type standaloneServerHooks struct {
+	afterListen func()
+	beforeDrain func(context.Context)
+}
+
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
 // It listens on the given address, handles graceful shutdown on SIGTERM/SIGINT.
-func startStandaloneServer(addr string, handler http.Handler, appCancel context.CancelFunc, shutdownWork func(context.Context) error) {
+func startStandaloneServer(addr string, handler http.Handler, appCancel context.CancelFunc, shutdownWork func(context.Context) error, hooks standaloneServerHooks) {
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      handler,
@@ -3324,12 +3425,22 @@ func startStandaloneServer(addr string, handler http.Handler, appCancel context.
 	}
 
 	errCh := make(chan error, 1)
-	go func() {
-		slog.Info("HTTP server listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("HTTP server error: %w", err)
+	// Bind before serving so the after-listen hook runs against a listener
+	// that exists.
+	listener, listenErr := net.Listen("tcp", addr)
+	if listenErr != nil {
+		errCh <- fmt.Errorf("HTTP server listen: %w", listenErr)
+	} else {
+		go func() {
+			slog.Info("HTTP server listening", "addr", addr)
+			if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+				errCh <- fmt.Errorf("HTTP server error: %w", err)
+			}
+		}()
+		if hooks.afterListen != nil {
+			hooks.afterListen()
 		}
-	}()
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -3345,6 +3456,11 @@ func startStandaloneServer(addr string, handler http.Handler, appCancel context.
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if hooks.beforeDrain != nil {
+		drainCtx, drainCancel := context.WithTimeout(shutdownCtx, 10*time.Second)
+		hooks.beforeDrain(drainCtx)
+		drainCancel()
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("HTTP shutdown error", "error", err)
 	}

@@ -3587,6 +3587,22 @@ export interface PluginCatalogEntry {
   metadata?: Record<string, unknown>;
 }
 
+export type PluginRuntimeState = "stopped" | "starting" | "running" | "backoff" | "failed";
+
+/**
+ * Process state of one installation. `resident` marks a plugin the server
+ * supervises (started at boot, restarted after a crash); `backoff` and
+ * `failed` only occur for those.
+ */
+export interface PluginRuntime {
+  resident: boolean;
+  state: PluginRuntimeState;
+  restart_count: number;
+  last_error?: string;
+  last_started_at?: string;
+  next_restart_at?: string;
+}
+
 export interface PluginInstallation {
   id: number;
   repository_id?: number | null;
@@ -3594,6 +3610,7 @@ export interface PluginInstallation {
   version: string;
   install_path: string;
   enabled: boolean;
+  runtime: PluginRuntime;
   capabilities: PluginCapability[];
   global_config_schema: PluginConfigSchema[];
   user_config_schema: PluginConfigSchema[];

@@ -21,6 +21,11 @@ type archiveStore interface {
 
 type ArchiveCache struct {
 	archives archiveStore
+	// root, when set, is this host's own plugin cache dir. Installations are
+	// then rehydrated under it (see LocalInstallPath) instead of at the
+	// install path the API server recorded, which on a proxy node names a
+	// directory on another machine.
+	root string
 }
 
 func NewArchiveCache(archives archiveStore) *ArchiveCache {
@@ -30,13 +35,59 @@ func NewArchiveCache(archives archiveStore) *ArchiveCache {
 	return &ArchiveCache{archives: archives}
 }
 
+// NewArchiveCacheAt returns a cache that keeps its copies of every
+// installation under root, the host's own plugin cache dir. A proxy node uses
+// it: the API server's install paths are release identities to it, never
+// paths it reads or writes.
+func NewArchiveCacheAt(archives archiveStore, root string) *ArchiveCache {
+	cache := NewArchiveCache(archives)
+	if cache != nil {
+		cache.root = filepath.Clean(root)
+		if root == "" {
+			cache.root = ""
+		}
+	}
+	return cache
+}
+
+// LocalInstallPath is where this host keeps the installation's binary. Without
+// a root it is the recorded install path. With one it is
+// <root>/<plugin id>/<version>/<install dir name>/plugin, where the install
+// dir name is the unique directory the API server's installer created
+// (install-XXXX), so a replaced binary — even at the same version — lands in
+// a fresh directory here too and the resident supervisor's install-path
+// change detection stays meaningful on this host.
+func (c *ArchiveCache) LocalInstallPath(installation *Installation) string {
+	if installation == nil {
+		return ""
+	}
+	if c == nil || c.root == "" {
+		return installation.InstallPath
+	}
+	release := filepath.Base(filepath.Dir(installation.InstallPath))
+	if release == "." || release == string(filepath.Separator) || release == "" {
+		release = "install"
+	}
+	return filepath.Join(
+		c.root,
+		sanitizeFilesystemSegment(installation.PluginID),
+		sanitizeFilesystemSegment(installation.Version),
+		sanitizeFilesystemSegment(release),
+		"plugin",
+	)
+}
+
+// Ensure makes the installation's files present at LocalInstallPath,
+// rehydrating them from plugin_archives when they are missing or incomplete,
+// and returns the installed manifest.
 func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
 	if installation == nil {
 		return nil, fmt.Errorf("plugin installation is required")
 	}
+	binaryPath := c.LocalInstallPath(installation)
 
-	if manifest, err := LoadManifestFile(InstalledManifestPath(installation.InstallPath)); err == nil {
-		if err := installedFilesPresent(installation.InstallPath, manifest); err == nil {
+	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
+		if err := installedFilesPresent(binaryPath, manifest); err == nil {
 			return manifest, nil
 		}
 	}
@@ -74,7 +125,7 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 		)
 	}
 
-	installDir := filepath.Dir(installation.InstallPath)
+	installDir := filepath.Dir(binaryPath)
 	if err := os.RemoveAll(installDir); err != nil {
 		return nil, fmt.Errorf("clear plugin cache dir %q: %w", installDir, err)
 	}
@@ -85,12 +136,51 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 		_ = os.RemoveAll(installDir)
 		return nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
 	}
-	if err := validateInstalledFiles(installation.InstallPath, manifest); err != nil {
+	if err := validateInstalledFiles(binaryPath, manifest); err != nil {
 		_ = os.RemoveAll(installDir)
 		return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
+	c.pruneStaleReleases(ctx, installation, installDir)
 
 	return manifest, nil
+}
+
+// pruneStaleReleases drops this host's copies of the plugin's other releases
+// once a new one is in place, the way the API server's installer removes the
+// previous install dir on replace. Only runs under an own root: without one
+// the directories belong to the installer. Best effort; a failure is logged
+// and costs disk, not correctness.
+func (c *ArchiveCache) pruneStaleReleases(ctx context.Context, installation *Installation, keepDir string) {
+	if c == nil || c.root == "" {
+		return
+	}
+	pluginRoot := filepath.Join(c.root, sanitizeFilesystemSegment(installation.PluginID))
+	versions, err := os.ReadDir(pluginRoot)
+	if err != nil {
+		return
+	}
+	for _, version := range versions {
+		if !version.IsDir() {
+			continue
+		}
+		versionDir := filepath.Join(pluginRoot, version.Name())
+		releases, err := os.ReadDir(versionDir)
+		if err != nil {
+			continue
+		}
+		for _, release := range releases {
+			releaseDir := filepath.Join(versionDir, release.Name())
+			if !release.IsDir() || releaseDir == keepDir {
+				continue
+			}
+			if err := os.RemoveAll(releaseDir); err != nil {
+				slog.WarnContext(ctx, "remove stale plugin release from cache", "component", "plugins",
+					"installation_id", installation.ID, "path", releaseDir, "error", err)
+			}
+		}
+		// Drop the version dir once it is empty; a non-empty one stays.
+		_ = os.Remove(versionDir)
+	}
 }
 
 func (c *ArchiveCache) recoverLegacyBinaryArchive(

@@ -1,0 +1,20 @@
+{
+  "provider": "stub",
+  "hosts": [
+    {
+      "host": {
+        "id": "api",
+        "role": "api",
+        "name": "Living Room"
+      },
+      "state": "disconnected",
+      "hostname": "silo.overlay.example.test",
+      "origin": "https://silo.overlay.example.test",
+      "addresses": [
+        "127.0.0.1"
+      ],
+      "provider_version": "stub 0.1.0",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ]
+}

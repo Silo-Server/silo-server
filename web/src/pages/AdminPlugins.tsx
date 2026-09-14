@@ -83,6 +83,7 @@ import {
 import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
+import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 
 const INSTALLED_PAGE_SIZE = 10;
@@ -291,6 +292,7 @@ function InstalledPluginCard({
   const adminRoutes = routes.filter(
     (route) => route.navigable && route.navigation_kind === "admin",
   );
+  const status = pluginStatusIndicator(installation);
 
   return (
     <>
@@ -352,12 +354,10 @@ function InstalledPluginCard({
                     )}
                   </Button>
                 )}
-                <span className="flex items-center gap-1.5">
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${installation.enabled ? "bg-success" : "bg-muted-foreground"}`}
-                  />
+                <span className="flex items-center gap-1.5" title={status.title}>
+                  <span className={`inline-block h-2 w-2 rounded-full ${status.dotClass}`} />
                   <span className="text-muted-foreground text-[11px] font-medium">
-                    {installation.enabled ? "Active" : "Inactive"}
+                    {status.label}
                   </span>
                 </span>
               </div>

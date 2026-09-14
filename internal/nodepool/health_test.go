@@ -570,7 +570,7 @@ func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
 	}))
 	defer node.Close()
 
-	healthy, activeJobs, _, hash, _ := CheckNode(context.Background(), &Node{ID: 1, URL: node.URL + "/"})
+	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: node.URL + "/"})
 	if !healthy {
 		t.Fatal("a node stored with a trailing slash was reported unhealthy")
 	}

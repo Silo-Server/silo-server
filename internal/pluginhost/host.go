@@ -2,10 +2,12 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -25,6 +27,9 @@ type Config struct {
 	Logger              hclog.Logger
 	HealthCheckInterval time.Duration
 	HealthFailureLimit  int
+	// ExitCheckInterval is how often the exit watcher polls the plugin
+	// process for an exit. Zero takes DefaultExitCheckInterval.
+	ExitCheckInterval time.Duration
 
 	// EventPublisher receives events that plugins publish via RuntimeHost.
 	// Typically silo's *events.Hub. When nil, plugins that try to
@@ -42,6 +47,15 @@ type Config struct {
 	// GlobalConfigSetter persists SetGlobalConfigEntry calls from plugins. When
 	// nil, SetGlobalConfigEntry returns an error.
 	GlobalConfigSetter GlobalConfigSetter
+	// HostInfo answers GetHostInfo. When nil, GetHostInfo is Unimplemented.
+	HostInfo HostInfoFunc
+	// InstanceState persists ReadInstanceState / WriteInstanceState for this
+	// process's host scope. When nil, both RPCs fail with FailedPrecondition.
+	InstanceState InstanceStateStore
+	// NetworkAccess issues the ingress token for every network access provider
+	// the host starts, revokes it when the process stops, and receives status
+	// pushes. When nil, providers get no token and pushes are dropped.
+	NetworkAccess NetworkAccessBroker
 }
 
 type StartRequest struct {
@@ -55,24 +69,47 @@ type Host struct {
 	logger              hclog.Logger
 	healthCheckInterval time.Duration
 	healthFailureLimit  int
+	exitCheckInterval   time.Duration
+
+	// exitHandler is told the installation id of a plugin whose process went
+	// away on its own (exit or failed health), never one the host stopped on
+	// purpose. The resident supervisor in internal/plugins uses it to
+	// schedule a restart.
+	exitMu      sync.RWMutex
+	exitHandler func(installationID int)
 
 	eventPublisher     EventPublisher
 	libraryLister      LibraryLister
 	catalogPresence    CatalogPresenceLookup
 	installedPlugins   InstalledPluginLister
 	globalConfigSetter GlobalConfigSetter
+	hostInfo           HostInfoFunc
+	instanceState      InstanceStateStore
+	networkAccess      NetworkAccessBroker
 
 	mu        sync.RWMutex
 	instances map[int]*instance
+	startSeq  atomic.Uint64
 }
 
 type instance struct {
-	process      *plugin.Client
-	command      *exec.Cmd
-	usageOnce    sync.Once
-	protocol     plugin.ClientProtocol
-	client       *Client
-	cancelHealth context.CancelFunc
+	process   *plugin.Client
+	command   *exec.Cmd
+	usageOnce sync.Once
+	protocol  plugin.ClientProtocol
+	client    *Client
+	// installationID lets stopInstance revoke the ingress token of a network
+	// access provider without a map lookup.
+	installationID int
+	// provider is the network_access_provider.v1 slug, empty otherwise, and
+	// ingressToken the token issued to this process instance.
+	provider     string
+	ingressToken string
+	// cancelMonitors stops the health probe and the exit watcher. Stop,
+	// Shutdown and a replacing Start cancel it before tearing the process
+	// down, which is how the monitors tell a deliberate stop from a crash.
+	cancelMonitors context.CancelFunc
+	retireOnce     sync.Once
 }
 
 func NewHost(cfg Config) *Host {
@@ -88,21 +125,30 @@ func NewHost(cfg Config) *Host {
 	if failureLimit <= 0 {
 		failureLimit = DefaultHealthFailureLimit
 	}
+	exitInterval := cfg.ExitCheckInterval
+	if exitInterval <= 0 {
+		exitInterval = DefaultExitCheckInterval
+	}
 
 	return &Host{
 		logger:              logger,
 		healthCheckInterval: interval,
 		healthFailureLimit:  failureLimit,
+		exitCheckInterval:   exitInterval,
 		eventPublisher:      cfg.EventPublisher,
 		libraryLister:       cfg.LibraryLister,
 		catalogPresence:     cfg.CatalogPresence,
 		installedPlugins:    cfg.InstalledPlugins,
 		globalConfigSetter:  cfg.GlobalConfigSetter,
+		hostInfo:            cfg.HostInfo,
+		instanceState:       cfg.InstanceState,
+		networkAccess:       cfg.NetworkAccess,
 		instances:           make(map[int]*instance),
 	}
 }
 
 func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
+	startSeq := h.startSeq.Add(1)
 	if req.InstallationID == 0 {
 		return nil, fmt.Errorf("installation id is required")
 	}
@@ -121,6 +167,22 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		h.mu.Lock()
 	}
 	h.mu.Unlock()
+
+	// A network access provider gets a fresh ingress token for this process
+	// instance before it can ask GetHostInfo for it. Config test-runs
+	// (negative installation ids) are not persisted installations and get
+	// none.
+	provider, isProvider := NetworkAccessProviderSlug(req.Manifest)
+	var ingressToken string
+	if !isProvider || req.InstallationID <= 0 || h.networkAccess == nil {
+		provider = ""
+	} else {
+		token, err := h.networkAccess.Issue(req.InstallationID, provider)
+		if err != nil {
+			return nil, fmt.Errorf("issue ingress token: %w", err)
+		}
+		ingressToken = token
+	}
 
 	command := exec.Command(req.BinaryPath)
 	process := plugin.NewClient(&plugin.ClientConfig{
@@ -143,6 +205,9 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 			// returns. Only then is ProcessState safe to read.
 			process.Kill()
 			processmetrics.Record(processmetrics.Plugin, command.ProcessState, nil, nil)
+			if provider != "" {
+				h.networkAccess.Revoke(req.InstallationID, ingressToken)
+			}
 		}
 	}()
 
@@ -166,7 +231,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		return nil, fmt.Errorf("unexpected plugin runtime client type %T", rawClient)
 	}
 
-	if err := h.bindRuntimeHost(ctx, rpcClient, req.Manifest.GetPluginId(), req.InstallationID); err != nil {
+	if err := h.bindRuntimeHost(ctx, rpcClient, req.Manifest.GetPluginId(), req.InstallationID, provider); err != nil {
 		_ = protocol.Close()
 		process.Kill()
 		return nil, fmt.Errorf("bind runtime host: %w", err)
@@ -203,15 +268,18 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		return nil, fmt.Errorf("configure plugin runtime: %w", err)
 	}
 
-	client := newClient(req.InstallationID, rpcClient, liveManifestResponse.GetManifest())
+	client := newClient(req.InstallationID, rpcClient, liveManifestResponse.GetManifest(), startSeq)
 
-	healthCtx, healthCancel := context.WithCancel(context.Background())
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	instance := &instance{
-		process:      process,
-		command:      command,
-		protocol:     protocol,
-		client:       client,
-		cancelHealth: healthCancel,
+		process:        process,
+		command:        command,
+		protocol:       protocol,
+		client:         client,
+		installationID: req.InstallationID,
+		provider:       provider,
+		ingressToken:   ingressToken,
+		cancelMonitors: monitorCancel,
 	}
 
 	h.mu.Lock()
@@ -219,9 +287,20 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	h.mu.Unlock()
 	retained = true
 
-	go h.monitorHealth(healthCtx, req.InstallationID, instance)
+	go h.monitorHealth(monitorCtx, req.InstallationID, instance)
+	go h.watchExit(monitorCtx, req.InstallationID, instance)
 
 	return client, nil
+}
+
+// SetExitHandler registers the callback told about plugin processes that
+// stop on their own: the process exited, or the gRPC health probe gave up on
+// it. Deliberate stops (Stop, Shutdown, a replacing Start) are not reported.
+// The callback runs on the monitor goroutine and must not block.
+func (h *Host) SetExitHandler(handler func(installationID int)) {
+	h.exitMu.Lock()
+	h.exitHandler = handler
+	h.exitMu.Unlock()
 }
 
 func (h *Host) Client(installationID int) (*Client, error) {
@@ -241,6 +320,8 @@ func (h *Host) Client(installationID int) (*Client, error) {
 
 	return instance.client, nil
 }
+
+func (h *Host) NextStartSeq() uint64 { return h.startSeq.Load() }
 
 func (h *Host) Stop(installationID int) error {
 	h.mu.Lock()
@@ -307,20 +388,73 @@ func (h *Host) monitorHealth(ctx context.Context, installationID int, instance *
 				continue
 			}
 
-			instance.client.markUnhealthy()
-			h.logger.Error("plugin health check failed", "installation_id", installationID, "error", err)
-			h.stopInstance(instance)
+			h.retireInstance(ctx, installationID, instance, fmt.Errorf("plugin health check failed: %w", err))
 			return
 		}
 	}
+}
+
+// watchExit polls the plugin process so a crash is noticed within one
+// interval instead of at the next failed health probe (which needs several
+// misses at DefaultHealthCheckInterval).
+func (h *Host) watchExit(ctx context.Context, installationID int, instance *instance) {
+	ticker := time.NewTicker(h.exitCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !instance.process.Exited() {
+				continue
+			}
+			h.retireInstance(ctx, installationID, instance, errors.New("plugin process exited"))
+			return
+		}
+	}
+}
+
+// retireInstance marks a monitored instance dead: it is unhealthy for
+// callers holding the *Client, is removed from the host so the next Client
+// lookup reports ErrClientNotFound, and its process is reaped. The exit
+// handler is told only when this instance is still the one the host maps
+// for the installation: a canceled ctx or a different (or missing) mapped
+// instance means Stop, Shutdown or a replacing Start owns the teardown, so
+// a crash noticed while one of those is in flight is not reported twice.
+func (h *Host) retireInstance(ctx context.Context, installationID int, instance *instance, cause error) {
+	instance.retireOnce.Do(func() {
+		if ctx.Err() != nil {
+			return
+		}
+		instance.client.markUnhealthy()
+		h.mu.Lock()
+		current, ok := h.instances[installationID]
+		if ok && current == instance {
+			delete(h.instances, installationID)
+		}
+		h.mu.Unlock()
+		if !ok || current != instance {
+			return
+		}
+		h.logger.Error("plugin instance retired", "installation_id", installationID, "error", cause)
+		h.stopInstance(instance)
+
+		h.exitMu.RLock()
+		handler := h.exitHandler
+		h.exitMu.RUnlock()
+		if handler != nil {
+			handler(installationID)
+		}
+	})
 }
 
 func (h *Host) stopInstance(instance *instance) {
 	if instance == nil {
 		return
 	}
-	if instance.cancelHealth != nil {
-		instance.cancelHealth()
+	if instance.cancelMonitors != nil {
+		instance.cancelMonitors()
 	}
 	if instance.protocol != nil {
 		_ = instance.protocol.Close()
@@ -333,6 +467,11 @@ func (h *Host) stopInstance(instance *instance) {
 			}
 		})
 	}
+	// The token dies with the process: a stale one is refused until the next
+	// Start issues a replacement and the plugin re-reads GetHostInfo.
+	if instance.provider != "" && h.networkAccess != nil {
+		h.networkAccess.Revoke(instance.installationID, instance.ingressToken)
+	}
 }
 
 // bindRuntimeHost stands up a RuntimeHost gRPC server on a fresh broker
@@ -341,8 +480,9 @@ func (h *Host) stopInstance(instance *instance) {
 // tears it down.
 //
 // Skipped when no RuntimeHost services are configured.
-func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int) error {
-	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil {
+func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int, provider string) error {
+	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil &&
+		h.hostInfo == nil && h.instanceState == nil && h.networkAccess == nil {
 		return nil
 	}
 
@@ -356,15 +496,20 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 	streamID := broker.NextId()
 	go broker.AcceptAndServe(streamID, func(opts []grpc.ServerOption) *grpc.Server {
 		s := grpc.NewServer(append(opts, grpc.ChainUnaryInterceptor(observePluginCallback))...)
-		srv := NewRuntimeHostServerWithServices(
-			h.eventPublisher,
-			h.libraryLister,
-			h.catalogPresence,
-			h.installedPlugins,
-			h.globalConfigSetter,
-			pluginID,
-			installationID,
-		)
+		srv := NewRuntimeHostServerWithOptions(RuntimeHostOptions{
+			Publisher:             h.eventPublisher,
+			Libraries:             h.libraryLister,
+			Catalog:               h.catalogPresence,
+			InstalledPlugins:      h.installedPlugins,
+			GlobalConfigSetter:    h.globalConfigSetter,
+			HostInfo:              h.hostInfo,
+			InstanceState:         h.instanceState,
+			NetworkAccess:         h.networkAccess,
+			Logger:                h.logger,
+			PluginID:              pluginID,
+			InstallationID:        installationID,
+			NetworkAccessProvider: provider,
+		})
 		pluginv1.RegisterRuntimeHostServer(s, srv)
 		return s
 	})

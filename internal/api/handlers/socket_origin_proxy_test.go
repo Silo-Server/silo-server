@@ -38,18 +38,18 @@ func TestSocketOriginTrustedProxy(t *testing.T) {
 			r.Header["X-Forwarded-Proto"] = tc.proto
 			r.Header.Set("X-Forwarded-Host", "foreign.test")
 			clientip.Middleware(resolver)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				if got := socketOriginAllowed(r, tc.override); got != tc.want {
+				if got := socketOriginAllowed(r, tc.override, nil); got != tc.want {
 					t.Fatalf("allowed=%v want %v", got, tc.want)
 				}
 			})).ServeHTTP(httptest.NewRecorder(), r)
 		})
 	}
 	r := httptest.NewRequest("GET", "http://example.test/", nil)
-	if !socketOriginAllowed(r, "") {
+	if !socketOriginAllowed(r, "", nil) {
 		t.Fatal("native originless request refused")
 	}
 	r.Header["Origin"] = []string{"http://example.test", "http://example.test"}
-	if socketOriginAllowed(r, "") {
+	if socketOriginAllowed(r, "", nil) {
 		t.Fatal("multiple origins allowed")
 	}
 }

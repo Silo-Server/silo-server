@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -560,6 +561,7 @@ func TestBuildProxyRedirectURLRequestsSourceAlignedCompatManifest(t *testing.T) 
 		"http://transcode-1",
 		0,
 		&nodepool.Node{URL: "http://proxy-1"},
+		netaccess.Path{},
 	)
 	if err != nil {
 		t.Fatalf("buildProxyRedirectURL: %v", err)
@@ -575,7 +577,7 @@ func TestBuildProxyRedirectURLMarksCopyFMP4ForOldReaderRejection(t *testing.T) {
 	redirectURL, err := h.buildProxyRedirectURL(
 		"play-1", "upstream-1", string(playback.PlayTranscode),
 		&models.MediaFile{FilePath: "/media/movie.mkv"}, source, nil, time.Time{},
-		"http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"},
+		"http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -599,7 +601,7 @@ func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
 	redirectURL, err := h.buildProxyRedirectURL(
 		"play-1", "upstream-1", string(playback.PlayTranscode),
 		&models.MediaFile{FilePath: "/media/movie.mkv"}, source, nil, time.Time{},
-		"http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"},
+		"http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -616,7 +618,7 @@ func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
 func TestBuildProxyRedirectURLMarksToneMapForOldReaderRejection(t *testing.T) {
 	h := &PlaybackHandler{JWTSecret: "test-secret"}
 	source := PlaybackMediaSource{Version: catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10", ColorTransfer: "smpte2084"}}}}
-	redirectURL, err := h.buildProxyRedirectURL("play-1", "upstream-1", string(playback.PlayTranscode), &models.MediaFile{FilePath: "/media/hdr.mkv"}, source, nil, time.Time{}, "http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"})
+	redirectURL, err := h.buildProxyRedirectURL("play-1", "upstream-1", string(playback.PlayTranscode), &models.MediaFile{FilePath: "/media/hdr.mkv"}, source, nil, time.Time{}, "http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,6 +655,7 @@ func TestBuildProxyRedirectURLCarriesAudioOnlyRemuxClaim(t *testing.T) {
 		"",
 		0,
 		&nodepool.Node{URL: "http://proxy-1"},
+		netaccess.Path{},
 	)
 	if err != nil {
 		t.Fatalf("buildProxyRedirectURL: %v", err)
@@ -894,11 +897,11 @@ func TestProxyRedirectURLClaimGrowthBudget(t *testing.T) {
 
 	for _, method := range []string{string(playback.PlayDirect), string(playback.PlayRemux), string(playback.PlayTranscode)} {
 		t.Run(method, func(t *testing.T) {
-			withClaims, err := h.buildProxyRedirectURL("play", "upstream", method, file, source, session, createdAt, transcodeNodeURL, 12.5, proxyNode)
+			withClaims, err := h.buildProxyRedirectURL("play", "upstream", method, file, source, session, createdAt, transcodeNodeURL, 12.5, proxyNode, netaccess.Path{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			withoutClaims, err := h.buildProxyRedirectURL("play", "upstream", method, file, source, nil, time.Time{}, transcodeNodeURL, 12.5, proxyNode)
+			withoutClaims, err := h.buildProxyRedirectURL("play", "upstream", method, file, source, nil, time.Time{}, transcodeNodeURL, 12.5, proxyNode, netaccess.Path{})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 const (
@@ -83,6 +85,16 @@ type Node struct {
 	// for. Non-nil exactly when CapabilityDrift is, except on a note written
 	// before this column existed.
 	CapabilityDriftBaseline json.RawMessage `json:"capability_drift_baseline,omitempty"`
+	// NetworkAccess is the node's last report about the network access
+	// provider plugins running beside it, keyed by provider slug. It is
+	// written by the same health update that writes LastStats, so it is exactly
+	// as fresh as LastHealthCheck: a check that carries no report — a node that
+	// predates the field, runs no providers, or did not answer — clears it, for
+	// the same reason a check clears LastStats. A stale connected origin is
+	// worse than none: it would hand an overlay client a URL nobody serves,
+	// while an empty entry makes ClientURLFor fall back to the API relay.
+	// Only ever read for proxy nodes: clients never talk to transcode nodes.
+	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
 	// AdvertisedCapabilitiesHash is the hash the node named on its last health
 	// check, which is not always the one stored beside it: the sweep refetches
 	// on a mismatch, and a refetch that keeps failing leaves the two apart while
@@ -141,6 +153,46 @@ func (n *Node) ClientURL() string {
 		}
 	}
 	return normalizeNodeURL(n.URL)
+}
+
+// ClientURLFor is the base URL to hand a streaming client that arrived on the
+// given access path. The default path — LAN, public URL, reverse proxy — gets
+// ClientURL. A client that came through a network access provider (an overlay
+// such as a tailnet) cannot reach that address at all, so it gets the origin
+// the same provider reported on this node, and an empty string when the node
+// has no connected origin for that provider. Empty is a real answer, not a
+// missing one: the caller must not use this node for that client and falls
+// back to an API-relative URL, which the API server relays.
+func (n *Node) ClientURLFor(path netaccess.Path) string {
+	if n == nil {
+		return ""
+	}
+	if path.IsDefault() {
+		return n.ClientURL()
+	}
+	origin, ok := n.NetworkAccess.ConnectedOrigin(path.Provider)
+	if !ok {
+		return ""
+	}
+	return normalizeNodeURL(origin)
+}
+
+// ClientReachableVia narrows a proxy eligibility predicate to proxies that
+// have a client origin for the request's access path, so the route resolver
+// never reserves a proxy the client cannot reach and then falls back on the
+// URL builder. The default path reaches every proxy, so base is returned as
+// is — nil included, which the planners read as "any healthy proxy". The
+// returned predicate runs under the planner lock: a map lookup only.
+func ClientReachableVia(path netaccess.Path, base func(*Node) bool) func(*Node) bool {
+	if path.IsDefault() {
+		return base
+	}
+	return func(n *Node) bool {
+		if n == nil || n.ClientURLFor(path) == "" {
+			return false
+		}
+		return base == nil || base(n)
+	}
 }
 
 // StoredCapabilities returns this node's last stored capability report, nil-safe
@@ -351,13 +403,13 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline`
+const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
 	// jsonb is scanned as raw bytes rather than into json.RawMessage directly so
 	// a NULL column stays nil instead of decoding through the JSON codec.
-	var capabilities, lastStats, driftBaselineBytes []byte
+	var capabilities, lastStats, driftBaselineBytes, networkAccessBytes []byte
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Type, &n.URL, &n.PublicURL,
 		&n.Enabled, &n.Healthy, &n.ActiveJobs,
@@ -368,9 +420,17 @@ func scanNode(row pgx.Row) (*Node, error) {
 		&lastStats,
 		&n.HWAccelOverride, &n.HWDeviceOverride,
 		&n.CapabilityDrift, &driftBaselineBytes,
+		&networkAccessBytes,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if len(networkAccessBytes) > 0 {
+		var report netaccess.NodeNetworkAccess
+		if err := json.Unmarshal(networkAccessBytes, &report); err != nil {
+			return nil, fmt.Errorf("decode node %d network_access: %w", n.ID, err)
+		}
+		n.NetworkAccess = report.Normalized()
 	}
 	if len(capabilities) > 0 {
 		n.Capabilities = json.RawMessage(capabilities)
@@ -506,7 +566,8 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 			capabilities_refreshed_at = CASE WHEN `+sameURL+` THEN capabilities_refreshed_at END,
 			last_stats = CASE WHEN `+sameURL+` THEN last_stats END,
 			capability_drift = CASE WHEN `+sameURL+` THEN capability_drift END,
-			capability_drift_baseline = CASE WHEN `+sameURL+` THEN capability_drift_baseline END
+			capability_drift_baseline = CASE WHEN `+sameURL+` THEN capability_drift_baseline END,
+			network_access = CASE WHEN `+sameURL+` THEN network_access ELSE '{}'::jsonb END
 		 WHERE id = $1
 		 RETURNING `+nodeColumns,
 		id, input.Name, input.URL, input.Enabled,
@@ -539,22 +600,28 @@ func (r *Repository) Delete(ctx context.Context, id int) error {
 }
 
 // UpdateHealth updates a node's health status, active job count, reported
-// egress bandwidth, and last resource sample.
+// egress bandwidth, last resource sample, and last network access report.
 //
 // A nil lastStats writes NULL, which is what a node that reports no sample —
 // an older build, or a non-Linux host — must produce. Passing the previous
 // value through instead would leave a dead node's numbers on screen looking
-// current.
+// current. networkAccess follows the same rule with '{}' as its empty form: a
+// check that carried no report clears the stored one, so an overlay origin
+// never outlives the check that last confirmed it.
 // checkedURL fences the write the same way UpdateCapabilities does. The window
 // is smaller — a health request is bounded at five seconds — but the
 // consequence is not: last_stats carries the scratch fill that transcode
 // admission reads, so one worker's disk reading landing on a row that now
 // addresses another can exclude a healthy node or admit a full one.
-func (r *Repository) UpdateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte) error {
+func (r *Repository) UpdateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) error {
+	networkAccessJSON, err := marshalNetworkAccess(networkAccess)
+	if err != nil {
+		return fmt.Errorf("update node health: %w", err)
+	}
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE stream_nodes SET healthy = $2, active_jobs = $3, egress_kbps = $4, last_stats = $5, last_health_check = NOW()
+		`UPDATE stream_nodes SET healthy = $2, active_jobs = $3, egress_kbps = $4, last_stats = $5, network_access = $7, last_health_check = NOW()
 		 WHERE id = $1 AND rtrim(url, '/') = rtrim($6, '/')`,
-		id, healthy, activeJobs, egressKbps, lastStats, checkedURL)
+		id, healthy, activeJobs, egressKbps, lastStats, checkedURL, networkAccessJSON)
 	if err != nil {
 		return fmt.Errorf("update node health: %w", err)
 	}
@@ -562,6 +629,16 @@ func (r *Repository) UpdateHealth(ctx context.Context, id int, checkedURL string
 		return ErrNodeMoved
 	}
 	return nil
+}
+
+// marshalNetworkAccess renders a node's network access report for its jsonb
+// column. The column is NOT NULL, so "no report" is the empty object.
+func marshalNetworkAccess(report netaccess.NodeNetworkAccess) ([]byte, error) {
+	report = report.Normalized()
+	if len(report) == 0 {
+		return []byte(`{}`), nil
+	}
+	return json.Marshal(report)
 }
 
 // UpdateCapabilities persists a freshly fetched capability report together with

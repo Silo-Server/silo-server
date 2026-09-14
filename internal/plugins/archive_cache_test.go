@@ -148,3 +148,81 @@ func (s *legacyArchiveStore) SaveArchive(
 	s.savedArchiveBytes = append([]byte(nil), archiveBytes...)
 	return nil
 }
+
+// A cache with its own root (a proxy node's) never touches the install path
+// the API server recorded: it rehydrates under <root>/<plugin>/<version>/
+// <release>/plugin, reuses that copy on the next Ensure, and drops the
+// previous release once a replacement is in place.
+func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "proxy-cache")
+	apiInstallRoot := filepath.Join(t.TempDir(), "api-machine", "plugins", "silo.metadb")
+
+	release := func(version, dir, script string) (*Installation, *legacyArchiveStore) {
+		t.Helper()
+		binaryData := []byte(script)
+		checksum := sha256.Sum256(binaryData)
+		manifest := testPluginManifest(t, "silo.metadb", version)
+		manifest.Checksum = hex.EncodeToString(checksum[:])
+		manifestBytes, err := protojson.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := &legacyArchiveStore{archive: &InstallationArchive{
+			InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archiveBytes,
+		}}
+		return &Installation{
+			ID:          42,
+			PluginID:    "silo.metadb",
+			Version:     version,
+			InstallPath: filepath.Join(apiInstallRoot, version, dir, "plugin"),
+		}, store
+	}
+
+	first, firstStore := release("0.0.19", "install-aaaa", "#!/bin/sh\nexit 0\n")
+	cache := NewArchiveCacheAt(firstStore, root)
+	wantFirst := filepath.Join(root, "silo.metadb", "0.0.19", "install-aaaa", "plugin")
+	if got := cache.LocalInstallPath(first); got != wantFirst {
+		t.Fatalf("LocalInstallPath = %q, want %q", got, wantFirst)
+	}
+	if got := NewArchiveCache(firstStore).LocalInstallPath(first); got != first.InstallPath {
+		t.Fatalf("LocalInstallPath without a root = %q, want the recorded path %q", got, first.InstallPath)
+	}
+
+	manifest, err := cache.Ensure(ctx, first)
+	if err != nil {
+		t.Fatalf("Ensure(first) returned error: %v", err)
+	}
+	if manifest.GetVersion() != "0.0.19" {
+		t.Fatalf("manifest version = %q", manifest.GetVersion())
+	}
+	if _, err := os.Stat(wantFirst); err != nil {
+		t.Fatalf("binary was not rehydrated under the cache root: %v", err)
+	}
+	if _, err := os.Stat(apiInstallRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the API server's install root was touched: %v", err)
+	}
+
+	// The second Ensure finds the copy and does not read the archive again.
+	firstStore.archive = nil
+	if _, err := cache.Ensure(ctx, first); err != nil {
+		t.Fatalf("Ensure(first) again returned error: %v", err)
+	}
+
+	second, secondStore := release("0.0.20", "install-bbbb", "#!/bin/sh\nexit 1\n")
+	cache = NewArchiveCacheAt(secondStore, root)
+	if _, err := cache.Ensure(ctx, second); err != nil {
+		t.Fatalf("Ensure(second) returned error: %v", err)
+	}
+	wantSecond := filepath.Join(root, "silo.metadb", "0.0.20", "install-bbbb", "plugin")
+	if _, err := os.Stat(wantSecond); err != nil {
+		t.Fatalf("second release was not rehydrated: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(wantFirst)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("previous release still present after the replacement: %v", err)
+	}
+}

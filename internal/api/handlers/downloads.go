@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -589,6 +590,15 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		return false, nil
 	}
 	releaseReservation := func() { h.nodePlanner.ReleaseSession(sessionID) }
+	// The download planner has no eligibility predicate, so the access-path
+	// check happens here: a client that came through a network access provider
+	// cannot reach a proxy without an origin on that overlay, and the file is
+	// served from this server instead, exactly as when no proxy is available.
+	clientBase := plan.ProxyNode.ClientURLFor(netaccess.PathFromContext(r.Context()))
+	if clientBase == "" {
+		releaseReservation()
+		return false, nil
+	}
 	mediaPath := target.Path
 	downloadFilename := ""
 	if target.OriginArtifactID != "" {
@@ -624,15 +634,22 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		return false, fmt.Errorf("sign proxy download token: %w", err)
 	}
 	// The location is what the client downloads from, so it uses the proxy's
-	// client-facing URL; the cache key below stays on the canonical backend
-	// URL, which is the node's identity everywhere else.
-	location := strings.TrimRight(plan.ProxyNode.ClientURL(), "/") + "/downloads/file/" + url.PathEscape(token)
+	// client-facing URL for this access path. The preflight below dials the
+	// proxy's backend URL instead: that is the address this server reaches the
+	// node on (health sweeps, force-reload), while a client-facing origin may
+	// be unreachable from here — a tailnet origin resolves only on tailnet
+	// members, and this process need not be one. The verdict is about the
+	// proxy's ability to read the file, not about any one access path, so the
+	// cache key is the backend URL plus the target and is shared by every path.
+	tokenPath := "/downloads/file/" + url.PathEscape(token)
+	location := clientBase + tokenPath
 	targetKey := target.Path
 	if target.OriginArtifactID != "" {
 		targetKey = target.OriginNodeURL + "\x00" + target.OriginArtifactID
 	}
-	cacheKey := strings.TrimRight(plan.ProxyNode.URL, "/") + "\x00" + targetKey
-	if !h.proxyCanServe(r.Context(), cacheKey, location) {
+	backendBase := strings.TrimRight(plan.ProxyNode.URL, "/")
+	cacheKey := backendBase + "\x00" + targetKey
+	if !h.proxyCanServe(r.Context(), cacheKey, backendBase+tokenPath) {
 		releaseReservation()
 		return false, nil
 	}
@@ -647,7 +664,9 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 	return true, nil
 }
 
-func (h *DownloadHandler) proxyCanServe(ctx context.Context, cacheKey, location string) bool {
+// proxyCanServe reports whether the proxy answers a HEAD for the signed token
+// at probeURL, its backend address. Verdicts are cached briefly per cacheKey.
+func (h *DownloadHandler) proxyCanServe(ctx context.Context, cacheKey, probeURL string) bool {
 	now := time.Now()
 	h.preflightMu.Lock()
 	for key, cached := range h.preflightCache {
@@ -661,7 +680,7 @@ func (h *DownloadHandler) proxyCanServe(ctx context.Context, cacheKey, location 
 	}
 	h.preflightMu.Unlock()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, location, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, probeURL, nil)
 	if err != nil {
 		return false
 	}

@@ -10,7 +10,7 @@
   "consumer_method": "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse.",
   "field_reference": "internal/contractledger validates this file against migration.schema.json and reconciles it against the route inventory: listener, namespace, method, path, registration_index, handler, handler_kind, source_file, route_group, middleware_chain, auth_class, auth_traits, conditional, conditions, delegates_to (inventory empty string is null here), request_kind, response_media_kind, streams, and upgrades_websocket are copied from the inventory row and must match it, except that dynamic_plugin_proxy rows record both media kinds as dynamic_proxy; profile_required and admin_required are derived from auth_traits. Every other field is curated by hand and preserved when scripts/apiv2-ledger/build_ledger.py merges a regenerated inventory into this file.",
   "totals": {
-    "entries": 773
+    "entries": 776
   },
   "entries": [
     {
@@ -45784,6 +45784,167 @@
         "operation_id": null
       },
       "notes": "External caller: Prometheus scraper. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/network-access/status",
+      "registration_index": 0,
+      "handler": "(*internal/proxy.Server).handleNetworkAccessStatus",
+      "handler_kind": "method",
+      "source_file": "internal/proxy/server.go",
+      "route_group": "/",
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/api/handlers/admin_node_network_access.go",
+          "line": 49,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-proxy",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on proxy listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols proxy GET /network-access/status. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2. Internal consumer: internal/api/handlers/admin_node_network_access.go fans GET /api/v2/admin/network-access/{provider}/status out to every enabled proxy node through this route with the node bearer and a ten-second timeout."
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/network-access/{provider}/connect",
+      "registration_index": 0,
+      "handler": "(*internal/proxy.Server).handleNetworkAccessConnect",
+      "handler_kind": "method",
+      "source_file": "internal/proxy/server.go",
+      "route_group": "/",
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/api/handlers/admin_node_network_access.go",
+          "line": 63,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-proxy",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on proxy listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols proxy POST /network-access/{provider}/connect. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2. Internal consumer: internal/api/handlers/admin_node_network_access.go fans POST /api/v2/admin/network-access/{provider}/connect out to every enabled proxy node through this route with the node bearer and a ten-second timeout. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR.",
+      "retry_safety": "natural_idempotent"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/network-access/{provider}/disconnect",
+      "registration_index": 0,
+      "handler": "(*internal/proxy.Server).handleNetworkAccessDisconnect",
+      "handler_kind": "method",
+      "source_file": "internal/proxy/server.go",
+      "route_group": "/",
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/api/handlers/admin_node_network_access.go",
+          "line": 70,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-proxy",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on proxy listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols proxy POST /network-access/{provider}/disconnect. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2. Internal consumer: internal/api/handlers/admin_node_network_access.go fans POST /api/v2/admin/network-access/{provider}/disconnect out to every enabled proxy node through this route with the node bearer and a ten-second timeout. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR.",
+      "retry_safety": "natural_idempotent"
     },
     {
       "listener": "proxy",

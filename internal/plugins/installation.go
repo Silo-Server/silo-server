@@ -360,6 +360,42 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 	return nil
 }
 
+// ListEnabledWithCapabilityTypes returns the enabled installations that
+// declare at least one capability of the given types, in id order. One
+// query replaces a ListEnabled + per-installation ListCapabilities fan-out
+// for callers that only need membership, such as the resident supervisor.
+func (s *InstallationStore) ListEnabledWithCapabilityTypes(ctx context.Context, capabilityTypes []string) ([]*Installation, error) {
+	if len(capabilityTypes) == 0 {
+		return nil, nil
+	}
+	query := `SELECT ` + installationColumns + ` FROM plugin_installations
+		WHERE enabled = true
+		  AND EXISTS (
+			SELECT 1 FROM plugin_capabilities
+			WHERE plugin_capabilities.plugin_installation_id = plugin_installations.id
+			  AND plugin_capabilities.capability_type = ANY($1)
+		  )
+		ORDER BY id ASC`
+	rows, err := s.pool.Query(ctx, query, capabilityTypes)
+	if err != nil {
+		return nil, fmt.Errorf("listing enabled plugin installations by capability type: %w", err)
+	}
+	defer rows.Close()
+
+	var installations []*Installation
+	for rows.Next() {
+		installation, err := scanInstallation(rows)
+		if err != nil {
+			return nil, err
+		}
+		installations = append(installations, installation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating enabled plugin installations by capability type: %w", err)
+	}
+	return installations, nil
+}
+
 func (s *InstallationStore) ListCapabilities(ctx context.Context, installationID int) ([]*Capability, error) {
 	query := `SELECT ` + capabilityColumns + ` FROM plugin_capabilities
 		WHERE plugin_installation_id = $1

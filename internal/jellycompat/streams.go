@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -488,7 +489,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if proxyNode := decision.Plan.ProxyNode; proxyNode != nil {
-		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, session, playSession.CreatedAt, "", seekSeconds, proxyNode); redirectErr == nil {
+		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, session, playSession.CreatedAt, "", seekSeconds, proxyNode, netaccess.PathFromContext(r.Context())); redirectErr == nil {
 			assignment := playback.NodeRoutingAssignment{
 				Workload: string(decision.Shape.Workload), Execution: string(decision.Shape.Execution),
 				Egress: string(decision.Shape.Egress), EgressNodeID: proxyNode.ID, EgressNodeURL: proxyNode.URL,
@@ -792,7 +793,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		executionNodeID := h.compatTranscodeNodeID(remoteNodeURL, tcNode)
 
 		if decision.Shape.Egress == noderouting.EgressProxy {
-			redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, string(playback.PlayTranscode), file, *source, session, playSession.CreatedAt, remoteNodeURL, 0, plan.ProxyNode)
+			redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, string(playback.PlayTranscode), file, *source, session, playSession.CreatedAt, remoteNodeURL, 0, plan.ProxyNode, netaccess.PathFromContext(r.Context()))
 			if redirectErr == nil {
 				if err := h.recordNodeRoutingAssignment(r.Context(), playSession.ID, playSession.UpstreamSessionID, playback.NodeRoutingAssignment{
 					Workload: string(decision.Shape.Workload), Execution: string(noderouting.ExecutionTranscode),

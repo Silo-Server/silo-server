@@ -115,11 +115,17 @@ func (s *Service) SetGlobalConfigWithClears(
 			stopErr = fmt.Errorf("reload plugin after config update: %w", err)
 		}
 	}
+	// A reconfigured resident gets a fresh failure budget; the lifecycle
+	// reconcile below starts it again.
+	s.resident.Reset(installationID)
 	// Configuration is part of metadata match input identity. Notify hooks
 	// after the old process has been stopped so resolver reloads observe the new
 	// runtime. The durable config changed even when stopping failed, so hooks
 	// still run before returning that error and parked rows are not left asleep.
 	s.OnLifecycleChange(ctx)
+	// Other hosts running this installation (proxy nodes) still hold the old
+	// configuration in a live process; tell them to replace it.
+	s.publishPluginsChanged(ctx, PluginsChangedEvent{InstallationID: installationID, Restart: true})
 	return stopErr
 }
 

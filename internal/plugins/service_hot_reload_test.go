@@ -241,6 +241,10 @@ func (f *fakePluginClient) WatchSyncProvider(string) (*pluginhost.WatchSyncProvi
 	return nil, nil
 }
 
+func (f *fakePluginClient) NetworkAccessProvider(string) (*pluginhost.NetworkAccessProviderClient, error) {
+	return nil, nil
+}
+
 type fakeServiceInstallationStore struct {
 	byID             map[int]*Installation
 	byPluginID       map[string][]*Installation
@@ -252,6 +256,9 @@ type fakeServiceInstallationStore struct {
 	saveArchiveErr   error
 	listCapabilities []*Capability
 	events           *[]string
+	// archives, when set, backs GetArchive for the archive cache; unset ids
+	// report ErrArchiveNotFound.
+	archives map[int]*InstallationArchive
 }
 
 func newFakeServiceInstallationStore(installations ...*Installation) *fakeServiceInstallationStore {
@@ -364,7 +371,30 @@ func (s *fakeServiceInstallationStore) ListCapabilities(context.Context, int) ([
 	return s.listCapabilities, nil
 }
 
-func (s *fakeServiceInstallationStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
+// ListEnabledWithCapabilityTypes mirrors ListCapabilities, whose fixed
+// capability list applies to every installation in the fake.
+func (s *fakeServiceInstallationStore) ListEnabledWithCapabilityTypes(ctx context.Context, capabilityTypes []string) ([]*Installation, error) {
+	matches := false
+	for _, record := range s.listCapabilities {
+		if record == nil {
+			continue
+		}
+		for _, capabilityType := range capabilityTypes {
+			if record.Type == capabilityType {
+				matches = true
+			}
+		}
+	}
+	if !matches {
+		return nil, nil
+	}
+	return s.ListEnabled(ctx)
+}
+
+func (s *fakeServiceInstallationStore) GetArchive(_ context.Context, installationID int) (*InstallationArchive, error) {
+	if archive, ok := s.archives[installationID]; ok && archive != nil {
+		return archive, nil
+	}
 	return nil, ErrArchiveNotFound
 }
 

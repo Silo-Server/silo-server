@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
 
+import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
+
 import AdminPlugins from "./AdminPlugins";
 
 const useAdminPluginsMock = vi.fn();
@@ -57,6 +59,7 @@ function makeInstallation(index: number, displayName: string): PluginInstallatio
     version: "1.0.0",
     install_path: `/plugins/installed-${suffix}`,
     enabled: true,
+    runtime: { resident: false, state: "stopped", restart_count: 0 },
     source_kind: "silo",
     repository_name: "Silo plugins",
     updates_paused: false,
@@ -155,6 +158,65 @@ describe("AdminPlugins", () => {
       catalogSettings: undefined,
       isLoading: false,
     });
+  });
+
+  it("reads runtime.state for the status dot only when the plugin is resident", () => {
+    const base = makeInstallation(1, "Resident");
+    expect(pluginStatusIndicator(base)).toMatchObject({ dotClass: "bg-success", label: "Active" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: false, state: "stopped", restart_count: 0 },
+      }),
+    ).toMatchObject({ dotClass: "bg-success", label: "Active" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: true, state: "running", restart_count: 0 },
+      }),
+    ).toMatchObject({ dotClass: "bg-success", label: "Running" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: true, state: "backoff", restart_count: 3, last_error: "exited" },
+      }),
+    ).toMatchObject({ dotClass: "bg-warning", label: "Restarting (3)", title: "exited" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: true, state: "failed", restart_count: 9, last_error: "boom" },
+      }),
+    ).toMatchObject({ dotClass: "bg-destructive", label: "Failed", title: "boom" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        enabled: false,
+        runtime: { resident: true, state: "failed", restart_count: 9 },
+      }),
+    ).toMatchObject({ dotClass: "bg-muted-foreground", label: "Inactive" });
+  });
+
+  it("renders the resident runtime state on the installed card", () => {
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalog: [],
+      installations: [
+        {
+          ...makeInstallation(1, "Overlay"),
+          runtime: { resident: true, state: "failed", restart_count: 10, last_error: "exited" },
+        },
+      ],
+      catalogSettings: undefined,
+      isLoading: false,
+    });
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+    expect(markup).toContain("bg-destructive");
+    expect(markup).toContain("Failed");
+    expect(markup).not.toContain(">Active<");
   });
 
   it("starts the shared plugin update check task from the plugins page", () => {
@@ -340,6 +402,7 @@ describe("AdminPlugins", () => {
           version: "0.9.0",
           install_path: "/plugins/example",
           enabled: true,
+          runtime: { resident: false, state: "stopped", restart_count: 0 },
           source_kind: "silo",
           repository_name: "Silo plugins",
           updates_paused: false,
