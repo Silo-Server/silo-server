@@ -95,6 +95,12 @@ func TestRetryCancellationPreservesLastFailure(t *testing.T) {
 			if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v; want cancellation and last failure %q", err, tt.want)
 			}
+			if tt.status >= 400 {
+				status, ok := errors.AsType[*HTTPError](err)
+				if !ok || status.StatusCode != tt.status {
+					t.Fatalf("error = %v; want preserved HTTP status %d", err, tt.status)
+				}
+			}
 			if calls != 1 {
 				t.Fatalf("requests = %d, want 1 after cancellation", calls)
 			}

@@ -62,6 +62,42 @@ Apple and Android adoption is coordinated separately. Generation and delivery re
 migration scopes land. Jellyfin compatibility uses its existing subtitle
 protocol and needs no equivalent native capability route.
 
+## OpenRouter transcription configuration
+
+In Admin Settings → AI Services, select the OpenRouter speech-to-text preset:
+base URL `https://openrouter.ai/api/v1`, model `openai/whisper-large-v3-turbo`, and an
+OpenRouter API key. A shared text endpoint and key can also be used, but the
+speech model must still be a transcription model. Test it before enabling
+"Create subtitles from audio".
+
+Silo sends multipart audio to `/audio/transcriptions` with `verbose_json` and
+both segment and word timestamp granularities. OpenRouter receives only the
+standard transcription fields; Silo omits the faster-whisper `vad_filter`
+extension. Missing or invalid timestamps on speech segments fail transcription. Empty
+segments are ignored because Whisper can emit them at chunk boundaries. An empty
+segment array is accepted for speech-free chunks only when no transcript text
+was returned.
+
+The connection check uploads a short bundled synthetic speech sample and
+requires nonempty speech with usable segment timestamps. It does not persist
+settings or guarantee that every future request will succeed. A completed check
+returns HTTP 200; inspect `success` for the provider outcome. Authentication
+failures report that the speech-to-text key needs replacing or clearing to use
+the shared Text AI key. Other recognized provider failures return fixed
+diagnostics without exposing credentials or provider response bodies.
+
+OpenRouter's [speech-to-text guide](https://openrouter.ai/docs/guides/overview/multimodal/stt)
+documents model-dependent timestamp support, a 25 MB multipart upload cap, and a
+60-second upstream processing timeout. Silo extracts 16 kHz mono WAV chunks of
+at most 600 seconds (about 19 MB). If a provider times out, lower "Audio per
+request" in Advanced settings, for example to 60. Processing time and audio
+length are different limits. OpenRouter's chat provider-routing preferences do
+not apply to transcription requests.
+
+Generated tracks use the existing subtitle delivery path for Apple, Android,
+and Jellyfin clients. This provider configuration needs no new client fields,
+capability endpoint, or Jellyfin operation.
+
 ## Stored tracks and provider search
 
 GET `/api/v2/subtitles/{media_file_id}` lists stored subtitle metadata under

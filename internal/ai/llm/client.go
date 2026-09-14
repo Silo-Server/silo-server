@@ -197,6 +197,15 @@ type permanentError struct{ err error }
 func (e *permanentError) Error() string { return e.err.Error() }
 func (e *permanentError) Unwrap() error { return e.err }
 
+// HTTPError preserves the provider status for callers that need a safe diagnostic.
+// Error includes provider-controlled details and must not be sent to clients.
+type HTTPError struct {
+	StatusCode int
+	message    string
+}
+
+func (e *HTTPError) Error() string { return e.message }
+
 // doWithRetry runs the shared request/retry loop: build constructs a fresh
 // request per attempt, parse consumes a 200 body. Transport errors, read
 // errors, 429 (honoring Retry-After), 5xx, and retryable parse errors back
@@ -239,20 +248,20 @@ func (c *Client) doWithRetry(ctx context.Context, httpClient *http.Client, label
 			}
 			wait := rateLimitBackoff(resp, attempt)
 			slog.WarnContext(ctx, "rate limited by AI API, waiting", "component", "ai", "api", label, "attempt", attempt+1, "wait", wait)
-			lastErr = fmt.Errorf("%s returned 429: %s", label, Truncate(string(respBody), 300))
+			lastErr = &HTTPError{StatusCode: resp.StatusCode, message: fmt.Sprintf("%s returned 429: %s", label, Truncate(string(respBody), 300))}
 			if waitErr := sleepCtx(ctx, wait); waitErr != nil {
 				return errors.Join(lastErr, waitErr)
 			}
 			continue
 		case resp.StatusCode >= 500:
-			lastErr = fmt.Errorf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))
+			lastErr = &HTTPError{StatusCode: resp.StatusCode, message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
 			if waitErr := sleepCtx(ctx, time.Duration(attempt+1)*time.Second); waitErr != nil {
 				return errors.Join(lastErr, waitErr)
 			}
 			continue
 		case resp.StatusCode != http.StatusOK:
 			// 4xx other than 429: not retryable.
-			return fmt.Errorf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))
+			return &HTTPError{StatusCode: resp.StatusCode, message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
 		}
 
 		parseErr := parse(respBody)

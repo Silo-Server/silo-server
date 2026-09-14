@@ -24,7 +24,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
-	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -2178,10 +2177,6 @@ func (h *AdminHandler) normalizeBatchSetting(
 		if err != nil {
 			err = fmt.Errorf("clientip.trusted_proxies must be a comma-separated list of CIDRs: %w", err)
 		}
-	case "ai.asr_base_url":
-		if llm.IsChatOnlyGateway(normalized) {
-			err = errors.New("this endpoint cannot produce timestamped transcriptions; use a Whisper-compatible transcription endpoint")
-		}
 	case diagnostics.KeyUploadsEnabled:
 		if normalized == "true" {
 			if err = h.validateDiagnosticsUploadsEnabled(ctx); err != nil {
@@ -2644,14 +2639,8 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "clientip.trusted_proxies must be a comma-separated list of CIDRs: " + err.Error()}
 		}
 		req.Value = normalized
-	case "ai.base_url", "ai.chat_model", "ai.asr_model":
+	case "ai.base_url", "ai.asr_base_url", "ai.chat_model", "ai.asr_model":
 		req.Value = strings.TrimSpace(req.Value)
-	case "ai.asr_base_url":
-		req.Value = strings.TrimSpace(req.Value)
-		if llm.IsChatOnlyGateway(req.Value) {
-			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "This endpoint cannot produce timestamped transcriptions (chat-only gateway). " +
-				"Use a self-hosted Whisper server (faster-whisper/speaches), api.groq.com/openai, or api.openai.com."}
-		}
 	case "metadata_ai.on_view":
 		switch req.Value {
 		case "off", "button", "auto":

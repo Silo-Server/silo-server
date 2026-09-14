@@ -3,7 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +32,8 @@ type adminSettingsConnectionCheckRequest struct {
 type connectionCheckResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+	// safeMessage contains only diagnostics authored here, never provider text.
+	safeMessage string
 }
 
 type s3SettingsCheckClient interface {
@@ -236,48 +238,64 @@ func checkAITranscriptionConnection(ctx context.Context, cfg *config.Config) con
 	client := newAdminAISettingsCheckClient(aiClientConfig(cfg))
 	checkCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
-	if _, err := client.Transcribe(checkCtx, llm.TranscribeRequest{
+	result, err := client.Transcribe(checkCtx, llm.TranscribeRequest{
 		Filename: "silo-connection-check.wav",
-		Audio:    silenceWAV(),
+		Audio:    transcriptionCheckWAV,
 		Timeout:  30 * time.Second,
-	}); err != nil {
+	})
+	if err != nil {
 		return connectionCheckResponse{
-			Success: false,
-			Message: fmt.Sprintf("Speech-to-text connection check failed: %v", err),
+			Success:     false,
+			Message:     fmt.Sprintf("Speech-to-text connection check failed: %v", err),
+			safeMessage: transcriptionCheckFailureMessage(err),
 		}
 	}
 
+	if result != nil {
+		for _, segment := range result.Segments {
+			if strings.TrimSpace(segment.Text) != "" && segment.Start >= 0 && segment.End > segment.Start {
+				return connectionCheckResponse{Success: true, Message: "Speech-to-text connection successful: timestamped speech received."}
+			}
+		}
+	}
 	return connectionCheckResponse{
-		Success: true,
-		Message: "Speech-to-text connection successful.",
+		Success: false,
+		Message: "Speech-to-text connection check failed: the model did not return usable timestamped speech. Choose a model that supports segment timestamps.",
 	}
 }
 
-// silenceWAV returns 250 ms of 16 kHz mono PCM. It is long enough for
-// transcription providers to parse while keeping connection checks cheap.
-func silenceWAV() []byte {
-	const (
-		sampleRate    = 16_000
-		bitsPerSample = 16
-		sampleCount   = sampleRate / 4
-		dataSize      = sampleCount * bitsPerSample / 8
-	)
-	wav := make([]byte, 44+dataSize)
-	copy(wav[0:4], "RIFF")
-	binary.LittleEndian.PutUint32(wav[4:8], uint32(36+dataSize))
-	copy(wav[8:12], "WAVE")
-	copy(wav[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(wav[16:20], 16)
-	binary.LittleEndian.PutUint16(wav[20:22], 1)
-	binary.LittleEndian.PutUint16(wav[22:24], 1)
-	binary.LittleEndian.PutUint32(wav[24:28], sampleRate)
-	binary.LittleEndian.PutUint32(wav[28:32], sampleRate*bitsPerSample/8)
-	binary.LittleEndian.PutUint16(wav[32:34], bitsPerSample/8)
-	binary.LittleEndian.PutUint16(wav[34:36], bitsPerSample)
-	copy(wav[36:40], "data")
-	binary.LittleEndian.PutUint32(wav[40:44], dataSize)
-	return wav
+func transcriptionCheckFailureMessage(err error) string {
+	if errors.Is(err, llm.ErrQuotaExhausted) {
+		return "Speech-to-text provider quota is exhausted. Check your provider balance and limits."
+	}
+	if status, ok := errors.AsType[*llm.HTTPError](err); ok {
+		switch status.StatusCode {
+		case http.StatusUnauthorized:
+			return "Speech-to-text authentication failed. Replace the speech-to-text API key, or clear it to use the Text AI key."
+		case http.StatusForbidden:
+			return "Speech-to-text access was denied. Check your API key permissions and allowed providers."
+		case http.StatusPaymentRequired:
+			return "Speech-to-text provider requires payment. Check your provider balance and spending limit."
+		case http.StatusNotFound:
+			return "Speech-to-text endpoint or model is unavailable. Check the base URL, model, and allowed providers."
+		case http.StatusTooManyRequests:
+			return "Speech-to-text provider is rate limiting requests. Try again later."
+		}
+		if status.StatusCode >= 500 {
+			return "Speech-to-text provider is temporarily unavailable. Try again later."
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Speech-to-text connection check timed out. Check provider availability and try again."
+	}
+	return ""
 }
+
+// transcriptionCheckWAV contains synthetic speech: "This is a subtitle test."
+// A silent probe cannot prove that a model returns usable timestamped speech.
+//
+//go:embed testdata/transcription-check.wav
+var transcriptionCheckWAV []byte
 
 func checkMeilisearchConnection(ctx context.Context, settings map[string]string) connectionCheckResponse {
 	searchSettings, err := catalog.CatalogSearchSettingsFromMap(settings)

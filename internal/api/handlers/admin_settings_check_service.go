@@ -41,7 +41,10 @@ func (h *AdminHandler) CheckAdminSettingsConnection(ctx context.Context, kind st
 	// Provider errors can include credentials, submitted endpoints, or response
 	// bodies. The native boundary returns a stable diagnostic without those values.
 	if !result.Success {
-		result.Message = "Connection check failed. Verify the submitted settings and provider availability."
+		result.Message = result.safeMessage
+		if result.Message == "" {
+			result.Message = "Connection check failed. Verify the submitted settings and provider availability."
+		}
 	}
 	return AdminSettingsCheckResult{Success: result.Success, Message: result.Message}, nil
 }
