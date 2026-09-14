@@ -185,6 +185,7 @@ type MediaDetail struct {
 	Year                int
 	Runtime             int
 	Genres              []string
+	GenreIDs            []int `json:"-"`
 	VoteAverage         float64
 	VoteCount           int
 	Status              string
