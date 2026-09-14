@@ -1,7 +1,9 @@
 package apiv2
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -80,7 +82,29 @@ type NetworkAccessProviderInput struct {
 // NetworkAccessCommand selects the hosts a connect or disconnect targets.
 type NetworkAccessCommand struct {
 	Hosts []string `json:"hosts,omitempty" maxItems:"256" doc:"Host ids to act on (api, node:<id>); omitted means every host"`
+	// hostsNull records an explicit {"hosts": null}. The decoder leaves Hosts
+	// nil for null and for omission alike, and omission means every host; a
+	// null must not widen a malformed request to the whole deployment. The
+	// body is optional, so the RawBody route other operations use for this
+	// rule would make it required in the document.
+	hostsNull bool
 }
+
+func (c *NetworkAccessCommand) UnmarshalJSON(data []byte) error {
+	type plain NetworkAccessCommand
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	*c = NetworkAccessCommand(decoded)
+	c.hostsNull = bytes.Equal(bytes.TrimSpace(members["hosts"]), jsonNull)
+	return nil
+}
+
 type NetworkAccessCommandInput struct {
 	NetworkAccessProviderInput
 	Body *NetworkAccessCommand `required:"false"`
@@ -181,6 +205,9 @@ func registerNetworkAccess(reg *Registry) {
 		Register(reg, op, func(ctx context.Context, in *NetworkAccessCommandInput) (*NetworkAccessStatusOutput, error) {
 			if reg.deps.NetworkAccess == nil {
 				return nil, unavailable("network access")
+			}
+			if in.Body != nil && in.Body.hostsNull {
+				return nil, validationProblem(locationBody+".hosts", codeInvalidType, "null is not a value for this member; omit it to act on every host.")
 			}
 			var hosts []string
 			if in.Body != nil && in.Body.Hosts != nil {

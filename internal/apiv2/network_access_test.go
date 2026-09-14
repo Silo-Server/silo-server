@@ -331,3 +331,19 @@ func TestNetworkAccessStatusOfDefaultsState(t *testing.T) {
 		t.Fatalf("updated_at = %v", out.Hosts[0].UpdatedAt)
 	}
 }
+
+// An explicit null selector must not be read as "every host".
+func TestNetworkAccessCommandRejectsExplicitNullHosts(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	f := newFakeNetworkAccess()
+	deps.NetworkAccess = f
+	h := newTestHandler(t, deps)
+	connect := Prefix + "/admin/network-access/stub/connect"
+	p := requireProblem(t, do(t, h, http.MethodPost, connect, `{"hosts":null}`, bearer(adminToken)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.hosts" {
+		t.Fatalf("problem = %+v", p)
+	}
+	if len(f.connects) != 0 {
+		t.Fatal("null hosts reached the service")
+	}
+}

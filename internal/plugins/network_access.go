@@ -439,36 +439,35 @@ func (s *Service) hostNetworkAccess(ctx context.Context, slug string, op network
 // the supervisor's last error, so an admin sees why without a second read.
 func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccessProvider, apply networkAccessCommand) netaccess.Status {
 	unavailable := netaccess.Status{InstallationID: provider.InstallationID, Provider: provider.Provider, State: netaccess.StateUnavailable}
-	if s.host == nil {
-		unavailable.Error = "plugin host is not running"
-		return unavailable
-	}
-	if reason := s.resident.GateError(); reason != "" {
+	// Every unavailable answer also replaces the cached status: whatever
+	// origin the instance last pushed is not being served by a process this
+	// host can reach, so the origin check and the node health report must
+	// stop advertising it. The plugin's next push restores it.
+	fail := func(reason string) netaccess.Status {
 		unavailable.Error = reason
-		return unavailable
-	}
-	pc, err := s.host.Client(provider.InstallationID)
-	if err != nil {
-		unavailable.Error = networkAccessUnavailableReason(err, s.RuntimeState(provider.InstallationID))
-		return unavailable
-	}
-	client, err := pc.NetworkAccessProvider(provider.CapabilityID)
-	if err != nil {
-		unavailable.Error = err.Error()
-		return unavailable
-	}
-	reported, err := apply(ctx, client)
-	if err != nil {
-		// The process is up but did not answer: whatever origin it last
-		// pushed may be dead, so the cache must not keep advertising it to
-		// the origin check and the node health report. A later push from
-		// the plugin restores it.
-		unavailable.Error = err.Error()
 		if s.networkAccessStatus != nil {
 			unavailable.UpdatedAt = time.Now()
 			s.networkAccessStatus.Report(unavailable)
 		}
 		return unavailable
+	}
+	if s.host == nil {
+		return fail("plugin host is not running")
+	}
+	if reason := s.resident.GateError(); reason != "" {
+		return fail(reason)
+	}
+	pc, err := s.host.Client(provider.InstallationID)
+	if err != nil {
+		return fail(networkAccessUnavailableReason(err, s.RuntimeState(provider.InstallationID)))
+	}
+	client, err := pc.NetworkAccessProvider(provider.CapabilityID)
+	if err != nil {
+		return fail(err.Error())
+	}
+	reported, err := apply(ctx, client)
+	if err != nil {
+		return fail(err.Error())
 	}
 	status := pluginhost.NetworkAccessStatusFromProto(provider.InstallationID, provider.Provider, reported)
 	status.UpdatedAt = time.Now()

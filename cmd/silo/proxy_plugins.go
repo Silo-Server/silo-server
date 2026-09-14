@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -39,6 +41,12 @@ type proxyPluginHost struct {
 // watcher has matched this process to its stream_nodes row: without the row
 // id there is no state scope to keep the overlay node key under.
 var errProxyNodeRowUnknown = errors.New("this proxy's stream_nodes row is not known yet (NODE_URL or NODE_NAME must match an enabled proxy node); network access providers start once it resolves")
+
+// errProxyNodeDisabled is why a proxy stops its providers once an operator
+// disables its row or changes its type: the API no longer lists the node as
+// a network-access host, so nothing could disconnect a provider it kept
+// running, and its overlay origin must not outlive the node's eligibility.
+var errProxyNodeDisabled = errors.New("this proxy's stream_nodes row is disabled or no longer a proxy; network access providers stay stopped until it is enabled again")
 
 // newProxyPluginHost builds the proxy's plugin host, service and supervisor.
 // It does not start anything; hooks() returns the listener-bracketing
@@ -106,9 +114,18 @@ func newProxyPluginHost(
 	// A proxy whose row is unknown must not start providers: their node keys
 	// would have no scope. The gate is re-evaluated on every reconcile, so
 	// the poll picks the row up once the watcher resolves it.
-	service.SetResidentGate(func(context.Context) error {
-		if _, ok := watcher.NodeRowID(); !ok {
+	nodes := nodepool.NewRepository(pool)
+	service.SetResidentGate(func(ctx context.Context) error {
+		id, ok := watcher.NodeRowID()
+		if !ok {
 			return errProxyNodeRowUnknown
+		}
+		node, err := nodes.GetByID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("read this proxy's stream_nodes row: %w", err)
+		}
+		if node == nil || !node.Enabled || node.Type != nodepool.NodeTypeProxy {
+			return errProxyNodeDisabled
 		}
 		return nil
 	})

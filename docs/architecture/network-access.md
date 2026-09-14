@@ -154,7 +154,11 @@ to them.
   `NODE_NAME` to `stream_nodes`. Until it resolves there is no state scope
   for the node key, so the supervisor's resident gate keeps every provider
   stopped, logs why once, and the admin status reports the reason as that
-  host's `unavailable` error. The gate is re-checked on every reconcile.
+  host's `unavailable` error. The gate also requires the row to be an
+  enabled proxy node: disabling the node or changing its type stops its
+  providers on the next reconcile, since the API stops listing it as a
+  network-access host and could no longer disconnect them. The gate is
+  re-checked on every reconcile.
 - Lifecycle changes happen on the API server. It publishes
   `cache.EventPluginsChanged` on `ChannelAdmin` after every
   `OnLifecycleChange`; a runtime config save or admin restart additionally
