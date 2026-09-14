@@ -95,6 +95,26 @@ func TestCheckNodeReportsNoStatsForOlderNodes(t *testing.T) {
 	}
 }
 
+// A node's build identity rides along with the sample, and on its own is
+// enough to persist: a non-Linux node that cannot be sampled still knows what
+// revision it is running.
+func TestCheckNodeKeepsBuildIdentity(t *testing.T) {
+	url := newStatsHealthNode(t, `{"status":"ok","build":{"display":"abcdef12","revision":"abcdef1234","build_number":42,"available":true}}`)
+	_, _, _, _, lastStats := CheckNode(context.Background(), &Node{URL: url})
+	var decoded struct {
+		Build struct {
+			Display     string `json:"display"`
+			BuildNumber int    `json:"build_number"`
+		} `json:"build"`
+	}
+	if err := json.Unmarshal(lastStats, &decoded); err != nil {
+		t.Fatalf("lastStats invalid: %v (%s)", err, lastStats)
+	}
+	if decoded.Build.Display != "abcdef12" || decoded.Build.BuildNumber != 42 {
+		t.Fatalf("build = %+v, want the node's identity carried through", decoded.Build)
+	}
+}
+
 // A node that reports only one half still persists that half.
 func TestCheckNodeKeepsAPartialSample(t *testing.T) {
 	url := newStatsHealthNode(t, `{"status":"ok","gpu":[{"device":"cuda:0","source":"nvidia-smi"}]}`)

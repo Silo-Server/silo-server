@@ -322,6 +322,14 @@ than browsing, so the entry has to identify itself. Node selection reads it:
 see "Scratch admission" below. It is also what labels the node's own
 `streamapp_node_disk_*` series `scratch` instead of `library-N`.
 
+`last_stats.build` is the build the node reported on that same health check,
+in the shape of `GET /admin/system/build` (`display`, `revision`, `dirty`,
+`build_number`, `built_at`, `available`). It is diagnostic only — the
+dashboard uses it to flag a node whose `revision` differs from the server's
+during a rollout — and is omitted on a node predating build reporting. Unlike
+the resource fields it is present on a node that cannot be sampled, so a
+`last_stats` object may carry `build` and nothing else.
+
 ### Scratch admission
 
 A transcode writes HLS segments to its node's scratch volume for the whole life

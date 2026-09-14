@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/chapterthumbs"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
@@ -188,6 +189,10 @@ type HealthResponse struct {
 	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
 	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
 	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
+	// Build identifies the binary this node runs, so the API can show whether
+	// the fleet is on the same revision as the server. Diagnostic only, like
+	// `server_version` on the API's own system route; nothing routes on it.
+	Build buildinfo.Info `json:"build"`
 }
 
 // sessionIdleTTL is how long a job may go without a manifest or segment
@@ -1198,6 +1203,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		GPU:              snapshot.GPU,
 		Attribution:      snapshot.Attribution,
 		SampledAt:        snapshot.SampledAt,
+		Build:            buildinfo.Current(),
 	})
 }
 

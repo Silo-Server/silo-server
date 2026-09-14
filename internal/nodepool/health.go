@@ -33,6 +33,9 @@ type healthResponse struct {
 	GPU         json.RawMessage `json:"gpu"`
 	Attribution json.RawMessage `json:"attribution"`
 	SampledAt   json.RawMessage `json:"sampled_at"`
+	// Build is the node's own build identity, carried opaquely for the same
+	// reason as the sample: it is display data for the nodes dashboard.
+	Build json.RawMessage `json:"build"`
 }
 
 // maxHealthResponseBytes bounds a node's whole /health body.
@@ -95,8 +98,9 @@ func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs, egressKb
 	return true, hr.ActiveJobs, hr.EgressKbps, hr.CapabilitiesHash, marshalLastStats(ctx, n, hr)
 }
 
-// marshalLastStats packs a health response's resource fields into the blob
-// stored on the node row, or nil when the node sent neither.
+// marshalLastStats packs a health response's resource fields and build
+// identity into the blob stored on the node row, or nil when the node sent
+// none of them.
 //
 // nil is what a node predating resource sampling produces, and it must persist
 // as SQL NULL rather than as an empty object: "this node cannot report" and
@@ -107,7 +111,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	gpu := trimJSONNull(hr.GPU)
 	attribution := trimJSONNull(hr.Attribution)
 	sampledAt := trimJSONNull(hr.SampledAt)
-	if system == nil && gpu == nil && attribution == nil {
+	build := trimJSONNull(hr.Build)
+	if system == nil && gpu == nil && attribution == nil && build == nil {
 		return nil
 	}
 	payload := struct {
@@ -115,7 +120,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		GPU         json.RawMessage `json:"gpu,omitempty"`
 		Attribution json.RawMessage `json:"attribution,omitempty"`
 		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt}
+		Build       json.RawMessage `json:"build,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil

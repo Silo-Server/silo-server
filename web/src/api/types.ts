@@ -3820,6 +3820,22 @@ export interface NodeLastStats {
   attribution?: ResourceAttribution | null;
   system?: HostSystemStats | null;
   gpu?: HostGPUStats[] | null;
+  /**
+   * The build the node was running at its last health check, in the same
+   * shape as the API's own build info. Absent on a node predating the field.
+   */
+  build?: NodeBuildInfo | null;
+}
+
+/** A node's build identity as reported on its health response. */
+export interface NodeBuildInfo {
+  /** Short revision, `+dirty` when built from a modified tree, or "unavailable". */
+  display?: string;
+  revision?: string;
+  dirty?: boolean;
+  build_number?: number;
+  built_at?: string;
+  available?: boolean;
 }
 
 /**

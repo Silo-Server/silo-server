@@ -35,7 +35,7 @@ export function ServerResourcesWidget() {
           </span>
         ) : null}
       </CardHeader>
-      <CardContent className="min-h-0 flex-1">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {resourcesQuery.data === undefined && !resourcesQuery.isError ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (

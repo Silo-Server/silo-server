@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/go-chi/chi/v5"
@@ -471,6 +472,8 @@ type healthResponse struct {
 	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
 	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
 	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
+	// Build identifies the binary this proxy runs; see transcodenode.HealthResponse.
+	Build buildinfo.Info `json:"build"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -489,6 +492,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		GPU:              snapshot.GPU,
 		Attribution:      snapshot.Attribution,
 		SampledAt:        snapshot.SampledAt,
+		Build:            buildinfo.Current(),
 	})
 }
 
