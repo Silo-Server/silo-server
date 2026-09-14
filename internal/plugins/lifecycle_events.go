@@ -14,10 +14,9 @@ import (
 
 // PluginsChangedEvent is the payload of cache.EventPluginsChanged. An empty
 // payload means "something about the installed set changed; reconcile".
-// Restart names one installation whose running process must be replaced
-// even though its row did not change: a runtime config save, or an admin
-// restart. The host that made the change already stopped its own process;
-// every other host running the installation restarts it on receipt.
+// Restart remains accepted from older API replicas. Current senders advance
+// plugin_installations.runtime_generation on admin config saves and restarts,
+// then send a plain reconcile event; the poll can recover missed events.
 type PluginsChangedEvent struct {
 	InstallationID int  `json:"installation_id,omitempty"`
 	Restart        bool `json:"restart,omitempty"`

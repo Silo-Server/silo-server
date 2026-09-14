@@ -12,6 +12,8 @@ import AdminPlugins from "./AdminPlugins";
 const useAdminPluginsMock = vi.fn();
 const checkPluginUpdatesMutateMock = vi.fn();
 const updatePluginCatalogSettingsMutateMock = vi.fn();
+const restartPluginInstallationMutateMock = vi.fn();
+let restartPluginInstallationPending = false;
 const capturedButtonProps: Array<Record<string, unknown>> = [];
 const capturedSwitchProps: Array<Record<string, unknown>> = [];
 
@@ -134,6 +136,10 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   usePluginUpload: () => ({ upload: vi.fn(), progress: null, isPending: false }),
   useUpdatePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useApplyPluginUpdate: () => ({ mutate: vi.fn(), isPending: false }),
+  useRestartPluginInstallation: () => ({
+    mutate: restartPluginInstallationMutateMock,
+    isPending: restartPluginInstallationPending,
+  }),
   useDeletePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useSavePluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
   useTestPluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
@@ -151,6 +157,8 @@ describe("AdminPlugins", () => {
     capturedSwitchProps.length = 0;
     checkPluginUpdatesMutateMock.mockReset();
     updatePluginCatalogSettingsMutateMock.mockReset();
+    restartPluginInstallationMutateMock.mockReset();
+    restartPluginInstallationPending = false;
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
       catalog: [],
@@ -217,6 +225,39 @@ describe("AdminPlugins", () => {
     expect(markup).toContain("bg-destructive");
     expect(markup).toContain("Failed");
     expect(markup).not.toContain(">Active<");
+    const restart = capturedButtonProps.find((props) => props["aria-label"] === "Restart Overlay");
+    expect(restart).toBeDefined();
+    expect(restart?.disabled).toBe(false);
+    (restart?.onClick as () => void)();
+    expect(restartPluginInstallationMutateMock).toHaveBeenCalledWith(1);
+  });
+
+  it.each([
+    { enabled: false, resident: true, pending: false, visible: false },
+    { enabled: true, resident: false, pending: false, visible: false },
+    { enabled: true, resident: true, pending: true, visible: true },
+  ])("only offers restart to enabled residents and waits for the response: %j", (testCase) => {
+    restartPluginInstallationPending = testCase.pending;
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalog: [],
+      installations: [
+        {
+          ...makeInstallation(1, "Overlay"),
+          enabled: testCase.enabled,
+          runtime: { resident: testCase.resident, state: "failed", restart_count: 10 },
+        },
+      ],
+      isLoading: false,
+    });
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+    const restart = capturedButtonProps.find((props) => props["aria-label"] === "Restart Overlay");
+    expect(Boolean(restart)).toBe(testCase.visible);
+    if (restart) expect(restart.disabled).toBe(testCase.pending);
   });
 
   it("starts the shared plugin update check task from the plugins page", () => {

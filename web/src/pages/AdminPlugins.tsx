@@ -9,6 +9,7 @@ import {
   Loader2,
   Package,
   Plus,
+  RotateCw,
   Search,
   Settings2,
   Shield,
@@ -72,6 +73,7 @@ import {
   useDeletePluginRepository,
   useInstallPlugin,
   usePluginUpload,
+  useRestartPluginInstallation,
   useSavePluginAuthBinding,
   useSavePluginConfig,
   useSavePluginTaskBinding,
@@ -284,6 +286,7 @@ function InstalledPluginCard({
   const updateInstallation = useUpdatePluginInstallation();
   const deleteInstallation = useDeletePluginInstallation();
   const applyUpdate = useApplyPluginUpdate();
+  const restartInstallation = useRestartPluginInstallation();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const capabilities = installation.capabilities ?? [];
   const presentation = installation.presentation ?? catalogEntry?.presentation;
@@ -385,6 +388,24 @@ function InstalledPluginCard({
 
           {/* Right: actions */}
           <div className="flex shrink-0 flex-wrap items-center gap-2 sm:ml-4">
+            {installation.runtime.resident && installation.enabled ? (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Restart ${pluginDisplayName(installation.plugin_id, presentation)}`}
+                disabled={
+                  restartInstallation.isPending || installation.runtime.state === "starting"
+                }
+                onClick={() => restartInstallation.mutate(installation.id)}
+              >
+                {restartInstallation.isPending ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCw className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Restart
+              </Button>
+            ) : null}
             {adminRoutes.length > 0 ? (
               <>
                 {adminRoutes.map((route) => {

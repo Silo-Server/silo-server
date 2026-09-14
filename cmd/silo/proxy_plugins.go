@@ -64,7 +64,7 @@ func newProxyPluginHost(
 	broker := netaccess.NewBroker()
 	installationStore := plugins.NewInstallationStore(pool)
 	runtimeConfigStore := plugins.NewRuntimeConfigStore(pool, cipher)
-	instanceState := plugins.NewInstanceStateStore(pool, cipher).ForNodeScope(watcher.NodeRowID)
+	instanceState := plugins.NewInstanceStateStore(pool, cipher)
 
 	hostInfo := func(context.Context) (pluginhost.HostInfo, error) {
 		live := watcher.Config()
@@ -90,8 +90,17 @@ func newProxyPluginHost(
 	}
 
 	host := pluginhost.NewHost(pluginhost.Config{
-		HostInfo:      hostInfo,
-		InstanceState: instanceState,
+		RuntimeHostForStart: func(ctx context.Context) (pluginhost.HostInfoFunc, pluginhost.InstanceStateStore, error) {
+			info, err := hostInfo(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			if info.NodeID <= 0 {
+				return nil, nil, errProxyNodeRowUnknown
+			}
+			return func(context.Context) (pluginhost.HostInfo, error) { return info, nil },
+				instanceState.ForScope(plugins.NodeHostScope(info.NodeID)), nil
+		},
 		NetworkAccess: broker,
 		GlobalConfigSetter: pluginhost.GlobalConfigSetterFunc(
 			func(ctx context.Context, installationID int, key string, value map[string]any) error {
@@ -111,6 +120,13 @@ func newProxyPluginHost(
 	host.SetExitHandler(service.HandleResidentExit)
 	service.SetNetworkAccessHostInfo(hostInfo)
 	service.SetNetworkAccessStatusSink(broker)
+	service.SetResidentHostIdentity(func() string {
+		id, ok := watcher.NodeRowID()
+		if !ok {
+			return ""
+		}
+		return plugins.NodeHostScope(int64(id))
+	})
 	// A proxy whose row is unknown must not start providers: their node keys
 	// would have no scope. The gate is re-evaluated on every reconcile, so
 	// the poll picks the row up once the watcher resolves it.

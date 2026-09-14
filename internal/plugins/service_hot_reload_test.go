@@ -317,6 +317,9 @@ func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input U
 	if input.Enabled != nil {
 		installation.Enabled = *input.Enabled
 	}
+	if input.Restart {
+		installation.RuntimeGeneration++
+	}
 	return nil
 }
 

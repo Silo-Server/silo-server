@@ -66,7 +66,8 @@ type NetworkAccessReport struct {
 // allow list, later stream URL selection) does not wait for the plugin's next
 // push. *netaccess.Broker implements it.
 type NetworkAccessStatusSink interface {
-	Report(status netaccess.Status) (previous netaccess.Status, changed bool)
+	IngressToken(installationID int) (string, bool)
+	ReportFor(installationID int, token string, status netaccess.Status) (previous netaccess.Status, changed bool, accepted bool)
 }
 
 // NetworkAccessHostTimeout bounds one host's answer to a status read or a
@@ -155,8 +156,8 @@ func (s *Service) ListNetworkAccessProviders(ctx context.Context) ([]NetworkAcce
 		}
 		// A slug names one provider per deployment. Installations are listed
 		// in id order, so the oldest enabled one owns the slug and later
-		// duplicates are skipped everywhere the slug is resolved; their
-		// processes still run but are never commanded or reported.
+		// duplicates are skipped everywhere the slug is resolved and are
+		// excluded from the resident set.
 		if first, dup := seen[slug]; dup {
 			slog.WarnContext(ctx, "network access provider slug is declared by more than one enabled installation; using the first", "component", "plugins",
 				"provider", slug, "installation_id", first, "skipped_installation_id", installation.ID, "plugin_id", installation.PluginID)
@@ -410,6 +411,13 @@ func (s *Service) HostNetworkAccessStatus(ctx context.Context) (netaccess.HostSt
 	return report, nil
 }
 
+// HostNetworkAccessProviderStatus reads one provider on this host without
+// waiting for unrelated providers. The API uses this for its per-provider
+// status fan-out to proxy nodes.
+func (s *Service) HostNetworkAccessProviderStatus(ctx context.Context, slug string) (netaccess.Status, error) {
+	return s.hostNetworkAccess(ctx, slug, networkAccessRead)
+}
+
 // HostNetworkAccessConnect brings the provider up on this host alone.
 func (s *Service) HostNetworkAccessConnect(ctx context.Context, slug string) (netaccess.Status, error) {
 	return s.hostNetworkAccess(ctx, slug, networkAccessConnect)
@@ -446,10 +454,14 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 	// The returned status carries no updated_at: the contract defines it as
 	// when the host last heard from the provider, which an unavailable
 	// answer is not. The cache stamps its own copy on Report.
+	var ingressToken string
+	if s.networkAccessStatus != nil {
+		ingressToken, _ = s.networkAccessStatus.IngressToken(provider.InstallationID)
+	}
 	fail := func(reason string) netaccess.Status {
 		unavailable.Error = reason
 		if s.networkAccessStatus != nil {
-			s.networkAccessStatus.Report(unavailable)
+			s.networkAccessStatus.ReportFor(provider.InstallationID, ingressToken, unavailable)
 		}
 		return unavailable
 	}
@@ -467,6 +479,7 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 	if err != nil {
 		return fail(err.Error())
 	}
+	ingressToken = client.IngressToken()
 	reported, err := apply(ctx, client)
 	if err != nil {
 		return fail(err.Error())
@@ -474,7 +487,7 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 	status := pluginhost.NetworkAccessStatusFromProto(provider.InstallationID, provider.Provider, reported)
 	status.UpdatedAt = time.Now()
 	if s.networkAccessStatus != nil {
-		s.networkAccessStatus.Report(status)
+		s.networkAccessStatus.ReportFor(provider.InstallationID, ingressToken, status)
 	}
 	return status
 }

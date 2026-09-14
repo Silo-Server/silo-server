@@ -234,14 +234,14 @@ func TestBrokerRevokeOfOldTokenKeepsReplacementStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.Report(Status{InstallationID: 7, Provider: "stub", State: StateConnected, Origin: "https://old.example.test"})
+	b.ReportFor(7, old, Status{InstallationID: 7, Provider: "stub", State: StateConnected, Origin: "https://old.example.test"})
 	// The replacement process is issued its token and pushes its status
 	// before the old process's revoke runs.
 	fresh, err := b.Issue(7, "stub")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.Report(Status{InstallationID: 7, Provider: "stub", State: StateConnected, Origin: "https://new.example.test"})
+	b.ReportFor(7, fresh, Status{InstallationID: 7, Provider: "stub", State: StateConnected, Origin: "https://new.example.test"})
 	b.Revoke(7, old)
 	if got, ok := b.Status.Get(7); !ok || got.Origin != "https://new.example.test" {
 		t.Fatalf("stale revoke cleared the replacement's status: %+v %v", got, ok)

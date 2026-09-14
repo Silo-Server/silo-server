@@ -61,11 +61,12 @@ for its live status, with a ten-second timeout per host:
   is also the instance-state scope the plugin's node keys are stored under.
   The API host comes first, then every enabled proxy node in id order. Proxy
   rows are read over the node's backend URL with the node bearer
-  (`GET /network-access/status` on the proxy listener) with the same
+  (`GET /network-access/{provider}/status` on the proxy listener) with the same
   ten-second timeout; a proxy that cannot be reached, refuses the bearer,
   runs a build without the routes, or has not resolved its `stream_nodes`
   row yet answers `unavailable` with the reason in `error`. Transcode nodes
-  are never listed.
+  are never listed. Each request reads only the named provider, so another
+  provider's timeout cannot hide its status.
 - `state` is one of the plugin's states `disconnected`,
   `awaiting_authorization`, `connecting`, `connected`, `error`, or the
   server-side `unavailable`: the plugin process is not running on that host

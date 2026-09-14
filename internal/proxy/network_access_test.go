@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
@@ -35,6 +36,14 @@ func (f *fakeProviderHost) HostNetworkAccessStatus(context.Context) (netaccess.H
 		f.status(),
 		{InstallationID: 9, Provider: "down", State: netaccess.StateUnavailable, Error: "plugin process is backoff: plugin process exited"},
 	}}, nil
+}
+
+func (f *fakeProviderHost) HostNetworkAccessProviderStatus(_ context.Context, provider string) (netaccess.Status, error) {
+	f.calls = append(f.calls, "status:"+provider)
+	if provider != "stub" {
+		return netaccess.Status{}, netaccess.ErrProviderNotFound
+	}
+	return f.status(), nil
 }
 
 func (f *fakeProviderHost) HostNetworkAccessConnect(_ context.Context, provider string) (netaccess.Status, error) {
@@ -79,6 +88,7 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/network-access/status"},
+		{http.MethodGet, "/network-access/stub/status"},
 		{http.MethodPost, "/network-access/stub/connect"},
 		{http.MethodPost, "/network-access/stub/disconnect"},
 	} {
@@ -102,6 +112,17 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 	if len(report.Providers) != 2 || report.Providers[0].Provider != "stub" || report.Providers[0].State != netaccess.StateDisconnected ||
 		report.Providers[1].Provider != "down" || report.Providers[1].State != netaccess.StateUnavailable || report.Providers[1].Error == "" {
 		t.Fatalf("status report = %+v", report)
+	}
+	providerStatus := networkAccessRequest(t, server, http.MethodGet, "/network-access/stub/status", secret)
+	if providerStatus.Code != http.StatusOK || providerStatus.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("provider status: %d %s", providerStatus.Code, providerStatus.Body)
+	}
+	var oneProvider netaccess.Status
+	if err := json.Unmarshal(providerStatus.Body.Bytes(), &oneProvider); err != nil {
+		t.Fatal(err)
+	}
+	if oneProvider.Provider != "stub" || oneProvider.State != netaccess.StateDisconnected {
+		t.Fatalf("provider status = %+v", oneProvider)
 	}
 
 	connect := networkAccessRequest(t, server, http.MethodPost, "/network-access/stub/connect", secret)
@@ -132,7 +153,11 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 	if unknown.Code != http.StatusNotFound {
 		t.Fatalf("unknown provider connect: %d %s", unknown.Code, unknown.Body)
 	}
-	want := []string{"status", "connect:stub", "disconnect:stub", "connect:netbird"}
+	unknownStatus := networkAccessRequest(t, server, http.MethodGet, "/network-access/netbird/status", secret)
+	if unknownStatus.Code != http.StatusNotFound {
+		t.Fatalf("unknown provider status: %d %s", unknownStatus.Code, unknownStatus.Body)
+	}
+	want := []string{"status", "status:stub", "connect:stub", "disconnect:stub", "connect:netbird", "status:netbird"}
 	if len(host.calls) != len(want) {
 		t.Fatalf("host calls = %v, want %v", host.calls, want)
 	}
@@ -151,6 +176,7 @@ func TestProxyNetworkAccessRoutesWithoutAHostAnswer503(t *testing.T) {
 	server := newDownloadProxyServer(t, secret)
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/network-access/status"},
+		{http.MethodGet, "/network-access/stub/status"},
 		{http.MethodPost, "/network-access/stub/connect"},
 		{http.MethodPost, "/network-access/stub/disconnect"},
 	} {
@@ -158,6 +184,64 @@ func TestProxyNetworkAccessRoutesWithoutAHostAnswer503(t *testing.T) {
 		if got.Code != http.StatusServiceUnavailable {
 			t.Fatalf("%s %s without a host: %d %s", route.method, route.path, got.Code, got.Body)
 		}
+	}
+}
+
+type blockedProviderHost struct {
+	fakeProviderHost
+	started chan struct{}
+}
+
+func (f *blockedProviderHost) HostNetworkAccessProviderStatus(ctx context.Context, provider string) (netaccess.Status, error) {
+	if provider == "slow" {
+		close(f.started)
+		<-ctx.Done()
+		return netaccess.Status{Provider: provider, State: netaccess.StateUnavailable}, nil
+	}
+	return f.fakeProviderHost.HostNetworkAccessProviderStatus(ctx, provider)
+}
+
+func TestProxyNetworkAccessProviderStatusDoesNotWaitForOtherProviders(t *testing.T) {
+	const secret = "network-access-proxy-secret"
+	server := newDownloadProxyServer(t, secret)
+	host := &blockedProviderHost{started: make(chan struct{})}
+	server.SetNetworkAccessProviderHost(host)
+	router := server.Handler()
+	ctx, cancel := context.WithCancel(context.Background())
+	slowDone := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		<-slowDone
+	})
+	go func() {
+		defer close(slowDone)
+		request := httptest.NewRequest(http.MethodGet, "/network-access/slow/status", nil).WithContext(ctx)
+		request.Header.Set("Authorization", "Bearer "+secret)
+		router.ServeHTTP(httptest.NewRecorder(), request)
+	}()
+	select {
+	case <-host.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow provider status was not requested")
+	}
+	request := httptest.NewRequest(http.MethodGet, "/network-access/stub/status", nil)
+	request.Header.Set("Authorization", "Bearer "+secret)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("healthy provider beside blocked provider: %d %s", recorder.Code, recorder.Body)
+	}
+	var status netaccess.Status
+	if err := json.Unmarshal(recorder.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Provider != "stub" || status.State != netaccess.StateDisconnected {
+		t.Fatalf("healthy provider status = %+v", status)
+	}
+	select {
+	case <-slowDone:
+		t.Fatal("slow provider finished before it was released")
+	default:
 	}
 }
 

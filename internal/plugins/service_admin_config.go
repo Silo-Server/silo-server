@@ -123,9 +123,8 @@ func (s *Service) SetGlobalConfigWithClears(
 	// runtime. The durable config changed even when stopping failed, so hooks
 	// still run before returning that error and parked rows are not left asleep.
 	s.OnLifecycleChange(ctx)
-	// Other hosts running this installation (proxy nodes) still hold the old
-	// configuration in a live process; tell them to replace it.
-	s.publishPluginsChanged(ctx, PluginsChangedEvent{InstallationID: installationID, Restart: true})
+	// The config save advanced runtime_generation in the same transaction;
+	// both the lifecycle event above and a proxy's poll replace stale processes.
 	return stopErr
 }
 

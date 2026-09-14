@@ -46,8 +46,14 @@ func (f *fakeProxyNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/network-access/stub/status":
+		_ = json.NewEncoder(w).Encode(f.status())
+	case r.Method == http.MethodGet && r.URL.Path == "/network-access/down/status":
+		_ = json.NewEncoder(w).Encode(netaccess.Status{InstallationID: 9, Provider: "down", State: netaccess.StateUnavailable, Error: "plugin process is failed"})
 	case r.Method == http.MethodGet && r.URL.Path == "/network-access/status":
-		_ = json.NewEncoder(w).Encode(netaccess.HostStatusReport{Providers: []netaccess.Status{f.status(), {InstallationID: 9, Provider: "down", State: netaccess.StateUnavailable, Error: "plugin process is failed"}}})
+		// Reading every provider could wait for an unrelated hung provider.
+		// API requests must use the provider-specific route instead.
+		http.Error(w, "unrelated provider did not answer", http.StatusGatewayTimeout)
 	case r.Method == http.MethodPost && r.URL.Path == "/network-access/stub/connect":
 		f.connected = true
 		_ = json.NewEncoder(w).Encode(f.status())
@@ -115,7 +121,7 @@ func TestNodeHandlerFansNetworkAccessOutToProxies(t *testing.T) {
 	}
 
 	want := []string{
-		"GET /network-access/status", "GET /network-access/status", "GET /network-access/status",
+		"GET /network-access/stub/status", "GET /network-access/down/status", "GET /network-access/netbird/status",
 		"POST /network-access/stub/connect", "POST /network-access/stub/disconnect", "POST /network-access/netbird/connect",
 	}
 	proxy.mu.Lock()

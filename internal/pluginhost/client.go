@@ -22,6 +22,7 @@ var (
 type Client struct {
 	installationID int
 	startSeq       uint64
+	ingressToken   string
 	manifest       *pluginv1.PluginManifest
 	rpc            *sdkruntime.Client
 	capabilities   map[string]*pluginv1.CapabilityDescriptor
@@ -90,9 +91,13 @@ type WatchSyncProviderClient struct {
 
 // NetworkAccessProviderClient drives one network_access_provider.v1 instance.
 type NetworkAccessProviderClient struct {
-	client  pluginv1.NetworkAccessProviderClient
-	timeout time.Duration
+	ingressToken string
+	client       pluginv1.NetworkAccessProviderClient
+	timeout      time.Duration
 }
+
+// IngressToken identifies the process that answers these provider RPCs.
+func (c *NetworkAccessProviderClient) IngressToken() string { return c.ingressToken }
 
 func newClient(installationID int, rpc *sdkruntime.Client, manifest *pluginv1.PluginManifest, startSeq uint64) *Client {
 	capabilities := make(map[string]*pluginv1.CapabilityDescriptor, len(manifest.GetCapabilities()))
@@ -242,8 +247,9 @@ func (c *Client) NetworkAccessProvider(capabilityID string) (*NetworkAccessProvi
 		return nil, err
 	}
 	return &NetworkAccessProviderClient{
-		client:  c.rpc.NetworkAccessProvider(),
-		timeout: DefaultNetworkAccessTimeout,
+		client:       c.rpc.NetworkAccessProvider(),
+		ingressToken: c.ingressToken,
+		timeout:      DefaultNetworkAccessTimeout,
 	}, nil
 }
 

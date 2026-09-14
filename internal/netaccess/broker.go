@@ -33,7 +33,11 @@ func (b *Broker) Issue(installationID int, provider string) (string, error) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.Registry.Issue(installationID, provider)
+	token, err := b.Registry.Issue(installationID, provider)
+	if err == nil {
+		b.Status.Forget(installationID)
+	}
+	return token, err
 }
 
 // Revoke forgets the installation's token and last reported status, provided

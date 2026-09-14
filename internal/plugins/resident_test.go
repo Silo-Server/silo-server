@@ -16,6 +16,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -49,6 +50,7 @@ type residentFixture struct {
 	store   *fakeServiceInstallationStore
 	host    *pluginhost.Host
 	exit    string
+	broker  *netaccess.Broker
 }
 
 func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
@@ -67,7 +69,9 @@ func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
 	})
 	store.listCapabilities = []*Capability{{InstallationID: 5, Type: capability.NetworkAccessProvider, ID: "stub"}}
 
+	broker := netaccess.NewBroker()
 	host := pluginhost.NewHost(pluginhost.Config{
+		NetworkAccess:     broker,
 		Logger:            hclog.NewNullLogger(),
 		ExitCheckInterval: 20 * time.Millisecond,
 		// Bind the RuntimeHost broker so fixtures can call back into the host.
@@ -94,7 +98,7 @@ func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
 		_ = service.StopResidents(ctx)
 		_ = host.Shutdown(ctx)
 	})
-	return &residentFixture{service: service, store: store, host: host, exit: exitFile}
+	return &residentFixture{service: service, store: store, host: host, exit: exitFile, broker: broker}
 }
 
 func (f *residentFixture) crash(t *testing.T) {

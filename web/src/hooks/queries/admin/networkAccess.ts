@@ -26,6 +26,16 @@ export type NetworkAccessHostState = NetworkAccessHostStatus["state"];
  */
 const STATUS_POLL_INTERVAL = 15_000;
 
+function networkAccessStatusKey(provider: string, context: ProfileRequestContextSnapshot | null) {
+  return [
+    ...adminKeys.networkAccessStatus(provider),
+    context?.serverOrigin,
+    context?.authContextVersion,
+    context?.profileId,
+    context?.profileTokenGeneration,
+  ] as const;
+}
+
 /** The installed overlay-network providers, read from plugin manifests. */
 export function useNetworkAccessCapabilities() {
   const profileContext = captureProfileRequestContext();
@@ -49,11 +59,7 @@ export function useAdminNetworkAccessStatus(provider: string | null) {
   const pageActivity = usePageActivity();
   const profileContext = captureProfileRequestContext();
   return useQuery({
-    queryKey: [
-      ...adminKeys.networkAccessStatus(provider ?? ""),
-      profileContext?.authContextVersion,
-      profileContext?.profileId,
-    ],
+    queryKey: networkAccessStatusKey(provider ?? "", profileContext),
     enabled: profileContext !== null && provider !== null,
     queryFn: async (): Promise<NetworkAccessStatus> => {
       if (!profileContext || !provider || !isCapturedProfileAuthorityActive(profileContext))
@@ -113,12 +119,11 @@ function useNetworkAccessCommand(kind: "connect" | "disconnect") {
     onSuccess: (result, intent) => {
       if (!intent.profileContext || !isCapturedProfileAuthorityActive(intent.profileContext))
         return;
-      queryClient.setQueriesData(
-        { queryKey: adminKeys.networkAccessStatus(intent.provider) },
-        () => result,
-      );
+      const queryKey = networkAccessStatusKey(intent.provider, intent.profileContext);
+      queryClient.setQueryData(queryKey, result);
       void queryClient.invalidateQueries({
-        queryKey: adminKeys.networkAccessStatus(intent.provider),
+        queryKey,
+        exact: true,
       });
     },
     onError: (err, intent) => {

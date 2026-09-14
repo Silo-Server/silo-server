@@ -144,6 +144,7 @@ type residentEntry struct {
 	// under (a proxy's instance-state scope). A change means the process
 	// holds another host's in-memory identity and is replaced.
 	hostIdentity string
+	runtimeGeneration int64
 
 	state         ResidentState
 	failures      int
@@ -343,7 +344,7 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 	for id, installation := range desired {
 		entry, ok := r.entries[id]
 		if !ok {
-			entry = &residentEntry{id: id, version: installation.Version, installPath: installation.InstallPath, hostIdentity: hostIdentity, state: ResidentStopped}
+			entry = &residentEntry{id: id, version: installation.Version, installPath: installation.InstallPath, hostIdentity: hostIdentity, runtimeGeneration: installation.RuntimeGeneration, state: ResidentStopped}
 			r.entries[id] = entry
 			r.startLocked(entry)
 			continue
@@ -352,14 +353,14 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 			r.opts.Logger.InfoContext(ctx, "host identity changed; replacing resident plugin process", "component", "plugins",
 				"installation_id", id, "previous_identity", entry.hostIdentity, "identity", hostIdentity)
 		}
-		if entry.version != installation.Version || entry.installPath != installation.InstallPath || entry.hostIdentity != hostIdentity {
+		if entry.version != installation.Version || entry.installPath != installation.InstallPath || entry.hostIdentity != hostIdentity || entry.runtimeGeneration != installation.RuntimeGeneration {
 			// A replaced or auto-updated binary gets a fresh failure budget,
 			// and the process built from the old binary is stopped before
 			// the new one starts. The host that made the change already
 			// stopped its own process; on any other host (a proxy node) it
 			// is still alive, and ensureClient would keep it because the
 			// row and the running manifest agree on nothing it checks.
-			entry.version, entry.installPath, entry.hostIdentity = installation.Version, installation.InstallPath, hostIdentity
+			entry.version, entry.installPath, entry.hostIdentity, entry.runtimeGeneration = installation.Version, installation.InstallPath, hostIdentity, installation.RuntimeGeneration
 			r.resetLocked(entry)
 			entry.state = ResidentStarting
 			entry.gen++

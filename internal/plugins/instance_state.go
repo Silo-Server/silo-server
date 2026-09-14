@@ -43,30 +43,7 @@ func NewInstanceStateStore(pool *pgxpool.Pool, cipher *secret.Cipher) *InstanceS
 // RuntimeHost server an InstanceStateStore that only names installations
 // and keys.
 func (s *InstanceStateStore) ForScope(scope string) *ScopedInstanceStateStore {
-	return &ScopedInstanceStateStore{store: s, scope: fixedScope(scope)}
-}
-
-// ForNodeScope binds the store to the proxy node whose stream_nodes id
-// nodeRowID resolves per call. A proxy learns its row from the config
-// watcher, possibly after boot, so the scope is looked up on every read and
-// write rather than captured once; while the row is unknown both RPCs fail
-// with pluginhost.ErrInstanceStateUnavailable instead of writing node keys
-// under a scope that belongs to nobody.
-func (s *InstanceStateStore) ForNodeScope(nodeRowID func() (int, bool)) *ScopedInstanceStateStore {
-	return &ScopedInstanceStateStore{store: s, scope: func() (string, bool) {
-		if nodeRowID == nil {
-			return "", false
-		}
-		id, ok := nodeRowID()
-		if !ok || id <= 0 {
-			return "", false
-		}
-		return NodeHostScope(int64(id)), true
-	}}
-}
-
-func fixedScope(scope string) func() (string, bool) {
-	return func() (string, bool) { return scope, true }
+	return &ScopedInstanceStateStore{store: s, scope: scope}
 }
 
 func instanceStateAAD(installationID int, scope, key string) string {
@@ -242,33 +219,24 @@ func (s *InstanceStateStore) open(installationID int, scope, key string, stored 
 	return []byte(plaintext), nil
 }
 
-// ScopedInstanceStateStore is an InstanceStateStore bound to one host scope,
-// fixed (the api host) or resolved per call (a proxy node). It satisfies
-// pluginhost.InstanceStateStore.
+// ScopedInstanceStateStore is an InstanceStateStore bound to one fixed host
+// scope for a plugin process. It satisfies pluginhost.InstanceStateStore.
 type ScopedInstanceStateStore struct {
 	store *InstanceStateStore
-	scope func() (string, bool)
+	scope string
 }
 
-// Scope returns the bound host scope and whether it is known yet.
-func (s *ScopedInstanceStateStore) Scope() (string, bool) { return s.scope() }
+// Scope returns the bound host scope.
+func (s *ScopedInstanceStateStore) Scope() string { return s.scope }
 
 // ReadInstanceState implements pluginhost.InstanceStateStore.
 func (s *ScopedInstanceStateStore) ReadInstanceState(ctx context.Context, installationID int, key string) ([]byte, bool, error) {
-	scope, ok := s.scope()
-	if !ok {
-		return nil, false, pluginhost.ErrInstanceStateUnavailable
-	}
-	return s.store.Read(ctx, installationID, scope, key)
+	return s.store.Read(ctx, installationID, s.scope, key)
 }
 
 // WriteInstanceState implements pluginhost.InstanceStateStore.
 func (s *ScopedInstanceStateStore) WriteInstanceState(ctx context.Context, installationID int, key string, value []byte) error {
-	scope, ok := s.scope()
-	if !ok {
-		return pluginhost.ErrInstanceStateUnavailable
-	}
-	return s.store.Write(ctx, installationID, scope, key, value)
+	return s.store.Write(ctx, installationID, s.scope, key, value)
 }
 
 var _ pluginhost.InstanceStateStore = (*ScopedInstanceStateStore)(nil)

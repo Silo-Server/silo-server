@@ -88,6 +88,11 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 
 	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
 		if err := installedFilesPresent(binaryPath, manifest); err == nil {
+			if c.root != "" {
+				if err := checkBinaryPlatform(binaryPath); err != nil {
+					return nil, fmt.Errorf("cached plugin for installation %d: %w", installation.ID, err)
+				}
+			}
 			return manifest, nil
 		}
 	}
@@ -141,8 +146,8 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 		return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
 	if c.root != "" {
-		// Only rehydration onto another host can cross platforms: the API
-		// server installed the archive it can run itself.
+		// Proxy caches may contain a binary installed by an API host on a
+		// different platform. Apply the same check to fresh and cached files.
 		if err := checkBinaryPlatform(binaryPath); err != nil {
 			_ = os.RemoveAll(installDir)
 			return nil, fmt.Errorf("rehydrate plugin for installation %d: %w", installation.ID, err)

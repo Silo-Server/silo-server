@@ -10,6 +10,7 @@ GET /metrics	non-media
 GET /network-access/status	non-media
 POST /network-access/{provider}/connect	non-media
 POST /network-access/{provider}/disconnect	non-media
+GET /network-access/{provider}/status	non-media
 GET /status	non-media
 GET /stream/direct/{token}	media	playback	viewer_egress	true	true
 HEAD /stream/direct/{token}	media	playback	viewer_egress	true	true
@@ -39,6 +40,7 @@ GET /metrics	non-media
 GET /network-access/status	non-media
 POST /network-access/{provider}/connect	non-media
 POST /network-access/{provider}/disconnect	non-media
+GET /network-access/{provider}/status	non-media
 GET /status	non-media
 GET /stream/direct/{token}	media	playback	viewer_egress	true	true
 HEAD /stream/direct/{token}	media	playback	viewer_egress	true	true

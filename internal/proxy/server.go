@@ -327,6 +327,7 @@ func (s *Server) router() chi.Router {
 		// Network access providers running beside this proxy; the API fans its
 		// admin status/connect/disconnect out to these with the node bearer.
 		r.Get("/network-access/status", s.handleNetworkAccessStatus)
+		r.Get("/network-access/{provider}/status", s.handleNetworkAccessProviderStatus)
 		r.Post("/network-access/{provider}/connect", s.handleNetworkAccessConnect)
 		r.Post("/network-access/{provider}/disconnect", s.handleNetworkAccessDisconnect)
 	})

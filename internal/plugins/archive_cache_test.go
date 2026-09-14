@@ -8,10 +8,45 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
+	// Use an ELF architecture different from the running test so the cache
+	// represents a volume moved from another proxy platform.
+	binaryData := make([]byte, 64)
+	copy(binaryData, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
+	binaryData[16], binaryData[18], binaryData[20], binaryData[52] = 2, 0xB7, 1, 64
+	if runtime.GOARCH == "arm64" {
+		binaryData[18] = 0x3E // EM_X86_64
+	}
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
+	checksum := sha256.Sum256(binaryData)
+	manifest.Checksum = hex.EncodeToString(checksum[:])
+	manifestBytes, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation := &Installation{ID: 42, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: "/api/plugins/install-cached/plugin"}
+	cache := NewArchiveCacheAt(&legacyArchiveStore{}, t.TempDir())
+	path := cache.LocalInstallPath(installation)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, binaryData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(InstalledManifestPath(path), manifestBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Ensure(context.Background(), installation); err == nil || !strings.Contains(err.Error(), "plugin binary is built for") {
+		t.Fatalf("cached foreign binary was not rejected: %v", err)
+	}
+}
 
 func TestArchiveCacheEnsureRecoversLegacyBinaryArchive(t *testing.T) {
 	ctx := context.Background()

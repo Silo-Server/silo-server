@@ -181426,6 +181426,77 @@
             }
           }
         ],
+        "description": "Live status of the named network access provider on this proxy, with a ten-second timeout. Reads only this provider, so another provider's timeout does not hide its status. 404 for a provider no enabled installation declares; 503 when the proxy hosts no plugins.",
+        "listener": "proxy",
+        "method": "GET",
+        "path": "/network-access/{provider}/status",
+        "handler": "(*internal/proxy.Server).handleNetworkAccessProviderStatus",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/netaccess_Status"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "description": "Provider slug declared by the plugin manifest, e.g. tailscale.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "description": "Ask the provider on this proxy to bring its overlay identity up; answers the state reached within ten seconds. Repeating converges on one connected instance. 404 for a provider no enabled installation declares.",
         "retry_safety": "natural_idempotent",
         "listener": "proxy",

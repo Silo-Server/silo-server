@@ -52,6 +52,8 @@ type Config struct {
 	// InstanceState persists ReadInstanceState / WriteInstanceState for this
 	// process's host scope. When nil, both RPCs fail with FailedPrecondition.
 	InstanceState InstanceStateStore
+	// RuntimeHostForStart binds host identity and state together for each launch.
+	RuntimeHostForStart func(context.Context) (HostInfoFunc, InstanceStateStore, error)
 	// NetworkAccess issues the ingress token for every network access provider
 	// the host starts, revokes it when the process stops, and receives status
 	// pushes. When nil, providers get no token and pushes are dropped.
@@ -78,14 +80,15 @@ type Host struct {
 	exitMu      sync.RWMutex
 	exitHandler func(installationID int)
 
-	eventPublisher     EventPublisher
-	libraryLister      LibraryLister
-	catalogPresence    CatalogPresenceLookup
-	installedPlugins   InstalledPluginLister
-	globalConfigSetter GlobalConfigSetter
-	hostInfo           HostInfoFunc
-	instanceState      InstanceStateStore
-	networkAccess      NetworkAccessBroker
+	eventPublisher      EventPublisher
+	libraryLister       LibraryLister
+	catalogPresence     CatalogPresenceLookup
+	installedPlugins    InstalledPluginLister
+	globalConfigSetter  GlobalConfigSetter
+	hostInfo            HostInfoFunc
+	instanceState       InstanceStateStore
+	runtimeHostForStart func(context.Context) (HostInfoFunc, InstanceStateStore, error)
+	networkAccess       NetworkAccessBroker
 
 	mu        sync.RWMutex
 	instances map[int]*instance
@@ -142,6 +145,7 @@ func NewHost(cfg Config) *Host {
 		globalConfigSetter:  cfg.GlobalConfigSetter,
 		hostInfo:            cfg.HostInfo,
 		instanceState:       cfg.InstanceState,
+		runtimeHostForStart: cfg.RuntimeHostForStart,
 		networkAccess:       cfg.NetworkAccess,
 		instances:           make(map[int]*instance),
 	}
@@ -157,6 +161,14 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	}
 	if req.Manifest == nil {
 		return nil, fmt.Errorf("plugin manifest is required")
+	}
+	hostInfo, instanceState := h.hostInfo, h.instanceState
+	if h.runtimeHostForStart != nil {
+		var err error
+		hostInfo, instanceState, err = h.runtimeHostForStart(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("bind process host identity: %w", err)
+		}
 	}
 
 	h.mu.Lock()
@@ -231,7 +243,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		return nil, fmt.Errorf("unexpected plugin runtime client type %T", rawClient)
 	}
 
-	if err := h.bindRuntimeHost(ctx, rpcClient, req.Manifest.GetPluginId(), req.InstallationID, provider, ingressToken); err != nil {
+	if err := h.bindRuntimeHost(ctx, rpcClient, req.Manifest.GetPluginId(), req.InstallationID, provider, ingressToken, hostInfo, instanceState); err != nil {
 		_ = protocol.Close()
 		process.Kill()
 		return nil, fmt.Errorf("bind runtime host: %w", err)
@@ -269,6 +281,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	}
 
 	client := newClient(req.InstallationID, rpcClient, liveManifestResponse.GetManifest(), startSeq)
+	client.ingressToken = ingressToken
 
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	instance := &instance{
@@ -480,9 +493,9 @@ func (h *Host) stopInstance(instance *instance) {
 // tears it down.
 //
 // Skipped when no RuntimeHost services are configured.
-func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int, provider, ingressToken string) error {
+func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int, provider, ingressToken string, hostInfo HostInfoFunc, instanceState InstanceStateStore) error {
 	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil &&
-		h.hostInfo == nil && h.instanceState == nil && h.networkAccess == nil {
+		hostInfo == nil && instanceState == nil && h.networkAccess == nil {
 		return nil
 	}
 
@@ -502,8 +515,8 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 			Catalog:               h.catalogPresence,
 			InstalledPlugins:      h.installedPlugins,
 			GlobalConfigSetter:    h.globalConfigSetter,
-			HostInfo:              h.hostInfo,
-			InstanceState:         h.instanceState,
+			HostInfo:              hostInfo,
+			InstanceState:         instanceState,
 			NetworkAccess:         h.networkAccess,
 			Logger:                h.logger,
 			PluginID:              pluginID,

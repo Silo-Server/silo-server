@@ -45,7 +45,7 @@ func TestHostStartIssuesAndStopRevokesIngressToken(t *testing.T) {
 	if ingress, ok := broker.Registry.Lookup(token); !ok || ingress.Provider != "stub" || ingress.InstallationID != 5 {
 		t.Fatalf("token resolves to %+v, %v", ingress, ok)
 	}
-	broker.Report(netaccess.Status{InstallationID: 5, Provider: "stub", State: netaccess.StateConnected, Origin: "https://stub.example"})
+	broker.ReportFor(5, token, netaccess.Status{InstallationID: 5, Provider: "stub", State: netaccess.StateConnected, Origin: "https://stub.example"})
 
 	if err := host.Stop(5); err != nil {
 		t.Fatalf("host.Stop: %v", err)

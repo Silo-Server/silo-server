@@ -45,16 +45,9 @@ func (h *NodeHandler) ListNetworkAccessNodes(ctx context.Context) ([]plugins.Net
 
 // NodeNetworkAccessStatus reads the provider's status from one proxy.
 func (h *NodeHandler) NodeNetworkAccessStatus(ctx context.Context, node plugins.NetworkAccessNode, provider string) (netaccess.Status, error) {
-	var report netaccess.HostStatusReport
-	if err := h.nodeNetworkAccessCall(ctx, node, http.MethodGet, "/network-access/status", "status", &report); err != nil {
-		return netaccess.Status{}, err
-	}
-	for _, status := range report.Providers {
-		if status.Provider == provider {
-			return status, nil
-		}
-	}
-	return netaccess.Status{}, plugins.ErrNetworkAccessProviderNotFound
+	var status netaccess.Status
+	err := h.nodeNetworkAccessCall(ctx, node, http.MethodGet, "/network-access/"+url.PathEscape(provider)+"/status", "status", &status)
+	return status, err
 }
 
 // NodeNetworkAccessConnect brings the provider up on one proxy.

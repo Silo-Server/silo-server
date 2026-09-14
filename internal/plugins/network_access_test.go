@@ -18,7 +18,7 @@ import (
 func TestNetworkAccessProvidersAndCommands(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
 	ctx := context.Background()
-	broker := netaccess.NewBroker()
+	broker := f.broker
 	f.service.SetNetworkAccessStatusSink(broker)
 	f.service.SetNetworkAccessHostInfo(func(context.Context) (pluginhost.HostInfo, error) {
 		return pluginhost.HostInfo{Role: pluginhost.HostRoleAPI, Name: "Living Room"}, nil
@@ -103,7 +103,7 @@ func TestNetworkAccessProvidersAndCommands(t *testing.T) {
 func TestNetworkAccessFailedRPCReportsUnavailableToTheStatusSink(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
 	ctx := context.Background()
-	broker := netaccess.NewBroker()
+	broker := f.broker
 	f.service.SetNetworkAccessStatusSink(broker)
 	f.service.SetNetworkAccessHostInfo(func(context.Context) (pluginhost.HostInfo, error) {
 		return pluginhost.HostInfo{Role: pluginhost.HostRoleAPI, Name: "Living Room"}, nil

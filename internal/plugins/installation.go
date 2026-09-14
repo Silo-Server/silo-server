@@ -34,17 +34,18 @@ const (
 )
 
 type Installation struct {
-	ID               int
-	RepositoryID     *int
-	PluginID         string
-	Version          string
-	InstallPath      string
-	Enabled          bool
-	Kind             string  `json:"kind"`
-	UpdatePolicy     string  `json:"update_policy"`
-	AvailableVersion *string `json:"available_version,omitempty"`
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                int
+	RepositoryID      *int
+	PluginID          string
+	Version           string
+	InstallPath       string
+	Enabled           bool
+	Kind              string  `json:"kind"`
+	UpdatePolicy      string  `json:"update_policy"`
+	AvailableVersion  *string `json:"available_version,omitempty"`
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	RuntimeGeneration int64 `json:"-"`
 }
 
 // IsBuiltin reports whether this is the reserved builtin-host installation.
@@ -87,6 +88,8 @@ type UpdateInstallationInput struct {
 	UpdatePolicy     *string
 	AvailableVersion *string
 	Capabilities     []Capability
+	// Restart durably requests a new process on every resident host.
+	Restart bool
 }
 
 type InstallationStore struct {
@@ -97,7 +100,7 @@ func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
 	return &InstallationStore{pool: pool}
 }
 
-const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at`
+const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation`
 const capabilityColumns = `plugin_installation_id, capability_type, capability_id, metadata, created_at, updated_at`
 const archiveColumns = `plugin_installation_id, manifest_json, checksum, archive_bytes, created_at, updated_at`
 
@@ -116,6 +119,7 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		&installation.AvailableVersion,
 		&installation.CreatedAt,
 		&installation.UpdatedAt,
+		&installation.RuntimeGeneration,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrInstallationNotFound
@@ -329,6 +333,9 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		setClauses = append(setClauses, fmt.Sprintf("available_version = $%d", argIndex))
 		args = append(args, *input.AvailableVersion)
 		argIndex++
+	}
+	if input.Restart {
+		setClauses = append(setClauses, "runtime_generation = runtime_generation + 1")
 	}
 
 	if len(setClauses) > 0 {

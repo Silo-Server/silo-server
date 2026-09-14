@@ -17,6 +17,7 @@ import (
 // (a proxy without a plugin host) answers 503 on the routes below.
 type NetworkAccessProviderHost interface {
 	HostNetworkAccessStatus(ctx context.Context) (netaccess.HostStatusReport, error)
+	HostNetworkAccessProviderStatus(ctx context.Context, provider string) (netaccess.Status, error)
 	HostNetworkAccessConnect(ctx context.Context, provider string) (netaccess.Status, error)
 	HostNetworkAccessDisconnect(ctx context.Context, provider string) (netaccess.Status, error)
 }
@@ -41,6 +42,25 @@ func (s *Server) handleNetworkAccessStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeNetworkAccessJSON(w, report)
+}
+
+// handleNetworkAccessProviderStatus reads the named provider independently,
+// so a slow provider cannot make another provider appear unreachable.
+func (s *Server) handleNetworkAccessProviderStatus(w http.ResponseWriter, r *http.Request) {
+	if s.networkAccessHost == nil {
+		http.Error(w, "network access providers are not hosted on this node", http.StatusServiceUnavailable)
+		return
+	}
+	status, err := s.networkAccessHost.HostNetworkAccessProviderStatus(r.Context(), chi.URLParam(r, "provider"))
+	if err != nil {
+		if errors.Is(err, netaccess.ErrProviderNotFound) {
+			http.Error(w, "network access provider not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "network access status: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeNetworkAccessJSON(w, status)
 }
 
 // handleNetworkAccessConnect brings the named provider up on this node.

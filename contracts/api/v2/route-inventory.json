@@ -50,7 +50,7 @@
       "id": "proxy",
       "entrypoint": "internal/proxy.(*Server).Handler",
       "description": "Proxy node listener: media relay, node control, and its own health/metrics probes.",
-      "route_count": 28
+      "route_count": 29
     },
     {
       "id": "transcode_node",
@@ -60,7 +60,7 @@
     }
   ],
   "totals": {
-    "routes": 866,
+    "routes": 867,
     "conditional_routes": 691,
     "streaming_routes": 42,
     "websocket_routes": 4
@@ -27256,6 +27256,34 @@
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/network-access/{provider}/status",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleNetworkAccessProviderStatus",
+      "handler_expr": "s.handleNetworkAccessProviderStatus",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
       "response_media_kind": "json",
       "delegates_to": "",
       "streams": false,

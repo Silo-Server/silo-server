@@ -87,7 +87,7 @@ func hostByID(t *testing.T, report NetworkAccessReport, id string) NetworkAccess
 func TestNetworkAccessFansOutToProxyNodes(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
 	ctx := context.Background()
-	f.service.SetNetworkAccessStatusSink(netaccess.NewBroker())
+	f.service.SetNetworkAccessStatusSink(f.broker)
 	f.service.SetNetworkAccessHostInfo(func(context.Context) (pluginhost.HostInfo, error) {
 		return pluginhost.HostInfo{Role: pluginhost.HostRoleAPI, Name: "Living Room"}, nil
 	})
@@ -192,7 +192,7 @@ func TestNetworkAccessFansOutToProxyNodes(t *testing.T) {
 func TestHostNetworkAccessOperationsAnswerForThisHost(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
 	ctx := context.Background()
-	broker := netaccess.NewBroker()
+	broker := f.broker
 	f.service.SetNetworkAccessStatusSink(broker)
 
 	report, err := f.service.HostNetworkAccessStatus(ctx)
@@ -202,11 +202,15 @@ func TestHostNetworkAccessOperationsAnswerForThisHost(t *testing.T) {
 	if len(report.Providers) != 1 || report.Providers[0].State != netaccess.StateUnavailable {
 		t.Fatalf("status before start = %+v", report)
 	}
+	status, err := f.service.HostNetworkAccessProviderStatus(ctx, "stub")
+	if err != nil || status.Provider != "stub" || status.State != netaccess.StateUnavailable {
+		t.Fatalf("provider status before start = %+v, %v", status, err)
+	}
 
 	f.service.StartResidents(ctx)
 	waitState(t, f.service, 5, "running", running)
 
-	status, err := f.service.HostNetworkAccessConnect(ctx, "stub")
+	status, err = f.service.HostNetworkAccessConnect(ctx, "stub")
 	if err != nil || status.State != netaccess.StateConnected || status.Origin != "https://silo.stub.test" {
 		t.Fatalf("connect = %+v, %v", status, err)
 	}
@@ -219,6 +223,13 @@ func TestHostNetworkAccessOperationsAnswerForThisHost(t *testing.T) {
 	report, err = f.service.HostNetworkAccessStatus(ctx)
 	if err != nil || len(report.Providers) != 1 || report.Providers[0].State != netaccess.StateConnected {
 		t.Fatalf("status after connect = %+v, %v", report, err)
+	}
+	status, err = f.service.HostNetworkAccessProviderStatus(ctx, "stub")
+	if err != nil || status.Provider != "stub" || status.State != netaccess.StateConnected {
+		t.Fatalf("provider status after connect = %+v, %v", status, err)
+	}
+	if _, err := f.service.HostNetworkAccessProviderStatus(ctx, "netbird"); !errors.Is(err, ErrNetworkAccessProviderNotFound) {
+		t.Fatalf("unknown provider status err = %v", err)
 	}
 	status, err = f.service.HostNetworkAccessDisconnect(ctx, "stub")
 	if err != nil || status.State != netaccess.StateDisconnected {
@@ -234,7 +245,7 @@ func TestHostNetworkAccessOperationsAnswerForThisHost(t *testing.T) {
 func TestResidentGateHoldsResidentsUntilItOpens(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
 	ctx := context.Background()
-	f.service.SetNetworkAccessStatusSink(netaccess.NewBroker())
+	f.service.SetNetworkAccessStatusSink(f.broker)
 	var mu sync.Mutex
 	gateErr := errors.New("this proxy's stream_nodes row is not known yet")
 	f.service.SetResidentGate(func(context.Context) error {

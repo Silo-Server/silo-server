@@ -39,11 +39,13 @@ worker. They consume no request DTO and retain the existing paths:
 
 The proxy listener additionally carries the network access provider routes the
 API server fans its `/api/v2/admin/network-access/{provider}/...` operations
-out to, under the same node bearer: `GET /network-access/status` (JSON, every
-provider instance on that proxy with `auth_url` and error text), and
+out to, under the same node bearer: `GET /network-access/{provider}/status`
+(JSON, only the named provider, independent of other providers' response times), and
 `POST /network-access/{provider}/connect` / `.../disconnect` (JSON, the state
 the instance reached; 404 for a provider no enabled installation declares).
-They are `natural_idempotent`: repeating converges on connected or
+The status responses carry `auth_url` and error text. The original
+`GET /network-access/status` also remains available to read every provider
+instance on that proxy. Connect and disconnect are `natural_idempotent`: repeating converges on connected or
 disconnected. A proxy that hosts no plugins answers plain-text 503. See
 [network-access.md](network-access.md).
 
