@@ -392,4 +392,24 @@ describe("invalidateMediaSurfaceQueries", () => {
       },
     });
   });
+
+  it("does not invalidate detail queries for a different item ID when itemId is specified", async () => {
+    const queryClient = new QueryClient();
+    const item1DetailKey = itemKeys.detail("item-1");
+    const item2DetailKey = itemKeys.detail("item-2");
+    const item1WatchKey = itemKeys.watchDetail("item-1");
+    const item2WatchKey = itemKeys.watchDetail("item-2");
+
+    queryClient.setQueryData(item1DetailKey, { content_id: "item-1" });
+    queryClient.setQueryData(item2DetailKey, { content_id: "item-2" });
+    queryClient.setQueryData(item1WatchKey, { content_id: "item-1" });
+    queryClient.setQueryData(item2WatchKey, { content_id: "item-2" });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "item-1" });
+
+    expect(queryClient.getQueryState(item1DetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(item1WatchKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(item2DetailKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(item2WatchKey)?.isInvalidated).toBe(false);
+  });
 });
