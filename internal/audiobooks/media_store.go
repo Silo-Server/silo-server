@@ -284,12 +284,21 @@ func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*mo
 		allowed = []int{int(libraryID)}
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT content_id, COALESCE(MAX(duration_seconds), 0)
-		FROM audiobook_item_file_stats
-		WHERE content_id = ANY($1)
-		  AND ($2::int[] IS NULL OR media_folder_id = ANY($2))
-		  AND (COALESCE(cardinality($3::int[]), 0) = 0 OR NOT (media_folder_id = ANY($3)))
-		GROUP BY content_id`, ids, allowed, access.DisabledLibraryIDs)
+		WITH presentations AS (
+			SELECT content_id, media_folder_id,
+			       COALESCE(presentation_group_key, '') AS presentation_key,
+			       SUM(COALESCE(duration, 0)) AS duration_seconds
+			FROM media_files
+			WHERE content_id = ANY($1) AND missing_since IS NULL
+			  AND ($2::int[] IS NULL OR media_folder_id = ANY($2))
+			  AND (COALESCE(cardinality($3::int[]), 0) = 0 OR NOT (media_folder_id = ANY($3)))
+			GROUP BY content_id, media_folder_id, COALESCE(presentation_group_key, '')
+		), chosen AS (
+			SELECT content_id, duration_seconds,
+			       ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY media_folder_id, presentation_key) AS rn
+			FROM presentations
+		)
+		SELECT content_id, duration_seconds FROM chosen WHERE rn = 1`, ids, allowed, access.DisabledLibraryIDs)
 	if err != nil {
 		return fmt.Errorf("abs_media_store: load audiobook durations: %w", err)
 	}
