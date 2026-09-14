@@ -784,6 +784,7 @@ func (s *Service) RestartInstallation(ctx context.Context, installationID int) e
 	// lifecycle subscription missed the event (a proxy with Redis down)
 	// replace its process on the next poll, and clears a failed entry's
 	// budget there the same way the event would.
+	durable := false
 	if s.installations != nil {
 		if err := s.installations.Update(ctx, installationID, UpdateInstallationInput{Restart: true}); err != nil {
 			return fmt.Errorf("record plugin restart: %w", err)
@@ -794,13 +795,21 @@ func (s *Service) RestartInstallation(ctx context.Context, installationID int) e
 			// generation on its entry so the next reconcile does not
 			// replace the fresh process a second time.
 			s.resident.setRuntimeGeneration(installationID, installation.RuntimeGeneration)
+			durable = true
 		}
 	}
+	// Every other host running the resident (proxy nodes) replaces its
+	// process too, so one admin action clears a failed instance everywhere.
+	// With the generation persisted a plain event is enough: the follower's
+	// reconcile sees the new generation and replaces its process once. A
+	// restart event on top of that would make it restart, then reconcile and
+	// replace the fresh process again for the generation it had not
+	// recorded. Without a durable generation the event carries the restart.
+	// Published whether or not this host runs the resident itself: the
+	// restart is recorded regardless of what this host does with it.
+	defer s.publishPluginsChanged(ctx, PluginsChangedEvent{InstallationID: installationID, Restart: !durable})
 	err := s.resident.Restart(ctx, installationID)
 	if err == nil {
-		// Proxy nodes running the same resident restart it too, so one admin
-		// action clears a failed instance everywhere.
-		s.publishPluginsChanged(ctx, PluginsChangedEvent{InstallationID: installationID, Restart: true})
 		return nil
 	}
 	if !errors.Is(err, ErrNotResident) {

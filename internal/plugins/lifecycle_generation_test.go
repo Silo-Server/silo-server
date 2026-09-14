@@ -136,3 +136,43 @@ func TestResidentPollRecoversMissedRestartOfFailedProvider(t *testing.T) {
 		t.Fatalf("restart did not clear failure budget: %+v", state)
 	}
 }
+
+// An admin restart on the API host replaces a following proxy's process
+// exactly once. The generation is durable, so the published event is a
+// plain reconcile; a restart event on top would restart and then replace
+// the fresh process again for the generation the follower had not seen.
+func TestAdminRestartReplacesFollowerProcessOnce(t *testing.T) {
+	bus := newFakeBus()
+	follower, store, _, id := newResidentDatabaseFixture(t, ResidentOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	follower.service.StartResidents(ctx)
+	waitState(t, follower.service, id, "follower running", running)
+	if err := follower.service.FollowLifecycleChanges(ctx, bus, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	before := follower.host.NextStartSeq()
+
+	publisher := &Service{installations: store}
+	publisher.resident = newResidentSupervisor(publisher, ResidentOptions{})
+	publisher.PublishLifecycleChanges(bus)
+	if err := publisher.RestartInstallation(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+
+	waitState(t, follower.service, id, "follower replaced its process", func(state RuntimeState, tracked bool) bool {
+		return tracked && state.State == ResidentRunning && follower.host.NextStartSeq() > before
+	})
+	// Give a second, wrong replacement time to show up before asserting.
+	settled := follower.host.NextStartSeq()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if follower.host.NextStartSeq() != settled {
+			t.Fatalf("follower restarted more than once: start seq %d -> %d", settled, follower.host.NextStartSeq())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := settled - before; got != 1 {
+		t.Fatalf("follower start count after one admin restart = %d, want 1", got)
+	}
+}
