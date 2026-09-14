@@ -1648,7 +1648,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
 	// The replacement has successfully spawned, so retire the old session and
 	// publish the new one under the same ID.
 	s.mu.Lock()
@@ -1665,6 +1664,15 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		s.mu.Unlock()
+	}
+	if replacementDir != "" {
+		if err := os.Rename(replacementDir, outputDir); err != nil {
+			_ = session.Close()
+			unlock()
+			http.Error(w, "failed to publish transcode replacement", http.StatusInternalServerError)
+			return
+		}
+		replacementDir = ""
 	}
 
 	s.mu.Lock()

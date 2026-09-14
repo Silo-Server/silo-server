@@ -207,7 +207,8 @@ type PlaybackHandler struct {
 	InstallationID string
 	// progressSideEffectLocks serializes v2 progress side effects per session
 	// (see persistProgressV2).
-	progressSideEffectLocks sync.Map
+	progressSideEffectLocks   sync.Map
+	progressSideEffectLocksMu sync.Mutex
 	// ProxyGrantStore hands a proxy the recipe it serves a header-authenticated
 	// session from. Optional: without it (or without Redis behind it) an attempt
 	// that negotiated authorized_media_origins_v1 simply stays on the API origin.
