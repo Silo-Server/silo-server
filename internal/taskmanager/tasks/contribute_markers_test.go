@@ -117,6 +117,29 @@ func TestContributeMarkersTaskStopsOnRateLimit(t *testing.T) {
 	}
 }
 
+func TestContributeMarkersTaskFailsWhenAllSubmissionsError(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{
+		Status: markers.OutcomeStatusError, Provider: "introdb", Reason: "AccessDenied",
+	}}}
+	cands := &fakeCandidates{ids: []int{10, 11}}
+	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+
+	prog := &contribTestProgress{}
+	err := task.Execute(context.Background(), prog)
+	if err == nil {
+		t.Fatal("expected Execute to return an error when every submission fails")
+	}
+
+	var data map[string]int
+	if jsonErr := json.Unmarshal(prog.data, &data); jsonErr != nil {
+		t.Fatalf("decode result data: %v", jsonErr)
+	}
+	if data["submitted"] != 0 || data["failed"] != 2 {
+		t.Fatalf("result = %v, want submitted=0 failed=2", data)
+	}
+}
+
 func TestContributeMarkersTaskCountsConflictAsSkipped(t *testing.T) {
 	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.OutcomeStatusConflict}}}
 	cands := &fakeCandidates{ids: []int{10}}
