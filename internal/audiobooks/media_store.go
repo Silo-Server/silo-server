@@ -250,7 +250,7 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 	if err := s.hydrateAudiobookSeries(ctx, ordered); err != nil {
 		_ = err
 	}
-	_ = s.hydrateAudiobookRuntime(ctx, ordered)
+	_ = s.hydrateAudiobookRuntime(ctx, ordered, libraryID)
 	return ordered, total, nil
 }
 
@@ -260,7 +260,7 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 // the resulting minutes to seconds at the wire boundary. Keeping the catalog
 // unit intact avoids changing the native API contract while ensuring library
 // listings have a useful duration even when a scan did not populate Runtime.
-func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*models.MediaItem) error {
+func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*models.MediaItem, libraryIDs ...int64) error {
 	if len(items) == 0 || s.Pool == nil {
 		return nil
 	}
@@ -277,7 +277,8 @@ func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*mo
 		SELECT content_id, COALESCE(MAX(duration_seconds), 0)
 		FROM audiobook_item_file_stats
 		WHERE content_id = ANY($1)
-		GROUP BY content_id`, ids)
+          AND ($2 = 0 OR media_folder_id = $2)
+		GROUP BY content_id`, ids, firstLibraryID(libraryIDs))
 	if err != nil {
 		return fmt.Errorf("abs_media_store: load audiobook durations: %w", err)
 	}
@@ -301,6 +302,13 @@ func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*mo
 		}
 	}
 	return nil
+}
+
+func firstLibraryID(ids []int64) int64 {
+	if len(ids) > 0 {
+		return ids[0]
+	}
+	return 0
 }
 
 // appendAudiobookFilterConditions pushes an ABS authors/series/narrators
