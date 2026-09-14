@@ -1690,7 +1690,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 			for _, alternate := range alternates {
 				candidateFile := h.ensurePlaybackProbe(r.Context(), alternate)
 				candidateReq := baseReq
-				candidateAudioIndex := remapAudioIndexV3(requestedFile, candidateFile, baseAudioIndex)
+				candidateAudioIndex := remapAudioIndexV3(alternateBase, candidateFile, baseAudioIndex)
 				var candidateResult playback.PlannerResultV3
 				var candidateToneMapErr error
 				if err := h.remapSubtitleSelectionV3(r.Context(), requestedFile, candidateFile, &candidateReq); err != nil {

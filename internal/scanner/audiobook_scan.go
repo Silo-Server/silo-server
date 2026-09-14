@@ -572,7 +572,9 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err != nil {
 		return fmt.Errorf("begin audiobook folder transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelCleanup()
+	defer func() { _ = tx.Rollback(cleanupCtx) }()
 	if err := s.upsertAudiobookMediaFilesTx(ctx, tx, folder, contentID, folderPath, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook files: %w", err)
 	}
