@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSearchAttachesAPIKeyAndQuery(t *testing.T) {
@@ -86,5 +87,27 @@ func TestSearchSurfacesUpstreamErrors(t *testing.T) {
 	c.baseURL = srv.URL
 	if _, err := c.Search(context.Background(), "x"); err == nil {
 		t.Fatal("expected unauthorized error, got nil")
+	}
+}
+
+func TestTransportErrorOmitsAPIKey(t *testing.T) {
+	secretKey := "super-secret-mdblist-key-12345"
+	c := NewClient(secretKey, &http.Client{})
+	c.baseURL = "http://127.0.0.1:0"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := c.Search(ctx, "test")
+	if err == nil {
+		t.Fatal("expected transport error, got nil")
+	}
+
+	errStr := err.Error()
+	if strings.Contains(errStr, secretKey) {
+		t.Fatalf("transport error leaked API key! error string: %s", errStr)
+	}
+	if !strings.Contains(errStr, "REDACTED") {
+		t.Fatalf("expected REDACTED in sanitized transport error string: %s", errStr)
 	}
 }
