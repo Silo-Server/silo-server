@@ -13,7 +13,7 @@ type SuggestionPosition struct {
 
 // ListSuggestionsPage uses immutable creation order, so changes in vote counts
 // do not move rows behind a continuation. It is a live list, not a snapshot.
-func (r *SuggestionRepository) ListSuggestionsPage(ctx context.Context, roomID, profileID string, limit int, after *SuggestionPosition) ([]Suggestion, bool, error) {
+func (r *SuggestionRepository) ListSuggestionsPage(ctx context.Context, roomID string, userID int, profileID string, limit int, after *SuggestionPosition) ([]Suggestion, bool, error) {
 	if r == nil || r.pool == nil {
 		return nil, false, fmt.Errorf("suggestion repository unavailable")
 	}
@@ -27,8 +27,8 @@ func (r *SuggestionRepository) ListSuggestionsPage(ctx context.Context, roomID, 
 		id = after.ID
 	}
 	rows, err := r.pool.Query(ctx, `SELECT s.id,s.room_id,s.suggester_user_id,s.suggester_profile_id,s.content_id,s.content_type,s.title,s.subtitle,s.poster_url,s.note,s.vote_count,s.created_at,(v.suggestion_id IS NOT NULL)
- FROM watch_together_suggestions s LEFT JOIN watch_together_votes v ON v.suggestion_id=s.id AND v.voter_profile_id=$2
- WHERE s.room_id=$1 AND ($3::timestamptz IS NULL OR (s.created_at,s.id)>($3,$4)) ORDER BY s.created_at,s.id LIMIT $5`, roomID, profileID, created, id, limit+1)
+	 FROM watch_together_suggestions s LEFT JOIN watch_together_votes v ON v.suggestion_id=s.id AND v.voter_user_id=$2 AND v.voter_profile_id=$3
+	 WHERE s.room_id=$1 AND ($4::timestamptz IS NULL OR (s.created_at,s.id)>($4,$5)) ORDER BY s.created_at,s.id LIMIT $6`, roomID, userID, profileID, created, id, limit+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -51,9 +51,12 @@ func (r *SuggestionRepository) ListSuggestionsPage(ctx context.Context, roomID, 
 	return out, more, nil
 }
 
-func (s *Service) ListSuggestionsPage(ctx context.Context, room, profile string, limit int, after *SuggestionPosition) ([]Suggestion, bool, error) {
+func (s *Service) ListSuggestionsPage(ctx context.Context, room string, userID int, profile string, limit int, after *SuggestionPosition) ([]Suggestion, bool, error) {
 	if s == nil || s.suggestions == nil {
 		return nil, false, fmt.Errorf("watch together suggestions unavailable")
 	}
-	return s.suggestions.ListSuggestionsPage(ctx, room, profile, limit, after)
+	if _, _, err := s.getOrLoadLiveRoom(ctx, room); err != nil {
+		return nil, false, err
+	}
+	return s.suggestions.ListSuggestionsPage(ctx, room, userID, profile, limit, after)
 }

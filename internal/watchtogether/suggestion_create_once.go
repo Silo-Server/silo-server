@@ -26,7 +26,7 @@ func (s *Service) CreateSuggestionWithIdentity(ctx context.Context, roomID, id s
 		return "", err
 	}
 	if inserted {
-		suggestions, err := s.suggestions.ListSuggestions(ctx, roomID, profile)
+		suggestions, err := s.suggestions.ListSuggestions(ctx, roomID, user, profile)
 		if err != nil {
 			return "", err
 		}
@@ -39,6 +39,7 @@ func (s *Service) CreateSuggestionWithIdentity(ctx context.Context, roomID, id s
 		} else {
 			s.mu.Unlock()
 		}
+		s.publishSuggestionUpdate(roomID)
 	}
 	return row.ID, nil
 }

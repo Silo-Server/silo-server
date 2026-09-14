@@ -260,7 +260,7 @@ export default function WatchTogetherJoin() {
           </div>
           <p className="text-foreground/65 text-sm leading-relaxed">
             Share the room code or invite link to let others join. If the host disconnects the room
-            stays open for 15 seconds — if they don't reconnect, the party ends automatically.
+            stays open for 2 minutes — if they don't reconnect, the party ends automatically.
           </p>
         </div>
       </div>

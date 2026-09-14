@@ -206,6 +206,8 @@ interface PlaybackNoticeState {
   title?: string;
   message: string;
   tone: "info" | "warning";
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
 function readNumericPayload(
@@ -582,13 +584,18 @@ export function VideoPlayer({
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
   const watchTogetherRoomActive = watchTogether.room !== null;
 
-  const showWatchTogetherNotice = useCallback((message: string, tone: "info" | "warning") => {
-    setNotice({
-      title: "Watch Party",
-      message,
-      tone,
-    });
-  }, []);
+  const showWatchTogetherNotice = useCallback(
+    (message: string, tone: "info" | "warning", onAction?: () => void) => {
+      setNotice({
+        title: "Watch Party",
+        message,
+        tone,
+        actionLabel: onAction ? "Join playback" : undefined,
+        onAction,
+      });
+    },
+    [],
+  );
 
   const resetLeaveState = useCallback(() => {
     leaveInProgressRef.current = false;
@@ -2489,7 +2496,22 @@ export function VideoPlayer({
         }
 
         if (command.action === "play") {
-          await video.play();
+          try {
+            await video.play();
+          } catch {
+            showWatchTogetherNotice(
+              "Your browser blocked automatic playback. Click to join playback.",
+              "warning",
+              () => {
+                const currentVideo = videoRef.current;
+                if (!currentVideo) return;
+                void currentVideo
+                  .play()
+                  .then(() => reportRoomReadyRef.current(command.position_seconds, false))
+                  .catch(() => {});
+              },
+            );
+          }
         }
 
         if (
@@ -2513,6 +2535,7 @@ export function VideoPlayer({
     watchTogether.room?.selection_revision,
     watchTogether.serverTimeOffsetMs,
     watchTogether.transportCommand,
+    showWatchTogetherNotice,
   ]);
 
   const handleVolumeChange = useCallback((v: number) => {
@@ -2989,7 +3012,13 @@ export function VideoPlayer({
       )}
 
       {!isDetached && notice ? (
-        <PlaybackNoticeOverlay title={notice.title} message={notice.message} tone={notice.tone} />
+        <PlaybackNoticeOverlay
+          title={notice.title}
+          message={notice.message}
+          tone={notice.tone}
+          actionLabel={notice.actionLabel}
+          onAction={notice.onAction}
+        />
       ) : null}
 
       {/* Error state */}

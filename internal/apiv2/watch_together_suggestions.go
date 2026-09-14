@@ -11,7 +11,7 @@ import (
 
 type WatchTogetherSuggestionService interface {
 	CheckSuggestionRoomProof(string, int, string, string) error
-	ListSuggestionPage(context.Context, string, string, int, *watchtogether.SuggestionPosition) ([]watchtogether.Suggestion, bool, error)
+	ListSuggestionPage(context.Context, string, int, string, int, *watchtogether.SuggestionPosition) ([]watchtogether.Suggestion, bool, error)
 	SetSuggestionVote(context.Context, string, string, int, string, bool) error
 }
 
@@ -87,7 +87,7 @@ func registerWatchTogetherSuggestions(reg *Registry) {
 				return nil, p
 			}
 		}
-		rows, more, err := reg.deps.WatchTogetherSuggestions.ListSuggestionPage(ctx, in.RoomID, profile, in.Limit, after)
+		rows, more, err := reg.deps.WatchTogetherSuggestions.ListSuggestionPage(ctx, in.RoomID, user, profile, in.Limit, after)
 		if err != nil {
 			return nil, suggestionProblem(err)
 		}

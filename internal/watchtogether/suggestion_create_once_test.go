@@ -19,7 +19,7 @@ func (r *recordingCreator) CreateSuggestionOnce(_ context.Context, input Suggest
 	r.input = input
 	return &input, r.calls == 1, nil
 }
-func (r *recordingCreator) ListSuggestions(context.Context, string, string) ([]Suggestion, error) {
+func (r *recordingCreator) ListSuggestions(context.Context, string, int, string) ([]Suggestion, error) {
 	r.lists++
 	return []Suggestion{r.input}, r.listErr
 }

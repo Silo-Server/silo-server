@@ -23,7 +23,7 @@ func (f *fakeRoomSuggestions) CheckSuggestionRoomProof(room string, user int, pr
 	}
 	return nil
 }
-func (f *fakeRoomSuggestions) ListSuggestionPage(_ context.Context, room, profile string, limit int, after *watchtogether.SuggestionPosition) ([]watchtogether.Suggestion, bool, error) {
+func (f *fakeRoomSuggestions) ListSuggestionPage(_ context.Context, room string, user int, profile string, limit int, after *watchtogether.SuggestionPosition) ([]watchtogether.Suggestion, bool, error) {
 	f.profile = profile
 	id := "first"
 	more := true

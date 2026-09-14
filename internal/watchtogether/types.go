@@ -189,11 +189,11 @@ type CreateSuggestionInput struct {
 
 // SuggestionStore provides persistence for room suggestions and votes.
 type SuggestionStore interface {
-	ListSuggestionsPage(context.Context, string, string, int, *SuggestionPosition) ([]Suggestion, bool, error)
+	ListSuggestionsPage(context.Context, string, int, string, int, *SuggestionPosition) ([]Suggestion, bool, error)
 	CreateSuggestion(ctx context.Context, s Suggestion) (*Suggestion, error)
 	GetSuggestion(ctx context.Context, id string) (*Suggestion, error)
-	ListSuggestions(ctx context.Context, roomID string, voterProfileID string) ([]Suggestion, error)
+	ListSuggestions(ctx context.Context, roomID string, voterUserID int, voterProfileID string) ([]Suggestion, error)
 	DeleteSuggestion(ctx context.Context, id string) error
-	AddVote(ctx context.Context, suggestionID string, voterProfileID string) error
-	RemoveVote(ctx context.Context, suggestionID string, voterProfileID string) error
+	AddVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error
+	RemoveVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error
 }

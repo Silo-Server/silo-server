@@ -22,9 +22,9 @@ func (s *deletionSuggestions) DeleteSuggestion(_ context.Context, id string) err
 	}
 	return ErrSuggestionNotFound
 }
-func (s *deletionSuggestions) ListSuggestions(ctx context.Context, room, profile string) ([]Suggestion, error) {
+func (s *deletionSuggestions) ListSuggestions(ctx context.Context, room string, user int, profile string) ([]Suggestion, error) {
 	s.lists++
-	return s.stubSuggestions.ListSuggestions(ctx, room, profile)
+	return s.stubSuggestions.ListSuggestions(ctx, room, user, profile)
 }
 func TestSuggestionDeletePreservesAccountAndProfileOwnership(t *testing.T) {
 	for _, tc := range []struct {

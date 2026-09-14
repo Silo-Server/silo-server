@@ -18,8 +18,8 @@ func (h *WatchTogetherHandler) CheckSuggestionRoomProof(room string, user int, p
 	}
 	return nil
 }
-func (h *WatchTogetherHandler) ListSuggestionPage(ctx context.Context, room, profile string, limit int, after *watchtogether.SuggestionPosition) ([]watchtogether.Suggestion, bool, error) {
-	return h.Service.ListSuggestionsPage(ctx, room, profile, limit, after)
+func (h *WatchTogetherHandler) ListSuggestionPage(ctx context.Context, room string, user int, profile string, limit int, after *watchtogether.SuggestionPosition) ([]watchtogether.Suggestion, bool, error) {
+	return h.Service.ListSuggestionsPage(ctx, room, user, profile, limit, after)
 }
 func (h *WatchTogetherHandler) SetSuggestionVote(ctx context.Context, room, suggestion string, user int, profile string, vote bool) error {
 	var err error

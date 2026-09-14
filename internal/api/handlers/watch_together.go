@@ -402,7 +402,7 @@ func (h *WatchTogetherHandler) HandleListSuggestions(w http.ResponseWriter, r *h
 		return
 	}
 
-	suggestions, err := h.Service.ListSuggestions(r.Context(), roomID, profileID)
+	suggestions, err := h.Service.ListSuggestions(r.Context(), roomID, userID, profileID)
 	if err != nil {
 		switch {
 		case errors.Is(err, watchtogether.ErrRoomNotFound):

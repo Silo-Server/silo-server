@@ -3,12 +3,31 @@ package watchtogether
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+func TestInvalidPlaybackPositionsAreRejected(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &stubRepo{room: baseRoom(now)}
+	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
+	conn := &recordingConn{}
+	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", sessionID: "session", connection: conn}
+	reg := registrationFor(repo.room.ID, 7, "host", conn)
+	for _, position := range []float64{math.NaN(), math.Inf(1), -1, maxPositionSeconds + 1} {
+		p := position
+		if _, err := service.HandleTransportRequestForConnection(t.Context(), reg, 7, "host", TransportRequest{Action: TransportActionSeek, PositionSeconds: &p}); !errors.Is(err, ErrInvalidPosition) {
+			t.Fatalf("position %v error = %v", position, err)
+		}
+		if _, err := service.HandleStateReportForConnection(t.Context(), reg, 7, "host", StateReport{SessionID: "session", PositionSeconds: position}); !errors.Is(err, ErrInvalidPosition) {
+			t.Fatalf("state position %v error = %v", position, err)
+		}
+	}
+}
 
 type stubRepo struct {
 	room Room
