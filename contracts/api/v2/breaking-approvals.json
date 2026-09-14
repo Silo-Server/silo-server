@@ -1,3 +1,32 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "messageAdminPlaybackSession",
+      "change_id": "request-property-max-set",
+      "fingerprint": "39d2ed0d52f377a92bbead57870c7d868b14a75aa56e28118039f9fc888d3da2",
+      "reason": "The sequence was an unbounded int64 while the web client, the only first-party caller, represents it as a JavaScript number; a value above 2^53-1 could not be echoed back exactly on a stale refusal. No first-party client sends values near the bound; silo-apple and silo-android do not call these operations.",
+      "approved_in": "#1080"
+    },
+    {
+      "operation_id": "pauseAdminPlaybackSession",
+      "change_id": "request-property-max-set",
+      "fingerprint": "373db300e361c938054d5681daa2bc1e7c8bb596e6b4e9b583f0a1ad14fac73b",
+      "reason": "The sequence was an unbounded int64 while the web client, the only first-party caller, represents it as a JavaScript number; a value above 2^53-1 could not be echoed back exactly on a stale refusal. No first-party client sends values near the bound; silo-apple and silo-android do not call these operations.",
+      "approved_in": "#1080"
+    },
+    {
+      "operation_id": "resumeAdminPlaybackSession",
+      "change_id": "request-property-max-set",
+      "fingerprint": "645876b35996f321ff26c6e91c854fbab76e35b5eb8234113ab434eb99db6e5c",
+      "reason": "The sequence was an unbounded int64 while the web client, the only first-party caller, represents it as a JavaScript number; a value above 2^53-1 could not be echoed back exactly on a stale refusal. No first-party client sends values near the bound; silo-apple and silo-android do not call these operations.",
+      "approved_in": "#1080"
+    },
+    {
+      "operation_id": "stopAdminPlaybackSession",
+      "change_id": "request-property-max-set",
+      "fingerprint": "b543cda55d0733af37e9663cb165d47fbaf4ceaaef0d533d87fc9d92788adf7b",
+      "reason": "The sequence was an unbounded int64 while the web client, the only first-party caller, represents it as a JavaScript number; a value above 2^53-1 could not be echoed back exactly on a stale refusal. No first-party client sends values near the bound; silo-apple and silo-android do not call these operations.",
+      "approved_in": "#1080"
+    }
+  ]
 }

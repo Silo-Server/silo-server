@@ -180,9 +180,10 @@ func TestSequencedCommandValidationAndSessionState(t *testing.T) {
 		}
 	}
 	for name, in := range map[string]AdminPlaybackCommandInput{
-		"non-canonical id": sequencedInput(session.ID, "not-a-uuid", 1, playback.CommandPause),
-		"uppercase id":     sequencedInput(session.ID, "11111111-1111-4111-8111-11111111111A", 1, playback.CommandPause),
-		"zero sequence":    sequencedInput(session.ID, sequencedCommandA, 0, playback.CommandPause),
+		"non-canonical id":                sequencedInput(session.ID, "not-a-uuid", 1, playback.CommandPause),
+		"uppercase id":                    sequencedInput(session.ID, "11111111-1111-4111-8111-11111111111A", 1, playback.CommandPause),
+		"zero sequence":                   sequencedInput(session.ID, sequencedCommandA, 0, playback.CommandPause),
+		"sequence above the shared bound": sequencedInput(session.ID, sequencedCommandA, AdminPlaybackCommandMaxSequence+1, playback.CommandPause),
 		"no actor": func() AdminPlaybackCommandInput {
 			in := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandPause)
 			in.ActorID = 0
@@ -242,6 +243,28 @@ func TestSequencedStopFallsBackWithoutLaneAndDropsLedger(t *testing.T) {
 	}
 	if _, _, ok := control.commandLedgerState(session.ID); ok {
 		t.Fatal("ledger survived the ended session")
+	}
+}
+
+// A session that ends behind the command path's back between lookup and
+// admission cannot be given a fresh ledger: the lookup happens under the
+// ledger lock, so a missing session drops the ledger and answers not found.
+func TestSequencedCommandOnEndedSessionLeavesNoLedger(t *testing.T) {
+	control, sessionMgr, _, session := newAdminPlaybackControlTestHandler(t)
+	ctx := context.Background()
+	in := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandStop)
+	in.DeadlineMS = int(maxPlaybackControlDeadline / time.Millisecond)
+	if _, err := control.Command(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionMgr.StopSession(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Command(ctx, sequencedInput(session.ID, sequencedCommandB, 2, playback.CommandStop)); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("err = %v, want not found", err)
+	}
+	if got := control.commandLedgerCount(); got != 0 {
+		t.Fatalf("ledgers = %d, want 0", got)
 	}
 }
 

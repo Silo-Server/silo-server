@@ -47,6 +47,14 @@ const sequencedActions: ReadonlySet<AdminPlaybackCommandAction> = new Set([
 
 const lastSequenceBySession = new Map<string, number>();
 
+/**
+ * The largest sequence the contract accepts (2^53-1): every client, including
+ * this one working in JavaScript numbers, can represent the latest applied
+ * sequence exactly and allocate above it. Reaching it would take a clock
+ * hundreds of thousands of years ahead, so allocation simply refuses there.
+ */
+export const MAX_ADMIN_PLAYBACK_SEQUENCE = Number.MAX_SAFE_INTEGER;
+
 /** The response header a stale refusal carries with the session's latest applied sequence. */
 export const LATEST_SEQUENCE_HEADER = "X-Silo-Latest-Sequence";
 
@@ -54,6 +62,9 @@ export const LATEST_SEQUENCE_HEADER = "X-Silo-Latest-Sequence";
 export function allocateAdminPlaybackCommand(sessionId: string): AdminPlaybackCommandIdentity {
   const previous = lastSequenceBySession.get(sessionId) ?? 0;
   const sequence = Math.max(previous + 1, Date.now());
+  if (sequence > MAX_ADMIN_PLAYBACK_SEQUENCE) {
+    throw new Error("The session's command sequence is exhausted.");
+  }
   lastSequenceBySession.set(sessionId, sequence);
   return { command_id: randomUUID(), sequence };
 }
@@ -63,7 +74,7 @@ export function allocateAdminPlaybackCommand(sessionId: string): AdminPlaybackCo
  * already applied, so the next `allocateAdminPlaybackCommand` is above it.
  */
 export function observeAdminPlaybackSequence(sessionId: string, latest: number): void {
-  if (!Number.isSafeInteger(latest) || latest < 1) return;
+  if (!Number.isSafeInteger(latest) || latest < 1 || latest > MAX_ADMIN_PLAYBACK_SEQUENCE) return;
   const previous = lastSequenceBySession.get(sessionId) ?? 0;
   if (latest > previous) lastSequenceBySession.set(sessionId, latest);
 }
@@ -74,7 +85,9 @@ export function latestSequenceOf(error: unknown): number | null {
   const raw = error.headers.get(LATEST_SEQUENCE_HEADER);
   if (raw === null) return null;
   const latest = Number(raw.trim());
-  return Number.isSafeInteger(latest) && latest > 0 ? latest : null;
+  return Number.isSafeInteger(latest) && latest > 0 && latest <= MAX_ADMIN_PLAYBACK_SEQUENCE
+    ? latest
+    : null;
 }
 
 export function captureAdminPlaybackCommandAuthority() {
@@ -110,8 +123,12 @@ export async function sendAdminPlaybackCommand(
   if (!sequencedActions.has(request.action)) {
     throw new Error(`Unsupported session command: ${request.action}`);
   }
-  if (!Number.isSafeInteger(request.identity.sequence) || request.identity.sequence < 1) {
-    throw new Error("A command sequence must be a positive integer.");
+  if (
+    !Number.isSafeInteger(request.identity.sequence) ||
+    request.identity.sequence < 1 ||
+    request.identity.sequence > MAX_ADMIN_PLAYBACK_SEQUENCE
+  ) {
+    throw new Error("A command sequence must be a positive integer within the contract bound.");
   }
   requireAuthority(profileContext);
   const identity = {

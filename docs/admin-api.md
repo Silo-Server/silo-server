@@ -1744,8 +1744,8 @@ session applies once. `/terminate` is ported separately below with a different
 contract: it revokes first and notifies second.
 
 Every request body carries `command_id` (a client-allocated canonical UUID) and
-`sequence` (a client-allocated positive integer that must rise within the
-session), plus optional `reason` and `deadline_ms` (bounded to 10000, default
+`sequence` (a client-allocated positive integer, at most 2^53-1 so every
+client can represent it exactly, that must rise within the session), plus optional `reason` and `deadline_ms` (bounded to 10000, default
 3000; ignored by message). Message adds a required `message` and optional
 `title`. Allocate the identity once per intended command and preserve the
 whole body on retry.

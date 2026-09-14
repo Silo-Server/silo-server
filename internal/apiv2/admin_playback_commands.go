@@ -23,7 +23,7 @@ type AdminPlaybackCommandService interface {
 // command and preserves the whole body on retry.
 type AdminPlaybackCommandIdentity struct {
 	CommandID  string `json:"command_id" format:"uuid" minLength:"36" maxLength:"36" doc:"Client-allocated canonical UUID naming this one command; a retry preserves it" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
-	Sequence   int64  `json:"sequence" minimum:"1" doc:"Client-allocated positive order within this session; a command below the latest applied sequence is refused as stale" example:"7"`
+	Sequence   int64  `json:"sequence" minimum:"1" maximum:"9007199254740991" doc:"Client-allocated positive order within this session, at most 2^53-1 so every client can represent the latest applied sequence exactly; a command below the latest applied sequence is refused as stale" example:"7"`
 	Reason     string `json:"reason,omitempty" maxLength:"1024" doc:"Free-form administrator reason shown to the player when supported"`
 	DeadlineMS int    `json:"deadline_ms,omitempty" minimum:"0" maximum:"10000" doc:"Delivery acknowledgement deadline in milliseconds; bounded to 10000, default 3000. Ignored by message"`
 }

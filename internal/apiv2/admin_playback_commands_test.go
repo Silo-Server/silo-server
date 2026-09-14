@@ -90,6 +90,7 @@ func TestAdminPlaybackCommandsTransport(t *testing.T) {
 			before := len(f.calls)
 			for _, invalid := range []string{
 				strings.Replace(tc.body, `"sequence":7`, `"sequence":0`, 1),
+				strings.Replace(tc.body, `"sequence":7`, `"sequence":9007199254740992`, 1),
 				strings.Replace(tc.body, `"3fa85f64-5717-4562-b3fc-2c963f66afa6"`, `"not-a-uuid"`, 1),
 				strings.Replace(tc.body, `"deadline_ms":250`, `"deadline_ms":20000`, 1),
 				strings.Replace(tc.body, `"reason":"bedtime"`, `"reason":"bedtime","position":5`, 1),
