@@ -133,6 +133,7 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 		return
 	}
 	if room.SelectionRevision != live.room.SelectionRevision {
+		s.disarmWaitingDeadlineLocked(live)
 		for _, member := range live.members {
 			if member == nil {
 				continue
