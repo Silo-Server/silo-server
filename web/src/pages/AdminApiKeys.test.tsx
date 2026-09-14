@@ -54,6 +54,20 @@ vi.mock("@/hooks/queries/admin/apiKeys", () => ({
   useAdminUpdateApiKeyTier: () => ({ mutate: vi.fn() }),
 }));
 
+vi.mock("@/api/v2/adminApiKeys", () => ({
+  captureAdminApiKeyAuthority: () => ({
+    serverOrigin: "https://test.local",
+    authContextVersion: 1,
+    profileId: "1",
+  }),
+  adminApiKeyScope: () => "test-scope",
+  getAdminApiKey: vi.fn(),
+}));
+
+vi.mock("@/api/client", () => ({
+  isCapturedProfileAuthorityActive: () => true,
+}));
+
 const CREATED_KEY = "silo_created_key_9876543210";
 
 async function createKey() {
