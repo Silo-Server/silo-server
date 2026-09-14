@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -246,7 +247,10 @@ func (f *fakePluginClient) NetworkAccessProvider(string) (*pluginhost.NetworkAcc
 }
 
 type fakeServiceInstallationStore struct {
-	byID             map[int]*Installation
+	byID map[int]*Installation
+	// mu guards every field: the resident supervisor reads the store from
+	// several goroutines while a test mutates it.
+	mu               sync.Mutex
 	byPluginID       map[string][]*Installation
 	createInputs     []CreateInstallationInput
 	updateIDs        []int
@@ -278,6 +282,8 @@ func newFakeServiceInstallationStore(installations ...*Installation) *fakeServic
 }
 
 func (s *fakeServiceInstallationStore) Create(_ context.Context, input CreateInstallationInput) (*Installation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	recordTestEvent(s.events, "create")
 	s.createInputs = append(s.createInputs, input)
 	id := len(s.byID) + 1
@@ -294,12 +300,16 @@ func (s *fakeServiceInstallationStore) Create(_ context.Context, input CreateIns
 }
 
 func (s *fakeServiceInstallationStore) SaveArchive(_ context.Context, installationID int, _ []byte, _ string, _ []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	recordTestEvent(s.events, "save_archive")
 	s.saveArchiveIDs = append(s.saveArchiveIDs, installationID)
 	return s.saveArchiveErr
 }
 
 func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input UpdateInstallationInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	recordTestEvent(s.events, "update")
 	s.updateIDs = append(s.updateIDs, id)
 	s.updateInputs = append(s.updateInputs, input)
@@ -324,6 +334,8 @@ func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input U
 }
 
 func (s *fakeServiceInstallationStore) Delete(_ context.Context, id int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	recordTestEvent(s.events, "delete")
 	s.deleteIDs = append(s.deleteIDs, id)
 	delete(s.byID, id)
@@ -331,6 +343,8 @@ func (s *fakeServiceInstallationStore) Delete(_ context.Context, id int) error {
 }
 
 func (s *fakeServiceInstallationStore) GetByID(_ context.Context, id int) (*Installation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	installation, ok := s.byID[id]
 	if !ok {
 		return nil, ErrInstallationNotFound
@@ -340,6 +354,8 @@ func (s *fakeServiceInstallationStore) GetByID(_ context.Context, id int) (*Inst
 }
 
 func (s *fakeServiceInstallationStore) List(context.Context) ([]*Installation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	result := make([]*Installation, 0, len(s.byID))
 	for _, installation := range s.byID {
 		cloned := *installation
@@ -349,6 +365,8 @@ func (s *fakeServiceInstallationStore) List(context.Context) ([]*Installation, e
 }
 
 func (s *fakeServiceInstallationStore) ListEnabled(_ context.Context) ([]*Installation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var result []*Installation
 	for _, installation := range s.byID {
 		if !installation.Enabled {
@@ -361,6 +379,8 @@ func (s *fakeServiceInstallationStore) ListEnabled(_ context.Context) ([]*Instal
 }
 
 func (s *fakeServiceInstallationStore) ListByPluginID(_ context.Context, pluginID string) ([]*Installation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	list := s.byPluginID[pluginID]
 	result := make([]*Installation, 0, len(list))
 	for _, installation := range list {
@@ -371,6 +391,8 @@ func (s *fakeServiceInstallationStore) ListByPluginID(_ context.Context, pluginI
 }
 
 func (s *fakeServiceInstallationStore) ListCapabilities(context.Context, int) ([]*Capability, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.listCapabilities, nil
 }
 
@@ -395,6 +417,8 @@ func (s *fakeServiceInstallationStore) ListEnabledWithCapabilityTypes(ctx contex
 }
 
 func (s *fakeServiceInstallationStore) GetArchive(_ context.Context, installationID int) (*InstallationArchive, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if archive, ok := s.archives[installationID]; ok && archive != nil {
 		return archive, nil
 	}

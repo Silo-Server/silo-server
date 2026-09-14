@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -528,5 +529,41 @@ func TestResidentSupervisorReplacesProcessWhenHostIdentityChanges(t *testing.T) 
 			t.Fatalf("resident kept the old process after the host identity changed (err=%v, state=%+v)", err, state)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Overlapping reconciles must not let an older one, whose desired set was
+// computed before a disable, resurrect the resident after a newer one
+// removed it. Reconcile is serialized end to end, so the second call sees
+// the disabled row.
+func TestResidentSupervisorConcurrentReconcilesDoNotResurrectADisabledResident(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	ctx := context.Background()
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "running", running)
+
+	// Race many reconciles against a disable. Whatever the interleaving, the
+	// final state is "not resident" and no process is left behind.
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.service.resident.Reconcile(ctx)
+		}()
+	}
+	disabled := false
+	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Enabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	f.service.OnLifecycleChange(ctx)
+	wg.Wait()
+	// One more reconcile after everything settled must be a no-op.
+	f.service.resident.Reconcile(ctx)
+	if _, tracked := f.service.Residents().State(5); tracked {
+		t.Fatal("disabled resident is still tracked after overlapping reconciles")
+	}
+	if _, err := f.host.Client(5); !errors.Is(err, pluginhost.ErrClientNotFound) {
+		t.Fatalf("disabled resident's process survived: %v", err)
 	}
 }

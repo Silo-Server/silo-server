@@ -143,7 +143,7 @@ type residentEntry struct {
 	// hostIdentity is the host identity the running process was launched
 	// under (a proxy's instance-state scope). A change means the process
 	// holds another host's in-memory identity and is replaced.
-	hostIdentity string
+	hostIdentity      string
 	runtimeGeneration int64
 
 	state         ResidentState
@@ -186,6 +186,14 @@ func (e *residentEntry) cancelTimer() {
 type ResidentSupervisor struct {
 	service *Service
 	opts    ResidentOptions
+
+	// reconcileMu serializes Reconcile end to end. The desired set and the
+	// gate result are computed outside mu (they read the database), so two
+	// overlapping reconciles could otherwise apply results in the wrong
+	// order: an older one resurrecting a resident a newer one just removed,
+	// or starting one after the gate closed. Lifecycle hooks, the proxy's
+	// event follower, and the poll all call Reconcile concurrently.
+	reconcileMu sync.Mutex
 
 	mu      sync.Mutex
 	armed   bool
@@ -276,6 +284,8 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 	if r == nil {
 		return
 	}
+	r.reconcileMu.Lock()
+	defer r.reconcileMu.Unlock()
 	r.mu.Lock()
 	ready := r.armed && !r.halted
 	r.mu.Unlock()
@@ -633,6 +643,20 @@ func (r *ResidentSupervisor) Restart(ctx context.Context, installationID int) er
 	return nil
 }
 
+// setRuntimeGeneration records the installation's persisted runtime
+// generation on its entry, for a host that is about to restart the process
+// itself and must not treat the bump it just wrote as someone else's.
+func (r *ResidentSupervisor) setRuntimeGeneration(installationID int, generation int64) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if entry := r.entries[installationID]; entry != nil {
+		entry.runtimeGeneration = generation
+	}
+}
+
 // Halt stops every resident and refuses further starts. It runs before the
 // HTTP servers drain so overlay ingress goes away first, and waits (bounded
 // by ctx) for in-flight launches to settle.
@@ -755,6 +779,22 @@ func (s *Service) RestartInstallation(ctx context.Context, installationID int) e
 	}
 	if _, err := s.loadInstallation(ctx, installationID, true); err != nil {
 		return err
+	}
+	// The restart is durable: advancing runtime_generation lets a host whose
+	// lifecycle subscription missed the event (a proxy with Redis down)
+	// replace its process on the next poll, and clears a failed entry's
+	// budget there the same way the event would.
+	if s.installations != nil {
+		if err := s.installations.Update(ctx, installationID, UpdateInstallationInput{Restart: true}); err != nil {
+			return fmt.Errorf("record plugin restart: %w", err)
+		}
+		s.invalidateInstallationCache()
+		if installation, err := s.loadInstallation(ctx, installationID, true); err == nil {
+			// This host restarts synchronously below; record the new
+			// generation on its entry so the next reconcile does not
+			// replace the fresh process a second time.
+			s.resident.setRuntimeGeneration(installationID, installation.RuntimeGeneration)
+		}
 	}
 	err := s.resident.Restart(ctx, installationID)
 	if err == nil {
