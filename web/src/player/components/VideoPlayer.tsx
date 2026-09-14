@@ -2503,6 +2503,7 @@ export function VideoPlayer({
               "Your browser blocked automatic playback. Click to join playback.",
               "warning",
               () => {
+                if (lastRoomCommandIdRef.current !== command.command_id) return;
                 const currentVideo = videoRef.current;
                 if (!currentVideo) return;
                 void currentVideo

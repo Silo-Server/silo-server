@@ -728,6 +728,9 @@ func (s *Service) HandleReadyForConnection(
 	member.ignoreWait = false
 
 	dispatches, commandDispatches = s.maybeResumeFromWaitingLocked(ctx, live, false)
+	if len(commandDispatches) == 0 && live.room.Phase == RoomPhasePlaying && live.room.PlaybackState == RoomPlaybackStatePlaying {
+		commandDispatches = s.syncMemberToRoomLocked(live, member.sessionID)
+	}
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	if dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
@@ -1939,6 +1942,7 @@ func (s *Service) Unvote(
 	} else {
 		s.mu.Unlock()
 	}
+	s.publishSuggestionUpdate(roomID)
 
 	return suggestions, nil
 }

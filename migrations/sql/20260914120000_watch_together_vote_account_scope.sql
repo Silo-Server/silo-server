@@ -16,6 +16,12 @@ ALTER TABLE watch_together_votes
 
 -- +goose Down
 -- +goose StatementBegin
+DELETE FROM watch_together_votes a
+USING watch_together_votes b
+WHERE a.ctid < b.ctid
+  AND a.suggestion_id = b.suggestion_id
+  AND a.voter_profile_id = b.voter_profile_id;
+
 ALTER TABLE watch_together_votes
     DROP CONSTRAINT watch_together_votes_pkey,
     ADD CONSTRAINT watch_together_votes_pkey PRIMARY KEY (suggestion_id, voter_profile_id),

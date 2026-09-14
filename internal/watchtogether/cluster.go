@@ -60,8 +60,6 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 		if json.Unmarshal([]byte(event.Payload), &incoming) != nil || incoming.Source == s.instanceID || incoming.RoomID == "" {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
 		s.mu.Lock()
 		live := s.rooms[incoming.RoomID]
 		members := make([]*memberState, 0)
@@ -74,7 +72,9 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 		}
 		s.mu.Unlock()
 		for _, member := range members {
-			rows, err := s.suggestions.ListSuggestions(ctx, incoming.RoomID, member.userID, member.profileID)
+			memberCtx, memberCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			rows, err := s.suggestions.ListSuggestions(memberCtx, incoming.RoomID, member.userID, member.profileID)
+			memberCancel()
 			if err == nil {
 				s.runDispatches([]snapshotDispatch{{conn: member.connection, payload: map[string]any{"type": "suggestions_update", "suggestions": rows}}})
 			}
@@ -130,15 +130,6 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 	}
 	live.room = *room
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
-	var commands []commandDispatch
-	if room.Phase == RoomPhasePlaying {
-		action := TransportActionPause
-		if room.PlaybackState == RoomPlaybackStatePlaying {
-			action = TransportActionPlay
-		}
-		commands = s.transportCommandDispatchesLocked(live, action, expectedPosition(*room, s.now()), s.now().Add(s.highestPingLocked(live)))
-	}
 	s.mu.Unlock()
 	s.runDispatches(dispatches)
-	s.runCommandDispatches(commands)
 }

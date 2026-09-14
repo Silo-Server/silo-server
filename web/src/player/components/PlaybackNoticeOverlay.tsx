@@ -21,7 +21,7 @@ export function PlaybackNoticeOverlay({
     setVisible(true);
     const timer = setTimeout(() => setVisible(false), 8000);
     return () => clearTimeout(timer);
-  }, [title, message]);
+  }, [title, message, onAction]);
 
   if (!visible) return null;
 
@@ -29,7 +29,7 @@ export function PlaybackNoticeOverlay({
     tone === "warning" ? "border-amber-400/50 bg-amber-500/15" : "border-sky-400/50 bg-sky-500/15";
 
   return (
-    <div className="absolute inset-x-0 top-20 z-40 flex justify-center px-4">
+    <div className="pointer-events-none absolute inset-x-0 top-20 z-40 flex justify-center px-4">
       <div
         className={`max-w-xl rounded-2xl border px-5 py-4 text-white shadow-2xl backdrop-blur ${accentClass}`}
       >
