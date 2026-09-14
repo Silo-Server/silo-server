@@ -296,6 +296,7 @@ func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*mo
 	}
 	for _, item := range items {
 		if seconds, ok := durations[item.ContentID]; ok && seconds > 0 {
+			item.AudiobookDurationSeconds = int(math.Round(seconds))
 			item.Runtime = int(math.Round(seconds / 60))
 		}
 	}

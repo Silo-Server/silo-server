@@ -741,7 +741,7 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 	// MediaItem.Runtime is measured in minutes across the native catalog. ABS
 	// uses seconds, so convert at this wire boundary. The media store overlays
 	// the more accurate active-file-stat total before this mapper is called.
-	duration := float64(item.Runtime) * 60
+	duration := audiobookDurationSeconds(item)
 
 	// Always point coverPath at our /api/items/{id}/cover endpoint rather
 	// than the raw silo PosterPath. Storage paths like
@@ -885,6 +885,16 @@ func audiobookLanguage(item *models.MediaItem) string {
 		return language
 	}
 	return strings.TrimSpace(item.DefaultMetadataLanguage)
+}
+
+func audiobookDurationSeconds(item *models.MediaItem) float64 {
+	if item == nil {
+		return 0
+	}
+	if item.AudiobookDurationSeconds > 0 {
+		return float64(item.AudiobookDurationSeconds)
+	}
+	return float64(item.Runtime) * 60
 }
 
 // siloItemToLibraryItemDetail converts a silo MediaItem + its media files into

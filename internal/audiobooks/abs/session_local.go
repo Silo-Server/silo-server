@@ -187,7 +187,7 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 				// MediaItem.Runtime is the catalog's minute unit; ABS progress
 				// stores seconds. The media store hydrates this from active-file
 				// stats when available.
-				DurationSeconds: float64(item.Runtime) * 60,
+				DurationSeconds: audiobookDurationSeconds(item),
 				UpdatedAt:       time.Now(),
 			})
 		} else {

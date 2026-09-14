@@ -572,16 +572,19 @@ type AudiobookSeriesMembership struct {
 
 // MediaItem represents a row in the media_items table.
 type MediaItem struct {
-	ContentID                    string // Sonyflake ID (PK)
-	Type                         string // movie, series
-	Title                        string
-	SortTitle                    string
-	DefaultMetadataLanguage      string
-	OriginalTitle                string
-	Year                         int
-	Genres                       []string
-	ContentRating                string // PG-13, TV-MA
-	Runtime                      int    // minutes
+	ContentID               string // Sonyflake ID (PK)
+	Type                    string // movie, series
+	Title                   string
+	SortTitle               string
+	DefaultMetadataLanguage string
+	OriginalTitle           string
+	Year                    int
+	Genres                  []string
+	ContentRating           string // PG-13, TV-MA
+	Runtime                 int    // minutes
+	// AudiobookDurationSeconds is an exact transient duration overlay loaded
+	// from active audiobook file stats for protocol adapters that use seconds.
+	AudiobookDurationSeconds     int
 	Overview                     string
 	Tagline                      string
 	RatingIMDB                   *float64

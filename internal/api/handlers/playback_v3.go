@@ -3290,6 +3290,13 @@ func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *model
 	if err != nil {
 		return nil, 0, err
 	}
+	// The requested file has already passed requestAccessFilter. Keep the
+	// resume timeline inside that same media folder; a content ID may be shared
+	// by copies in several libraries, and an unscoped part lookup could move
+	// playback onto a folder the viewer cannot access.
+	parts = slices.DeleteFunc(parts, func(part *models.MediaFile) bool {
+		return part == nil || part.MediaFolderID != file.MediaFolderID
+	})
 	parts = slices.Clone(parts)
 	slices.SortStableFunc(parts, func(a, b *models.MediaFile) int {
 		if a == nil && b == nil {

@@ -523,7 +523,6 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		e.recordFailure(ctx, item, classifyProviderError(resolveErr), resolveErr.Error())
 		return resolveErr
 	}
-	providers = dedupeAudiobookProviders(providers)
 	if len(providers) == 0 {
 		slog.DebugContext(ctx, "audiobook enrichment: no providers in chain", "component", "audiobooks",
 			"content_id", item.ContentID,
@@ -773,36 +772,6 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	)
 
 	return nil
-}
-
-// dedupeAudiobookProviders protects the provider budget when a chain contains
-// the same plugin more than once. Provider chains are assembled from persisted
-// rows, and older configurations can contain duplicates; running Search and
-// GetMetadata twice would spend two rate-limited calls without adding any
-// information. Preserve the first occurrence because chain order determines
-// the preferred metadata source.
-func dedupeAudiobookProviders(providers []metadata.Provider) []metadata.Provider {
-	if len(providers) < 2 {
-		return providers
-	}
-	seen := make(map[string]struct{}, len(providers))
-	result := make([]metadata.Provider, 0, len(providers))
-	for _, provider := range providers {
-		if provider == nil {
-			continue
-		}
-		slug := strings.ToLower(strings.TrimSpace(provider.Slug()))
-		if slug == "" {
-			result = append(result, provider)
-			continue
-		}
-		if _, exists := seen[slug]; exists {
-			continue
-		}
-		seen[slug] = struct{}{}
-		result = append(result, provider)
-	}
-	return result
 }
 
 func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
