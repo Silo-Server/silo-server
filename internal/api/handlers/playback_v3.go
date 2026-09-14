@@ -1639,7 +1639,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// it to that part's local clock. Explicit client positions remain
 		// unchanged.
 		if req.StartPosition != nil && effectiveFile.PresentationPartTotal > 1 {
-			target, local, resolveErr := h.multipartResumeFileV3(r.Context(), effectiveFile, *req.StartPosition)
+			target, local, resolveErr := h.multipartResumeFileV3(r.Context(), effectiveFile, *req.StartPosition, requestAccessFilter(r))
 			if resolveErr != nil {
 				// An item-absolute position cannot be projected onto this
 				// file's part-local clock without the complete ordered part
@@ -3289,7 +3289,7 @@ func sessionOwnsResumeTimelineV3(file *models.MediaFile) bool {
 // whose local timeline should be planned. It only returns a mapping when all
 // ordered parts have positive durations; guessing across incomplete metadata
 // would seek to the wrong file, so callers retain the existing safe fallback.
-func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *models.MediaFile, absolute float64) (*models.MediaFile, float64, error) {
+func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *models.MediaFile, absolute float64, access catalog.AccessFilter) (*models.MediaFile, float64, error) {
 	if h == nil || h.FileVersionFetcher == nil || file == nil || file.PresentationPartTotal <= 1 || absolute <= 0 {
 		return nil, 0, nil
 	}
@@ -3302,7 +3302,7 @@ func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *model
 	// by copies in several libraries, and an unscoped part lookup could move
 	// playback onto a folder the viewer cannot access.
 	parts = slices.DeleteFunc(parts, func(part *models.MediaFile) bool {
-		return part == nil || part.MediaFolderID != file.MediaFolderID
+		return part == nil || part.MediaFolderID != file.MediaFolderID || !catalog.FileAllowedByAccess(part, access)
 	})
 	if len(parts) != file.PresentationPartTotal {
 		return nil, 0, fmt.Errorf("multipart sequence incomplete")

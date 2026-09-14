@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -5076,7 +5077,7 @@ func TestMultipartResumeFileV3MapsAbsolutePositionToPart(t *testing.T) {
 		{absolute: 200, id: 20, local: 100},
 		{absolute: 310, id: 30, local: 90},
 	} {
-		target, local, err := h.multipartResumeFileV3(context.Background(), parts[0], tc.absolute)
+		target, local, err := h.multipartResumeFileV3(context.Background(), parts[0], tc.absolute, catalog.AccessFilter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5090,7 +5091,7 @@ func TestMultipartResumeFileV3FallsBackWhenDurationMissing(t *testing.T) {
 	part := &models.MediaFile{ID: 1, ContentID: "book-1", PresentationPartIndex: 1, PresentationPartTotal: 2, Duration: 0}
 	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: part})
 	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{"book-1": {part}}}
-	target, _, err := h.multipartResumeFileV3(context.Background(), part, 10)
+	target, _, err := h.multipartResumeFileV3(context.Background(), part, 10, catalog.AccessFilter{})
 	if err == nil || target != nil {
 		t.Fatalf("target=%v err=%v, want unavailable mapping", target, err)
 	}
