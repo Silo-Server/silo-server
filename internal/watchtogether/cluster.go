@@ -19,6 +19,11 @@ type clusterSuggestionEvent struct {
 	RoomID string `json:"room_id"`
 }
 
+const (
+	clusterMessageTypeKey = "type"
+	suggestionsUpdateType = "suggestions_update"
+)
+
 func (s *Service) publishSuggestionUpdate(roomID string) {
 	if s == nil || s.clusterBus == nil {
 		return
@@ -76,7 +81,7 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 			rows, err := s.suggestions.ListSuggestions(memberCtx, incoming.RoomID, member.userID, member.profileID)
 			memberCancel()
 			if err == nil {
-				s.runDispatches([]snapshotDispatch{{conn: member.connection, payload: map[string]any{"type": "suggestions_update", "suggestions": rows}}})
+				s.runDispatches([]snapshotDispatch{{conn: member.connection, payload: map[string]any{clusterMessageTypeKey: suggestionsUpdateType, "suggestions": rows}}})
 			}
 		}
 		return
