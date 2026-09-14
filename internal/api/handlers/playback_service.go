@@ -474,6 +474,17 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 		return receipt
 	}
 	if !claimed {
+		for attempt := 0; attempt < 30; attempt++ {
+			replay, _, err := store.StopAttempt(ctx, sessionID, receipt.StopID, nil)
+			if err == nil && replay.Finalized {
+				return replay
+			}
+			select {
+			case <-ctx.Done():
+				return receipt
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
 		return receipt
 	}
 	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted)

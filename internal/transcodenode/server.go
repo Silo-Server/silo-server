@@ -1572,28 +1572,20 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	// session's output dir while we replace it.
 	unlock := s.lockSessionLifecycle(req.SessionID)
 
-	// Defensively close any existing session for this ID so that a quality
-	// switch doesn't orphan the old ffmpeg process or leave stale segments.
+	// Start the replacement before touching an existing session. A transient
 	s.mu.Lock()
-	if old, ok := s.sessions[req.SessionID]; ok {
-		delete(s.sessions, req.SessionID)
-		delete(s.lastAccess, req.SessionID)
-		s.mu.Unlock()
-		_ = s.closeSessionOffGPU(old)
-		// Move the old segment directory aside and delete it in the
-		// background: removing a long session's segments can take seconds
-		// on slow disks, and the playback start that triggered this switch
-		// is blocked waiting for our 202.
-		staleDir := outputDir + ".stale-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-		if err := os.Rename(outputDir, staleDir); err == nil {
-			go func() { _ = os.RemoveAll(staleDir) }()
+	_, hasExisting := s.sessions[req.SessionID]
+	s.mu.Unlock()
+	if hasExisting {
+		if tempDir, tempErr := os.MkdirTemp(s.transcodeDir, req.SessionID+"-replacement-"); tempErr == nil {
+			opts.OutputDir = tempDir
 		} else {
-			os.RemoveAll(outputDir)
+			unlock()
+			http.Error(w, "failed to prepare transcode replacement", http.StatusInternalServerError)
+			return
 		}
-	} else {
-		s.mu.Unlock()
 	}
-
+	// spawn or validation failure must leave a healthy live session intact.
 	session, err := playback.StartTranscode(r.Context(), opts)
 	if err != nil {
 		unlock()
@@ -1605,6 +1597,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
 	if req.RequireReady {
 		if _, err := session.WaitForManifest(TranscodeStartReadinessTimeout); err != nil {
 			wasRunning := session.IsRunning()
@@ -1640,6 +1633,24 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+
+	// The replacement has successfully spawned, so retire the old session and
+	// publish the new one under the same ID.
+	s.mu.Lock()
+	if old, ok := s.sessions[req.SessionID]; ok {
+		delete(s.sessions, req.SessionID)
+		delete(s.lastAccess, req.SessionID)
+		s.mu.Unlock()
+		_ = s.closeSessionOffGPU(old)
+		staleDir := outputDir + ".stale-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err := os.Rename(outputDir, staleDir); err == nil {
+			go func() { _ = os.RemoveAll(staleDir) }()
+		} else {
+			_ = os.RemoveAll(outputDir)
+		}
+	} else {
+		s.mu.Unlock()
 	}
 
 	s.mu.Lock()
