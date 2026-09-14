@@ -432,7 +432,13 @@ func (r *ResidentSupervisor) runStart(ctx context.Context, id int, gen uint64) {
 	r.mu.Lock()
 	entry := r.entries[id]
 	if entry == nil || entry.gen != gen || r.halted {
-		orphaned := err == nil && (entry == nil || r.halted)
+		// A superseded launch's process is stopped only when nothing will
+		// take it over: the entry is gone, halted, or parked (stopped or
+		// failed). While a newer generation is starting, that generation
+		// either adopts this process (start sequence above its floor) or
+		// stops and relaunches it, so stopping here would kill a process
+		// the newer generation may already have accepted.
+		orphaned := err == nil && (entry == nil || r.halted || entry.state == ResidentStopped || entry.state == ResidentFailed)
 		r.mu.Unlock()
 		if orphaned {
 			r.stopProcess(ctx, id)

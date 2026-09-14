@@ -195,3 +195,44 @@ func TestInstanceStateStoreRequiresCipher(t *testing.T) {
 		t.Fatal("plaintext write accepted without a cipher")
 	}
 }
+
+// Concurrent first writes of distinct keys at the budget must not overshoot
+// it: admission of a new key is serialized per scope.
+func TestInstanceStateWriteKeyBudgetHoldsUnderConcurrency(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	store := NewInstanceStateStore(pool, instanceStateTestCipher(t))
+	ctx := context.Background()
+	installation := seedResidentQueryInstallation(t, pool, true)
+	for i := 0; i < pluginhost.InstanceStateMaxKeys-1; i++ {
+		if err := store.Write(ctx, installation, HostScopeAPI, fmt.Sprintf("k%03d", i), []byte("v")); err != nil {
+			t.Fatalf("fill key %d: %v", i, err)
+		}
+	}
+	const racers = 16
+	errs := make(chan error, racers)
+	start := make(chan struct{})
+	for i := 0; i < racers; i++ {
+		go func(i int) {
+			<-start
+			errs <- store.Write(ctx, installation, HostScopeAPI, fmt.Sprintf("race%02d", i), []byte("v"))
+		}(i)
+	}
+	close(start)
+	admitted := 0
+	for i := 0; i < racers; i++ {
+		switch err := <-errs; {
+		case err == nil:
+			admitted++
+		case errors.Is(err, pluginhost.ErrInstanceStateTooManyKeys):
+		default:
+			t.Fatalf("racing write: %v", err)
+		}
+	}
+	keys, err := store.Keys(ctx, installation, HostScopeAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admitted != 1 || len(keys) != pluginhost.InstanceStateMaxKeys {
+		t.Fatalf("admitted %d racers, scope holds %d keys; want exactly 1 and %d", admitted, len(keys), pluginhost.InstanceStateMaxKeys)
+	}
+}

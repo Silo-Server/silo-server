@@ -140,6 +140,14 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 		_ = os.RemoveAll(installDir)
 		return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
+	if c.root != "" {
+		// Only rehydration onto another host can cross platforms: the API
+		// server installed the archive it can run itself.
+		if err := checkBinaryPlatform(binaryPath); err != nil {
+			_ = os.RemoveAll(installDir)
+			return nil, fmt.Errorf("rehydrate plugin for installation %d: %w", installation.ID, err)
+		}
+	}
 	c.pruneStaleReleases(ctx, installation, installDir)
 
 	return manifest, nil

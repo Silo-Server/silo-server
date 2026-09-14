@@ -227,3 +227,41 @@ func TestStatusCacheNodeNetworkAccess(t *testing.T) {
 		t.Fatal("an unauthorized provider yielded an origin")
 	}
 }
+
+func TestBrokerRevokeOfOldTokenKeepsReplacementStatus(t *testing.T) {
+	b := NewBroker()
+	old, err := b.Issue(7, "stub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Report(Status{InstallationID: 7, Provider: "stub", State: StateConnected, Origin: "https://old.example.test"})
+	// The replacement process is issued its token and pushes its status
+	// before the old process's revoke runs.
+	fresh, err := b.Issue(7, "stub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Report(Status{InstallationID: 7, Provider: "stub", State: StateConnected, Origin: "https://new.example.test"})
+	b.Revoke(7, old)
+	if got, ok := b.Status.Get(7); !ok || got.Origin != "https://new.example.test" {
+		t.Fatalf("stale revoke cleared the replacement's status: %+v %v", got, ok)
+	}
+	if tok, ok := b.IngressToken(7); !ok || tok != fresh {
+		t.Fatalf("stale revoke removed the replacement's token")
+	}
+	b.Revoke(7, fresh)
+	if _, ok := b.Status.Get(7); ok {
+		t.Fatal("current revoke left the status behind")
+	}
+}
+
+func TestStatusCacheNodeNetworkAccessLowestInstallationOwnsDuplicateSlug(t *testing.T) {
+	c := NewStatusCache()
+	c.Report(Status{InstallationID: 9, Provider: "tailscale", State: StateConnected, Origin: "https://nine.example.test"})
+	c.Report(Status{InstallationID: 4, Provider: "tailscale", State: StateConnected, Origin: "https://four.example.test"})
+	for i := 0; i < 20; i++ {
+		if got := c.NodeNetworkAccess()["tailscale"].Origin; got != "https://four.example.test" {
+			t.Fatalf("iteration %d: origin = %q, want the lowest installation's", i, got)
+		}
+	}
+}

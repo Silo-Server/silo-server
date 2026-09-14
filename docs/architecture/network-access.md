@@ -140,7 +140,10 @@ to them.
   unique install directory name the API's installer chose. Only that root
   has to exist and be writable on the proxy; a shared plugin volume is not
   required. When a new release lands the previous one is removed from the
-  cache.
+  cache. The archive was resolved for the API server's platform at install
+  time, so every proxy must run the same OS and architecture as the API
+  server in this release; a proxy on another platform refuses the binary
+  with a clear error at rehydration instead of failing every launch.
 - A replaced or auto-updated binary changes the row's version and install
   path. The API host stopped its own process before installing; the proxy's
   process is still alive and healthy, so the supervisor stops it on the next
@@ -169,6 +172,11 @@ to them.
 - The proxy's `/health` `network_access` block is what the API stores on the
   node row every sweep and what `ClientURLFor` hands overlay clients. The
   admin status is live and can run ahead of it by up to one sweep.
+
+A provider slug names one provider per deployment. If two enabled
+installations declare the same slug, the one with the lowest installation
+id owns it: commands, status, and the node health report address that one
+and the duplicate is logged and skipped.
 
 ## Single-API constraint
 

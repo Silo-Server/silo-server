@@ -91,10 +91,18 @@ func (c *StatusCache) NodeNetworkAccess() NodeNetworkAccess {
 		return nil
 	}
 	out := make(NodeNetworkAccess, len(c.entries))
+	owner := make(map[string]int, len(c.entries))
 	for _, status := range c.entries {
 		if status.Provider == "" {
 			continue
 		}
+		// Two installations declaring one slug: the lowest installation id
+		// owns it, matching plugins.ListNetworkAccessProviders, instead of
+		// whichever map iteration happened to visit last.
+		if id, dup := owner[status.Provider]; dup && id < status.InstallationID {
+			continue
+		}
+		owner[status.Provider] = status.InstallationID
 		out[status.Provider] = NodeProviderStatus{
 			State:     status.State,
 			Origin:    status.Origin,

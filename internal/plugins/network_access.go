@@ -138,6 +138,7 @@ func (s *Service) ListNetworkAccessProviders(ctx context.Context) ([]NetworkAcce
 		return nil, fmt.Errorf("list network access providers: %w", err)
 	}
 	providers := make([]NetworkAccessProvider, 0, len(installations))
+	seen := make(map[string]int, len(installations))
 	for _, installation := range installations {
 		if installation == nil || installation.IsBuiltin() {
 			continue
@@ -152,6 +153,16 @@ func (s *Service) ListNetworkAccessProviders(ctx context.Context) ([]NetworkAcce
 		if descriptor == nil {
 			continue
 		}
+		// A slug names one provider per deployment. Installations are listed
+		// in id order, so the oldest enabled one owns the slug and later
+		// duplicates are skipped everywhere the slug is resolved; their
+		// processes still run but are never commanded or reported.
+		if first, dup := seen[slug]; dup {
+			slog.WarnContext(ctx, "network access provider slug is declared by more than one enabled installation; using the first", "component", "plugins",
+				"provider", slug, "installation_id", first, "skipped_installation_id", installation.ID, "plugin_id", installation.PluginID)
+			continue
+		}
+		seen[slug] = installation.ID
 		providers = append(providers, NetworkAccessProvider{
 			InstallationID: installation.ID,
 			CapabilityID:   descriptor.GetId(),
@@ -448,7 +459,15 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 	}
 	reported, err := apply(ctx, client)
 	if err != nil {
+		// The process is up but did not answer: whatever origin it last
+		// pushed may be dead, so the cache must not keep advertising it to
+		// the origin check and the node health report. A later push from
+		// the plugin restores it.
 		unavailable.Error = err.Error()
+		if s.networkAccessStatus != nil {
+			unavailable.UpdatedAt = time.Now()
+			s.networkAccessStatus.Report(unavailable)
+		}
 		return unavailable
 	}
 	status := pluginhost.NetworkAccessStatusFromProto(provider.InstallationID, provider.Provider, reported)

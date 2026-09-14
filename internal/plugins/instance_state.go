@@ -139,8 +139,18 @@ func (s *InstanceStateStore) Write(ctx context.Context, installationID int, scop
 	}
 	// The key budget is checked in the same statement as the upsert: an
 	// existing key always updates, a new key only lands while the scope has
-	// room. Zero affected rows means the budget refused it.
-	tag, err := s.pool.Exec(ctx, `
+	// room. Zero affected rows means the budget refused it. Writers to one
+	// scope are serialized by a transaction-scoped advisory lock so two
+	// concurrent new keys cannot both observe the same count and overshoot.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("writing plugin instance state: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('plugin_instance_state'), hashtext($1::text || ':' || $2))`, strconv.Itoa(installationID), scope); err != nil {
+		return fmt.Errorf("writing plugin instance state: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO plugin_instance_state (plugin_installation_id, host_scope, state_key, state_value)
 		SELECT $1, $2, $3, $4
 		WHERE (
@@ -157,6 +167,9 @@ func (s *InstanceStateStore) Write(ctx context.Context, installationID int, scop
 	}
 	if tag.RowsAffected() == 0 {
 		return pluginhost.ErrInstanceStateTooManyKeys
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("writing plugin instance state: %w", err)
 	}
 	return nil
 }
