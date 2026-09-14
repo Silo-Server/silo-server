@@ -471,10 +471,7 @@ func (r *ResidentSupervisor) runStart(ctx context.Context, id int, gen uint64) {
 	var err error
 	accepted := false
 	for attempt := 0; attempt < 3; attempt++ {
-		floor := uint64(0)
-		if h, ok := r.service.host.(interface{ NextStartSeq() uint64 }); ok {
-			floor = h.NextStartSeq()
-		}
+		floor := r.service.host.NextStartSeq()
 		var client pluginClient
 		client, err = r.service.ensureClient(ctx, id)
 		if err != nil {

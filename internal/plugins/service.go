@@ -47,6 +47,10 @@ type Host interface {
 	Client(installationID int) (pluginClient, error)
 	Stop(installationID int) error
 	Shutdown(ctx context.Context) error
+	// NextStartSeq returns the host's monotonic start counter. A client whose
+	// StartSeq is at or below the value read before a launch was issued by
+	// an earlier launch that the singleflight joined.
+	NextStartSeq() uint64
 }
 
 type serviceInstallationStore interface {
