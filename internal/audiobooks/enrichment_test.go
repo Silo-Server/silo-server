@@ -111,6 +111,20 @@ func TestAudiobookEnrichBatchSizeIgnoresInvalidEnv(t *testing.T) {
 	}
 }
 
+func TestDedupeAudiobookProvidersPreservesFirstOccurrence(t *testing.T) {
+	first := &fakeAudiobookMetadataProvider{slug: "TMDB"}
+	duplicate := &fakeAudiobookMetadataProvider{slug: "tmdb"}
+	other := &fakeAudiobookMetadataProvider{slug: "audnexus"}
+
+	got := dedupeAudiobookProviders([]metadata.Provider{first, duplicate, other})
+	if len(got) != 2 {
+		t.Fatalf("deduped provider count = %d, want 2", len(got))
+	}
+	if got[0] != first || got[1] != other {
+		t.Fatalf("deduped providers = %#v, want first TMDB and Audnexus", got)
+	}
+}
+
 func TestCacheRemotePosterCachesProviderURL(t *testing.T) {
 	cacher := &fakeAudiobookImageCacher{}
 	e := &Enricher{imageCacher: cacher}

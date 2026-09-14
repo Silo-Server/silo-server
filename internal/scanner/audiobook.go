@@ -138,7 +138,12 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	if len(audioFiles) == 0 {
 		return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, errFolderHasNoMedia)
 	}
-	sort.Strings(audioFiles)
+	// Audio parts are commonly named with unpadded numbers (part2, part10).
+	// Use the same natural ordering as ebook archive pages so playback follows
+	// human order instead of byte/lexical order.
+	sort.SliceStable(audioFiles, func(i, j int) bool {
+		return naturalPathLess(audioFiles[i], audioFiles[j])
+	})
 
 	book := &parsedAudiobook{}
 
@@ -161,22 +166,19 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 		return book, nil
 	}
 
-	// Multi-file case: read header from the first file, synthesize one
-	// chapter per file with title = filename stem. A 0..0 range means the
-	// chapter duration is unknown; consumers should treat it as non-seekable.
-	probedFirst, err := ProbeFile(ctx, ffprobePath, audioFiles[0])
-	if err != nil {
-		return nil, fmt.Errorf("probe first audiobook file %s: %w", audioFiles[0], err)
-	}
-	book.populateFromTags(probedFirst.FormatTags)
-	book.applyFilesystemFallbacks(folderPath, audioFiles)
-
+	// Multi-file case: synthesize one chapter per file with title = filename
+	// stem. The first file's probe also supplies the book-level tags; keep that
+	// result and use it for the first part instead of probing the file twice.
 	book.Files = make([]parsedAudiobookFile, 0, len(audioFiles))
 	for i, path := range audioFiles {
 		stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		probed, err := ProbeFile(ctx, ffprobePath, path)
 		if err != nil {
 			return nil, fmt.Errorf("probe audiobook file %s: %w", path, err)
+		}
+		if i == 0 {
+			book.populateFromTags(probed.FormatTags)
+			book.applyFilesystemFallbacks(folderPath, audioFiles)
 		}
 		book.Files = append(book.Files, parsedAudiobookFile{
 			Path: path,

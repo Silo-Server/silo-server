@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -105,6 +106,7 @@ func (s *ABSMediaStore) GetAudiobookByID(ctx context.Context, contentID string, 
 	if err := s.hydrateAudiobookSeries(ctx, []*models.MediaItem{item}); err != nil {
 		_ = err
 	}
+	_ = s.hydrateAudiobookRuntime(ctx, []*models.MediaItem{item})
 	return item, nil
 }
 
@@ -137,6 +139,7 @@ func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []str
 	if err := s.hydrateAudiobookSeries(ctx, books); err != nil {
 		_ = err
 	}
+	_ = s.hydrateAudiobookRuntime(ctx, books)
 	out := make(map[string]*models.MediaItem, len(books))
 	for _, b := range books {
 		out[b.ContentID] = b
@@ -247,7 +250,56 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 	if err := s.hydrateAudiobookSeries(ctx, ordered); err != nil {
 		_ = err
 	}
+	_ = s.hydrateAudiobookRuntime(ctx, ordered)
 	return ordered, total, nil
+}
+
+// hydrateAudiobookRuntime overlays the canonical duration from the active
+// file-stat rollup. MediaItem.Runtime is a video-era integer measured in
+// minutes; ABS exposes audiobook durations in seconds, so consumers convert
+// the resulting minutes to seconds at the wire boundary. Keeping the catalog
+// unit intact avoids changing the native API contract while ensuring library
+// listings have a useful duration even when a scan did not populate Runtime.
+func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*models.MediaItem) error {
+	if len(items) == 0 || s.Pool == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT content_id, COALESCE(MAX(duration_seconds), 0)
+		FROM audiobook_item_file_stats
+		WHERE content_id = ANY($1)
+		GROUP BY content_id`, ids)
+	if err != nil {
+		return fmt.Errorf("abs_media_store: load audiobook durations: %w", err)
+	}
+	defer rows.Close()
+	durations := make(map[string]float64, len(ids))
+	for rows.Next() {
+		var id string
+		var seconds float64
+		if err := rows.Scan(&id, &seconds); err != nil {
+			return fmt.Errorf("abs_media_store: scan audiobook duration: %w", err)
+		}
+		durations[id] = seconds
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("abs_media_store: iterate audiobook durations: %w", err)
+	}
+	for _, item := range items {
+		if seconds, ok := durations[item.ContentID]; ok && seconds > 0 {
+			item.Runtime = int(math.Round(seconds / 60))
+		}
+	}
+	return nil
 }
 
 // appendAudiobookFilterConditions pushes an ABS authors/series/narrators
@@ -443,7 +495,7 @@ func (s *ABSMediaStore) GetMediaFiles(ctx context.Context, contentID string, acc
 	if len(items) == 0 {
 		return []*models.MediaFile{}, nil
 	}
-	files, err := s.Files.GetByContentID(ctx, contentID)
+	files, err := s.Files.GetByContentIDPresentation(ctx, contentID)
 	if err != nil {
 		return nil, fmt.Errorf("abs_media_store: get media files for %q: %w", contentID, err)
 	}
@@ -538,6 +590,9 @@ func (s *ABSMediaStore) listAudiobookIDs(ctx context.Context, sql string, args [
 		_ = err // non-fatal
 	}
 	if err := s.hydrateAudiobookSeries(ctx, ordered); err != nil {
+		_ = err // non-fatal
+	}
+	if err := s.hydrateAudiobookRuntime(ctx, ordered); err != nil {
 		_ = err // non-fatal
 	}
 	return ordered, nil

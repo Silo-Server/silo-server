@@ -236,12 +236,28 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			SELECT 1
 			FROM media_items mi
 			WHERE mi.type = 'audiobook'
+			  AND EXISTS (
+			      SELECT 1
+			      FROM media_item_libraries mil
+			      WHERE mil.content_id = mi.content_id
+			  )
 			  AND NOT EXISTS (
 			      SELECT 1
 			      FROM media_item_provider_ids p
 			      WHERE p.content_id = mi.content_id
+			        AND p.provider <> 'asin'
 			  )
-			  AND mi.last_refreshed IS NULL
+			  AND (
+			      mi.last_refreshed IS NULL
+			      OR EXISTS (
+			          SELECT 1
+			          FROM audiobook_enrichment_state retry
+			          WHERE retry.content_id = mi.content_id
+			            AND retry.outcome IN ('no_match', 'skipped')
+			            AND (retry.next_attempt_at IS NULL OR retry.next_attempt_at <= now())
+			            AND (retry.outcome = 'skipped' OR retry.attempts < $1)
+			      )
+			  )
 			  AND NOT EXISTS (
 			      SELECT 1
 			      FROM audiobook_enrichment_state s
@@ -253,7 +269,7 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			  )
 			LIMIT 1
 		)
-	`).Scan(&exists)
+	`, audiobookNoMatchRetryLimit).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("checking pending audiobook enrichment: %w", err)
 	}
@@ -264,6 +280,9 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 // enrichFn parameter exists for testing: production calls pass e.enrichItem.
 // Returns the count of items where enrichFn returned nil.
 func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enrichFn func(context.Context, enrichmentItemRow) error) int {
+	if len(items) == 0 {
+		return 0
+	}
 	workers := e.workers
 	if workers <= 0 {
 		workers = 1
@@ -283,9 +302,13 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 			defer wg.Done()
 			for item := range ch {
 				if ctx.Err() != nil {
-					continue // drain
+					e.releaseClaim(item)
+					continue // drain and return queued claims to the pool
 				}
 				if err := enrichFn(ctx, item); err != nil {
+					if ctx.Err() != nil {
+						e.releaseClaim(item)
+					}
 					slog.WarnContext(ctx, "audiobook enrichment: item failed", "component", "audiobooks",
 						"content_id", item.ContentID,
 						"title", item.Title,
@@ -298,23 +321,37 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 		}()
 	}
 	for _, item := range items {
-		if ctx.Err() != nil {
-			break
+		select {
+		case ch <- item:
+		case <-ctx.Done():
+			// Items not sent to a worker still hold a database lease from
+			// claimBatch. Return them immediately instead of waiting for the
+			// two-hour recovery lease to expire.
+			e.releaseClaim(item)
 		}
-		ch <- item
 	}
 	close(ch)
 	wg.Wait()
 	return int(enriched)
 }
 
+func (e *Enricher) releaseClaim(item enrichmentItemRow) {
+	if e == nil || e.state == nil || item.ClaimToken == "" {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := e.state.ReleaseClaim(cleanupCtx, item.ContentID, item.ClaimToken); err != nil {
+		slog.WarnContext(cleanupCtx, "audiobook enrichment: could not release canceled claim", "component", "audiobooks", "content_id", item.ContentID, "error", err)
+	}
+}
+
 // claimBatch returns up to batchSize audiobook items that need enrichment.
 // "Needs enrichment" means the item has no provider identity at all AND
-// last_refreshed IS NULL. We skip items where last_refreshed IS NOT NULL —
-// those have already had at least one enrichment pass regardless of outcome,
-// which is what bounds retries: enrichItem stamps last_refreshed on a clean
-// no-match and deliberately withholds it on provider error, so unmatchable
-// items are tried once while transient failures come back.
+// last_refreshed IS NULL, with a bounded retry exception for clean no-match
+// results and a slower retry loop for skipped items (for example, a library
+// that had no provider chain configured yet). Provider errors use the durable
+// error backoff path and do not stamp last_refreshed.
 //
 // This keys on identity rather than on poster_path, which is what it used to
 // test. Audiobook files essentially always carry embedded cover art, so the
@@ -331,12 +368,28 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			SELECT mi.content_id
 			FROM media_items mi
 			WHERE mi.type = 'audiobook'
+			  AND EXISTS (
+			      SELECT 1
+			      FROM media_item_libraries mil
+			      WHERE mil.content_id = mi.content_id
+			  )
 			  AND NOT EXISTS (
 			      SELECT 1
 			      FROM media_item_provider_ids p
 			      WHERE p.content_id = mi.content_id
+			        AND p.provider <> 'asin'
 			  )
-			  AND mi.last_refreshed IS NULL
+			  AND (
+			      mi.last_refreshed IS NULL
+			      OR EXISTS (
+			          SELECT 1
+			          FROM audiobook_enrichment_state retry
+			          WHERE retry.content_id = mi.content_id
+			            AND retry.outcome IN ('no_match', 'skipped')
+			            AND (retry.next_attempt_at IS NULL OR retry.next_attempt_at <= now())
+			            AND (retry.outcome = 'skipped' OR retry.attempts < $3)
+			      )
+			  )
 			  AND NOT EXISTS (
 			      SELECT 1
 			      FROM audiobook_enrichment_state s
@@ -406,7 +459,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 		FROM claimed c
 		JOIN media_items mi ON mi.content_id = c.content_id
 		ORDER BY mi.created_at ASC, mi.content_id ASC
-	`, e.batchSize, defaultEnrichClaimLease.Seconds())
+	`, e.batchSize, defaultEnrichClaimLease.Seconds(), audiobookNoMatchRetryLimit)
 	if err != nil {
 		return nil, fmt.Errorf("querying unenriched audiobooks: %w", err)
 	}
@@ -470,6 +523,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		e.recordFailure(ctx, item, classifyProviderError(resolveErr), resolveErr.Error())
 		return resolveErr
 	}
+	providers = dedupeAudiobookProviders(providers)
 	if len(providers) == 0 {
 		slog.DebugContext(ctx, "audiobook enrichment: no providers in chain", "component", "audiobooks",
 			"content_id", item.ContentID,
@@ -656,8 +710,14 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		admittedResult := *result
 		admittedResult.ProviderIDs = identity.ProviderIDs
 		result = &admittedResult
+		// MergeMetadata intentionally copies fields, not the provider-level
+		// admission marker. Preserve it here so an otherwise sparse response
+		// (for example, title/year/people only) is still recognized as a
+		// successful metadata response rather than being stamped no_match.
+		if result.HasMetadata {
+			accumulator.HasMetadata = true
+		}
 		// Bootstrap subsequent providers with any newly discovered IDs.
-		mergeEnrichmentProviderIDs(accumulator, result)
 		accumulatedIDs = accumulator.ProviderIDs
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
 
@@ -713,6 +773,36 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	)
 
 	return nil
+}
+
+// dedupeAudiobookProviders protects the provider budget when a chain contains
+// the same plugin more than once. Provider chains are assembled from persisted
+// rows, and older configurations can contain duplicates; running Search and
+// GetMetadata twice would spend two rate-limited calls without adding any
+// information. Preserve the first occurrence because chain order determines
+// the preferred metadata source.
+func dedupeAudiobookProviders(providers []metadata.Provider) []metadata.Provider {
+	if len(providers) < 2 {
+		return providers
+	}
+	seen := make(map[string]struct{}, len(providers))
+	result := make([]metadata.Provider, 0, len(providers))
+	for _, provider := range providers {
+		if provider == nil {
+			continue
+		}
+		slug := strings.ToLower(strings.TrimSpace(provider.Slug()))
+		if slug == "" {
+			result = append(result, provider)
+			continue
+		}
+		if _, exists := seen[slug]; exists {
+			continue
+		}
+		seen[slug] = struct{}{}
+		result = append(result, provider)
+	}
+	return result
 }
 
 func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
@@ -937,10 +1027,10 @@ func (e *Enricher) completeWithoutMetadata(ctx context.Context, item enrichmentI
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_items
 		SET last_refreshed = $1,
-		    matched_at     = COALESCE(matched_at, $1),
-		    status         = CASE WHEN status = 'pending' THEN 'matched' ELSE status END
+		    matched_at     = CASE WHEN $3 = 'success' THEN COALESCE(matched_at, $1) ELSE matched_at END,
+		    status         = CASE WHEN $3 = 'success' AND status = 'pending' THEN 'matched' ELSE status END
 		WHERE content_id = $2
-	`, now, item.ContentID); err != nil {
+	`, now, item.ContentID, string(outcome)); err != nil {
 		return fmt.Errorf("stamping audiobook terminal outcome: %w", err)
 	}
 	if err := e.state.RecordOutcomeTx(ctx, tx, item.ContentID, item.ClaimToken, outcome); err != nil {
@@ -1087,24 +1177,6 @@ func (e *Enricher) applyLocalCoverFallback(ctx context.Context, contentID string
 		return fmt.Errorf("update poster_path: %w", err)
 	}
 	return nil
-}
-
-// mergeEnrichmentProviderIDs copies new provider IDs from src into dst,
-// without overwriting existing entries.
-func mergeEnrichmentProviderIDs(dst *metadata.MetadataResult, src *metadata.MetadataResult) {
-	if src == nil || len(src.ProviderIDs) == 0 {
-		return
-	}
-	if dst.ProviderIDs == nil {
-		dst.ProviderIDs = make(map[string]string, len(src.ProviderIDs))
-	}
-	for k, v := range src.ProviderIDs {
-		if v != "" {
-			if _, exists := dst.ProviderIDs[k]; !exists {
-				dst.ProviderIDs[k] = v
-			}
-		}
-	}
 }
 
 // providerIDMapFromRows converts a slice of MediaItemProviderID DB rows

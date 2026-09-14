@@ -65,9 +65,19 @@ func giveProviderID(t *testing.T, pool *pgxpool.Pool, contentID string) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(), `
 		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
-		VALUES ($1, 'asin', $2, 'audiobook')
+		VALUES ($1, 'audiobook-metadata', $2, 'audiobook')
 	`, contentID, "B0"+contentID[len(contentID)-8:]); err != nil {
 		t.Fatalf("seed provider id for %s: %v", contentID, err)
+	}
+}
+
+func giveASINHint(t *testing.T, pool *pgxpool.Pool, contentID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
+		VALUES ($1, 'asin', $2, 'audiobook')
+	`, contentID, "B0"+contentID[len(contentID)-8:]); err != nil {
+		t.Fatalf("seed ASIN hint for %s: %v", contentID, err)
 	}
 }
 
@@ -134,6 +144,18 @@ func TestClaimBatchSelectsOnIdentityNotCoverArt(t *testing.T) {
 	if got[alreadyPassed] {
 		t.Error("an audiobook with last_refreshed set was claimed; last_refreshed is the " +
 			"retry bound that stops unmatchable items looping against the provider")
+	}
+}
+
+func TestClaimBatchTreatsScannerASINAsAMetadataHint(t *testing.T) {
+	pool := newClaimTestPool(t)
+	e := &Enricher{pool: pool, chainRepo: metadata.NewChainRepository(pool), batchSize: 500}
+
+	contentID := seedAudiobook(t, pool, "asin-hint", "/covers/embedded.jpg", false)
+	giveASINHint(t, pool, contentID)
+
+	if got := claimedIDs(t, e); !got[contentID] {
+		t.Fatal("an audiobook with only a scanner-supplied ASIN hint was not claimed")
 	}
 }
 

@@ -97,16 +97,19 @@ func applyAudiobookSidecarCover(ctx context.Context, store audiobookCoverMetadat
 	if store == nil || cacher == nil || contentID == "" || folderPath == "" {
 		return nil
 	}
-	cover, _, err := findSidecarAudiobookCover(folderPath)
-	if err != nil || len(cover) == 0 {
-		return err
-	}
 	existingPosterPath, err := store.GetPosterPath(ctx, contentID)
 	if err != nil {
 		return fmt.Errorf("get audiobook poster path for cover: %w", err)
 	}
 	if strings.TrimSpace(existingPosterPath) != "" {
 		return nil
+	}
+	// Check the cheap metadata guard before reading and buffering a sidecar
+	// image. Existing posters are common on repeat scans, and avoiding the
+	// directory walk plus image read keeps the unchanged path inexpensive.
+	cover, _, err := findSidecarAudiobookCover(folderPath)
+	if err != nil || len(cover) == 0 {
+		return err
 	}
 	posterPath, thumbhash, err := cacher.CacheAudiobookCover(ctx, cover, contentID)
 	if err != nil {

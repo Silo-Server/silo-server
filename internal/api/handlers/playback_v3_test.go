@@ -5059,6 +5059,43 @@ func TestHandleStartPlaybackV3MultipartSuppressesProgressPersistence(t *testing.
 	}
 }
 
+func TestMultipartResumeFileV3MapsAbsolutePositionToPart(t *testing.T) {
+	parts := []*models.MediaFile{
+		{ID: 30, ContentID: "book-1", PresentationPartIndex: 3, PresentationPartTotal: 3, Duration: 90},
+		{ID: 10, ContentID: "book-1", PresentationPartIndex: 1, PresentationPartTotal: 3, Duration: 100},
+		{ID: 20, ContentID: "book-1", PresentationPartIndex: 2, PresentationPartTotal: 3, Duration: 120},
+	}
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: parts[0]})
+	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{"book-1": parts}}
+	for _, tc := range []struct {
+		absolute float64
+		id       int
+		local    float64
+	}{
+		{absolute: 100, id: 20, local: 0},
+		{absolute: 200, id: 20, local: 100},
+		{absolute: 310, id: 30, local: 90},
+	} {
+		target, local, err := h.multipartResumeFileV3(context.Background(), parts[0], tc.absolute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if target == nil || target.ID != tc.id || local != tc.local {
+			t.Fatalf("absolute=%v target=%v local=%v, want part %d at %v", tc.absolute, target, local, tc.id, tc.local)
+		}
+	}
+}
+
+func TestMultipartResumeFileV3FallsBackWhenDurationMissing(t *testing.T) {
+	part := &models.MediaFile{ID: 1, ContentID: "book-1", PresentationPartIndex: 1, PresentationPartTotal: 2, Duration: 0}
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: part})
+	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{"book-1": {part}}}
+	target, _, err := h.multipartResumeFileV3(context.Background(), part, 10)
+	if err == nil || target != nil {
+		t.Fatalf("target=%v err=%v, want unavailable mapping", target, err)
+	}
+}
+
 func postPlaybackReplanV3(t *testing.T, handler *PlaybackHandler, sessionID string, request playback.ReplanRequestV3) playback.DecisionResponseV3 {
 	t.Helper()
 	body, err := json.Marshal(request)

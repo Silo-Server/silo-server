@@ -98,10 +98,6 @@ type audiobookGroupsSQLPlan struct {
 // audiobookGroupsPageCap bounds externally-requested pages.
 const audiobookGroupsPageCap = 500
 
-// audiobookGroupsFullCap preserves the full-list path used by the legacy
-// short-lived cache; the endpoint now uses true paged queries instead.
-const audiobookGroupsFullCap = 50000
-
 // ListAudiobookGroups returns grouped browse rows for an audiobook library.
 // Groups are aggregated per person name (authors/narrators) or per series
 // name, matching the case-insensitive semantics of the corresponding catalog
@@ -110,21 +106,6 @@ const audiobookGroupsFullCap = 50000
 // filter.UserID / filter.ProfileID.
 func ListAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter) (AudiobookGroupsResult, error) {
 	return listAudiobookGroupsWithLimit(ctx, pool, q, filter, audiobookGroupsPageCap)
-}
-
-// listAllAudiobookGroups fetches a complete grouped list for the older cache
-// helper. New callers should prefer ListAudiobookGroups so each page can avoid
-// recomputing exact totals and poster stacks for groups outside the page.
-func listAllAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter) ([]AudiobookGroup, int, error) {
-	full := q
-	full.Limit = audiobookGroupsFullCap
-	full.Offset = 0
-	full.IncludeTotal = true
-	result, err := listAudiobookGroupsWithLimit(ctx, pool, full, filter, audiobookGroupsFullCap)
-	if err != nil {
-		return nil, 0, err
-	}
-	return result.Groups, result.Total, nil
 }
 
 func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter, maxLimit int) (AudiobookGroupsResult, error) {

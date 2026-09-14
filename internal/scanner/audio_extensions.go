@@ -14,6 +14,8 @@ var audioExtensions = map[string]bool{
 	".flac": true,
 	".opus": true,
 	".ogg":  true,
+	".wav":  true,
+	".aac":  true,
 }
 
 // SupportsAudioFile reports whether the given path uses a recognized audio

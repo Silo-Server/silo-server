@@ -366,7 +366,7 @@ func buildSiloPlayMediaMetadata(item *models.MediaItem) map[string]any {
 		"descriptionPlain":  nilIfEmpty(stripHTML(item.Overview)),
 		"isbn":              nil,
 		"asin":              nil,
-		"language":          "en",
+		"language":          audiobookLanguage(item),
 		"explicit":          false,
 		"abridged":          false,
 	}
