@@ -53,6 +53,9 @@ func (s *Service) publishRoomState(room Room) {
 
 func (s *Service) handleClusterEvent(event cache.Event) {
 	if event.Type == "watch_together_suggestions" {
+		if s.suggestions == nil {
+			return
+		}
 		var incoming clusterSuggestionEvent
 		if json.Unmarshal([]byte(event.Payload), &incoming) != nil || incoming.Source == s.instanceID || incoming.RoomID == "" {
 			return
