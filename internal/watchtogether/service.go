@@ -176,6 +176,7 @@ type Service struct {
 	clusterBus    cache.EventBus
 	clusterCancel context.CancelFunc
 	instanceID    string
+	clusterMu     sync.Mutex
 }
 
 // defaultHostDisconnectTTL is how long a room survives its host's socket going
@@ -227,9 +228,11 @@ func (s *Service) Close() {
 	if s == nil || s.janitorStop == nil {
 		return
 	}
+	s.clusterMu.Lock()
 	if s.clusterCancel != nil {
 		s.clusterCancel()
 	}
+	s.clusterMu.Unlock()
 	select {
 	case <-s.janitorStop:
 	default:
@@ -239,16 +242,23 @@ func (s *Service) Close() {
 
 // SetClusterEventBus wires cross-node room state propagation. It is optional
 // so in-process users and tests can keep the lightweight constructor.
-func (s *Service) SetClusterEventBus(bus cache.EventBus) {
+func (s *Service) SetClusterEventBus(bus cache.EventBus) error {
 	if s == nil || bus == nil {
-		return
-	}
-	if s.clusterCancel != nil {
-		s.clusterCancel()
+		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	if err := bus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) { s.handleClusterEvent(event) }); err != nil {
+		cancel()
+		return err
+	}
+	s.clusterMu.Lock()
+	oldCancel := s.clusterCancel
 	s.clusterBus, s.clusterCancel = bus, cancel
-	_ = bus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) { s.handleClusterEvent(event) })
+	s.clusterMu.Unlock()
+	if oldCancel != nil {
+		oldCancel()
+	}
+	return nil
 }
 
 func (s *Service) CreateRoom(ctx context.Context, input CreateRoomInput) (*Room, error) {

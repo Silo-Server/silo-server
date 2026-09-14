@@ -25,14 +25,19 @@ const (
 )
 
 func (s *Service) publishSuggestionUpdate(roomID string) {
-	if s == nil || s.clusterBus == nil {
+	if s == nil {
+		return
+	}
+	s.clusterMu.Lock()
+	bus := s.clusterBus
+	s.clusterMu.Unlock()
+	if bus == nil {
 		return
 	}
 	payload, err := json.Marshal(clusterSuggestionEvent{Source: s.instanceID, RoomID: roomID})
 	if err != nil {
 		return
 	}
-	bus := s.clusterBus
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -41,10 +46,15 @@ func (s *Service) publishSuggestionUpdate(roomID string) {
 }
 
 func (s *Service) publishRoomState(room Room) {
-	if s == nil || s.clusterBus == nil {
+	if s == nil {
 		return
 	}
+	s.clusterMu.Lock()
 	bus := s.clusterBus
+	s.clusterMu.Unlock()
+	if bus == nil {
+		return
+	}
 	payload, err := json.Marshal(clusterRoomEvent{Source: s.instanceID, RoomID: room.ID, Generation: room.Generation})
 	if err != nil {
 		return

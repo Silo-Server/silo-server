@@ -26,6 +26,9 @@ func TestInvalidPlaybackPositionsAreRejected(t *testing.T) {
 		if _, err := service.HandleStateReportForConnection(t.Context(), reg, 7, "host", StateReport{SessionID: "session", PositionSeconds: position}); !errors.Is(err, ErrInvalidPosition) {
 			t.Fatalf("state position %v error = %v", position, err)
 		}
+		if _, err := service.HandleBufferingForConnection(t.Context(), reg, 7, "host", StateReport{SessionID: "session", PositionSeconds: position}); !errors.Is(err, ErrInvalidPosition) {
+			t.Fatalf("buffering position %v error = %v", position, err)
+		}
 	}
 }
 

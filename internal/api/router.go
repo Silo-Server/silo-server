@@ -1254,7 +1254,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				watchtogether.NewSuggestionRepository(deps.DB),
 				watchtogether.NewProfileNameResolver(deps.UserStoreProvider),
 			)
-			watchTogetherService.SetClusterEventBus(deps.EventBus)
+			if err := watchTogetherService.SetClusterEventBus(deps.EventBus); err != nil {
+				slog.Warn("watch together cluster synchronization unavailable", "error", err)
+			}
 			watchTogetherHandler = handlers.NewWatchTogetherHandler(
 				watchTogetherService,
 				viewerResolver,

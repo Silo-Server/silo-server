@@ -22,6 +22,16 @@ WHERE a.ctid < b.ctid
   AND a.suggestion_id = b.suggestion_id
   AND a.voter_profile_id = b.voter_profile_id;
 
+UPDATE watch_together_suggestions s
+SET vote_count = COALESCE(v.count, 0)
+FROM (
+    SELECT s2.id, COUNT(v2.suggestion_id)::integer AS count
+    FROM watch_together_suggestions s2
+    LEFT JOIN watch_together_votes v2 ON v2.suggestion_id = s2.id
+    GROUP BY s2.id
+) v
+WHERE s.id = v.id;
+
 ALTER TABLE watch_together_votes
     DROP CONSTRAINT watch_together_votes_pkey,
     ADD CONSTRAINT watch_together_votes_pkey PRIMARY KEY (suggestion_id, voter_profile_id),
