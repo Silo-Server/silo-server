@@ -78,7 +78,7 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 		s.mu.Lock()
 		live := s.rooms[incoming.RoomID]
 		members := make([]*memberState, 0)
-		if live != nil {
+		if live != nil && live.room.Phase != RoomPhaseEnded {
 			for _, member := range live.members {
 				if member != nil && member.connection != nil {
 					members = append(members, member)
