@@ -179,8 +179,9 @@ to them.
 
 A provider slug names one provider per deployment. If two enabled
 installations declare the same slug, the one with the lowest installation
-id owns it: commands, status, and the node health report address that one
-and the duplicate is logged and skipped.
+id owns it: commands, status, and the node health report address that one,
+and the duplicate is neither started as a resident nor listed; it is
+logged and skipped on every host.
 
 ## Single-API constraint
 

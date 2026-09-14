@@ -374,9 +374,29 @@ func (r *ResidentSupervisor) desiredResidents(ctx context.Context) (map[int]*Ins
 		return nil, fmt.Errorf("list enabled resident installations: %w", err)
 	}
 	desired := make(map[int]*Installation, len(installations))
+	// A provider slug is owned by the lowest enabled installation declaring
+	// it (ListNetworkAccessProviders). A later duplicate is not commanded,
+	// reported, or listed anywhere, so it must not run either: a resident
+	// nobody can disconnect would keep serving ingress unseen. Installations
+	// arrive in id order, so the first holder of a slug is the owner.
+	slugOwner := make(map[string]int, len(installations))
 	for _, installation := range installations {
 		if installation == nil || installation.IsBuiltin() {
 			continue
+		}
+		manifest, err := r.service.ensureLoadedInstallation(ctx, installation)
+		if err != nil {
+			r.opts.Logger.WarnContext(ctx, "resident plugin manifest unavailable; not starting it", "component", "plugins",
+				"installation_id", installation.ID, "plugin_id", installation.PluginID, "error", err)
+			continue
+		}
+		if _, slug := pluginhost.NetworkAccessProviderCapability(manifest); slug != "" {
+			if owner, dup := slugOwner[slug]; dup {
+				r.opts.Logger.WarnContext(ctx, "network access provider slug is already owned by another installation; not starting the duplicate", "component", "plugins",
+					"provider", slug, "installation_id", owner, "skipped_installation_id", installation.ID, "plugin_id", installation.PluginID)
+				continue
+			}
+			slugOwner[slug] = installation.ID
 		}
 		desired[installation.ID] = installation
 	}

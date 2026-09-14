@@ -462,3 +462,25 @@ func TestResidentSupervisorReplacesRehydratedProcessOnNewRelease(t *testing.T) {
 		t.Fatalf("proxy touched the API server's install path: %v", err)
 	}
 }
+
+// Two enabled installations declaring one provider slug: only the lowest id
+// is resident. The duplicate is never commanded or reported, so it must not
+// run either.
+func TestResidentSupervisorDoesNotStartADuplicateProviderSlug(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	ctx := context.Background()
+	second := buildResidentFixture(t)
+	dup := &Installation{ID: 6, PluginID: "silo.test.resident-copy", Version: "0.1.0", InstallPath: second, Enabled: true, Kind: KindPlugin}
+	f.store.byID[dup.ID] = dup
+	f.store.byPluginID[dup.PluginID] = append(f.store.byPluginID[dup.PluginID], dup)
+	f.store.listCapabilities = append(f.store.listCapabilities, &Capability{InstallationID: 6, Type: capability.NetworkAccessProvider, ID: "stub"})
+
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "owner running", running)
+	if _, tracked := f.service.Residents().State(6); tracked {
+		t.Fatal("duplicate slug installation became resident")
+	}
+	if _, err := f.host.Client(6); !errors.Is(err, pluginhost.ErrClientNotFound) {
+		t.Fatalf("duplicate slug installation was launched: %v", err)
+	}
+}

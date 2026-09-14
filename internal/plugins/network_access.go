@@ -443,10 +443,12 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 	// origin the instance last pushed is not being served by a process this
 	// host can reach, so the origin check and the node health report must
 	// stop advertising it. The plugin's next push restores it.
+	// The returned status carries no updated_at: the contract defines it as
+	// when the host last heard from the provider, which an unavailable
+	// answer is not. The cache stamps its own copy on Report.
 	fail := func(reason string) netaccess.Status {
 		unavailable.Error = reason
 		if s.networkAccessStatus != nil {
-			unavailable.UpdatedAt = time.Now()
 			s.networkAccessStatus.Report(unavailable)
 		}
 		return unavailable
