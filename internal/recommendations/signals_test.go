@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -39,13 +40,25 @@ func (r *fakeSignalRepo) GetRewatchCounts(context.Context, int, string) ([]Rewat
 	return r.fallbackRewatches, nil
 }
 
-func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(_ context.Context, contentIDs []string) (map[string]struct{}, error) {
-	set := make(map[string]struct{}, len(contentIDs))
+func (r *fakeSignalRepo) ResolveCanonicalItemIDs(_ context.Context, contentIDs []string) (map[string]string, error) {
+	resolved := make(map[string]string, len(contentIDs))
 	for _, id := range contentIDs {
 		if canonical, ok := r.canonical[id]; ok {
-			set[canonical] = struct{}{}
+			resolved[id] = canonical
 			continue
 		}
+		resolved[id] = id
+	}
+	return resolved, nil
+}
+
+func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error) {
+	resolved, err := r.ResolveCanonicalItemIDs(ctx, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(resolved))
+	for _, id := range resolved {
 		set[id] = struct{}{}
 	}
 	return set, nil
@@ -256,6 +269,60 @@ func TestSignalReaderRecentCompletedUsesStoreUpdatedOrder(t *testing.T) {
 
 	want := []string{"newest", "newer"}
 	if !slices.Equal(ids, want) {
+		t.Fatalf("recent completed = %#v, want %#v", ids, want)
+	}
+}
+
+func TestSignalReaderRecentCompletedCanonicalizesBeforeDedupAndLimit(t *testing.T) {
+	store := &fakeSignalStore{progress: []userstore.WatchProgress{
+		{ProfileID: "p1", MediaItemID: "episode-a2", Completed: true, UpdatedAt: "2026-08-05T10:00:00Z"},
+		{ProfileID: "p1", MediaItemID: "episode-a1", Completed: true, UpdatedAt: "2026-08-04T10:00:00Z"},
+		{ProfileID: "p1", MediaItemID: "movie-b", Completed: true, UpdatedAt: "2026-08-03T10:00:00Z"},
+		{ProfileID: "p1", MediaItemID: "episode-c1", Completed: true, UpdatedAt: "2026-08-02T10:00:00Z"},
+	}}
+	repo := &fakeSignalRepo{canonical: map[string]string{
+		"episode-a2": "series-a",
+		"episode-a1": "series-a",
+		"episode-c1": "series-c",
+	}}
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+
+	ids, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 3)
+	if err != nil {
+		t.Fatalf("RecentCompletedItemIDs returned error: %v", err)
+	}
+	want := []string{"series-a", "movie-b", "series-c"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("recent completed = %#v, want %#v", ids, want)
+	}
+}
+
+func TestSignalReaderRecentCompletedPagesUntilDistinctLimitIsFilled(t *testing.T) {
+	progress := make([]userstore.WatchProgress, 0, signalPageSize+2)
+	canonical := make(map[string]string, signalPageSize)
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < signalPageSize; i++ {
+		id := fmt.Sprintf("episode-a-%04d", i)
+		progress = append(progress, userstore.WatchProgress{
+			ProfileID: "p1", MediaItemID: id, Completed: true,
+			UpdatedAt: base.Add(-time.Duration(i) * time.Second).Format(time.RFC3339Nano),
+		})
+		canonical[id] = "series-a"
+	}
+	progress = append(progress,
+		userstore.WatchProgress{ProfileID: "p1", MediaItemID: "movie-b", Completed: true, UpdatedAt: base.Add(-2000 * time.Second).Format(time.RFC3339Nano)},
+		userstore.WatchProgress{ProfileID: "p1", MediaItemID: "movie-c", Completed: true, UpdatedAt: base.Add(-2001 * time.Second).Format(time.RFC3339Nano)},
+	)
+
+	reader := NewSignalReader(
+		&fakeSignalRepo{canonical: canonical},
+		fakeSignalProvider{store: &fakeSignalStore{progress: progress}},
+	)
+	ids, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 3)
+	if err != nil {
+		t.Fatalf("RecentCompletedItemIDs returned error: %v", err)
+	}
+	if want := []string{"series-a", "movie-b", "movie-c"}; !slices.Equal(ids, want) {
 		t.Fatalf("recent completed = %#v, want %#v", ids, want)
 	}
 }

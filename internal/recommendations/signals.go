@@ -17,6 +17,7 @@ type signalRepo interface {
 	GetEbookReaderProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error)
 	GetRecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error)
 	GetRewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error)
+	ResolveCanonicalItemIDs(ctx context.Context, contentIDs []string) (map[string]string, error)
 	ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error)
 }
 
@@ -129,48 +130,103 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 		return s.repo.GetRecentCompletedItemIDs(ctx, userID, profileID, limit)
 	}
 
-	progress, err := store.ListProgress(ctx, profileID, "completed", limit, 0)
-	if err != nil {
-		return nil, fmt.Errorf("list completed progress from store: %w", err)
-	}
-	completed := make([]WatchProgressRow, 0, len(progress))
-	for _, wp := range progress {
-		if !wp.Completed {
-			continue
-		}
-		completed = append(completed, WatchProgressRow{
-			MediaItemID: wp.MediaItemID,
-			Completed:   true,
-			UpdatedAt:   parseSignalTime(wp.UpdatedAt, time.Time{}),
-		})
-	}
+	candidates := make([]WatchProgressRow, 0, limit)
 	ebookProgress, err := s.repo.GetEbookReaderProgressForUser(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}
 	for _, wp := range ebookProgress {
-		if !wp.Completed {
-			continue
+		if wp.Completed {
+			candidates = append(candidates, wp)
 		}
-		completed = append(completed, wp)
 	}
-	sort.SliceStable(completed, func(i, j int) bool {
-		left := completed[i].UpdatedAt
-		right := completed[j].UpdatedAt
-		if !left.Equal(right) {
-			return left.After(right)
-		}
-		return completed[i].MediaItemID < completed[j].MediaItemID
-	})
+	if err := canonicalizeCompletedRows(ctx, s.repo, candidates); err != nil {
+		return nil, fmt.Errorf("resolve recent completed item IDs: %w", err)
+	}
+	candidates = recentDistinctCompletedRows(candidates, limit)
 
-	ids := make([]string, 0, min(limit, len(completed)))
-	for _, wp := range completed {
-		ids = append(ids, wp.MediaItemID)
-		if len(ids) == limit {
+	offset := 0
+	for {
+		progress, err := store.ListProgress(ctx, profileID, "completed", signalPageSize, offset)
+		if err != nil {
+			return nil, fmt.Errorf("list completed progress from store: %w", err)
+		}
+
+		page := make([]WatchProgressRow, 0, len(progress))
+		oldestPageTime := time.Time{}
+		for _, wp := range progress {
+			if !wp.Completed {
+				continue
+			}
+			updatedAt := parseSignalTime(wp.UpdatedAt, time.Time{})
+			page = append(page, WatchProgressRow{
+				MediaItemID: wp.MediaItemID,
+				Completed:   true,
+				UpdatedAt:   updatedAt,
+			})
+			if oldestPageTime.IsZero() || updatedAt.Before(oldestPageTime) {
+				oldestPageTime = updatedAt
+			}
+		}
+		if err := canonicalizeCompletedRows(ctx, s.repo, page); err != nil {
+			return nil, fmt.Errorf("resolve recent completed item IDs: %w", err)
+		}
+		candidates = recentDistinctCompletedRows(append(candidates, page...), limit)
+
+		if len(progress) < signalPageSize {
+			break
+		}
+		offset += len(progress)
+		if len(candidates) == limit && !oldestPageTime.IsZero() &&
+			oldestPageTime.Before(candidates[len(candidates)-1].UpdatedAt) {
 			break
 		}
 	}
+
+	ids := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.MediaItemID)
+	}
 	return ids, nil
+}
+
+func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) error {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.MediaItemID)
+	}
+	resolved, err := repo.ResolveCanonicalItemIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		if canonicalID := resolved[rows[i].MediaItemID]; canonicalID != "" {
+			rows[i].MediaItemID = canonicalID
+		}
+	}
+	return nil
+}
+
+func recentDistinctCompletedRows(rows []WatchProgressRow, limit int) []WatchProgressRow {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if !rows[i].UpdatedAt.Equal(rows[j].UpdatedAt) {
+			return rows[i].UpdatedAt.After(rows[j].UpdatedAt)
+		}
+		return rows[i].MediaItemID < rows[j].MediaItemID
+	})
+	seen := make(map[string]struct{}, len(rows))
+	result := make([]WatchProgressRow, 0, min(limit, len(rows)))
+	for _, row := range rows {
+		if _, ok := seen[row.MediaItemID]; ok {
+			continue
+		}
+		seen[row.MediaItemID] = struct{}{}
+		result = append(result, row)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result
 }
 
 func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error) {
