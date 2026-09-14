@@ -13,3 +13,14 @@ export const LIBRARY_TYPES = [
 export function libraryTypeMeta(type: string) {
   return LIBRARY_TYPES.find((t) => t.value === type) ?? LIBRARY_TYPES[0];
 }
+
+// Keep these aligned with the video scanner and intro-marker library filters.
+export function librarySettingSupport(type: string) {
+  const kind = type.trim().toLowerCase();
+  const video = ["movie", "movies", "series", "tv", "show", "tvshows", "mixed"].includes(kind);
+  return {
+    trailers: video,
+    chapterThumbnails: video,
+    introDetection: kind === "series" || kind === "mixed",
+  };
+}
