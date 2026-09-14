@@ -75,6 +75,7 @@ func TestScannerEbookEnrichmentReconciliationIsBoundedAndNonFatal(t *testing.T) 
 		&models.MediaFolder{ID: 17},
 		nil,
 		nil,
+		nil,
 		true,
 	); err != nil {
 		t.Fatalf("reconcileEbookScan() error = %v", err)

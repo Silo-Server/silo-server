@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -46,6 +47,7 @@ type scanStateFile struct {
 	ProbeSource            string
 	ProbeUpdatedAt         *time.Time
 	MissingSince           *time.Time
+	ScanGeneration         int64
 	HasVideoTracks         bool
 	HasNonImageVideoTracks bool
 	HasAudioTracks         bool
@@ -63,6 +65,11 @@ const scanStateColumns = `id, content_id, extra_id,
 	presentation_kind, presentation_group_key, presentation_part_index,
 	multi_episode_start, multi_episode_end,
 	probe_source, probe_updated_at, missing_since,
+	COALESCE((
+		SELECT generation.scan_generation
+		FROM media_file_scan_generations AS generation
+		WHERE generation.media_file_id = media_files.id
+	), 1) AS scan_generation,
 	COALESCE(jsonb_typeof(video_tracks) = 'array' AND jsonb_array_length(video_tracks) > 0, FALSE) AS has_video_tracks,
 	COALESCE((
 		SELECT bool_or(lower(btrim(COALESCE(track->>'codec', ''))) NOT IN ('mjpeg', 'jpeg', 'png', 'webp', 'gif', 'bmp'))
@@ -138,6 +145,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		&probeSource,
 		&state.ProbeUpdatedAt,
 		&state.MissingSince,
+		&state.ScanGeneration,
 		&state.HasVideoTracks,
 		&state.HasNonImageVideoTracks,
 		&state.HasAudioTracks,
@@ -276,6 +284,21 @@ func (r *FileRepository) GetScanStateByFolderAndPathPrefix(ctx context.Context, 
 		return nil, fmt.Errorf("querying scan state by folder and path prefix: %w", err)
 	}
 	return scanScanStateRows(rows)
+}
+
+// GetScanStateByFolderAndPath returns the lightweight scan-state row for an
+// exact path in a folder.
+func (r *FileRepository) GetScanStateByFolderAndPath(ctx context.Context, folderID int, path string) (*scanStateFile, error) {
+	query := `SELECT ` + scanStateColumns + ` FROM media_files
+		WHERE media_folder_id = $1 AND file_path = $2`
+	file, err := scanScanStateRow(r.pool.QueryRow(ctx, query, folderID, path))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrFileNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying scan state by folder and path: %w", err)
+	}
+	return file, nil
 }
 
 func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {

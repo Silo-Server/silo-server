@@ -36,6 +36,10 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	if s == nil || folder == nil {
 		return fmt.Errorf("scanMangaPaths: nil scanner or folder")
 	}
+	reconcileSnapshot, err := s.snapshotScanStateForRoots(ctx, folder.ID, roots)
+	if err != nil {
+		return err
+	}
 	scans, err := collectEbookRootScans(ctx, folder.ID, roots)
 	if err != nil {
 		return err
@@ -49,7 +53,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	if len(candidates) == 0 {
-		return s.reconcileMangaScan(ctx, folder, scans, nil, fullScan)
+		return s.reconcileMangaScan(ctx, folder, scans, nil, reconcileSnapshot, fullScan)
 	}
 
 	workers := ebookScanWorkers()
@@ -152,15 +156,18 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	for _, p := range candidates {
 		seenPaths[p] = true
 	}
-	return s.reconcileMangaScan(ctx, folder, scans, seenPaths, fullScan)
+	if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, presentScanPaths(seenPaths)); err != nil {
+		return fmt.Errorf("refreshing present manga paths: %w", err)
+	}
+	return s.reconcileMangaScan(ctx, folder, scans, seenPaths, reconcileSnapshot, fullScan)
 }
 
 // reconcileMangaScan runs the shared ebook missing-file reconciliation (which
 // removes vanished chapters) and then deletes any type='manga' series left with
 // no chapters. Series items are file-less parents reconciled by chapter count,
 // not file presence — catalog.ReconcileFolderMembership deliberately skips them.
-func (s *Scanner) reconcileMangaScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool) error {
-	if err := s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan); err != nil {
+func (s *Scanner) reconcileMangaScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, existingFiles []*scanStateFile, fullScan bool) error {
+	if err := s.reconcileEbookScan(ctx, folder, scans, seenPaths, existingFiles, fullScan); err != nil {
 		return err
 	}
 	return s.deleteOrphanedMangaSeries(ctx, folder.ID)

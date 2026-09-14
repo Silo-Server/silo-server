@@ -311,6 +311,11 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
 	}
 
+	reconcileSnapshot, err := s.snapshotScanStateForRoots(ctx, folder.ID, folder.Paths)
+	if err != nil {
+		return err
+	}
+
 	// Phase 1: walk the tree to collect candidate book folders. This is
 	// I/O-light (no ffprobe), and avoids holding the worker pool open
 	// for the duration of a 240k-folder scan.
@@ -329,7 +334,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		// library converges — but only when a root was readable, and the
 		// empty-walk guard requires operator confirmation before deleting.
 		if len(reconcileRoots) > 0 {
-			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, fullScan); err != nil {
+			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, reconcileSnapshot, fullScan); err != nil {
 				slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 			}
 		} else if len(scans) > 0 {
@@ -432,7 +437,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 
 	// Reconcile files that vanished from disk now that the full walk's
 	// seenPaths is known and the scan completed without cancellation.
-	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, fullScan); err != nil {
+	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, reconcileSnapshot, fullScan); err != nil {
 		slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	return nil
@@ -445,7 +450,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 // the newly indexed path instead of leaving a stale duplicate). A scan that saw
 // zero files while the DB still has rows only reconciles when the operator has
 // confirmed cleanup, so an unmounted source can't wipe the catalog.
-func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, fullScan bool) error {
+func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, existingFiles []*scanStateFile, fullScan bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -459,27 +464,28 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 	if blockAll {
 		return nil
 	}
+	if _, err := s.fileRepo.RefreshPresentPaths(ctx, folder.ID, presentScanPaths(seenPaths)); err != nil {
+		return fmt.Errorf("refreshing present audiobook paths: %w", err)
+	}
 
 	now := time.Now().UTC()
 	missing := 0
-	for _, root := range roots {
-		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
-		if err != nil {
-			return fmt.Errorf("listing existing audiobook files for %q: %w", root, err)
+	for _, mf := range existingFiles {
+		if mf == nil || seenPaths[mf.FilePath] || !pathWithinAnyRoot(mf.FilePath, roots) {
+			continue
 		}
-		for _, mf := range existing {
-			if mf == nil || seenPaths[mf.FilePath] {
+		if mf.MissingSince == nil {
+			marked, err := s.fileRepo.MarkMissingIfUnchanged(ctx, mf.ID, mf.ScanGeneration, now)
+			if err != nil {
+				slog.ErrorContext(ctx, "audiobook scan: failed to mark file missing", "component", "scanner",
+					"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 				continue
 			}
-			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
-					slog.ErrorContext(ctx, "audiobook scan: failed to mark file missing", "component", "scanner",
-						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
-					continue
-				}
+			if !marked {
+				continue
 			}
-			missing++
 		}
+		missing++
 	}
 
 	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)
