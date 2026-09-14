@@ -3297,6 +3297,14 @@ func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *model
 	parts = slices.DeleteFunc(parts, func(part *models.MediaFile) bool {
 		return part == nil || part.MediaFolderID != file.MediaFolderID
 	})
+	if len(parts) != file.PresentationPartTotal {
+		return nil, 0, fmt.Errorf("multipart sequence incomplete")
+	}
+	for _, part := range parts {
+		if part.PresentationGroupKey != file.PresentationGroupKey || part.PresentationPartTotal != file.PresentationPartTotal || part.PresentationPartIndex < 1 || part.PresentationPartIndex > file.PresentationPartTotal {
+			return nil, 0, fmt.Errorf("multipart sequence inconsistent")
+		}
+	}
 	parts = slices.Clone(parts)
 	slices.SortStableFunc(parts, func(a, b *models.MediaFile) int {
 		if a == nil && b == nil {
@@ -3319,6 +3327,11 @@ func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *model
 		}
 		return 0
 	})
+	for i, part := range parts {
+		if part.PresentationPartIndex != i+1 {
+			return nil, 0, fmt.Errorf("multipart sequence has missing part")
+		}
+	}
 	var offset float64
 	for _, part := range parts {
 		if part == nil || part.Duration <= 0 {
@@ -3413,7 +3426,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 // skipped for the same reason their progress is not persisted: they share one
 // resume point with the whole item, so a part-local seek to it is meaningless.
 func (h *PlaybackHandler) resumePositionV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) (*float64, error) {
-	if h.StoreProvider == nil || !sessionOwnsResumeTimelineV3(file) {
+	if h.StoreProvider == nil {
 		return nil, nil
 	}
 	targetID := playbackProgressTarget(file)

@@ -99,12 +99,12 @@ func (s *enrichmentStateStore) RecordOutcome(ctx context.Context, contentID, cla
 	if claimToken != "" {
 		tag, err := s.pool.Exec(ctx, `
 			UPDATE audiobook_enrichment_state
-			SET attempts         = attempts + 1,
+			SET attempts         = CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END,
 			    outcome          = $3,
 			    last_error_class = NULL,
 			    last_error       = NULL,
 			    next_attempt_at  = CASE
-			        WHEN $3 = 'no_match' AND attempts + 1 < $4
+			        WHEN $3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) < $4
 			            THEN now() + make_interval(secs => $5::double precision)
 			        WHEN $3 = 'skipped'
 			            THEN now() + make_interval(secs => $6::double precision)
@@ -112,7 +112,7 @@ func (s *enrichmentStateStore) RecordOutcome(ctx context.Context, contentID, cla
 			    END,
 			    last_attempt_at  = now(),
 			    completed_at     = CASE
-			        WHEN $3 = 'success' OR ($3 = 'no_match' AND attempts + 1 >= $4)
+			        WHEN $3 = 'success' OR ($3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) >= $4)
 			            THEN now() ELSE NULL END,
 			    claim_token      = NULL,
 			    lease_until      = NULL,
@@ -343,7 +343,7 @@ func (s *enrichmentStateStore) RecordOutcomeTx(
 		    last_error_class = NULL,
 		    last_error       = NULL,
 		    next_attempt_at  = CASE
-		        WHEN $3 = 'no_match' AND attempts + 1 < $4
+		        WHEN $3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) < $4
 		            THEN now() + make_interval(secs => $5::double precision)
 		        WHEN $3 = 'skipped'
 		            THEN now() + make_interval(secs => $6::double precision)
@@ -351,7 +351,7 @@ func (s *enrichmentStateStore) RecordOutcomeTx(
 		    END,
 		    last_attempt_at  = now(),
 		    completed_at     = CASE
-		        WHEN $3 = 'success' OR ($3 = 'no_match' AND attempts + 1 >= $4)
+		        WHEN $3 = 'success' OR ($3 = 'no_match' AND (CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END) >= $4)
 		            THEN now() ELSE NULL END,
 		    claim_token      = NULL,
 		    lease_until      = NULL,
