@@ -1311,7 +1311,10 @@ func (s *Service) sweepIdleRooms() {
 		if hasMembers {
 			continue
 		}
-		_, _ = s.repo.CloseRoom(ctx, roomID, closedAt)
+		room, closeErr := s.repo.CloseRoom(ctx, roomID, closedAt)
+		if closeErr == nil && room != nil {
+			s.publishRoomState(*room)
+		}
 	}
 }
 
