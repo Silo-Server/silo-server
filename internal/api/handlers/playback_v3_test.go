@@ -5096,6 +5096,52 @@ func TestMultipartResumeFileV3FallsBackWhenDurationMissing(t *testing.T) {
 	}
 }
 
+// When the stored item-absolute position cannot be translated onto the
+// requested part, the planner must not receive it as a part-local start: an
+// absolute offset applied to one part's clock seeks past that part's end. The
+// pre-mapping behavior (start from the beginning) is the safe fallback.
+func TestHandleStartPlaybackV3MultipartResumeFallsBackToStartWhenMappingUnavailable(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	if err := store.SetProgress(context.Background(), "profile-1", "book-1", 250, 400, userstore.ProgressThresholds{}); err != nil {
+		t.Fatalf("seed progress: %v", err)
+	}
+	file := &models.MediaFile{
+		ID: 42, ContentID: "book-1", BaseType: "audiobook", FilePath: writePlaybackTestMediaFile(t, "book.m4b"),
+		Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 3600,
+		AudioTracks:           []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
+		PresentationKind:      "multipart",
+		PresentationGroupKey:  "book-1",
+		PresentationPartIndex: 1,
+		PresentationPartTotal: 3,
+	}
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	// The catalog only knows part 1, so the item-absolute position has no
+	// complete ordered part list to map onto.
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{"book-1": {file}}}
+
+	request := v3HandlerStartRequest()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext())
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.PlaybackPlan == nil {
+		t.Fatalf("response = %#v", response)
+	}
+	if got := response.PlaybackPlan.Timeline.PlayerStartSeconds; got != 0 {
+		t.Fatalf("part-local start = %v, want 0; an item-absolute resume position leaked into a part timeline", got)
+	}
+}
+
 func postPlaybackReplanV3(t *testing.T, handler *PlaybackHandler, sessionID string, request playback.ReplanRequestV3) playback.DecisionResponseV3 {
 	t.Helper()
 	body, err := json.Marshal(request)

@@ -538,7 +538,7 @@ func reportAudiobookScanProgress(ctx context.Context, folderID int, total, proce
 }
 
 func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, skipped *int64) error {
-	_, isUnchanged, skipErr := s.audiobookFolderShouldSkip(ctx, folder, folderPath)
+	existingContentID, isUnchanged, skipErr := s.audiobookFolderShouldSkip(ctx, folder, folderPath)
 	if skipErr != nil {
 		slog.WarnContext(ctx, "audiobook scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
@@ -546,6 +546,10 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 			"error", skipErr,
 		)
 	} else if isUnchanged {
+		// Unchanged files still get the link repair, matching the ebook scan:
+		// a linked item short-circuits on one cheap lookup, while an item that
+		// predates the linker (or whose link failed) is repaired here.
+		s.autoLinkLiteraryWork(ctx, existingContentID)
 		atomic.AddInt64(skipped, 1)
 		return nil
 	}
@@ -1017,6 +1021,13 @@ func (s *Scanner) upsertAudiobookMediaFilesTx(
 		info, err := os.Stat(af.Path)
 		if err != nil {
 			return fmt.Errorf("stat media file %s: %w", af.Path, err)
+		}
+		// The probe read a specific version of the file. If size or mtime
+		// moved while it ran, the probe facts describe bytes this row would
+		// not: fail the folder so the next scan reprocesses it instead of
+		// persisting a mismatch the unchanged check would then trust.
+		if af.Size != info.Size() || !sameFileModifiedAt(&af.ModifiedAt, info.ModTime()) {
+			return fmt.Errorf("media file %s changed while it was probed; will rescan", af.Path)
 		}
 		modifiedAt := normalizeFileModifiedAt(info.ModTime())
 		chapters := make([]models.MediaChapter, len(af.Chapters))

@@ -257,6 +257,12 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			            AND (retry.next_attempt_at IS NULL OR retry.next_attempt_at <= now())
 			            AND (retry.outcome = 'skipped' OR retry.attempts < $1)
 			      )
+			      OR EXISTS (
+			          SELECT 1
+			          FROM audiobook_enrichment_state pending
+			          WHERE pending.content_id = mi.content_id
+			            AND pending.outcome IS NULL
+			      )
 			  )
 			  AND NOT EXISTS (
 			      SELECT 1
@@ -296,18 +302,39 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 		wg       sync.WaitGroup
 		enriched int64
 	)
+	// Claim cleanup must outlive the canceled batch context, but it cannot
+	// hand every remaining item its own five-second timeout: the drain is
+	// serial, so an unreachable database would stretch cancellation by five
+	// seconds per queued item. One lazily-created deadline bounds the whole
+	// cleanup phase.
+	var (
+		cleanupOnce   sync.Once
+		cleanupCtx    context.Context
+		cleanupCancel context.CancelFunc
+	)
+	defer func() {
+		if cleanupCancel != nil {
+			cleanupCancel()
+		}
+	}()
+	release := func(item enrichmentItemRow) {
+		cleanupOnce.Do(func() {
+			cleanupCtx, cleanupCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		})
+		e.releaseClaim(cleanupCtx, item)
+	}
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for item := range ch {
 				if ctx.Err() != nil {
-					e.releaseClaim(item)
+					release(item)
 					continue // drain and return queued claims to the pool
 				}
 				if err := enrichFn(ctx, item); err != nil {
 					if ctx.Err() != nil {
-						e.releaseClaim(item)
+						release(item)
 					}
 					slog.WarnContext(ctx, "audiobook enrichment: item failed", "component", "audiobooks",
 						"content_id", item.ContentID,
@@ -327,7 +354,7 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 			// Items not sent to a worker still hold a database lease from
 			// claimBatch. Return them immediately instead of waiting for the
 			// two-hour recovery lease to expire.
-			e.releaseClaim(item)
+			release(item)
 		}
 	}
 	close(ch)
@@ -335,18 +362,14 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 	return int(enriched)
 }
 
-func (e *Enricher) releaseClaim(item enrichmentItemRow) {
-	e.releaseClaimContext(context.Background(), item)
-}
-
-func (e *Enricher) releaseClaimContext(ctx context.Context, item enrichmentItemRow) {
+// releaseClaim returns an unprocessed claim to the pool. ctx is the batch's
+// shared cleanup context, not the canceled request context.
+func (e *Enricher) releaseClaim(ctx context.Context, item enrichmentItemRow) {
 	if e == nil || e.state == nil || item.ClaimToken == "" {
 		return
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := e.state.ReleaseClaim(cleanupCtx, item.ContentID, item.ClaimToken); err != nil {
-		slog.WarnContext(cleanupCtx, "audiobook enrichment: could not release canceled claim", "component", "audiobooks", "content_id", item.ContentID, "error", err)
+	if err := e.state.ReleaseClaim(ctx, item.ContentID, item.ClaimToken); err != nil {
+		slog.WarnContext(ctx, "audiobook enrichment: could not release canceled claim", "component", "audiobooks", "content_id", item.ContentID, "error", err)
 	}
 }
 
@@ -354,8 +377,10 @@ func (e *Enricher) releaseClaimContext(ctx context.Context, item enrichmentItemR
 // "Needs enrichment" means the item has no provider identity at all AND
 // last_refreshed IS NULL, with a bounded retry exception for clean no-match
 // results and a slower retry loop for skipped items (for example, a library
-// that had no provider chain configured yet). Provider errors use the durable
-// error backoff path and do not stamp last_refreshed.
+// that had no provider chain configured yet). Provider errors park a due
+// retry in the state row and stay eligible even after an earlier outcome
+// stamped last_refreshed, so a transient failure mid-retry cannot silently
+// end the retry sequence.
 //
 // This keys on identity rather than on poster_path, which is what it used to
 // test. Audiobook files essentially always carry embedded cover art, so the
@@ -392,6 +417,12 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			            AND retry.outcome IN ('no_match', 'skipped')
 			            AND (retry.next_attempt_at IS NULL OR retry.next_attempt_at <= now())
 			            AND (retry.outcome = 'skipped' OR retry.attempts < $3)
+			      )
+			      OR EXISTS (
+			          SELECT 1
+			          FROM audiobook_enrichment_state pending
+			          WHERE pending.content_id = mi.content_id
+			            AND pending.outcome IS NULL
 			      )
 			  )
 			  AND NOT EXISTS (

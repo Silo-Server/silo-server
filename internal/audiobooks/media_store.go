@@ -106,7 +106,7 @@ func (s *ABSMediaStore) GetAudiobookByID(ctx context.Context, contentID string, 
 	if err := s.hydrateAudiobookSeries(ctx, []*models.MediaItem{item}); err != nil {
 		_ = err
 	}
-	_ = s.hydrateAudiobookRuntime(ctx, []*models.MediaItem{item})
+	_ = s.hydrateAudiobookRuntime(ctx, []*models.MediaItem{item}, access, 0)
 	return item, nil
 }
 
@@ -139,7 +139,7 @@ func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []str
 	if err := s.hydrateAudiobookSeries(ctx, books); err != nil {
 		_ = err
 	}
-	_ = s.hydrateAudiobookRuntime(ctx, books)
+	_ = s.hydrateAudiobookRuntime(ctx, books, access, 0)
 	out := make(map[string]*models.MediaItem, len(books))
 	for _, b := range books {
 		out[b.ContentID] = b
@@ -250,7 +250,7 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 	if err := s.hydrateAudiobookSeries(ctx, ordered); err != nil {
 		_ = err
 	}
-	_ = s.hydrateAudiobookRuntime(ctx, ordered, libraryID)
+	_ = s.hydrateAudiobookRuntime(ctx, ordered, access, libraryID)
 	return ordered, total, nil
 }
 
@@ -260,7 +260,13 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 // the resulting minutes to seconds at the wire boundary. Keeping the catalog
 // unit intact avoids changing the native API contract while ensuring library
 // listings have a useful duration even when a scan did not populate Runtime.
-func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*models.MediaItem, libraryIDs ...int64) error {
+//
+// The rollup is scoped to the folders the caller may serve: one content ID can
+// be linked to copies in several libraries, and an unrestricted MAX would let
+// an inaccessible copy's duration decide what the viewer sees. A non-zero
+// route library pins the rollup to that folder; otherwise the access
+// allowlist applies, with disabled libraries excluded either way.
+func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*models.MediaItem, access catalog.AccessFilter, libraryID int64) error {
 	if len(items) == 0 || s.Pool == nil {
 		return nil
 	}
@@ -273,12 +279,17 @@ func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*mo
 	if len(ids) == 0 {
 		return nil
 	}
+	allowed := access.AllowedLibraryIDs
+	if libraryID != 0 {
+		allowed = []int{int(libraryID)}
+	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT content_id, COALESCE(MAX(duration_seconds), 0)
 		FROM audiobook_item_file_stats
 		WHERE content_id = ANY($1)
-          AND ($2 = 0 OR media_folder_id = $2)
-		GROUP BY content_id`, ids, firstLibraryID(libraryIDs))
+		  AND ($2::int[] IS NULL OR media_folder_id = ANY($2))
+		  AND (COALESCE(cardinality($3::int[]), 0) = 0 OR NOT (media_folder_id = ANY($3)))
+		GROUP BY content_id`, ids, allowed, access.DisabledLibraryIDs)
 	if err != nil {
 		return fmt.Errorf("abs_media_store: load audiobook durations: %w", err)
 	}
@@ -302,13 +313,6 @@ func (s *ABSMediaStore) hydrateAudiobookRuntime(ctx context.Context, items []*mo
 		}
 	}
 	return nil
-}
-
-func firstLibraryID(ids []int64) int64 {
-	if len(ids) > 0 {
-		return ids[0]
-	}
-	return 0
 }
 
 // appendAudiobookFilterConditions pushes an ABS authors/series/narrators
@@ -558,7 +562,7 @@ func (s *ABSMediaStore) ListAudiobookLibraries(ctx context.Context, access catal
 // RecentlyAdded/Discover. It runs a parameterized SQL fragment that yields
 // a list of audiobook content_ids; the caller composes the WHERE/ORDER
 // portions. Returned items have People hydrated.
-func (s *ABSMediaStore) listAudiobookIDs(ctx context.Context, sql string, args []any) ([]*models.MediaItem, error) {
+func (s *ABSMediaStore) listAudiobookIDs(ctx context.Context, sql string, args []any, access catalog.AccessFilter, libraryID int64) ([]*models.MediaItem, error) {
 	if s.Pool == nil {
 		return nil, fmt.Errorf("abs_media_store: no pgx pool")
 	}
@@ -601,7 +605,7 @@ func (s *ABSMediaStore) listAudiobookIDs(ctx context.Context, sql string, args [
 	if err := s.hydrateAudiobookSeries(ctx, ordered); err != nil {
 		_ = err // non-fatal
 	}
-	if err := s.hydrateAudiobookRuntime(ctx, ordered); err != nil {
+	if err := s.hydrateAudiobookRuntime(ctx, ordered, access, libraryID); err != nil {
 		_ = err // non-fatal
 	}
 	return ordered, nil
@@ -670,7 +674,7 @@ func (s *ABSMediaStore) SearchAudiobooks(ctx context.Context, libraryID int64, q
 		ORDER BY MIN(rank), LOWER(sort_title), LOWER(title)
 		LIMIT $` + strconv.Itoa(argIdx) + `
 	`
-	return s.listAudiobookIDs(ctx, sql, args)
+	return s.listAudiobookIDs(ctx, sql, args, access, libraryID)
 }
 
 // ListContinueListening returns audiobooks the user has in-progress (and
@@ -709,7 +713,7 @@ func (s *ABSMediaStore) ListContinueListening(ctx context.Context, userID, profi
 		ORDER BY wp.updated_at DESC
 		LIMIT $3
 	`
-	return s.listAudiobookIDs(ctx, sql, args)
+	return s.listAudiobookIDs(ctx, sql, args, access, libraryID)
 }
 
 // ListRecentlyAdded returns the most recently added audiobooks. Added-at
@@ -739,7 +743,7 @@ func (s *ABSMediaStore) ListRecentlyAdded(ctx context.Context, libraryID int64, 
 		ORDER BY added.added_at DESC
 		LIMIT $1
 	`
-	return s.listAudiobookIDs(ctx, sql, args)
+	return s.listAudiobookIDs(ctx, sql, args, access, libraryID)
 }
 
 // ListDiscover returns a random sampling of audiobooks for the home
@@ -768,7 +772,7 @@ func (s *ABSMediaStore) ListDiscover(ctx context.Context, libraryID int64, limit
 		ORDER BY random()
 		LIMIT $1
 	`
-	return s.listAudiobookIDs(ctx, sql, args)
+	return s.listAudiobookIDs(ctx, sql, args, access, libraryID)
 }
 
 // RefreshAuthorCounts rebuilds the abs_audiobook_author_counts materialized
@@ -1091,7 +1095,7 @@ func (s *ABSMediaStore) GetAuthorByID(ctx context.Context, authorID string, acce
 		FROM item_people ip
 		JOIN media_items mi ON mi.content_id = ip.content_id
 		WHERE `+strings.Join(conditions, " AND ")+`
-		ORDER BY LOWER(mi.title)`, args)
+		ORDER BY LOWER(mi.title)`, args, access, 0)
 	if err != nil {
 		return abs.Author{}, fmt.Errorf("abs_media_store: get author books: %w", err)
 	}
@@ -1126,7 +1130,7 @@ func (s *ABSMediaStore) GetSeriesByName(ctx context.Context, seriesName string, 
 		FROM audiobook_series asx
 		JOIN media_items mi ON mi.content_id = asx.content_id
 		WHERE `+strings.Join(conditions, " AND ")+`
-		ORDER BY asx.series_index NULLS LAST, LOWER(mi.title)`, args)
+		ORDER BY asx.series_index NULLS LAST, LOWER(mi.title)`, args, access, 0)
 	if err != nil {
 		return abs.Series{}, fmt.Errorf("abs_media_store: get series books: %w", err)
 	}

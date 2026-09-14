@@ -33,11 +33,13 @@ const (
 	EnrichmentOutcomeSkipped EnrichmentOutcome = "skipped"
 )
 
-// Clean no-match results are retried a small number of times. Provider
-// catalogs change, and a one-shot no-match made a temporary provider omission
-// indistinguishable from a real absence. Skips (for example, a library with
-// no configured provider chain) remain retryable indefinitely at a slower
-// cadence so enabling a provider later does not require rebuilding the item.
+// Clean no-match results are retried a small number of times consecutively.
+// Provider catalogs change, and a one-shot no-match made a temporary provider
+// omission indistinguishable from a real absence. Any successful match or
+// transient failure resets that consecutive no-match streak. Skips (for
+// example, a library with no configured provider chain) remain retryable
+// indefinitely at a slower cadence so enabling a provider later does not
+// require rebuilding the item.
 const (
 	audiobookNoMatchRetryLimit = 3
 	audiobookNoMatchRetryDelay = 24 * time.Hour
@@ -149,12 +151,15 @@ func (s *enrichmentStateStore) RecordOutcome(ctx context.Context, contentID, cla
 			     THEN now() ELSE NULL END,
 			NULL, NULL, now())
 		ON CONFLICT (content_id) DO UPDATE SET
-			attempts         = audiobook_enrichment_state.attempts + 1,
+			attempts         = CASE
+				WHEN EXCLUDED.outcome = 'no_match' AND audiobook_enrichment_state.outcome = 'no_match' THEN audiobook_enrichment_state.attempts + 1
+				ELSE 1
+			END,
 			outcome          = EXCLUDED.outcome,
 			last_error_class = NULL,
 				last_error       = NULL,
 				next_attempt_at  = CASE
-				    WHEN EXCLUDED.outcome = 'no_match' AND audiobook_enrichment_state.attempts + 1 < $3
+				    WHEN EXCLUDED.outcome = 'no_match' AND (CASE WHEN audiobook_enrichment_state.outcome = 'no_match' THEN audiobook_enrichment_state.attempts + 1 ELSE 1 END) < $3
 				        THEN now() + make_interval(secs => $4::double precision)
 				    WHEN EXCLUDED.outcome = 'skipped'
 				        THEN now() + make_interval(secs => $5::double precision)
@@ -162,7 +167,7 @@ func (s *enrichmentStateStore) RecordOutcome(ctx context.Context, contentID, cla
 				END,
 			last_attempt_at  = now(),
 			completed_at     = CASE
-			    WHEN EXCLUDED.outcome = 'success' OR (EXCLUDED.outcome = 'no_match' AND audiobook_enrichment_state.attempts + 1 >= $3)
+				    WHEN EXCLUDED.outcome = 'success' OR (EXCLUDED.outcome = 'no_match' AND (CASE WHEN audiobook_enrichment_state.outcome = 'no_match' THEN audiobook_enrichment_state.attempts + 1 ELSE 1 END) >= $3)
 			        THEN now() ELSE NULL END,
 			claim_token      = NULL,
 			lease_until      = NULL,

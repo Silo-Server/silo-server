@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // narratorSuffixRE matches a trailing "read by X" / "(Read by X)" /
@@ -101,6 +102,11 @@ type parsedAudiobookFile struct {
 	CodecAudio    string // aac, mp3, opus, flac
 	Container     string // m4b, mp3, mka, ...
 	AudioChannels int
+	// Size and ModifiedAt are captured before probing so the persisted row
+	// can be checked against them after the probe: a file replaced mid-scan
+	// must not store old probe facts under the new file's identity.
+	Size       int64
+	ModifiedAt time.Time
 }
 
 // parseAudiobookFolder reads a single audiobook folder and returns its
@@ -148,6 +154,10 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	book := &parsedAudiobook{}
 
 	if len(audioFiles) == 1 {
+		info, err := os.Stat(audioFiles[0])
+		if err != nil {
+			return nil, fmt.Errorf("stat audiobook file %s: %w", audioFiles[0], err)
+		}
 		probed, err := ProbeFile(ctx, ffprobePath, audioFiles[0])
 		if err != nil {
 			return nil, fmt.Errorf("probe audiobook file %s: %w", audioFiles[0], err)
@@ -162,6 +172,8 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 			CodecAudio:    probed.CodecAudio,
 			Container:     probed.Container,
 			AudioChannels: probed.AudioChannels,
+			Size:          info.Size(),
+			ModifiedAt:    normalizeFileModifiedAt(info.ModTime()),
 		}}
 		return book, nil
 	}
@@ -172,6 +184,10 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	book.Files = make([]parsedAudiobookFile, 0, len(audioFiles))
 	for i, path := range audioFiles {
 		stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("stat audiobook file %s: %w", path, err)
+		}
 		probed, err := ProbeFile(ctx, ffprobePath, path)
 		if err != nil {
 			return nil, fmt.Errorf("probe audiobook file %s: %w", path, err)
@@ -193,6 +209,8 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 			CodecAudio:    probed.CodecAudio,
 			Container:     probed.Container,
 			AudioChannels: probed.AudioChannels,
+			Size:          info.Size(),
+			ModifiedAt:    normalizeFileModifiedAt(info.ModTime()),
 		})
 	}
 	return book, nil

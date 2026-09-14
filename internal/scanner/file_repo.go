@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -3118,9 +3119,11 @@ func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) (
 }
 
 // GetByContentIDPresentation is the audiobook presentation ordering variant.
-// Multipart books use the scanner-assigned part index; file path and id are
-// deterministic fallbacks for legacy rows without one. Keeping this separate
-// avoids changing ordering assumptions in movie and series playback.
+// Multipart books use the scanner-assigned part index. Rows that predate the
+// column have no index and SQL cannot apply naturalPathLess to them, so those
+// legacy rows are re-sorted in Go after the query; part10.m4b must follow
+// part2.m4b for them too. Keeping this separate avoids changing ordering
+// assumptions in movie and series playback.
 func (r *FileRepository) GetByContentIDPresentation(ctx context.Context, contentID string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files
 		WHERE content_id = $1 AND missing_since IS NULL
@@ -3130,7 +3133,37 @@ func (r *FileRepository) GetByContentIDPresentation(ctx context.Context, content
 		return nil, fmt.Errorf("querying presentation files by content_id: %w", err)
 	}
 	defer rows.Close()
-	return scanMediaFiles(rows)
+	files, err := scanMediaFiles(rows)
+	if err != nil {
+		return nil, err
+	}
+	sortPresentationFiles(files)
+	return files, nil
+}
+
+// sortPresentationFiles orders multipart rows for one content ID: indexed rows
+// by part index, then legacy rows without one by natural file path. The SQL
+// ordering already places the null-index group last, so this only fixes the
+// intra-group lexical order (part10 before part2) that SQL cannot express.
+func sortPresentationFiles(files []*models.MediaFile) {
+	sort.SliceStable(files, func(i, j int) bool {
+		a, b := files[i], files[j]
+		if a == nil || b == nil {
+			return b == nil && a != nil
+		}
+		aIndexed := a.PresentationPartIndex > 0
+		bIndexed := b.PresentationPartIndex > 0
+		switch {
+		case aIndexed && bIndexed:
+			return a.PresentationPartIndex < b.PresentationPartIndex
+		case aIndexed != bIndexed:
+			return aIndexed
+		}
+		if a.FilePath != b.FilePath {
+			return naturalPathLess(a.FilePath, b.FilePath)
+		}
+		return a.ID < b.ID
+	})
 }
 
 // FirstDurationsByContentIDs returns the probed duration (seconds) of the

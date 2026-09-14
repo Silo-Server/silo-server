@@ -1629,7 +1629,6 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	timings.mark("file_preflight")
 	if req.StartPosition == nil {
-		resumeWasOmitted := true
 		req.StartPosition, err = h.resumePositionV3(r.Context(), userID, profileID, effectiveFile)
 		if err != nil {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to load saved playback progress")
@@ -1638,10 +1637,16 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// planner starts a single file-local timeline. When the stored resume
 		// point is item-absolute, select the corresponding part and translate
 		// it to that part's local clock. Explicit client positions remain
-		// unchanged; incomplete duration metadata keeps the safe fallback.
-		if resumeWasOmitted && req.StartPosition != nil && effectiveFile.PresentationPartTotal > 1 {
-			if target, local, resolveErr := h.multipartResumeFileV3(r.Context(), effectiveFile, *req.StartPosition); resolveErr != nil {
+		// unchanged.
+		if req.StartPosition != nil && effectiveFile.PresentationPartTotal > 1 {
+			target, local, resolveErr := h.multipartResumeFileV3(r.Context(), effectiveFile, *req.StartPosition)
+			if resolveErr != nil {
+				// An item-absolute position cannot be projected onto this
+				// file's part-local clock without the complete ordered part
+				// list. Applying it to the requested part would seek that part
+				// far past its end, so start from the beginning instead.
 				slog.DebugContext(r.Context(), "protocol v3 multipart resume mapping unavailable", "component", "api", "file_id", effectiveFile.ID, "error", resolveErr)
+				req.StartPosition = nil
 			} else if target != nil {
 				effectiveFile = h.ensurePlaybackProbe(r.Context(), target)
 				audioIndex = remapAudioIndexV3(requestedFile, effectiveFile, audioIndex)
@@ -1649,6 +1654,8 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 					return playback.DecisionResponseV3{}, playbackPreflightOperationError(err)
 				}
 				req.StartPosition = &local
+			} else {
+				req.StartPosition = nil
 			}
 		}
 	}
@@ -3422,9 +3429,9 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 // chosen for zero and then seeked to 40 minutes is a different route.
 //
 // A client that wants to start over sends an explicit `start_position: 0`; only
-// omission asks the server for its resume policy. Parts of a multipart item are
-// skipped for the same reason their progress is not persisted: they share one
-// resume point with the whole item, so a part-local seek to it is meaningless.
+// omission asks the server for its resume policy. Multipart progress is stored
+// as one item-level position and is translated to a part-local seek only when
+// the complete ordered part timeline is available.
 func (h *PlaybackHandler) resumePositionV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) (*float64, error) {
 	if h.StoreProvider == nil {
 		return nil, nil
