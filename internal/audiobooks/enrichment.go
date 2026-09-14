@@ -336,6 +336,10 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 }
 
 func (e *Enricher) releaseClaim(item enrichmentItemRow) {
+	e.releaseClaimContext(context.Background(), item)
+}
+
+func (e *Enricher) releaseClaimContext(ctx context.Context, item enrichmentItemRow) {
 	if e == nil || e.state == nil || item.ClaimToken == "" {
 		return
 	}

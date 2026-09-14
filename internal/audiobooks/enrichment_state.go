@@ -338,7 +338,7 @@ func (s *enrichmentStateStore) RecordOutcomeTx(
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE audiobook_enrichment_state
-		SET attempts         = attempts + 1,
+		SET attempts         = CASE WHEN $3 = 'no_match' AND outcome IS DISTINCT FROM 'no_match' THEN 1 ELSE attempts + 1 END,
 		    outcome          = $3,
 		    last_error_class = NULL,
 		    last_error       = NULL,
