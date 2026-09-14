@@ -20,8 +20,9 @@ type clusterSuggestionEvent struct {
 }
 
 const (
-	clusterMessageTypeKey = "type"
-	suggestionsUpdateType = "suggestions_update"
+	clusterMessageTypeKey       = "type"
+	suggestionsUpdateType       = "suggestions_update"
+	clusterSuggestionsEventType = "watch_together_suggestions"
 )
 
 func (s *Service) publishSuggestionUpdate(roomID string) {
@@ -41,7 +42,7 @@ func (s *Service) publishSuggestionUpdate(roomID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = bus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: "watch_together_suggestions", Payload: string(payload)})
+		_ = bus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: clusterSuggestionsEventType, Payload: string(payload)})
 	}()
 }
 
@@ -67,7 +68,7 @@ func (s *Service) publishRoomState(room Room) {
 }
 
 func (s *Service) handleClusterEvent(event cache.Event) {
-	if event.Type == "watch_together_suggestions" {
+	if event.Type == clusterSuggestionsEventType {
 		if s.suggestions == nil {
 			return
 		}
