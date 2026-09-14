@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -482,5 +483,46 @@ func TestResidentSupervisorDoesNotStartADuplicateProviderSlug(t *testing.T) {
 	}
 	if _, err := f.host.Client(6); !errors.Is(err, pluginhost.ErrClientNotFound) {
 		t.Fatalf("duplicate slug installation was launched: %v", err)
+	}
+}
+
+// A change of host identity (a proxy whose stream_nodes row was deleted and
+// re-registered under a new id) replaces every running resident: the process
+// keeps the identity it started with in memory, so it must not go on serving
+// under the new one.
+func TestResidentSupervisorReplacesProcessWhenHostIdentityChanges(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	ctx := context.Background()
+	var identity atomic.Value
+	identity.Store("node:1")
+	f.service.SetResidentHostIdentity(func() string { return identity.Load().(string) })
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "running under node:1", running)
+	first, err := f.host.Client(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.service.OnLifecycleChange(ctx)
+	if same, err := f.host.Client(5); err != nil || same != first {
+		t.Fatalf("an unchanged identity replaced the process (err=%v)", err)
+	}
+
+	identity.Store("node:2")
+	f.service.OnLifecycleChange(ctx)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		current, err := f.host.Client(5)
+		state, _ := f.service.Residents().State(5)
+		if err == nil && current != first && state.State == ResidentRunning {
+			if state.RestartCount != 0 || state.LastError != "" {
+				t.Fatalf("identity change counted as a failure: %+v", state)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("resident kept the old process after the host identity changed (err=%v, state=%+v)", err, state)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

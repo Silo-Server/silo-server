@@ -91,6 +91,11 @@ Downstream, `Path.Provider` selects the proxy origin a client is handed: a
 tailnet client cannot reach a LAN proxy origin, so a provider path returns
 that provider's connected origin on the proxy or falls back to API relay.
 
+A status push is accepted only from the process holding the installation's
+current ingress token. A push that was in flight when its process was
+stopped, crashed, or replaced lands after the revoke and is dropped, so a
+dead instance can never write a stale origin over the replacement's.
+
 ## Status
 
 Plugins push status on every change through
@@ -158,7 +163,11 @@ to them.
   enabled proxy node: disabling the node or changing its type stops its
   providers on the next reconcile, since the API stops listing it as a
   network-access host and could no longer disconnect them. The gate is
-  re-checked on every reconcile.
+  re-checked on every reconcile. The node scope is also the host identity
+  residents run under: if the row is deleted and re-registered under a new
+  id, the next reconcile replaces every provider process, since a process
+  keeps the identity it started with (its overlay node key, the node id it
+  reports) in memory.
 - Lifecycle changes happen on the API server. It publishes
   `cache.EventPluginsChanged` on `ChannelAdmin` after every
   `OnLifecycleChange`; a runtime config save or admin restart additionally

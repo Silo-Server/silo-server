@@ -114,6 +114,18 @@ func newProxyPluginHost(
 	// A proxy whose row is unknown must not start providers: their node keys
 	// would have no scope. The gate is re-evaluated on every reconcile, so
 	// the poll picks the row up once the watcher resolves it.
+	// A provider process keeps the node identity it started under in memory
+	// (its overlay node key, the node id it reports). If the operator deletes
+	// and re-registers this proxy the watcher resolves a new row id; the
+	// state scope follows it per call, so the process must be replaced
+	// rather than left reading another scope's keys.
+	service.SetResidentHostIdentity(func() string {
+		id, ok := watcher.NodeRowID()
+		if !ok {
+			return ""
+		}
+		return plugins.NodeHostScope(int64(id))
+	})
 	nodes := nodepool.NewRepository(pool)
 	service.SetResidentGate(func(ctx context.Context) error {
 		id, ok := watcher.NodeRowID()

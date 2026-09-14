@@ -110,6 +110,9 @@ type RuntimeHostServer struct {
 	hostInfo      HostInfoFunc
 	instanceState InstanceStateStore
 	networkAccess NetworkAccessBroker
+	// ingressToken is the token issued to this process instance; pushes are
+	// accepted only while it is current.
+	ingressToken string
 	// provider is the network_access_provider.v1 slug from the plugin's
 	// manifest; empty for plugins that are not providers.
 	provider string
@@ -135,6 +138,10 @@ type RuntimeHostOptions struct {
 	// NetworkAccessProvider is the provider slug the manifest declares, or
 	// empty. Only providers may push network access status.
 	NetworkAccessProvider string
+	// IngressToken is the token issued to this process instance. Status
+	// pushes are accepted only while it is still the installation's current
+	// token.
+	IngressToken string
 }
 
 // NewRuntimeHostServerWithOptions builds the server the host binds for one
@@ -149,6 +156,7 @@ func NewRuntimeHostServerWithOptions(opts RuntimeHostOptions) *RuntimeHostServer
 	s.instanceState = opts.InstanceState
 	s.networkAccess = opts.NetworkAccess
 	s.provider = opts.NetworkAccessProvider
+	s.ingressToken = opts.IngressToken
 	s.logger = opts.Logger
 	if s.logger == nil {
 		s.logger = hclog.NewNullLogger()
@@ -487,7 +495,15 @@ func (s *RuntimeHostServer) ReportNetworkAccessStatus(_ context.Context, req *pl
 		return &pluginv1.ReportNetworkAccessStatusResponse{}, nil
 	}
 	entry := NetworkAccessStatusFromProto(s.installationID, s.provider, req.GetStatus())
-	previous, changed := s.networkAccess.Report(entry)
+	previous, changed, accepted := s.networkAccess.ReportFor(s.installationID, s.ingressToken, entry)
+	if !accepted {
+		// This process's token was revoked while the push was in flight:
+		// the host already stopped or replaced it. Its status must not
+		// overwrite whatever the replacement reports.
+		s.logger.Debug("network access status from a revoked process instance dropped",
+			"plugin_id", s.pluginID, "installation_id", s.installationID, "provider", s.provider)
+		return &pluginv1.ReportNetworkAccessStatusResponse{}, nil
+	}
 	if changed {
 		s.logger.Info("network access provider state changed",
 			"plugin_id", s.pluginID,

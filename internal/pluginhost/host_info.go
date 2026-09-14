@@ -68,7 +68,11 @@ type NetworkAccessBroker interface {
 	// current one, so a late stop cannot revoke a replacement's token.
 	Revoke(installationID int, token string)
 	IngressToken(installationID int) (string, bool)
-	Report(status netaccess.Status) (previous netaccess.Status, changed bool)
+	// ReportFor records a status push from the process holding token. A push
+	// from a process whose token was already revoked (it crashed, was
+	// stopped, or was replaced while the RPC was in flight) is dropped, so a
+	// dead instance can never write a stale origin back over a fresh one.
+	ReportFor(installationID int, token string, status netaccess.Status) (previous netaccess.Status, changed bool, accepted bool)
 }
 
 // NetworkAccessProviderSlug returns the provider slug a manifest declares

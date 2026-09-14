@@ -140,6 +140,10 @@ type residentEntry struct {
 	id          int
 	version     string
 	installPath string
+	// hostIdentity is the host identity the running process was launched
+	// under (a proxy's instance-state scope). A change means the process
+	// holds another host's in-memory identity and is replaced.
+	hostIdentity string
 
 	state         ResidentState
 	failures      int
@@ -193,6 +197,11 @@ type ResidentSupervisor struct {
 	// keep overlay node keys under, so it runs none until the row resolves.
 	gate    func(ctx context.Context) error
 	gateErr string
+	// hostIdentity, when set, names the identity residents run under on this
+	// host; a proxy returns its node scope. Reconcile replaces every running
+	// resident when it changes, since a process keeps the identity it was
+	// started with (its overlay node key, its reported node id) in memory.
+	hostIdentity func() string
 }
 
 // SetResidentGate installs a precondition every reconcile checks before it
@@ -206,6 +215,20 @@ func (s *Service) SetResidentGate(gate func(ctx context.Context) error) {
 	}
 	s.resident.mu.Lock()
 	s.resident.gate = gate
+	s.resident.mu.Unlock()
+}
+
+// SetResidentHostIdentity installs the identity residents run under on this
+// host. When the returned value changes between reconciles, every running
+// resident is stopped and started again so no process keeps serving under
+// a previous identity; a proxy passes its node scope so a deleted and
+// re-registered row (new stream_nodes id) restarts its providers.
+func (s *Service) SetResidentHostIdentity(identity func() string) {
+	if s == nil || s.resident == nil {
+		return
+	}
+	s.resident.mu.Lock()
+	s.resident.hostIdentity = identity
 	s.resident.mu.Unlock()
 }
 
@@ -262,7 +285,12 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 	r.mu.Lock()
 	gate := r.gate
 	previousGateErr := r.gateErr
+	identity := r.hostIdentity
 	r.mu.Unlock()
+	hostIdentity := ""
+	if identity != nil {
+		hostIdentity = identity()
+	}
 
 	var (
 		desired map[int]*Installation
@@ -315,19 +343,23 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 	for id, installation := range desired {
 		entry, ok := r.entries[id]
 		if !ok {
-			entry = &residentEntry{id: id, version: installation.Version, installPath: installation.InstallPath, state: ResidentStopped}
+			entry = &residentEntry{id: id, version: installation.Version, installPath: installation.InstallPath, hostIdentity: hostIdentity, state: ResidentStopped}
 			r.entries[id] = entry
 			r.startLocked(entry)
 			continue
 		}
-		if entry.version != installation.Version || entry.installPath != installation.InstallPath {
+		if entry.hostIdentity != hostIdentity {
+			r.opts.Logger.InfoContext(ctx, "host identity changed; replacing resident plugin process", "component", "plugins",
+				"installation_id", id, "previous_identity", entry.hostIdentity, "identity", hostIdentity)
+		}
+		if entry.version != installation.Version || entry.installPath != installation.InstallPath || entry.hostIdentity != hostIdentity {
 			// A replaced or auto-updated binary gets a fresh failure budget,
 			// and the process built from the old binary is stopped before
 			// the new one starts. The host that made the change already
 			// stopped its own process; on any other host (a proxy node) it
 			// is still alive, and ensureClient would keep it because the
 			// row and the running manifest agree on nothing it checks.
-			entry.version, entry.installPath = installation.Version, installation.InstallPath
+			entry.version, entry.installPath, entry.hostIdentity = installation.Version, installation.InstallPath, hostIdentity
 			r.resetLocked(entry)
 			entry.state = ResidentStarting
 			entry.gen++

@@ -231,7 +231,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		return nil, fmt.Errorf("unexpected plugin runtime client type %T", rawClient)
 	}
 
-	if err := h.bindRuntimeHost(ctx, rpcClient, req.Manifest.GetPluginId(), req.InstallationID, provider); err != nil {
+	if err := h.bindRuntimeHost(ctx, rpcClient, req.Manifest.GetPluginId(), req.InstallationID, provider, ingressToken); err != nil {
 		_ = protocol.Close()
 		process.Kill()
 		return nil, fmt.Errorf("bind runtime host: %w", err)
@@ -480,7 +480,7 @@ func (h *Host) stopInstance(instance *instance) {
 // tears it down.
 //
 // Skipped when no RuntimeHost services are configured.
-func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int, provider string) error {
+func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int, provider, ingressToken string) error {
 	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil &&
 		h.hostInfo == nil && h.instanceState == nil && h.networkAccess == nil {
 		return nil
@@ -509,6 +509,7 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 			PluginID:              pluginID,
 			InstallationID:        installationID,
 			NetworkAccessProvider: provider,
+			IngressToken:          ingressToken,
 		})
 		pluginv1.RegisterRuntimeHostServer(s, srv)
 		return s

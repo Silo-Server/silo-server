@@ -1,6 +1,9 @@
 package netaccess
 
-import "sync"
+import (
+	"crypto/subtle"
+	"sync"
+)
 
 // Broker ties the token registry and the status cache to resident plugin
 // process lifetimes: a start issues a fresh ingress token, a stop revokes it
@@ -55,10 +58,30 @@ func (b *Broker) IngressToken(installationID int) (string, bool) {
 	return b.Registry.IngressToken(installationID)
 }
 
-// Report records a provider status push.
+// Report records a provider status push from this process's own reads and
+// commands (see plugins.Service.applyNetworkAccess), which run against the
+// current instance by construction.
 func (b *Broker) Report(status Status) (Status, bool) {
 	if b == nil {
 		return Status{}, false
 	}
 	return b.Status.Report(status)
+}
+
+// ReportFor records a status push from the plugin process holding token.
+// The registry check and the cache write happen under the same lock Revoke
+// takes, so a push that was in flight while its process was revoked lands
+// after the revoke and is refused rather than resurrecting the old origin.
+func (b *Broker) ReportFor(installationID int, token string, status Status) (previous Status, changed bool, accepted bool) {
+	if b == nil {
+		return Status{}, false, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	current, ok := b.Registry.IngressToken(installationID)
+	if !ok || subtle.ConstantTimeCompare([]byte(current), []byte(token)) != 1 {
+		return Status{}, false, false
+	}
+	previous, changed = b.Status.Report(status)
+	return previous, changed, true
 }

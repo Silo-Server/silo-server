@@ -186,11 +186,15 @@ func TestRuntimeHostServer_InstanceState_RoundTripAndLimits(t *testing.T) {
 
 func TestRuntimeHostServer_ReportNetworkAccessStatus(t *testing.T) {
 	broker := netaccess.NewBroker()
+	token, err := broker.Issue(9, "tailscale")
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := pluginhost.NewRuntimeHostServerWithOptions(pluginhost.RuntimeHostOptions{
-		NetworkAccess: broker, InstallationID: 9, NetworkAccessProvider: "tailscale", Logger: hclog.NewNullLogger(),
+		NetworkAccess: broker, InstallationID: 9, NetworkAccessProvider: "tailscale", IngressToken: token, Logger: hclog.NewNullLogger(),
 	})
 	ctx := context.Background()
-	_, err := srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{
+	_, err = srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{
 		State: "connected", Hostname: "silo.tail1234.ts.net", Origin: "https://silo.tail1234.ts.net",
 		Listeners: []*pluginv1.NetworkAccessListener{{Name: "api", Origin: "https://silo.tail1234.ts.net"}, {Name: "abs", Origin: "https://silo.tail1234.ts.net:13378"}},
 		AuthUrl:   "https://login.tailscale.com/a/secret", ProviderVersion: "tsnet 1.0", DesiredConnected: true,
@@ -210,6 +214,26 @@ func TestRuntimeHostServer_ReportNetworkAccessStatus(t *testing.T) {
 	if _, err := srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("nil status: %v", err)
 	}
+	// A push from a process whose token was revoked (it was stopped or
+	// replaced while the RPC was in flight) is dropped, so it cannot write a
+	// stale origin over the replacement's.
+	broker.Revoke(9, token)
+	if _, err := srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{State: "connected", Origin: "https://stale.tail1234.ts.net"}}); err != nil {
+		t.Fatalf("revoked push must be accepted quietly: %v", err)
+	}
+	if _, ok := broker.Status.Get(9); ok {
+		t.Fatal("a revoked process repopulated the status cache")
+	}
+	replacement, _ := broker.Issue(9, "tailscale")
+	broker.Report(netaccess.Status{InstallationID: 9, Provider: "tailscale", State: "connected", Origin: "https://fresh.tail1234.ts.net"})
+	if _, err := srv.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{State: "connected", Origin: "https://stale.tail1234.ts.net"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := broker.Status.Get(9); got.Origin != "https://fresh.tail1234.ts.net" {
+		t.Fatalf("old process overwrote the replacement's status: %+v", got)
+	}
+	_ = replacement
+
 	notProvider := pluginhost.NewRuntimeHostServerWithOptions(pluginhost.RuntimeHostOptions{NetworkAccess: broker, InstallationID: 10})
 	if _, err := notProvider.ReportNetworkAccessStatus(ctx, &pluginv1.ReportNetworkAccessStatusRequest{Status: &pluginv1.NetworkAccessStatus{State: "connected"}}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("non-provider push: %v", err)
