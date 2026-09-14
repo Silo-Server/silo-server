@@ -7,6 +7,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -108,6 +111,19 @@ func (c *NetworkAccessCommand) UnmarshalJSON(data []byte) error {
 type NetworkAccessCommandInput struct {
 	NetworkAccessProviderInput
 	Body *NetworkAccessCommand `required:"false"`
+	// bodyPresent records that the request carried a body at all. Huma leaves
+	// Body nil both for an omitted body and for the literal document `null`,
+	// and only omission means "every host"; a null body is malformed and
+	// must not widen to deployment-wide fan-out.
+	bodyPresent bool
+}
+
+// Resolve notes whether a body was sent. The body itself is still decoded
+// by Huma; this only distinguishes an absent body from a null one.
+func (in *NetworkAccessCommandInput) Resolve(ctx huma.Context) []error {
+	r, _ := humachi.Unwrap(ctx)
+	in.bodyPresent = r.ContentLength != 0
+	return nil
 }
 
 // publishedNetworkAccessStates is the closed enum on NetworkAccessHostStatus.State.
@@ -205,6 +221,9 @@ func registerNetworkAccess(reg *Registry) {
 		Register(reg, op, func(ctx context.Context, in *NetworkAccessCommandInput) (*NetworkAccessStatusOutput, error) {
 			if reg.deps.NetworkAccess == nil {
 				return nil, unavailable("network access")
+			}
+			if in.Body == nil && in.bodyPresent {
+				return nil, validationProblem(locationBody, codeInvalidType, "null is not a request body; send an object or omit the body to act on every host.")
 			}
 			if in.Body != nil && in.Body.hostsNull {
 				return nil, validationProblem(locationBody+".hosts", codeInvalidType, "null is not a value for this member; omit it to act on every host.")

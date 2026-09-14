@@ -1390,9 +1390,16 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	if h.service != nil {
 		state := h.service.RuntimeState(installation.ID)
 		runtime = &PluginRuntimeView{Resident: state.Resident, State: string(state.State), RestartCount: state.RestartCount, LastError: state.LastError, LastStartedAt: state.LastStartedAt, NextRestartAt: state.NextRestartAt}
-		for _, capability := range capabilities {
-			if plugins.IsResidentCapabilityType(capability.Type) {
-				runtime.Resident = true
+		// Before the supervisor arms (boot) the capability says what will be
+		// resident. Once armed, its entries are the truth: an enabled
+		// installation it deliberately does not own (a duplicate provider
+		// slug) is not resident, so the page must not offer a restart that
+		// would be a no-op.
+		if !state.Resident && !h.service.ResidentsArmed() {
+			for _, capability := range capabilities {
+				if plugins.IsResidentCapabilityType(capability.Type) {
+					runtime.Resident = true
+				}
 			}
 		}
 	}

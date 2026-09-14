@@ -241,6 +241,18 @@ func (s *Service) SetResidentHostIdentity(identity func() string) {
 	s.resident.mu.Unlock()
 }
 
+// ResidentsArmed reports whether the supervisor has been enabled, after
+// which its entries, not the manifests, say which installations are
+// resident.
+func (s *Service) ResidentsArmed() bool {
+	if s == nil || s.resident == nil {
+		return false
+	}
+	s.resident.mu.Lock()
+	defer s.resident.mu.Unlock()
+	return s.resident.armed
+}
+
 // GateError returns why the host currently runs no residents, or "" when the
 // gate (if any) is open.
 func (r *ResidentSupervisor) GateError() string {

@@ -347,3 +347,24 @@ func TestNetworkAccessCommandRejectsExplicitNullHosts(t *testing.T) {
 		t.Fatal("null hosts reached the service")
 	}
 }
+
+// A literal null body is malformed, not "omitted": it must not fan out to
+// every host.
+func TestNetworkAccessCommandRejectsNullBody(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	f := newFakeNetworkAccess()
+	deps.NetworkAccess = f
+	h := newTestHandler(t, deps)
+	connect := Prefix + "/admin/network-access/stub/connect"
+	p := requireProblem(t, do(t, h, http.MethodPost, connect, `null`, bearer(adminToken)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body" {
+		t.Fatalf("problem = %+v", p)
+	}
+	if len(f.connects) != 0 {
+		t.Fatal("null body reached the service")
+	}
+	// An omitted body still means every host.
+	if rec := do(t, h, http.MethodPost, connect, "", bearer(adminToken)); rec.Code != http.StatusAccepted || len(f.connects) != 1 {
+		t.Fatalf("omitted body: %d, connects=%d", rec.Code, len(f.connects))
+	}
+}

@@ -166,7 +166,13 @@ func (h *PluginHandler) RestartAdminPluginInstallation(ctx context.Context, id i
 	if err := h.service.RestartInstallation(ctx, id); err != nil {
 		return PluginInstallationView{}, err
 	}
-	return h.buildInstallationResponse(ctx, current, nil)
+	// The restart advanced runtime_generation and updated_at on the row; the
+	// receipt reflects the row as it is now, not the pre-restart snapshot.
+	restarted, err := h.installations.GetByID(ctx, id)
+	if err != nil {
+		return PluginInstallationView{}, err
+	}
+	return h.buildInstallationResponse(ctx, restarted, nil)
 }
 
 // DeleteAdminPluginInstallation stops the plugin, deletes its row (dependent
