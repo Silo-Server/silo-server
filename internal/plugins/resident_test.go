@@ -66,7 +66,14 @@ func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
 	})
 	store.listCapabilities = []*Capability{{InstallationID: 5, Type: capability.NetworkAccessProvider, ID: "stub"}}
 
-	host := pluginhost.NewHost(pluginhost.Config{Logger: hclog.NewNullLogger(), ExitCheckInterval: 20 * time.Millisecond})
+	host := pluginhost.NewHost(pluginhost.Config{
+		Logger:            hclog.NewNullLogger(),
+		ExitCheckInterval: 20 * time.Millisecond,
+		// Bind the RuntimeHost broker so fixtures can call back into the host.
+		HostInfo: func(context.Context) (pluginhost.HostInfo, error) {
+			return pluginhost.HostInfo{Role: pluginhost.HostRoleAPI, Name: "fixture"}, nil
+		},
+	})
 	service := &Service{installations: store, host: NewHostAdapter(host)}
 	if opts.MinBackoff == 0 {
 		opts.MinBackoff = 10 * time.Millisecond

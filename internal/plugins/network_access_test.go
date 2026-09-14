@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -64,7 +65,7 @@ func TestNetworkAccessProvidersAndCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := report.Hosts[0].Status; got.State != netaccess.StateDisconnected || got.ProviderVersion != "stub 0.1.0" || got.UpdatedAt.IsZero() {
+	if got := report.Hosts[0].Status; got.State != netaccess.StateDisconnected || !strings.HasPrefix(got.ProviderVersion, "stub 0.1.0") || got.UpdatedAt.IsZero() {
 		t.Fatalf("status when running = %+v", got)
 	}
 

@@ -63,8 +63,22 @@ func (p *provider) Disconnect(context.Context, *pluginv1.NetworkAccessDisconnect
 	return p.status(), nil
 }
 
-func (p *provider) GetStatus(context.Context, *pluginv1.NetworkAccessGetStatusRequest) (*pluginv1.NetworkAccessStatus, error) {
-	return p.status(), nil
+func (p *provider) GetStatus(ctx context.Context, _ *pluginv1.NetworkAccessGetStatusRequest) (*pluginv1.NetworkAccessStatus, error) {
+	status := p.status()
+	// Exercise the host broker on demand: the status carries whether the
+	// callback path still works, so a test can prove the stream survives an
+	// idle period longer than go-plugin's five-second pending-stream window.
+	if host := sdkruntime.Host(); host != nil {
+		if _, err := host.GetHostInfo(ctx); err != nil {
+			status.Error = "host callback: " + err.Error()
+		} else {
+			status.Error = ""
+			status.ProviderVersion += " host-ok"
+		}
+	} else {
+		status.Error = "host callback: broker unavailable"
+	}
+	return status, nil
 }
 
 func main() {
