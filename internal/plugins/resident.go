@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -62,6 +63,15 @@ var residentCapabilityTypes = []string{capability.NetworkAccessProvider}
 func IsResidentCapabilityType(capabilityType string) bool {
 	for _, resident := range residentCapabilityTypes {
 		if capabilityType == resident {
+			return true
+		}
+	}
+	return false
+}
+
+func isResidentManifest(manifest *pluginv1.PluginManifest) bool {
+	for _, declared := range manifest.GetCapabilities() {
+		if IsResidentCapabilityType(declared.GetType()) {
 			return true
 		}
 	}
@@ -485,7 +495,7 @@ func (r *ResidentSupervisor) runStart(ctx context.Context, id int, gen uint64) {
 	for attempt := 0; attempt < 3; attempt++ {
 		floor := r.service.host.NextStartSeq()
 		var client pluginClient
-		client, err = r.service.ensureClientForStart(ctx, id)
+		client, err = r.service.ensureClientForStart(ctx, id, true)
 		if err != nil {
 			break
 		}

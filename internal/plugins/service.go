@@ -529,9 +529,16 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 }
 
 func (s *Service) Start(ctx context.Context, installationID int) (pluginClient, error) {
+	return s.start(ctx, installationID, true)
+}
+
+func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
 	installation, manifest, err := s.ensureInstallationCache(ctx, installationID, true)
 	if err != nil {
 		return nil, err
+	}
+	if !allowResident && isResidentManifest(manifest) {
+		return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
 	}
 	configEntries, err := s.globalConfigEntries(ctx, installation.ID)
 	if err != nil {
@@ -796,18 +803,20 @@ func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginC
 		}
 		return s.host.Client(installationID)
 	}
-	return s.ensureClientForStart(ctx, installationID)
+	return s.ensureClientForStart(ctx, installationID, false)
 }
 
 // ensureClientForStart collapses concurrent launches for a cold installation.
-// The supervisor uses it for accepted starts; lazy RPCs use it only when the
-// installation is not tracked as a resident.
-func (s *Service) ensureClientForStart(ctx context.Context, installationID int) (pluginClient, error) {
-	v, err, _ := s.launchGroup.Do(strconv.Itoa(installationID), func() (any, error) {
+// Only accepted supervisor starts may launch resident-capability plugins.
+// Separate flights keep a lazy RPC from joining an accepted resident launch,
+// or making that launch fail because the RPC is forbidden from starting it.
+func (s *Service) ensureClientForStart(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
+	key := strconv.Itoa(installationID) + ":" + strconv.FormatBool(allowResident)
+	v, err, _ := s.launchGroup.Do(key, func() (any, error) {
 		// Isolate the shared launch from the leader caller's cancellation: other
 		// waiters depend on this in-flight launch, so a single caller's canceled
 		// request must not tear it down. Values (tracing, auth) are preserved.
-		return s.doEnsureClient(context.WithoutCancel(ctx), installationID)
+		return s.doEnsureClient(context.WithoutCancel(ctx), installationID, allowResident)
 	})
 	if err != nil {
 		return nil, err
@@ -815,7 +824,7 @@ func (s *Service) ensureClientForStart(ctx context.Context, installationID int) 
 	return v.(pluginClient), nil
 }
 
-func (s *Service) doEnsureClient(ctx context.Context, installationID int) (pluginClient, error) {
+func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
 	installation, err := s.loadInstallation(ctx, installationID, true)
 	if err != nil {
 		return nil, err
@@ -823,6 +832,9 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int) (plugi
 	client, err := s.host.Client(installationID)
 	if err == nil {
 		cachedManifest := client.Manifest()
+		if !allowResident && isResidentManifest(cachedManifest) {
+			return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
+		}
 		installedManifest, manifestErr := LoadManifestFile(InstalledManifestPath(s.localInstallPath(installation)))
 		if manifestErr != nil {
 			// The files are not here (yet): on a proxy node the row may name
@@ -838,7 +850,7 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int) (plugi
 				if stopErr := s.host.Stop(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
 					return nil, fmt.Errorf("stop stale plugin installation %d: %w", installationID, stopErr)
 				}
-				return s.Start(ctx, installationID)
+				return s.start(ctx, installationID, allowResident)
 			}
 			slog.WarnContext(ctx, "plugin installed manifest unavailable; reusing healthy client", "component", "plugins",
 				"installation_id", installation.ID,
@@ -862,16 +874,16 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int) (plugi
 		if stopErr := s.host.Stop(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
 			return nil, fmt.Errorf("stop stale plugin installation %d: %w", installationID, stopErr)
 		}
-		return s.Start(ctx, installationID)
+		return s.start(ctx, installationID, allowResident)
 	}
 	if errors.Is(err, pluginhost.ErrPluginUnhealthy) {
 		if stopErr := s.host.Stop(installationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
 			return nil, fmt.Errorf("stop unhealthy plugin installation %d: %w", installationID, stopErr)
 		}
-		return s.Start(ctx, installationID)
+		return s.start(ctx, installationID, allowResident)
 	}
 	if errors.Is(err, pluginhost.ErrClientNotFound) {
-		return s.Start(ctx, installationID)
+		return s.start(ctx, installationID, allowResident)
 	}
 	return nil, err
 }

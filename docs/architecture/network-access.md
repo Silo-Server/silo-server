@@ -193,6 +193,9 @@ installations declare the same slug, the one with the lowest installation
 id owns it: commands, status, and the node health report address that one,
 and the duplicate is neither started as a resident nor listed; it is
 logged and skipped on every host.
+Other capabilities on a resident plugin cannot launch it lazily. This also
+applies to excluded duplicates and hosts whose resident gate is closed;
+capability RPCs may only reuse the supervisor's running process.
 
 ## Single-API constraint
 

@@ -522,6 +522,28 @@ func TestResidentSupervisorDoesNotStartADuplicateProviderSlug(t *testing.T) {
 	if _, err := f.host.Client(6); !errors.Is(err, pluginhost.ErrClientNotFound) {
 		t.Fatalf("duplicate slug installation was launched: %v", err)
 	}
+	if _, err := f.service.MetadataProviderClient(ctx, 6, "metadata"); !errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+		t.Errorf("duplicate lazy RPC error = %v, want ErrPluginUnhealthy", err)
+	}
+	if _, err := f.host.Client(6); !errors.Is(err, pluginhost.ErrClientNotFound) {
+		t.Fatal("lazy RPC started the excluded duplicate provider")
+	}
+}
+
+func TestResidentLazyRPCDoesNotLaunchBeforeTheGateOpens(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	for _, armed := range []bool{false, true} {
+		if armed {
+			f.service.SetResidentGate(func(context.Context) error { return errors.New("node disabled") })
+			f.service.StartResidents(t.Context())
+		}
+		if _, err := f.service.MetadataProviderClient(t.Context(), 5, "metadata"); !errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+			t.Errorf("lazy RPC with armed=%v error = %v, want ErrPluginUnhealthy", armed, err)
+		}
+		if _, err := f.host.Client(5); !errors.Is(err, pluginhost.ErrClientNotFound) {
+			t.Fatalf("lazy RPC started a provider before the gate opened (armed=%v)", armed)
+		}
+	}
 }
 
 // A change of host identity (a proxy whose stream_nodes row was deleted and
