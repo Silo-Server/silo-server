@@ -784,12 +784,25 @@ func (s *Service) ManifestForInstallation(
 	return s.manifestForInstallation(ctx, installationID, false)
 }
 
-// ensureClient returns a running client for the installation, collapsing
-// concurrent first-use of a cold installation into a single launch so a burst of
-// callers does not spawn redundant plugin processes (Host.Start releases its lock
-// during the slow launch and cannot dedupe). After the flight completes the key
-// is freed, so subsequent callers re-run and hit the now-warm cache.
+// ensureClient returns a running client for an RPC. Tracked residents may
+// only use the process the supervisor owns; RPCs cannot launch or replace it.
 func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginClient, error) {
+	if state, tracked := s.resident.State(installationID); tracked {
+		if _, err := s.loadInstallation(ctx, installationID, true); err != nil {
+			return nil, err
+		}
+		if state.State != ResidentRunning {
+			return nil, fmt.Errorf("%w: resident plugin installation %d is %s", pluginhost.ErrPluginUnhealthy, installationID, state.State)
+		}
+		return s.host.Client(installationID)
+	}
+	return s.ensureClientForStart(ctx, installationID)
+}
+
+// ensureClientForStart collapses concurrent launches for a cold installation.
+// The supervisor uses it for accepted starts; lazy RPCs use it only when the
+// installation is not tracked as a resident.
+func (s *Service) ensureClientForStart(ctx context.Context, installationID int) (pluginClient, error) {
 	v, err, _ := s.launchGroup.Do(strconv.Itoa(installationID), func() (any, error) {
 		// Isolate the shared launch from the leader caller's cancellation: other
 		// waiters depend on this in-flight launch, so a single caller's canceled

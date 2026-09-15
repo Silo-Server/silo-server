@@ -477,7 +477,7 @@ func (r *ResidentSupervisor) startLocked(entry *residentEntry) {
 }
 
 // runStart launches the plugin and records the outcome, unless the entry was
-// reset, removed, or superseded while the launch was in flight. ensureClient
+// reset, removed, or superseded while the launch was in flight. ensureClientForStart
 // reuses a process a lazy RPC already started instead of replacing it.
 func (r *ResidentSupervisor) runStart(ctx context.Context, id int, gen uint64) {
 	var err error
@@ -485,7 +485,7 @@ func (r *ResidentSupervisor) runStart(ctx context.Context, id int, gen uint64) {
 	for attempt := 0; attempt < 3; attempt++ {
 		floor := r.service.host.NextStartSeq()
 		var client pluginClient
-		client, err = r.service.ensureClient(ctx, id)
+		client, err = r.service.ensureClientForStart(ctx, id)
 		if err != nil {
 			break
 		}

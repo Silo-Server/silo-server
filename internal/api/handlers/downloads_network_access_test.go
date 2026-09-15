@@ -20,7 +20,7 @@ type recordingDownloadPlanner struct {
 	released []string
 }
 
-func (p *recordingDownloadPlanner) PlanDownload(string, ...string) nodepool.Plan {
+func (p *recordingDownloadPlanner) PlanDownloadWith(string, func(*nodepool.Node) bool, ...string) nodepool.Plan {
 	p.plans++
 	return nodepool.Plan{ProxyNode: p.proxy}
 }
@@ -123,5 +123,41 @@ func TestDirectDownloadViaProxyRedirectsToTheProviderOrigin(t *testing.T) {
 	}
 	if preflights != 1 {
 		t.Fatalf("preflights after the default-path request = %d, want the cached verdict reused", preflights)
+	}
+}
+
+func TestDirectDownloadViaProxySkipsUnreachablePreferredGroup(t *testing.T) {
+	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("proxy without a provider origin was preflighted")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer unreachable.Close()
+	reachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer reachable.Close()
+	const origin = "https://proxy.example.test"
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{
+		{ID: 1, URL: unreachable.URL, Group: new("origin-host"), Enabled: true, Healthy: true},
+		{ID: 2, URL: reachable.URL, Enabled: true, Healthy: true,
+			NetworkAccess: netaccess.NodeNetworkAccess{"tailscale": {State: netaccess.StateConnected, Origin: origin}}},
+	})
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		directTarget: &downloads.FileTarget{
+			Path: "/media/movie.mkv", MediaFileID: 42, ProxyEligible: true, OriginNodeGroup: "origin-host",
+		},
+	}
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	for range 4 {
+		req := downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", "")
+		req = req.WithContext(netaccess.WithPath(req.Context(), netaccess.Path{Provider: "tailscale"}))
+		rec := httptest.NewRecorder()
+		h.HandleDirectDownloadViaProxy(rec, req)
+		if rec.Code != http.StatusTemporaryRedirect || !strings.HasPrefix(rec.Header().Get("Location"), origin+"/downloads/file/") {
+			t.Fatalf("status = %d Location = %q, want the reachable proxy", rec.Code, rec.Header().Get("Location"))
+		}
 	}
 }

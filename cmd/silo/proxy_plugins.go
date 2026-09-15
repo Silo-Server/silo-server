@@ -143,21 +143,38 @@ func newProxyPluginHost(
 		return plugins.NodeHostScope(int64(id))
 	})
 	nodes := nodepool.NewRepository(pool)
-	service.SetResidentGate(func(ctx context.Context) error {
-		id, ok := watcher.NodeRowID()
+	service.SetResidentGate(newProxyResidentGate(watcher.NodeRowID, nodes.GetByID))
+	return &proxyPluginHost{host: host, service: service, broker: broker, bus: bus, ctx: ctx}
+}
+
+// Reconcile calls this gate serially. A transient read failure preserves the
+// last confirmed decision for the same node identity, while a missing,
+// disabled, or retyped row closes the gate immediately.
+func newProxyResidentGate(nodeRowID func() (int, bool), getNode func(context.Context, int) (*nodepool.Node, error)) func(context.Context) error {
+	var confirmedID int
+	var confirmedErr error
+	return func(ctx context.Context) error {
+		id, ok := nodeRowID()
+		if !ok || id != confirmedID {
+			confirmedID, confirmedErr = 0, nil
+		}
 		if !ok {
 			return errProxyNodeRowUnknown
 		}
-		node, err := nodes.GetByID(ctx, id)
-		if err != nil {
+		node, err := getNode(ctx, id)
+		if err != nil && !errors.Is(err, nodepool.ErrNodeNotFound) {
+			if confirmedID == id {
+				slog.WarnContext(ctx, "proxy resident gate retaining its confirmed state after a node read failure", "component", "plugins", "error", err)
+				return confirmedErr
+			}
 			return fmt.Errorf("read this proxy's stream_nodes row: %w", err)
 		}
-		if node == nil || !node.Enabled || node.Type != nodepool.NodeTypeProxy {
-			return errProxyNodeDisabled
+		confirmedID, confirmedErr = id, nil
+		if errors.Is(err, nodepool.ErrNodeNotFound) || node == nil || !node.Enabled || node.Type != nodepool.NodeTypeProxy {
+			confirmedErr = errProxyNodeDisabled
 		}
-		return nil
-	})
-	return &proxyPluginHost{host: host, service: service, broker: broker, bus: bus, ctx: ctx}
+		return confirmedErr
+	}
 }
 
 // hooks returns the callbacks startStandaloneServer runs around the listener:

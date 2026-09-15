@@ -585,16 +585,15 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		reservationKey = fmt.Sprintf("direct-%d-%d", userID, target.MediaFileID)
 	}
 	sessionID := fmt.Sprintf("download-%s-%d", reservationKey, time.Now().UnixNano())
-	plan := h.nodePlanner.PlanDownload(sessionID, target.OriginNodeGroup)
+	accessPath := netaccess.PathFromContext(r.Context())
+	plan := h.nodePlanner.PlanDownloadWith(sessionID, func(node *nodepool.Node) bool {
+		return node.ClientURLFor(accessPath) != ""
+	}, target.OriginNodeGroup)
 	if plan.ProxyNode == nil {
 		return false, nil
 	}
 	releaseReservation := func() { h.nodePlanner.ReleaseSession(sessionID) }
-	// The download planner has no eligibility predicate, so the access-path
-	// check happens here: a client that came through a network access provider
-	// cannot reach a proxy without an origin on that overlay, and the file is
-	// served from this server instead, exactly as when no proxy is available.
-	clientBase := plan.ProxyNode.ClientURLFor(netaccess.PathFromContext(r.Context()))
+	clientBase := plan.ProxyNode.ClientURLFor(accessPath)
 	if clientBase == "" {
 		releaseReservation()
 		return false, nil

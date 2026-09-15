@@ -250,6 +250,39 @@ func TestResidentSupervisorFailsAfterConsecutiveFailuresAndAdminRestartRecovers(
 	}
 }
 
+func TestResidentLazyRPCDoesNotBypassFailureBudget(t *testing.T) {
+	for _, state := range []ResidentState{ResidentFailed, ResidentBackoff} {
+		t.Run(string(state), func(t *testing.T) {
+			maxFailures := 1
+			if state == ResidentBackoff {
+				maxFailures = 2
+			}
+			f := newResidentFixture(t, ResidentOptions{
+				MaxFailures: maxFailures, MinBackoff: time.Hour, MaxBackoff: time.Hour,
+			})
+			f.service.StartResidents(t.Context())
+			waitState(t, f.service, 5, "initial running", running)
+			f.crash(t)
+			waitState(t, f.service, 5, "parked after crash", func(s RuntimeState, ok bool) bool {
+				return ok && s.State == state
+			})
+			f.heal(t)
+			// Every lazy capability RPC obtains its process through this path,
+			// before checking whether the manifest declares that capability.
+			if _, err := f.service.MetadataProviderClient(t.Context(), 5, "metadata"); !errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+				t.Errorf("lazy RPC error = %v, want ErrPluginUnhealthy", err)
+			}
+			if _, err := f.host.Client(5); !errors.Is(err, pluginhost.ErrClientNotFound) {
+				t.Fatalf("lazy RPC revived the parked resident: %v", err)
+			}
+			if err := f.service.RestartInstallation(t.Context(), 5); err != nil {
+				t.Fatal(err)
+			}
+			waitState(t, f.service, 5, "running after admin restart", running)
+		})
+	}
+}
+
 func TestResidentSupervisorHaltStopsResidents(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
 	ctx := context.Background()
