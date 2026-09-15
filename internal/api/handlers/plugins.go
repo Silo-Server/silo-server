@@ -176,6 +176,22 @@ type PluginInstallationView struct {
 	TaskBindings       []PluginTaskBindingView  `json:"task_bindings"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
+	// Runtime is the process state the v2 contract exposes as `runtime`. The
+	// frozen v1 bridge does not carry it.
+	Runtime *PluginRuntimeView `json:"-"`
+}
+
+// PluginRuntimeView is one installation's process state. Resident marks a
+// plugin the supervisor keeps running (network access providers); State is
+// the supervisor's machine for those and running/stopped for lazily started
+// plugins.
+type PluginRuntimeView struct {
+	Resident      bool
+	State         string
+	RestartCount  int
+	LastError     string
+	LastStartedAt *time.Time
+	NextRestartAt *time.Time
 }
 
 type pluginCatalogSettingsResponse struct {
@@ -1370,6 +1386,23 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	if presentation != nil {
 		repoURL = presentation.SourceURL
 	}
+	var runtime *PluginRuntimeView
+	if h.service != nil {
+		state := h.service.RuntimeState(installation.ID)
+		runtime = &PluginRuntimeView{Resident: state.Resident, State: string(state.State), RestartCount: state.RestartCount, LastError: state.LastError, LastStartedAt: state.LastStartedAt, NextRestartAt: state.NextRestartAt}
+		// Before the supervisor arms (boot) the capability says what will be
+		// resident. Once armed, its entries are the truth: an enabled
+		// installation it deliberately does not own (a duplicate provider
+		// slug) is not resident, so the page must not offer a restart that
+		// would be a no-op.
+		if !state.Resident && !h.service.ResidentsArmed() {
+			for _, capability := range capabilities {
+				if plugins.IsResidentCapabilityType(capability.Type) {
+					runtime.Resident = true
+				}
+			}
+		}
+	}
 
 	return PluginInstallationView{
 		ID:                 installation.ID,
@@ -1397,6 +1430,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		TaskBindings:       taskBindingsForInstallation(installation.ID, taskBindings),
 		CreatedAt:          installation.CreatedAt,
 		UpdatedAt:          installation.UpdatedAt,
+		Runtime:            runtime,
 	}, nil
 }
 

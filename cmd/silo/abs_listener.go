@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // absMounter is the narrow interface the listener needs from the
@@ -30,10 +31,13 @@ type absMounter interface {
 // one covers exactly the compatibility listener it was written for. ABS is an
 // external wire contract, not Silo's native API, so it is out of scope for the
 // v2 migration and carries no inventory rows.
-func newAudiobookshelfListener(listen string, handler absMounter, ipResolver *clientip.Resolver) *http.Server {
+func newAudiobookshelfListener(listen string, handler absMounter, ipResolver *clientip.Resolver, ingressTokens *netaccess.Registry) *http.Server {
 	absRouter := chi.NewRouter()
 	if ipResolver != nil {
 		absRouter.Use(clientip.Middleware(ipResolver))
+	}
+	if ingressTokens != nil {
+		absRouter.Use(netaccess.Middleware(ingressTokens))
 	}
 	absRouter.Use(chimiddleware.Recoverer)
 	absRouter.Use(httpstream.CompressExcept(5, abs.SkipMediaCompression))

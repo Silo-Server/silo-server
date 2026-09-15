@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -17,7 +18,7 @@ type commandNodeRepo struct {
 	persistErr   error
 }
 
-func (r *commandNodeRepo) UpdateHealth(_ context.Context, _ int, url string, _ bool, _, _ int, _ []byte) error {
+func (r *commandNodeRepo) UpdateHealth(_ context.Context, _ int, url string, _ bool, _, _ int, _ []byte, _ netaccess.NodeNetworkAccess) error {
 	r.persistedURL = url
 	return r.persistErr
 }

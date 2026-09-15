@@ -132,6 +132,7 @@ type Dependencies struct {
 	AdminLogsSocket                 AdminLogsSocketService
 	PlaybackControlSocket           PlaybackControlSocketService
 	EventsCapability                EventsCapabilityService
+	NetworkAccess                   NetworkAccessService
 	NotificationDestinationCreate   NotificationDestinationCreateService
 	AdminUnmatchedFiles             AdminUnmatchedFilesService
 	AdminCatalogImages              AdminCatalogImagesService

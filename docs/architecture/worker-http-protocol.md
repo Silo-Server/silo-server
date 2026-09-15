@@ -37,6 +37,18 @@ worker. They consume no request DTO and retain the existing paths:
 | `/admin/force-reload` | Empty 204 | 401, 500 | Proxy reloads configuration; transcode node also tears down sessions and delivery authority. |
 | `/admin/reprobe-capabilities` | JSON 200: `resolved`, `capability_hash` | 401, 409, 503 | Rebuild the capability snapshot; an incomplete rebuild retains the prior published hash. |
 
+The proxy listener additionally carries the network access provider routes the
+API server fans its `/api/v2/admin/network-access/{provider}/...` operations
+out to, under the same node bearer: `GET /network-access/{provider}/status`
+(JSON, only the named provider, independent of other providers' response times), and
+`POST /network-access/{provider}/connect` / `.../disconnect` (JSON, the state
+the instance reached; 404 for a provider no enabled installation declares).
+The status responses carry `auth_url` and error text. The original
+`GET /network-access/status` also remains available to read every provider
+instance on that proxy. Connect and disconnect are `natural_idempotent`: repeating converges on connected or
+disconnected. A proxy that hosts no plugins answers plain-text 503. See
+[network-access.md](network-access.md).
+
 An unconfigured transcode listener also returns plain-text 503 from its bearer
 middleware, including for both reload commands. All six require the existing node bearer token. Reprobe refuses active probes;
 the transcode node also refuses active jobs while holding its GPU admission gate.

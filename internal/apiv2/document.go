@@ -517,6 +517,7 @@ func registerAll(reg *Registry) {
 	registerOrderedApplePush(reg)
 	registerEmailVerification(reg)
 	registerEventsCapability(reg)
+	registerNetworkAccess(reg)
 	registerEventsSocket(reg)
 	registerAdminLogsSocket(reg)
 	registerPlaybackControlSocket(reg)

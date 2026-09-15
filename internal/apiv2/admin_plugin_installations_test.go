@@ -109,7 +109,7 @@ func TestAdminPluginInstallationsRead(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	raw := rec.Body.String()
-	for _, want := range []string{`"value":{"region":"us-east"}`, `"configured_secrets":["api_key"]`, `"trigger":{"cron":"0 * * * *"}`, `"display_order":2`, `2026-09-01T00:00:00.123Z`, `"capabilities":[]`, `"metadata":{}`} {
+	for _, want := range []string{`"value":{"region":"us-east"}`, `"configured_secrets":["api_key"]`, `"trigger":{"cron":"0 * * * *"}`, `"display_order":2`, `2026-09-01T00:00:00.123Z`, `"capabilities":[]`, `"metadata":{}`, `"runtime":{"resident":false,"state":"stopped","restart_count":0}`} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("missing %s in %s", want, raw)
 		}
