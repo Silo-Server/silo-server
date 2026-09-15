@@ -82,7 +82,7 @@ func (c *ArchiveCache) LocalInstallPath(installation *Installation) string {
 }
 
 // Ensure makes the installation's files present at LocalInstallPath,
-// rehydrating them from plugin_archives when they are missing or incomplete,
+// rehydrating them from plugin_archives when they are missing, incomplete, or corrupted,
 // and returns the installed manifest.
 func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
 	if installation == nil {
@@ -96,7 +96,7 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 	binaryPath := c.LocalInstallPath(installation)
 
 	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
-		if err := installedFilesPresent(binaryPath, manifest); err == nil {
+		if err := validateInstalledFiles(binaryPath, manifest); err == nil {
 			if c.root != "" {
 				if err := checkBinaryPlatform(binaryPath); err != nil {
 					return nil, fmt.Errorf("cached plugin for installation %d: %w", installation.ID, err)

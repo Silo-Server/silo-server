@@ -50,6 +50,58 @@ func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
 	}
 }
 
+func TestArchiveCacheRepairsCorruptedBinaryOnCacheHit(t *testing.T) {
+	for _, proxy := range []bool{false, true} {
+		name := "local"
+		if proxy {
+			name = "proxy"
+		}
+		t.Run(name, func(t *testing.T) {
+			binaryData := []byte("#!/bin/sh\nexit 0\n")
+			checksum := sha256.Sum256(binaryData)
+			manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
+			manifest.Checksum = hex.EncodeToString(checksum[:])
+			manifestBytes, err := protojson.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &legacyArchiveStore{archive: &InstallationArchive{
+				InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archiveBytes,
+			}}
+			installation := &Installation{
+				ID: 42, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+				InstallPath: filepath.Join(t.TempDir(), "install-cached", "plugin"),
+			}
+			cache := NewArchiveCache(store)
+			if proxy {
+				cache = NewArchiveCacheAt(store, t.TempDir())
+			}
+			if _, err := cache.Ensure(t.Context(), installation); err != nil {
+				t.Fatalf("populate cache: %v", err)
+			}
+			path := cache.LocalInstallPath(installation)
+			// Keep the file executable and the same size, but change its contents.
+			if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := cache.Ensure(t.Context(), installation); err != nil {
+				t.Fatalf("repair cache: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, binaryData) {
+				t.Fatalf("cached binary = %q, want stored binary %q", got, binaryData)
+			}
+		})
+	}
+}
+
 func TestArchiveCacheEnsureRecoversLegacyBinaryArchive(t *testing.T) {
 	ctx := context.Background()
 
