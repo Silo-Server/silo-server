@@ -46,6 +46,8 @@ function renderControls(
       onTogglePlaybackInfo={vi.fn()}
       onPlayPause={vi.fn()}
       onSeek={vi.fn()}
+      onSkip={{ back: vi.fn(), forward: vi.fn() }}
+      skipSeconds={{ back: 10, forward: 30 }}
       onVolumeChange={vi.fn()}
       onMutedChange={vi.fn()}
       onFullscreenToggle={vi.fn()}

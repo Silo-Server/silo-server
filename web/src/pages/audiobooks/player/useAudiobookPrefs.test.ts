@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { storage } from "@/utils/storage";
+import { legacyAudiobookIntervals } from "@/lib/seekIntervals";
 import {
   clampAudiobookRate,
-  getAudiobookSkipBack,
-  getAudiobookSkipForward,
   getAudiobookSmartRewind,
   getBookRate,
   setBookRate,
@@ -34,24 +33,21 @@ beforeEach(() => {
   });
 });
 
-describe("skip interval prefs", () => {
-  it("returns asymmetric defaults", () => {
-    expect(getAudiobookSkipBack()).toBe(10);
-    expect(getAudiobookSkipForward()).toBe(30);
+describe("browser-local skip intervals", () => {
+  it("reports nothing when this browser never stored a value", () => {
+    expect(legacyAudiobookIntervals()).toEqual({});
   });
 
   it("reads persisted values", () => {
     storage.set(storage.KEYS.AUDIOBOOK_SKIP_BACK, "15");
     storage.set(storage.KEYS.AUDIOBOOK_SKIP_FORWARD, "60");
-    expect(getAudiobookSkipBack()).toBe(15);
-    expect(getAudiobookSkipForward()).toBe(60);
+    expect(legacyAudiobookIntervals()).toEqual({ back: 15, forward: 60 });
   });
 
-  it("falls back to defaults for values outside the allowed set", () => {
+  it("drops values outside the allowed set", () => {
     storage.set(storage.KEYS.AUDIOBOOK_SKIP_BACK, "7");
     storage.set(storage.KEYS.AUDIOBOOK_SKIP_FORWARD, "garbage");
-    expect(getAudiobookSkipBack()).toBe(10);
-    expect(getAudiobookSkipForward()).toBe(30);
+    expect(legacyAudiobookIntervals()).toEqual({});
   });
 });
 
