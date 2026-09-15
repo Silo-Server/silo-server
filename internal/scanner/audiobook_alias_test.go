@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -204,5 +205,43 @@ func TestAudiobookAliasesConcurrentIdentity(t *testing.T) {
 		if len(files) != 1 {
 			t.Fatalf("concurrent aliases left %d playable copies", len(files))
 		}
+	}
+}
+
+func TestClaimAudiobookIdentityRefreshesExistingClaim(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := t.Context()
+	folderID := seedDeadRootTestFolder(t, pool, "audiobooks", "Claim timestamp test")
+	s := NewScanner(NewFileRepository(pool), "", nil, 1, false, 0)
+	physical := t.TempDir()
+	book := &parsedAudiobook{Title: "Book"}
+	id, err := s.claimAudiobookIdentity(ctx, folderID, physical, "", book, book.Title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM media_items WHERE content_id=$1`, id)
+	})
+	old := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `UPDATE media_item_roots SET first_seen_at=$3, last_seen_at=$3 WHERE media_folder_id=$1 AND canonical_root_path=$2`, folderID, physical, old); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.claimAudiobookIdentity(ctx, folderID, physical, "", book, book.Title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var storedID string
+	var first, last time.Time
+	if err := pool.QueryRow(ctx, `SELECT content_id, first_seen_at, last_seen_at FROM media_item_roots WHERE media_folder_id=$1 AND canonical_root_path=$2`, folderID, physical).Scan(&storedID, &first, &last); err != nil {
+		t.Fatal(err)
+	}
+	if got != id || storedID != id {
+		t.Fatalf("claim identity changed: returned=%s stored=%s want=%s", got, storedID, id)
+	}
+	if !first.Equal(old) {
+		t.Fatalf("first_seen_at changed: %v", first)
+	}
+	if !last.After(old) {
+		t.Fatalf("last_seen_at was not refreshed: %v", last)
 	}
 }

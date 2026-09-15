@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
@@ -855,6 +856,8 @@ func (s *Scanner) claimAudiobookIdentity(ctx context.Context, folderID int, phys
 			DO UPDATE SET last_seen_at = NOW() RETURNING content_id`, folderID, physical, claimedID).Scan(&claimedID); err != nil {
 			return "", err
 		}
+	} else if err := catalog.NewRootClaimRepository(s.fileRepo.Pool()).Claim(ctx, tx, folderID, physical, claimedID); err != nil {
+		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
