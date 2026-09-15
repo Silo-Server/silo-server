@@ -1,6 +1,6 @@
 # S3 Storage Setup
 
-Silo uses S3-compatible object storage for caching artwork, catalog exports, and other operational data. Any S3-compatible backend works (AWS S3, Ceph RGW, MinIO, Cloudflare R2, etc.).
+Silo uses S3-compatible object storage for caching artwork, catalog exports, and other operational data. Any S3-compatible backend works (AWS S3, Ceph RGW, MinIO, Garage, Cloudflare R2, etc.).
 
 ## Core Settings
 
@@ -131,3 +131,74 @@ https://your-cdn-domain.com/tmdb/movies/550/poster/original.jpg?verify=171215040
 3. Leave URL Auth Method as **S3 Presigned URLs** (default)
 
 No additional setup needed — presigned URLs work out of the box.
+
+---
+
+## Garage Setup Guide
+
+[Garage](https://garagehq.deuxfleurs.fr/) is a lightweight, actively maintained
+S3-compatible object store aimed at self-hosters. It implements the core S3 API
+(`PutObject`, `GetObject`, `DeleteObject`, multipart upload, bucket CORS) that
+Silo needs, so it works as a drop-in backend the same way MinIO or Ceph RGW do
+— with one difference worth knowing up front: **Garage has no S3 bucket-policy
+or object-ACL support** (`PutBucketPolicy`, `PutObjectAcl`, and friends are all
+unimplemented — see [Garage's S3 compatibility
+matrix](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/)).
+Public, unsigned reads are handled entirely differently: through Garage's own
+[website-access
+feature](https://garagehq.deuxfleurs.fr/documentation/cookbook/exposing-websites/),
+which binds a bucket to a domain either by exact bucket-name match or as a
+subdomain of a configured `root_domain` — not by a bucket policy on the normal
+S3 API endpoint.
+
+### Option A: Presigned URLs (simplest, no extra setup)
+
+Garage's S3 API supports standard SigV4 signing, so the default **S3 Presigned
+URLs** mode works with no Garage-specific configuration at all:
+
+1. Create a bucket and an access key scoped to it (`garage bucket create`,
+   `garage key create`, `garage bucket allow --read --write`)
+2. Configure Silo with the endpoint, bucket, and credentials, **Path Style**
+   enabled
+3. Leave URL Auth Method as **S3 Presigned URLs** (default)
+
+This is the recommended starting point and is sufficient for most
+self-hosted deployments.
+
+### Option B: Public (no auth), for a public asset domain
+
+Public mode is usable with Garage, but — because Garage has no bucket-policy
+concept — it requires the bucket itself to be named after the domain you want
+to serve it from, and Garage's separate website listener (not the main S3 API
+port) to be what Silo's Read Endpoint actually reaches:
+
+1. **Name the bucket as the exact public domain**, e.g. `garage bucket create
+   assets.example.com` (Garage matches the website Host header against the
+   bucket name itself, or against `<bucket>.<root_domain>` if you'd rather use
+   a shared suffix — see the website-access cookbook linked above)
+2. **Enable website access on that bucket**: `garage bucket website --allow
+   assets.example.com`
+3. **Route the domain to Garage's website port** (`[s3_web]` in `garage.toml`,
+   default `3902`), not the regular S3 API port — e.g. a Caddy/nginx vhost for
+   `assets.example.com` proxying to `garage:3902` with the Host header
+   preserved
+4. **Configure Silo:**
+
+| Setting | Value |
+|---------|-------|
+| Endpoint | Garage's S3 API endpoint, e.g. `https://garage.internal:3900` |
+| Bucket | `assets.example.com` |
+| Path Style | Enabled |
+| URL Auth Method | Public (no auth) |
+| Read Endpoint | `https://assets.example.com` |
+
+Private/operational buckets (metadata, user DB) are unaffected by this — keep
+those on the default presigned mode against the normal S3 API port; only the
+bucket you want served as public, unsigned reads needs the website-domain
+treatment above.
+
+**Not supported today:** the `MakeObjectPublic` per-object ACL path in
+`internal/s3client` (`PutObjectAcl` with a `public-read` canned ACL) will fail
+against Garage, since object ACLs are unimplemented. It is not currently
+called anywhere in this codebase, but a future caller should not assume it
+works on every configured backend.
