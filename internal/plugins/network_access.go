@@ -144,7 +144,7 @@ func (s *Service) ListNetworkAccessProviders(ctx context.Context) ([]NetworkAcce
 		if installation == nil || installation.IsBuiltin() {
 			continue
 		}
-		manifest, err := s.ensureLoadedInstallation(ctx, installation)
+		manifest, err := s.networkAccessManifest(ctx, installation)
 		if err != nil {
 			slog.WarnContext(ctx, "network access provider manifest unavailable; skipping", "component", "plugins",
 				"installation_id", installation.ID, "plugin_id", installation.PluginID, "error", err)
@@ -172,6 +172,21 @@ func (s *Service) ListNetworkAccessProviders(ctx context.Context) ([]NetworkAcce
 		})
 	}
 	return providers, nil
+}
+
+// networkAccessManifest keeps a running provider discoverable and commandable
+// during a transient manifest read failure. Enabled rows still control membership;
+// a process from an older version cannot stand in for a replacement release.
+func (s *Service) networkAccessManifest(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
+	manifest, err := s.ensureLoadedInstallation(ctx, installation)
+	if err == nil || s.host == nil {
+		return manifest, err
+	}
+	client, clientErr := s.host.Client(installation.ID)
+	if clientErr == nil && manifestVersion(client.Manifest()) == installation.Version {
+		return client.Manifest(), nil
+	}
+	return nil, err
 }
 
 func networkAccessDisplayName(descriptor *pluginv1.CapabilityDescriptor, slug string) string {

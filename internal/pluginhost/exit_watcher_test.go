@@ -6,10 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -129,6 +132,45 @@ func TestHostExitWatcherIgnoresDeliberateStop(t *testing.T) {
 			}
 		case <-ctx.Done():
 			t.Fatal("exit handler was not called for the crashed instance 9")
+		}
+	}
+}
+
+func TestHostConcurrentStartsRetireEveryProcess(t *testing.T) {
+	bin, manifest := buildExitingPlugin(t)
+	host := pluginhost.NewHost(pluginhost.Config{})
+	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+	clients := make(chan *pluginhost.Client, 8)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			<-start
+			client, err := host.Start(t.Context(), pluginhost.StartRequest{InstallationID: 7, BinaryPath: bin, Manifest: manifest})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			clients <- client
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(clients)
+	if err := host.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for client := range clients {
+		provider, err := client.MetadataProvider("exiting")
+		if errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = provider.Search(t.Context(), &pluginv1.SearchMetadataRequest{})
+		if code := status.Code(err); code != codes.Unavailable && code != codes.Canceled {
+			t.Errorf("superseded process still answers RPCs: %v", err)
 		}
 	}
 }

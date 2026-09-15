@@ -567,3 +567,61 @@ func TestResidentSupervisorConcurrentReconcilesDoNotResurrectADisabledResident(t
 		t.Fatalf("disabled resident's process survived: %v", err)
 	}
 }
+
+func TestResidentSupervisorKeepsRunningProviderWhenManifestUnavailable(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	ctx := t.Context()
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "running", running)
+	first, err := f.host.Client(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(InstalledManifestPath(f.store.byID[5].InstallPath)); err != nil {
+		t.Fatal(err)
+	}
+	f.service.OnLifecycleChange(ctx)
+	if current, err := f.host.Client(5); err != nil || current != first {
+		t.Fatalf("healthy process replaced after manifest read failure: %v", err)
+	}
+	if _, err := f.service.HostNetworkAccessDisconnect(ctx, "stub"); err != nil {
+		t.Fatalf("provider cannot be disconnected without its disk manifest: %v", err)
+	}
+	disabled := false
+	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Enabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	f.service.OnLifecycleChange(ctx)
+	if _, err := f.host.Client(5); !errors.Is(err, pluginhost.ErrClientNotFound) {
+		t.Fatalf("disabled provider still running: %v", err)
+	}
+}
+
+func TestResidentRestartReturnsWhenCallerCancels(t *testing.T) {
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
+	path := writeInstalledPluginManifest(t, manifest)
+	host := &ctxCaptureHost{entered: make(chan struct{}), proceed: make(chan struct{}), startResult: &fakePluginClient{manifest: manifest}}
+	store := newFakeServiceInstallationStore(&Installation{ID: 5, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: path, Enabled: true, Kind: KindPlugin})
+	service := &Service{host: host, installations: store}
+	service.resident = newResidentSupervisor(service, ResidentOptions{})
+	service.resident.entries[5] = &residentEntry{id: 5, state: ResidentRunning}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- service.resident.Restart(ctx, 5) }()
+	t.Cleanup(func() { close(host.proceed); _ = service.StopResidents(context.Background()) })
+	select {
+	case <-host.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("restart did not reach the host")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("restart cancellation=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("restart ignored caller cancellation")
+	}
+}

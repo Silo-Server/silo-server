@@ -2,11 +2,13 @@ package plugins
 
 import (
 	"archive/zip"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -377,6 +379,7 @@ func (s *fakeServiceInstallationStore) ListEnabled(_ context.Context) ([]*Instal
 		cloned := *installation
 		result = append(result, &cloned)
 	}
+	slices.SortFunc(result, func(a, b *Installation) int { return cmp.Compare(a.ID, b.ID) })
 	return result, nil
 }
 

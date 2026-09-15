@@ -92,6 +92,7 @@ type Host struct {
 
 	mu        sync.RWMutex
 	instances map[int]*instance
+	starting  map[int]chan struct{}
 	startSeq  atomic.Uint64
 }
 
@@ -148,6 +149,7 @@ func NewHost(cfg Config) *Host {
 		runtimeHostForStart: cfg.RuntimeHostForStart,
 		networkAccess:       cfg.NetworkAccess,
 		instances:           make(map[int]*instance),
+		starting:            make(map[int]chan struct{}),
 	}
 }
 
@@ -162,6 +164,14 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	if req.Manifest == nil {
 		return nil, fmt.Errorf("plugin manifest is required")
 	}
+	// Serialize replacements per installation while allowing unrelated plugins
+	// to launch independently. Failed-uninstall recovery can call Start
+	// directly while the resident supervisor is already launching it.
+	if err := h.acquireStart(ctx, req.InstallationID); err != nil {
+		return nil, err
+	}
+	defer h.releaseStart(req.InstallationID)
+
 	hostInfo, instanceState := h.hostInfo, h.instanceState
 	if h.runtimeHostForStart != nil {
 		var err error
@@ -304,6 +314,34 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	go h.watchExit(monitorCtx, req.InstallationID, instance)
 
 	return client, nil
+}
+
+func (h *Host) acquireStart(ctx context.Context, id int) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h.mu.Lock()
+		pending, busy := h.starting[id]
+		if !busy {
+			h.starting[id] = make(chan struct{})
+			h.mu.Unlock()
+			return nil
+		}
+		h.mu.Unlock()
+		select {
+		case <-pending:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (h *Host) releaseStart(id int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	close(h.starting[id])
+	delete(h.starting, id)
 }
 
 // SetExitHandler registers the callback told about plugin processes that

@@ -183,17 +183,21 @@ func (s *InstanceStateStore) Keys(ctx context.Context, installationID int, scope
 	return keys, nil
 }
 
-// instanceStateEmptyMarker is stored for an empty value: the cipher never
-// wraps an empty plaintext, and an absent row must stay distinguishable from
-// an empty one.
-const instanceStateEmptyMarker = "empty:v1"
+// Empty values need an authenticated marker because Cipher.Encrypt leaves
+// empty plaintext unwrapped. A separate AAD domain prevents adding or removing
+// the marker from turning an ordinary ciphertext into an empty value.
+const instanceStateEmptyMarker = "empty:v1:"
 
 func (s *InstanceStateStore) seal(installationID int, scope, key string, value []byte) ([]byte, error) {
 	if s.cipher == nil {
 		return nil, errors.New("plugin instance state requires the server data cipher")
 	}
 	if len(value) == 0 {
-		return []byte(instanceStateEmptyMarker), nil
+		ciphertext, err := s.cipher.Encrypt("empty", instanceStateEmptyMarker+instanceStateAAD(installationID, scope, key))
+		if err != nil {
+			return nil, fmt.Errorf("encrypting empty plugin instance state: %w", err)
+		}
+		return []byte(instanceStateEmptyMarker + ciphertext), nil
 	}
 	ciphertext, err := s.cipher.Encrypt(string(value), instanceStateAAD(installationID, scope, key))
 	if err != nil {
@@ -203,11 +207,18 @@ func (s *InstanceStateStore) seal(installationID int, scope, key string, value [
 }
 
 func (s *InstanceStateStore) open(installationID int, scope, key string, stored []byte) ([]byte, error) {
-	if string(stored) == instanceStateEmptyMarker {
-		return []byte{}, nil
-	}
 	if s.cipher == nil {
 		return nil, errors.New("plugin instance state requires the server data cipher")
+	}
+	if ciphertext, empty := strings.CutPrefix(string(stored), instanceStateEmptyMarker); empty {
+		plaintext, err := s.cipher.Decrypt(ciphertext, instanceStateEmptyMarker+instanceStateAAD(installationID, scope, key))
+		if err != nil {
+			return nil, fmt.Errorf("decrypting empty plugin instance state: %w", err)
+		}
+		if plaintext != "empty" {
+			return nil, errors.New("invalid empty plugin instance state marker")
+		}
+		return []byte{}, nil
 	}
 	if !secret.IsEncrypted(string(stored)) {
 		return nil, errors.New("plugin instance state row is not an encrypted envelope")

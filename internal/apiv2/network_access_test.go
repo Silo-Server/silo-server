@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -366,5 +367,34 @@ func TestNetworkAccessCommandRejectsNullBody(t *testing.T) {
 	// An omitted body still means every host.
 	if rec := do(t, h, http.MethodPost, connect, "", bearer(adminToken)); rec.Code != http.StatusAccepted || len(f.connects) != 1 {
 		t.Fatalf("omitted body: %d, connects=%d", rec.Code, len(f.connects))
+	}
+}
+
+func TestNetworkAccessCommandChunkedBody(t *testing.T) {
+	for _, action := range []string{"connect", "disconnect"} {
+		for _, body := range []string{"", "null", "{}", `{"hosts":null}`, `{"hosts":["api"]}`} {
+			t.Run(action+"/"+body, func(t *testing.T) {
+				deps := pilotDeps(nil, nil)
+				f := newFakeNetworkAccess()
+				deps.NetworkAccess = f
+				h := newTestHandler(t, deps)
+				req := httptest.NewRequest(http.MethodPost, Prefix+"/admin/network-access/stub/"+action, strings.NewReader(body))
+				req.ContentLength = -1
+				req.TransferEncoding = []string{"chunked"}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+adminToken)
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+				invalid := body == "null" || body == `{"hosts":null}`
+				if invalid {
+					requireProblem(t, rec, TypeValidationFailed)
+					if len(f.connects)+len(f.disconnects) != 0 {
+						t.Fatal("invalid body reached the service")
+					}
+				} else if rec.Code != http.StatusAccepted || len(f.connects)+len(f.disconnects) != 1 {
+					t.Fatalf("status=%d, calls=%d: %s", rec.Code, len(f.connects)+len(f.disconnects), rec.Body.String())
+				}
+			})
+		}
 	}
 }

@@ -121,7 +121,8 @@ the host, never supplied by the plugin: `api` on the API server, `node:<id>`
 admin API reports, so the two never disagree. Limits: key ≤ 256 bytes, value
 ≤ 256 KiB, ≤ 256 keys per scope. Uninstall cascades; config test-runs
 (negative installation ids) get no state. The API never returns instance
-state.
+state. Empty values also use an encrypted, row-bound envelope; a plaintext
+empty marker is rejected.
 
 ## Proxy nodes
 
@@ -170,11 +171,12 @@ to them.
   reports) in memory.
 - Lifecycle changes happen on the API server. It publishes
   `cache.EventPluginsChanged` on `ChannelAdmin` after every
-  `OnLifecycleChange`; a runtime config save or admin restart additionally
-  names the installation with `restart: true`, since only the API host's
-  process was stopped by the save. Proxies reconcile on the event and on a
-  60 s poll (`Service.FollowLifecycleChanges`), so a missed publish costs at
-  most one minute.
+  `OnLifecycleChange`. Config saves and admin restarts advance the persisted
+  `runtime_generation`; the event asks proxies to reconcile against that
+  generation. Proxies also reconcile on a 60 s poll
+  (`Service.FollowLifecycleChanges`), so a missed publish costs at most one
+  minute. A caller that cancels an accepted restart stops waiting while the
+  supervisor continues the restart and records the result.
 - The API reaches proxies over their backend URL with the node bearer:
   `GET /network-access/status`, `POST /network-access/{provider}/connect`
   and `.../disconnect` on the proxy listener, ten seconds each, in parallel,

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
@@ -20,6 +21,9 @@ type archiveStore interface {
 }
 
 type ArchiveCache struct {
+	// mu protects rehydration and pruning from concurrent status and
+	// reconcile calls, including cache-hit validation during extraction.
+	mu       sync.Mutex
 	archives archiveStore
 	// root, when set, is this host's own plugin cache dir. Installations are
 	// then rehydrated under it (see LocalInstallPath) instead of at the
@@ -83,6 +87,11 @@ func (c *ArchiveCache) LocalInstallPath(installation *Installation) string {
 func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
 	if installation == nil {
 		return nil, fmt.Errorf("plugin installation is required")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	binaryPath := c.LocalInstallPath(installation)
 

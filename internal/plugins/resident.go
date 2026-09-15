@@ -439,7 +439,7 @@ func (r *ResidentSupervisor) desiredResidents(ctx context.Context) (map[int]*Ins
 		if installation == nil || installation.IsBuiltin() {
 			continue
 		}
-		manifest, err := r.service.ensureLoadedInstallation(ctx, installation)
+		manifest, err := r.service.networkAccessManifest(ctx, installation)
 		if err != nil {
 			r.opts.Logger.WarnContext(ctx, "resident plugin manifest unavailable; not starting it", "component", "plugins",
 				"installation_id", installation.ID, "plugin_id", installation.PluginID, "error", err)
@@ -626,7 +626,8 @@ func (r *ResidentSupervisor) Reset(installationID int) {
 // it again, waiting for the launch so the caller's next read sees running or
 // the recorded failure. A launch failure is recorded in the entry (state
 // backoff or failed, LastError set) rather than returned. ErrNotResident is
-// returned for installations the supervisor does not own.
+// returned for installations the supervisor does not own. A canceled caller
+// stops waiting; the accepted restart still records its eventual result.
 func (r *ResidentSupervisor) Restart(ctx context.Context, installationID int) error {
 	if r == nil {
 		return ErrNotResident
@@ -645,11 +646,20 @@ func (r *ResidentSupervisor) Restart(ctx context.Context, installationID int) er
 	// lock before waiting, always sees this launch.
 	r.starts.Add(1)
 	r.mu.Unlock()
-	defer r.starts.Done()
-
-	r.stopProcess(ctx, installationID)
-	r.runStart(context.WithoutCancel(ctx), installationID, gen)
-	return nil
+	done := make(chan struct{})
+	go func() {
+		defer r.starts.Done()
+		defer close(done)
+		launchCtx := context.WithoutCancel(ctx)
+		r.stopProcess(launchCtx, installationID)
+		r.runStart(launchCtx, installationID, gen)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // setRuntimeGeneration records the installation's persisted runtime

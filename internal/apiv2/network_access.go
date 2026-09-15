@@ -7,9 +7,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humachi"
-
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -88,8 +85,7 @@ type NetworkAccessCommand struct {
 	// hostsNull records an explicit {"hosts": null}. The decoder leaves Hosts
 	// nil for null and for omission alike, and omission means every host; a
 	// null must not widen a malformed request to the whole deployment. The
-	// body is optional, so the RawBody route other operations use for this
-	// rule would make it required in the document.
+	// body is optional; RawBody separately records a top-level null.
 	hostsNull bool
 }
 
@@ -111,19 +107,9 @@ func (c *NetworkAccessCommand) UnmarshalJSON(data []byte) error {
 type NetworkAccessCommandInput struct {
 	NetworkAccessProviderInput
 	Body *NetworkAccessCommand `required:"false"`
-	// bodyPresent records that the request carried a body at all. Huma leaves
-	// Body nil both for an omitted body and for the literal document `null`,
-	// and only omission means "every host"; a null body is malformed and
-	// must not widen to deployment-wide fan-out.
-	bodyPresent bool
-}
-
-// Resolve notes whether a body was sent. The body itself is still decoded
-// by Huma; this only distinguishes an absent body from a null one.
-func (in *NetworkAccessCommandInput) Resolve(ctx huma.Context) []error {
-	r, _ := humachi.Unwrap(ctx)
-	in.bodyPresent = r.ContentLength != 0
-	return nil
+	// RawBody distinguishes omitted bytes from a literal null, including
+	// requests whose transfer encoding leaves ContentLength unknown.
+	RawBody []byte
 }
 
 // publishedNetworkAccessStates is the closed enum on NetworkAccessHostStatus.State.
@@ -222,7 +208,7 @@ func registerNetworkAccess(reg *Registry) {
 			if reg.deps.NetworkAccess == nil {
 				return nil, unavailable("network access")
 			}
-			if in.Body == nil && in.bodyPresent {
+			if in.Body == nil && len(in.RawBody) != 0 {
 				return nil, validationProblem(locationBody, codeInvalidType, "null is not a request body; send an object or omit the body to act on every host.")
 			}
 			if in.Body != nil && in.Body.hostsNull {
@@ -241,6 +227,9 @@ func registerNetworkAccess(reg *Registry) {
 			}
 			return &NetworkAccessStatusOutput{Body: networkAccessStatusOf(report)}, nil
 		})
+		// Huma infers required=true from RawBody. Keep this operation's
+		// documented optional body in both decoding and the OpenAPI document.
+		registeredOperation(reg.api.OpenAPI(), op).RequestBody.Required = false
 	}
 	command("/connect", "connectNetworkAccess",
 		"Ask the provider on the named hosts (every host when hosts is omitted) to bring its overlay identity up and start proxying. Answers 202 with the state each host reached within ten seconds; enrollment may continue in the background (awaiting_authorization carries the auth_url), so poll status for the final state. Repeating the request converges on one connected instance per host. Hosts not named answer their current status; an unknown host id is 422.",

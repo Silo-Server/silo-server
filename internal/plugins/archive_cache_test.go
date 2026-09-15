@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -259,5 +261,61 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Dir(wantFirst)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("previous release still present after the replacement: %v", err)
+	}
+}
+
+type blockedArchiveStore struct {
+	*legacyArchiveStore
+	calls   atomic.Int32
+	release chan struct{}
+}
+
+func (s *blockedArchiveStore) GetArchive(ctx context.Context, id int) (*InstallationArchive, error) {
+	s.calls.Add(1)
+	select {
+	case <-s.release:
+		return s.legacyArchiveStore.GetArchive(ctx, id)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestArchiveCacheSerializesRehydration(t *testing.T) {
+	binary := []byte("#!/bin/sh\nexit 0\n")
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
+	sum := sha256.Sum256(binary)
+	manifest.Checksum = hex.EncodeToString(sum[:])
+	raw, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := buildBinaryPluginArchive(raw, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &blockedArchiveStore{legacyArchiveStore: &legacyArchiveStore{archive: &InstallationArchive{InstallationID: 42, ManifestJSON: raw, Checksum: manifest.Checksum, Bytes: archive}}, release: make(chan struct{})}
+	cache := NewArchiveCacheAt(store, t.TempDir())
+	installation := &Installation{ID: 42, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: "/api/plugins/install-release/plugin"}
+	var wg sync.WaitGroup
+	ready := make(chan struct{}, 32)
+	for range 32 {
+		wg.Go(func() {
+			ready <- struct{}{}
+			if _, err := cache.Ensure(t.Context(), installation); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	for range 32 {
+		<-ready
+	}
+	close(store.release)
+	wg.Wait()
+	if got := store.calls.Load(); got != 1 {
+		t.Errorf("archive loads=%d, want 1", got)
+	}
+
+	if err := validateInstalledFiles(cache.LocalInstallPath(installation), manifest); err != nil {
+		t.Fatal(err)
 	}
 }
