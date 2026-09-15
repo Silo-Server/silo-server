@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -204,6 +203,72 @@ func (r *audiobookRootScan) failed() bool {
 	return r.rootErr != nil || r.walkFailures > 0
 }
 
+// walkAudiobookDirectories keeps catalog paths under the configured root while
+// following directory symlinks. Only ancestors are tracked: aliases must retain
+// their own seen paths so missing-file reconciliation does not retire them.
+func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookRootScan, ancestors map[string]bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	recordFailure := func(err error) {
+		scan.walkFailures++
+		slog.WarnContext(ctx, "audiobook scan: walk error", "component", "scanner", "path", path, "error", err)
+	}
+	canonical, err := canonicalWalkPath(path)
+	if err != nil {
+		recordFailure(err)
+		return nil
+	}
+	if ancestors[canonical] {
+		return nil
+	}
+	ancestors[canonical] = true
+	defer delete(ancestors, canonical)
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		recordFailure(err)
+		return nil
+	}
+	directories := make([]string, 0)
+	hadAudio := false
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		child := filepath.Join(path, entry.Name())
+		isDir := entry.IsDir()
+		if entry.Type()&os.ModeSymlink != 0 {
+			info, err := os.Stat(child)
+			if err != nil {
+				scan.walkFailures++
+				slog.WarnContext(ctx, "audiobook scan: symlink stat failed", "component", "scanner", "path", child, "error", err)
+				continue
+			}
+			isDir = info.IsDir()
+		}
+		if isDir {
+			directories = append(directories, child)
+		} else if SupportsAudioFile(entry.Name()) {
+			scan.seenPaths[child] = true
+			hadAudio = true
+		}
+	}
+	if hadAudio {
+		scan.candidates = append(scan.candidates, path)
+		// Keep multipart books together, but loose root audio must not hide
+		// sibling book directories.
+		if path != scan.root {
+			return nil
+		}
+	}
+	for _, directory := range directories {
+		if err := walkAudiobookDirectories(ctx, directory, scan, ancestors); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string) ([]audiobookRootScan, error) {
 	scans := make([]audiobookRootScan, 0, len(roots))
 	for _, root := range roots {
@@ -226,44 +291,7 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string
 			scan.rootErr = fmt.Errorf("root is not a directory after symlink resolution")
 		}
 		if statErr == nil && scan.rootErr == nil {
-			walkErr := filepath.WalkDir(cleanRoot, func(path string, d fs.DirEntry, walkErr error) error {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if walkErr != nil {
-					scan.walkFailures++
-					slog.WarnContext(ctx, "audiobook scan: walk error", "component", "scanner", "path", path, "error", walkErr)
-					return nil
-				}
-				if !d.IsDir() {
-					return nil
-				}
-				entries, err := os.ReadDir(path)
-				if err != nil {
-					scan.walkFailures++
-					slog.WarnContext(ctx, "audiobook scan: read dir failed", "component", "scanner", "path", path, "error", err)
-					return nil
-				}
-				hadAudio := false
-				for _, entry := range entries {
-					if entry.IsDir() || !SupportsAudioFile(entry.Name()) {
-						continue
-					}
-					filePath := filepath.Join(path, entry.Name())
-					scan.seenPaths[filePath] = true
-					hadAudio = true
-				}
-				if hadAudio {
-					scan.candidates = append(scan.candidates, path)
-					// A loose file at the configured root must not hide sibling
-					// audiobook directories. Nested book folders still stop descent
-					// so their parts remain one candidate.
-					if path != cleanRoot {
-						return filepath.SkipDir
-					}
-				}
-				return nil
-			})
+			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool))
 			if walkErr != nil {
 				if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
 					return nil, walkErr
@@ -313,9 +341,9 @@ func splitAudiobookReconcileRoots(scans []audiobookRootScan) (roots []string, se
 // plus the corresponding media_files rows and author/narrator links in
 // item_people.
 //
-// Each immediate subdirectory of one of folder.Paths is treated as a
-// single audiobook. Subdirectories that contain zero audio files are
-// silently skipped (parseAudiobookFolder returns errFolderHasNoMedia).
+// Directories containing audio are treated as books; discovery follows directory
+// symlinks and stops below each book so its parts remain one candidate. A root
+// containing loose audio is also a candidate without hiding sibling books.
 //
 // This bypasses the per-file movie/TV pipeline because audiobooks are
 // inherently folder-scoped (one book = one item, possibly multi-file).
