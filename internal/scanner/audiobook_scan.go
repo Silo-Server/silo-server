@@ -148,6 +148,15 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	if err != nil {
 		return "", false, fmt.Errorf("list existing files: %w", err)
 	}
+	physical, err := canonicalWalkPath(folderPath)
+	if err != nil {
+		return "", false, err
+	}
+	for _, file := range existing {
+		if file == nil || file.CanonicalRootPath != physical {
+			return "", false, nil
+		}
+	}
 	if !audiobookFolderUnchanged(existing, onDisk) {
 		return "", false, nil
 	}
@@ -341,6 +350,66 @@ func splitAudiobookReconcileRoots(scans []audiobookRootScan) (roots []string, se
 	return roots, seenPaths, protectedPaths
 }
 
+// groupAudiobookCandidates dispatches each physical book once. Retain logical
+// aliases for retry if the preferred path disappears after discovery.
+func groupAudiobookCandidates(scans []audiobookRootScan) [][]string {
+	var groups [][]string
+	byPhysical := make(map[string]int)
+	seen := make(map[string]bool)
+	for _, scan := range scans {
+		for _, path := range scan.candidates {
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			physical, err := canonicalWalkPath(path)
+			if err != nil {
+				// Let reconciliation report the failure rather than silently
+				// dropping a book that vanished after the walk.
+				physical = path
+			}
+			if index, ok := byPhysical[physical]; ok {
+				groups[index] = append(groups[index], path)
+			} else {
+				byPhysical[physical] = len(groups)
+				groups = append(groups, []string{path})
+			}
+		}
+	}
+	return groups
+}
+
+func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.MediaFolder, aliases []string, skipped *int64) error {
+	// Prefer the already indexed location. Adding an alias should not churn
+	// file IDs or overwrite a filesystem-derived title on every scan.
+	if s.fileRepo != nil && len(aliases) > 1 {
+		for i, path := range aliases {
+			id, err := s.fileRepo.FindContentIDByObservedRootPath(ctx, folder.ID, path, "audiobook")
+			if err != nil {
+				return err
+			}
+			if id != "" {
+				aliases[0], aliases[i] = aliases[i], aliases[0]
+				break
+			}
+		}
+	}
+	var failures []error
+	for _, path := range aliases {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.reconcileAudiobookFolder(ctx, folder, path, skipped); err != nil {
+			if !errors.Is(err, errFolderHasNoMedia) {
+				failures = append(failures, err)
+			}
+			continue
+		}
+		return nil
+	}
+	return errors.Join(failures...)
+}
+
 // ScanAudiobookFolder walks an audiobooks-typed media folder and writes
 // one media_items row per subdirectory it can parse as an audiobook,
 // plus the corresponding media_files rows and author/narrator links in
@@ -364,17 +433,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 	if err != nil {
 		return err
 	}
-	candidates := make([]string, 0)
-	seenCandidates := make(map[string]struct{})
-	for i := range scans {
-		for _, candidate := range scans[i].candidates {
-			if _, seen := seenCandidates[candidate]; seen {
-				continue
-			}
-			seenCandidates[candidate] = struct{}{}
-			candidates = append(candidates, candidate)
-		}
-	}
+	candidates := groupAudiobookCandidates(scans)
 	reconcileRoots, seenPaths, protectedPaths := splitAudiobookReconcileRoots(scans)
 	reportAudiobookScanProgress(ctx, folder.ID, len(candidates), 0, 0, 0)
 
@@ -403,7 +462,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		"workers", workers,
 	)
 
-	ch := make(chan string, workers*2)
+	ch := make(chan []string, workers*2)
 	var (
 		wg        sync.WaitGroup
 		processed int64
@@ -414,15 +473,14 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		cancelErr error
 	)
 	start := time.Now()
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range ch {
+	for range workers {
+		wg.Go(func() {
+			for aliases := range ch {
+				path := aliases[0]
 				if ctx.Err() != nil {
 					return
 				}
-				if err := s.reconcileAudiobookFolder(ctx, folder, path, &skipped); err != nil {
+				if err := s.reconcileAudiobookAliases(ctx, folder, aliases, &skipped); err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						cancelMu.Lock()
 						if cancelErr == nil {
@@ -454,7 +512,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 					reportAudiobookScanProgress(ctx, folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
 				}
 			}
-		}()
+		})
 	}
 
 	for _, p := range candidates {
@@ -589,7 +647,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	parsed, err := parseAudiobookFolder(ctx, s.ffprobePath, folderPath)
 	if err != nil {
 		if errors.Is(err, errFolderHasNoMedia) {
-			return nil
+			return err
 		}
 		return fmt.Errorf("parse audiobook folder %s: %w", folderPath, err)
 	}
@@ -713,51 +771,100 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, folderID int, fo
 		return "", fmt.Errorf("fileRepo not configured on Scanner")
 	}
 
-	existingID, err := s.fileRepo.FindContentIDByRootPath(ctx, folderID, folderPath, "audiobook")
+	physical, err := canonicalWalkPath(folderPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve audiobook root: %w", err)
+	}
+	// Include missing rows so a surviving alias restores the same identity.
+	var existingID string
+	err = s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT mf.content_id FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE mf.media_folder_id = $1 AND mf.canonical_root_path = $2
+		  AND mi.type = 'audiobook'
+		ORDER BY mf.missing_since NULLS FIRST, mf.id
+		LIMIT 1
+	`, folderID, physical).Scan(&existingID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("find audiobook by physical root: %w", err)
+	}
+	if existingID == "" {
+		// Upgrade books indexed before canonical roots followed symlinks.
+		existingID, err = s.fileRepo.FindContentIDByRootPath(ctx, folderID, folderPath, "audiobook")
+	} else {
+		err = nil
+	}
 	if err != nil {
 		return "", fmt.Errorf("find audiobook by root path: %w", err)
 	}
-	if existingID != "" {
-		if err := s.updateExistingAudiobookMediaItem(ctx, existingID, book); err != nil {
-			return "", err
-		}
-		return existingID, nil
-	}
-
 	cleanTitle := stripNarratorSuffix(book.Title)
 	if cleanTitle == "" {
 		cleanTitle = book.Title
 	}
-
-	if existing := s.findAudiobookByFilePath(ctx, folderID, book); existing != nil {
-		applyBookToMediaItem(existing, book)
-		if existing.SortTitle == "" {
-			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
+	if existingID == "" {
+		if existing := s.findAudiobookByFilePath(ctx, folderID, book); existing != nil {
+			existingID = existing.ContentID
+		} else if existing := s.findAudiobookDuplicate(ctx, book, cleanTitle); existing != nil {
+			existingID = existing.ContentID
 		}
-		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
+	}
+	contentID, err := s.claimAudiobookIdentity(ctx, folderID, physical, existingID, book, cleanTitle)
+	if err != nil {
+		return "", err
+	}
+	if err := s.updateExistingAudiobookMediaItem(ctx, contentID, book); err != nil {
+		return "", err
+	}
+	return contentID, nil
+}
+
+// Use the existing root-claim table so concurrent scoped scans through different
+// aliases agree on identity before either has written its media files.
+func (s *Scanner) claimAudiobookIdentity(ctx context.Context, folderID int, physical, existingID string, book *parsedAudiobook, title string) (string, error) {
+	tx, err := s.fileRepo.Pool().Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	defer func() { _ = tx.Rollback(cleanupCtx) }()
+	if err := lockAudiobookRoot(ctx, tx, folderID, physical); err != nil {
+		return "", err
+	}
+	var claimedID string
+	err = tx.QueryRow(ctx, `SELECT content_id FROM media_item_roots
+		WHERE media_folder_id = $1 AND canonical_root_path = $2`, folderID, physical).Scan(&claimedID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	if claimedID == "" {
+		claimedID = existingID
+		if claimedID == "" {
+			claimedID, err = idgen.NextID()
+			if err != nil {
+				return "", err
+			}
+			item := &models.MediaItem{ContentID: claimedID, SortTitle: titleutil.DeriveDefaultSortTitle(title)}
+			applyBookToMediaItem(item, book)
+			if err := s.itemRepo.UpsertTx(ctx, tx, item); err != nil {
+				return "", err
+			}
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id)
+			VALUES ($1, $2, $3) ON CONFLICT (media_folder_id, canonical_root_path)
+			DO UPDATE SET last_seen_at = NOW() RETURNING content_id`, folderID, physical, claimedID).Scan(&claimedID); err != nil {
 			return "", err
 		}
-		return existing.ContentID, nil
 	}
-
-	// Secondary dedup: catch books stored under two folders ("Foo" + "Foo
-	// Subtitle Version"). Same scan-time rule as the one-shot
-	// scripts/dedup_audiobooks.py — author + narrator + year + duration
-	// within tolerance + title is equal or an exact "X" / "X: subtitle"
-	// prefix relation. Attaches the new file to the existing row so we
-	// don't pile up duplicates as the scan progresses.
-	if existing := s.findAudiobookDuplicate(ctx, book, cleanTitle); existing != nil {
-		applyBookToMediaItem(existing, book)
-		if existing.SortTitle == "" {
-			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
-		}
-		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
-			return "", err
-		}
-		return existing.ContentID, nil
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
 	}
+	return claimedID, nil
+}
 
-	return createAudiobookMediaItem(ctx, s.itemRepo, book, cleanTitle)
+func lockAudiobookRoot(ctx context.Context, tx pgx.Tx, folderID int, physical string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, fmt.Sprintf("audiobook:%d:%s", folderID, physical))
+	return err
 }
 
 func (s *Scanner) updateExistingAudiobookMediaItem(ctx context.Context, contentID string, book *parsedAudiobook) error {
@@ -1049,6 +1156,13 @@ func (s *Scanner) upsertAudiobookMediaFilesTx(
 	folderPath string,
 	book *parsedAudiobook,
 ) error {
+	physical, err := canonicalWalkPath(folderPath)
+	if err != nil {
+		return fmt.Errorf("resolve audiobook root: %w", err)
+	}
+	if err := lockAudiobookRoot(ctx, tx, folder.ID, physical); err != nil {
+		return err
+	}
 	partTotal := len(book.Files)
 	probeUpdatedAt := time.Now().UTC()
 	mediaFiles := make([]models.MediaFile, 0, partTotal)
@@ -1079,7 +1193,7 @@ func (s *Scanner) upsertAudiobookMediaFilesTx(
 		mf := models.MediaFile{
 			ContentID:          contentID,
 			MediaFolderID:      folder.ID,
-			CanonicalRootPath:  folderPath,
+			CanonicalRootPath:  physical,
 			ObservedRootPath:   folderPath,
 			ContentGroupKey:    contentID,
 			GroupKeyVersion:    1,
@@ -1110,6 +1224,16 @@ func (s *Scanner) upsertAudiobookMediaFilesTx(
 	}
 	if err := s.fileRepo.UpsertBatchTx(ctx, tx, mediaFiles); err != nil {
 		return fmt.Errorf("upsert audiobook media files: %w", err)
+	}
+	// One physical recording has one playable set of parts. Retire the old
+	// alias only after its replacement files have been written in this same
+	// transaction, so a failed scan cannot take away the working location.
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_files SET missing_since = COALESCE(missing_since, NOW())
+		WHERE media_folder_id = $1 AND content_id = $2
+		  AND canonical_root_path = $3 AND observed_root_path <> $4
+	`, folder.ID, contentID, physical, folderPath); err != nil {
+		return fmt.Errorf("retire alternate audiobook paths: %w", err)
 	}
 	return nil
 }
