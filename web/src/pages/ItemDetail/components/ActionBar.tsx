@@ -60,6 +60,17 @@ const responsivePrimaryActionClass =
 const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-primary motion-reduce:hover:bg-primary/90`;
 const staticGlassActionClass = "transition-none";
 
+function visibleOverflowItems(menu: HTMLElement | null): HTMLButtonElement[] {
+  if (!menu) return [];
+  return Array.from(
+    menu.querySelectorAll<HTMLButtonElement>(
+      '[role="menuitem"]:not(:disabled), [role="radio"][tabindex="0"]:not(:disabled)',
+    ),
+  ).filter(
+    (item) => item.getClientRects().length > 0 && getComputedStyle(item).visibility === "visible",
+  );
+}
+
 function DetailOverflowMenuItem({
   className,
   closeMenu,
@@ -84,6 +95,7 @@ function DetailOverflowMenuItem({
 }
 
 export interface ActionBarProps {
+  compactMobile?: boolean;
   contentId?: string;
   playHref?: string;
   playLabel?: string;
@@ -97,6 +109,7 @@ export interface ActionBarProps {
   effectiveVersionResolution?: string;
   effectiveVersionHdr?: boolean;
   watchedLabel?: string;
+  isWatched?: boolean;
   onToggleWatched?: () => void;
   isUpdatingWatched?: boolean;
   onToggleFavorite?: () => void;
@@ -141,6 +154,7 @@ export interface ActionBarProps {
 }
 
 export default function ActionBar({
+  compactMobile = false,
   contentId,
   playHref,
   playLabel = "Play",
@@ -150,6 +164,7 @@ export default function ActionBar({
   resumePositionSeconds,
   resumeDurationSeconds,
   watchedLabel,
+  isWatched,
   onToggleWatched,
   isUpdatingWatched = false,
   onToggleFavorite,
@@ -211,6 +226,16 @@ export default function ActionBar({
   const showPlayChoiceDialog =
     !hasMultipleVersions && playLabel === "Resume" && !!playHref && !!restartHref;
   const displayedPlayLabel = showPlayChoiceDialog ? "Play" : playLabel;
+  const playText = compactMobile ? (
+    <>
+      <span className="detail-full-label">{displayedPlayLabel}</span>
+      <span className="detail-short-label">
+        {displayedPlayLabel === "Resume" ? "Resume" : "Play"}
+      </span>
+    </>
+  ) : (
+    displayedPlayLabel
+  );
 
   const progressOverlay =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
@@ -311,9 +336,6 @@ export default function ActionBar({
 
     const triggerElement = overflowTriggerRef.current;
     positionOverflowMenu();
-    overflowMenuRef.current
-      ?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
-      ?.focus({ preventScroll: true });
 
     window.addEventListener("resize", positionOverflowMenu);
     return () => {
@@ -326,6 +348,14 @@ export default function ActionBar({
       triggerElement?.focus({ preventScroll: true });
     };
   }, [overflowOpen, positionOverflowMenu]);
+
+  // The portal starts hidden until its position is measured. Focus only once
+  // it is painted, and skip actions hidden by the responsive layout.
+  const overflowPositioned = overflowPosition !== null;
+  useLayoutEffect(() => {
+    if (!overflowOpen || !overflowPositioned) return;
+    visibleOverflowItems(overflowMenuRef.current)[0]?.focus({ preventScroll: true });
+  }, [overflowOpen, overflowPositioned]);
 
   useEffect(() => {
     if (!overflowOpen) return;
@@ -394,9 +424,7 @@ export default function ActionBar({
       event.key !== " ";
     if (!isNavigationKey && !isTypeahead) return;
 
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
-    );
+    const items = visibleOverflowItems(event.currentTarget);
     if (items.length === 0) return;
 
     event.preventDefault();
@@ -438,7 +466,11 @@ export default function ActionBar({
     showMarkerEditor,
   );
   const hasOverflowMenuItems =
-    hasOverflowActions || hasAdminActions || hasMetadataActions || Boolean(contentId);
+    hasOverflowActions ||
+    hasAdminActions ||
+    hasMetadataActions ||
+    Boolean(contentId) ||
+    (compactMobile && Boolean(onToggleFavorite || onRatingChange));
 
   const formattedResumeTime = formatPlaybackTime(resumePositionSeconds ?? 0);
   const percentComplete =
@@ -472,9 +504,9 @@ export default function ActionBar({
   const hasStreamControls = Boolean(selectedVersion);
 
   return (
-    <div className="detail-action-bar space-y-2.5">
+    <div className="detail-action-bar space-y-2.5" data-compact-mobile={compactMobile || undefined}>
       {/* ── Primary actions ──────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="detail-primary-actions flex flex-wrap items-center gap-3">
         {/* ── Play button ────────────────────────────────────── */}
         {playHref ? (
           showPlayChoiceDialog ? (
@@ -483,7 +515,7 @@ export default function ActionBar({
               className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
-              {displayedPlayLabel}
+              {playText}
               {progressOverlay}
             </Button>
           ) : selectedVersion ? (
@@ -492,7 +524,7 @@ export default function ActionBar({
               className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
-              {displayedPlayLabel}
+              {playText}
               {progressOverlay}
             </Button>
           ) : (
@@ -501,7 +533,7 @@ export default function ActionBar({
               className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
-              {displayedPlayLabel}
+              {playText}
               {progressOverlay}
             </Button>
           )
@@ -523,12 +555,21 @@ export default function ActionBar({
         {watchedLabel && onToggleWatched && (
           <Button
             variant="glass"
+            aria-label={watchedLabel}
+            aria-pressed={compactMobile ? isWatched : undefined}
             onClick={onToggleWatched}
             disabled={isUpdatingWatched}
             className={`${responsivePrimaryActionClass} h-11 min-w-[161px] rounded-full px-5 text-[14px] font-semibold enabled:cursor-pointer`}
           >
             <Check className="size-[18px]" />
-            {watchedLabel}
+            {compactMobile ? (
+              <>
+                <span className="detail-full-label">{watchedLabel}</span>
+                <span className="detail-short-label">Watched</span>
+              </>
+            ) : (
+              watchedLabel
+            )}
           </Button>
         )}
 
@@ -540,7 +581,7 @@ export default function ActionBar({
             onClick={onToggleFavorite}
             title={isFavorite ? "Unfavorite" : "Favorite"}
             aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
-            className={`${staticGlassActionClass} size-11 cursor-pointer rounded-full`}
+            className={`${staticGlassActionClass} detail-secondary-action size-11 cursor-pointer rounded-full`}
           >
             <Heart
               className={`size-[18px] transition-colors ${isFavorite ? "fill-current text-red-400" : ""}`}
@@ -549,7 +590,9 @@ export default function ActionBar({
         )}
 
         {onRatingChange && (
-          <StarRating value={rating ?? null} onChange={onRatingChange} size={18} />
+          <div className="detail-secondary-action">
+            <StarRating value={rating ?? null} onChange={onRatingChange} size={18} />
+          </div>
         )}
 
         {hasOverflowMenuItems && (
@@ -583,6 +626,32 @@ export default function ActionBar({
               role="menu"
               onKeyDown={handleOverflowKeyDown}
             >
+              {compactMobile && (
+                <div className="detail-mobile-menu-actions">
+                  {onToggleFavorite && (
+                    <DetailOverflowMenuItem
+                      closeMenu={closeOverflowMenu}
+                      onAction={onToggleFavorite}
+                    >
+                      <Heart className="size-4" />
+                      {isFavorite ? "Remove from favorites" : "Add to favorites"}
+                    </DetailOverflowMenuItem>
+                  )}
+                  {onRatingChange && (
+                    <div
+                      className="px-2 py-2"
+                      role="group"
+                      aria-label="Your rating"
+                      onKeyDown={(event) => {
+                        if (event.key !== "Escape" && event.key !== "Tab") event.stopPropagation();
+                      }}
+                    >
+                      <span className="mb-2 block text-sm">Your rating</span>
+                      <StarRating value={rating ?? null} onChange={onRatingChange} size={18} />
+                    </div>
+                  )}
+                </div>
+              )}
               {restartHref && (
                 <DetailOverflowMenuItem
                   closeMenu={closeOverflowMenu}
@@ -752,7 +821,7 @@ export default function ActionBar({
           three nowrap trigger buttons) inflates the auto-sized hero column
           past narrow viewports, clipping the whole info column. */}
       {hasStreamControls && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="detail-stream-actions flex min-w-0 flex-wrap items-center gap-2">
           {versions && hasMultipleVersions && selectedVersion && onSelectVersion && (
             <VersionDropdown
               versions={versions}

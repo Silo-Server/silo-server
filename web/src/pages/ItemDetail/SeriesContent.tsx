@@ -1,3 +1,4 @@
+import DetailSynopsis from "./components/DetailSynopsis";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
@@ -108,85 +109,103 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
 
   return (
     <div>
-      <DetailHero
-        title={title}
-        topNav={<PageBack />}
-        context="Series"
-        studioLabel={firstNetwork}
-        backdropUrl={item.backdrop_url}
-        backdropThumbhash={item.backdrop_thumbhash}
-        posterUrl={item.poster_url}
-        posterThumbhash={item.poster_thumbhash}
-        logoUrl={item.logo_url}
-        tagline={item.tagline || undefined}
-        metadata={
-          <MetadataBadges
-            year={yearDisplay || undefined}
-            contentRating={item.content_rating || undefined}
-            seasonCount={seasons.length || undefined}
-            episodeCount={episodeCount || undefined}
-          />
-        }
-        scoreRow={
-          <ScoreRow
-            ratingImdb={item.rating_imdb}
-            ratingRtCritic={item.rating_rt_critic}
-            ratingRtAudience={item.rating_rt_audience}
-          />
-        }
-        overview={item.overview}
-        overviewTranslating={overviewTranslating}
-        onTranslateOverview={onTranslateOverview}
-        crewLine={
-          <HeroCrewLine crew={item.crew ?? []} genres={item.genres} jobLabel="Created by" />
-        }
-        actions={
-          <MediaUserActionBar
-            item={item}
-            contentId={item.content_id}
-            playHref={resolvedPrimaryHref}
-            playLabel={primaryAction.label}
-            playLoading={primaryActionLoading}
-            onRefresh={
-              canCurateMetadata
-                ? (mode) =>
-                    refreshMetadataMutation.mutate({
-                      item,
-                      mode,
-                      onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
-                    })
-                : undefined
-            }
-            isRefreshing={refreshMetadataMutation.isPending}
-            isAdmin={isAdmin}
-            canCurateMetadata={canCurateMetadata}
-            onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
-            onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
-            onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
-          />
-        }
-      />
-
-      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
-        {seasonsLoading ? (
-          <SeasonCarouselSkeleton />
-        ) : singleSeason ? (
-          <section>
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold tracking-tight">Episodes</h2>
-              <span className="text-muted-foreground text-sm">
-                {singleSeason.episode_count} total
-              </span>
-            </div>
-            <SeasonEpisodeGrid
-              episodes={singleSeasonEpisodesQuery.data?.episodes ?? []}
-              isLoading={singleSeasonEpisodesQuery.isLoading}
-              episodeLinkState={singleSeasonEpisodeLinkState}
+      <div className="episode-detail-viewport series-detail-viewport">
+        <DetailHero
+          variant="series"
+          title={title}
+          topNav={<PageBack />}
+          context="Series"
+          studioLabel={firstNetwork}
+          backdropUrl={item.backdrop_url}
+          backdropThumbhash={item.backdrop_thumbhash}
+          posterUrl={item.poster_url}
+          posterThumbhash={item.poster_thumbhash}
+          logoUrl={item.logo_url}
+          tagline={item.tagline || undefined}
+          metadata={
+            <MetadataBadges
+              year={yearDisplay || undefined}
+              contentRating={item.content_rating || undefined}
+              seasonCount={seasons.length || undefined}
+              episodeCount={episodeCount || undefined}
             />
-          </section>
-        ) : (
-          seasons.length > 0 && <SeasonCarousel seasons={seasons} />
+          }
+          scoreRow={
+            <ScoreRow
+              ratingImdb={item.rating_imdb}
+              ratingRtCritic={item.rating_rt_critic}
+              ratingRtAudience={item.rating_rt_audience}
+            />
+          }
+          overview={item.overview}
+          overviewTranslating={overviewTranslating}
+          onTranslateOverview={onTranslateOverview}
+          crewLine={
+            <HeroCrewLine crew={item.crew ?? []} genres={item.genres} jobLabel="Created by" />
+          }
+          actions={
+            <MediaUserActionBar
+              compactMobile
+              item={item}
+              contentId={item.content_id}
+              playHref={resolvedPrimaryHref}
+              playLabel={primaryAction.label}
+              playLoading={primaryActionLoading}
+              onRefresh={
+                canCurateMetadata
+                  ? (mode) =>
+                      refreshMetadataMutation.mutate({
+                        item,
+                        mode,
+                        onReplaced: (contentID) =>
+                          navigate(`/item/${contentID}`, { replace: true }),
+                      })
+                  : undefined
+              }
+              isRefreshing={refreshMetadataMutation.isPending}
+              isAdmin={isAdmin}
+              canCurateMetadata={canCurateMetadata}
+              onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
+              onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
+              onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
+            />
+          }
+        />
+
+        {(seasonsLoading || seasons.length > 0) && (
+          <div
+            className="page-shell series-detail-navigation"
+            role="region"
+            aria-label="Seasons and episodes"
+          >
+            {seasonsLoading ? (
+              <SeasonCarouselSkeleton />
+            ) : singleSeason ? (
+              <section>
+                <div className="mb-5 flex items-center justify-between gap-3">
+                  <h2 className="text-xl font-semibold tracking-tight">Episodes</h2>
+                  <span className="text-muted-foreground text-sm">
+                    {singleSeason.episode_count} total
+                  </span>
+                </div>
+                <SeasonEpisodeGrid
+                  episodes={singleSeasonEpisodesQuery.data?.episodes ?? []}
+                  isLoading={singleSeasonEpisodesQuery.isLoading}
+                  episodeLinkState={singleSeasonEpisodeLinkState}
+                />
+              </section>
+            ) : (
+              <SeasonCarousel seasons={seasons} />
+            )}
+          </div>
         )}
+      </div>
+      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
+        <DetailSynopsis
+          overview={item.overview}
+          translating={overviewTranslating}
+          onTranslate={onTranslateOverview}
+        />
         {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
 
         {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
