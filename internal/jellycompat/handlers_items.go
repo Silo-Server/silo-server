@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -1457,7 +1458,7 @@ func (h *ItemsHandler) HandleSeasons(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(r.Context(), "jellycompat HandleSeasons panic", "component", "jellycompat",
 				"error", fmt.Sprint(rv),
 				"path", r.URL.Path,
-				"query", r.URL.RawQuery,
+				"query", logredact.SanitizeQuery(r.URL.RawQuery),
 				"stack", string(debug.Stack()),
 			)
 			writeError(w, http.StatusInternalServerError, "ServerError", "Internal error")
