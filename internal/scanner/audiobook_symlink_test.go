@@ -90,7 +90,7 @@ func TestCollectAudiobookRootScansSymlinks(t *testing.T) {
 			}
 			scan := scans[0]
 			if scan.failed() {
-				t.Fatalf("scan failed: rootErr=%v walkFailures=%d", scan.rootErr, scan.walkFailures)
+				t.Fatalf("scan failed: rootErr=%v walkFailures=%v", scan.rootErr, scan.walkFailures)
 			}
 			if !reflect.DeepEqual(scan.candidates, wantCandidates) {
 				t.Errorf("candidates = %v, want %v", scan.candidates, wantCandidates)
@@ -103,7 +103,7 @@ func TestCollectAudiobookRootScansSymlinks(t *testing.T) {
 }
 
 func TestCollectAudiobookRootScansBrokenSymlinkProtectsReconciliation(t *testing.T) {
-	for _, name := range []string{"Missing Author", "missing.mp3"} {
+	for _, name := range []string{"Missing Author", "missing.mp3", "cover.jpg", "notes.txt"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			if err := os.WriteFile(filepath.Join(root, "available.mp3"), []byte("audio"), 0o644); err != nil {
@@ -125,9 +125,23 @@ func TestCollectAudiobookRootScansBrokenSymlinkProtectsReconciliation(t *testing
 			if !reflect.DeepEqual(scans[0].seenPaths, map[string]bool{filepath.Join(root, "available.mp3"): true}) {
 				t.Errorf("seen paths should contain only readable audio: %v", scans[0].seenPaths)
 			}
-			roots, seen, sawFiles := splitAudiobookReconcileRoots(scans)
-			if len(roots) != 0 || len(seen) != 0 || sawFiles {
-				t.Fatalf("incomplete root must be excluded from missing-file reconciliation: roots=%v seen=%v sawFiles=%v", roots, seen, sawFiles)
+			roots, seen, protected := splitAudiobookReconcileRoots(scans)
+			if !reflect.DeepEqual(roots, []string{root}) || !reflect.DeepEqual(seen, scans[0].seenPaths) {
+				t.Fatalf("healthy paths must remain eligible for reconciliation: roots=%v seen=%v", roots, seen)
+			}
+			failedPath := filepath.Join(root, name)
+			if !reflect.DeepEqual(protected, []string{failedPath}) {
+				t.Fatalf("protected paths = %v, want only %s", protected, failedPath)
+			}
+			for _, path := range []string{failedPath, filepath.Join(failedPath, "Book", "chapter.mp3")} {
+				if !pathWithinAnyRoot(path, protected) {
+					t.Errorf("failed path or descendant is unprotected: %s", path)
+				}
+			}
+			for _, path := range []string{filepath.Join(root, "available.mp3"), filepath.Join(root, "removed.mp3"), failedPath + "-other"} {
+				if pathWithinAnyRoot(path, protected) {
+					t.Errorf("unrelated path must remain eligible for reconciliation: %s", path)
+				}
 			}
 		})
 	}
