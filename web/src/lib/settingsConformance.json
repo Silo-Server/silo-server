@@ -1,8 +1,134 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 8,
+  "manifest_revision": 9,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
+    {
+      "name": "seek_intervals_p1",
+      "description": "Video and audiobook intervals are independent profile values and follow the profile across devices. Other profiles receive defaults.",
+      "keys": [
+        "player.video_skip_back_seconds",
+        "player.video_skip_forward_seconds",
+        "player.audiobook_skip_back_seconds",
+        "player.audiobook_skip_forward_seconds"
+      ],
+      "context": {
+        "profile_id": "p1",
+        "device_id": "another-device",
+        "client_family": "mobile"
+      },
+      "stored": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 5
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 90
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 15
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 45
+        }
+      ],
+      "expected": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "value": 5,
+          "source": "profile"
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "value": 90,
+          "source": "profile"
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "value": 15,
+          "source": "profile"
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "value": 45,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "seek_intervals_p2",
+      "description": "Video and audiobook intervals are independent profile values and follow the profile across devices. Other profiles receive defaults.",
+      "keys": [
+        "player.video_skip_back_seconds",
+        "player.video_skip_forward_seconds",
+        "player.audiobook_skip_back_seconds",
+        "player.audiobook_skip_forward_seconds"
+      ],
+      "context": {
+        "profile_id": "p2",
+        "device_id": "another-device",
+        "client_family": "mobile"
+      },
+      "stored": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 5
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 90
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 15
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": 45
+        }
+      ],
+      "expected": [
+        {
+          "key": "player.video_skip_back_seconds",
+          "value": 10,
+          "source": "default"
+        },
+        {
+          "key": "player.video_skip_forward_seconds",
+          "value": 30,
+          "source": "default"
+        },
+        {
+          "key": "player.audiobook_skip_back_seconds",
+          "value": 10,
+          "source": "default"
+        },
+        {
+          "key": "player.audiobook_skip_forward_seconds",
+          "value": 30,
+          "source": "default"
+        }
+      ]
+    },
     {
       "name": "profile_client_sits_between_device_and_profile",
       "description": "Presentation values roam across like clients, while an exact-device override remains more specific and a profile value remains the cross-family fallback.",

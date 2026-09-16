@@ -226,6 +226,8 @@ export interface PlayerPlaybackStateChange {
 export interface PlayerPlaybackTransport {
   playPause: () => void | Promise<void>;
   seekBy: (secondsDelta: number) => void;
+  skipBack: () => void;
+  skipForward: () => void;
   seekTo: (seconds: number) => void;
   togglePictureInPicture: () => void | Promise<void>;
 }
@@ -277,6 +279,8 @@ export interface WatchPageProps {
   playbackRequestKey?: string;
   watchTogetherRoomId?: string | null;
   watchTogetherRoomToken?: string | null;
+  /** Resolved profile intervals; the contract defaults on servers without shared seek settings. */
+  seekIntervals: { back: number; forward: number };
   displayMode?: PlayerDisplayMode;
   onPictureInPictureChange?: (change: PlayerPictureInPictureChange) => void;
   autoEnterPictureInPicture?: boolean;
