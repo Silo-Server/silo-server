@@ -145,6 +145,17 @@ type ResolvedSection struct {
 	Customized  bool            `json:"customized"`
 	Hidden      bool            `json:"hidden,omitempty"`
 
+	// fetchNow pins the instant one FetchOne call reads the clock at.
+	// seasonal_themed is the only clock-dependent type today, and it reads the
+	// clock twice: once to pick the theme whose items the query returns, once to
+	// pick the theme the cache key and the rail title come from. A request that
+	// straddles a window boundary would otherwise file one theme's items under
+	// another theme's key, where they would be served for the rest of the
+	// entry's TTL. Unexported so it stays fetch-time state that no API decode
+	// can set; zero means "read the clock", which is what the fetch helpers do
+	// when a test calls one directly.
+	fetchNow time.Time
+
 	// SuppressNextUp, when true on a continue-watching section, skips the
 	// next-up injection (and the combined series collapse/sort that pairs with
 	// it) so the section returns in-progress resume points only. Callers that

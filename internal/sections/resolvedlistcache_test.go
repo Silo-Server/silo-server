@@ -555,6 +555,36 @@ func TestResolvedListCacheKeyContentBoundaries(t *testing.T) {
 	}
 }
 
+// TestSeasonalThemeScopesResolvedListCacheKey verifies a seasonal section's
+// cached list is scoped to the theme that produced it. The config alone does not
+// determine membership here — the calendar picks one of the enabled themes — so
+// without the theme in the key a Halloween list would keep being served for the
+// rest of the entry's TTL after the window closed, under a title recomputed from
+// a fresh clock read.
+func TestSeasonalThemeScopesResolvedListCacheKey(t *testing.T) {
+	resolved := ResolvedSection{
+		ID:          "sec-seasonal",
+		SectionType: SectionSeasonalThemed,
+		ItemLimit:   15,
+		Config:      json.RawMessage(`{"enabled_themes":["halloween","saturday_morning"]}`),
+	}
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1}}
+	base := resolvedListCacheKey(resolved, nil, nil, scope)
+
+	halloween := appendSeasonalThemeKey(base, "halloween")
+	saturday := appendSeasonalThemeKey(base, "saturday_morning")
+	offSeason := appendSeasonalThemeKey(base, "")
+
+	for _, pair := range [][2]string{{halloween, saturday}, {halloween, offSeason}, {saturday, offSeason}} {
+		if pair[0] == pair[1] {
+			t.Errorf("expected distinct keys, got %q for both", pair[0])
+		}
+	}
+	if halloween != appendSeasonalThemeKey(base, "halloween") {
+		t.Error("expected the same theme to produce a stable key")
+	}
+}
+
 // TestHashSectionConfigCanonicalizes verifies configs that are semantically
 // identical but differ in whitespace or field order hash the same, so native
 // and jellycompat fetches of the same rail share a cache entry. It fails if the
