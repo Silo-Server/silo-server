@@ -295,10 +295,13 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		return result, nil
 	}
 
-	// A seasonal section's membership follows the calendar, not just its config,
-	// so the theme in season right now is resolved once here: it both scopes the
-	// cache entry (see appendSeasonalThemeKey) and picks the title applied below,
-	// which keeps the rail header agreeing with the items under it.
+	// A seasonal section's membership follows the calendar, not just its config.
+	// Pin the instant every clock-dependent step of this fetch reads, then
+	// resolve the theme in season at it once: it scopes the cache entry (see
+	// appendSeasonalThemeKey), selects the items (fetchSeasonalThemed reads the
+	// same pinned instant), and picks the title applied below, so the rail header
+	// and the items under it cannot come from different sides of a boundary.
+	resolved.fetchNow = f.now()
 	seasonalTheme := f.inSeasonTheme(resolved)
 
 	var items []*models.MediaItem
@@ -376,9 +379,18 @@ func (f *Fetcher) inSeasonTheme(resolved ResolvedSection) string {
 	if !ok {
 		return ""
 	}
-	// Same usable filter as fetchSeasonalThemed so the theme tracks the one
-	// that actually resolved.
-	return recipes.InSeasonTheme(p, f.now(), seasonalThemeHasQuery)
+	// Same instant and usable filter as fetchSeasonalThemed so the theme tracks
+	// the one that actually resolved.
+	return recipes.InSeasonTheme(p, f.sectionNow(resolved), seasonalThemeHasQuery)
+}
+
+// sectionNow returns the instant this fetch reads the clock at: the one FetchOne
+// pinned, or a fresh read when the helper was reached without going through it.
+func (f *Fetcher) sectionNow(resolved ResolvedSection) time.Time {
+	if !resolved.fetchNow.IsZero() {
+		return resolved.fetchNow
+	}
+	return f.now()
 }
 
 // seasonalTitleOverride returns the display name theme lends the section, or
@@ -3454,10 +3466,9 @@ func (f *Fetcher) fetchSeasonalThemed(ctx context.Context, s ResolvedSection, li
 		_ = json.Unmarshal(s.Config, &p)
 	}
 
-	now := time.Now()
-	if f.Clock != nil {
-		now = f.Clock.Now()
-	}
+	// The instant FetchOne pinned, so the theme selected here is the one its
+	// cache key and title were built from (see ResolvedSection.fetchNow).
+	now := f.sectionNow(s)
 
 	// Resolve which theme to use. Multi-theme mode wins when populated.
 	// Selection skips themes without an executable query so a data-less theme

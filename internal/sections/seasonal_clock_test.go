@@ -185,3 +185,69 @@ func TestInSeasonThemeIgnoresPinnedLegacyMode(t *testing.T) {
 		t.Fatalf("inSeasonTheme() = %q, want empty for a pinned section in April", got)
 	}
 }
+
+// boundaryClock returns the last second of October on its first read and
+// December on every read after it, standing in for a request that starts just
+// before a theme window closes and reaches the query just after.
+type boundaryClock struct{ reads int }
+
+func (c *boundaryClock) Now() time.Time {
+	c.reads++
+	if c.reads == 1 {
+		return time.Date(2026, 10, 31, 23, 59, 59, 0, time.UTC)
+	}
+	return time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+}
+
+// TestSeasonalFetchPinsOneInstant verifies every clock-dependent step of one
+// fetch reads the same instant. The section enables halloween alone, so a
+// second clock read would resolve no theme and suppress the section — while the
+// cache key and title, built from the first read, still said halloween. That
+// mismatch would file an empty list under halloween's key for the rest of its
+// TTL.
+func TestSeasonalFetchPinsOneInstant(t *testing.T) {
+	clock := &boundaryClock{}
+	f := &Fetcher{Clock: clock}
+	section := ResolvedSection{
+		SectionType: SectionSeasonalThemed,
+		Title:       recipes.SeasonalPicksTitle,
+		Config:      json.RawMessage(`{"enabled_themes":["halloween"]}`),
+	}
+
+	// Stands in for FetchOne's pin, which the fetch path below must reuse.
+	section.fetchNow = f.now()
+
+	theme := f.inSeasonTheme(section)
+	if theme != "halloween" {
+		t.Fatalf("inSeasonTheme() = %q, want halloween from the pinned instant", theme)
+	}
+	if got := f.seasonalTitleOverride(section, theme); got != "Halloween" {
+		t.Fatalf("seasonalTitleOverride() = %q, want Halloween", got)
+	}
+
+	// fetchSeasonalThemed reaches the query for the pinned theme instead of
+	// suppressing the section. The nil pool makes the SQL attempt observable.
+	var reached bool
+	func() {
+		defer func() {
+			if recover() != nil {
+				reached = true
+			}
+		}()
+		_, _, err := f.fetchSection(
+			context.Background(),
+			section,
+			nil, nil, 0, "",
+			catalog.AccessFilter{},
+		)
+		if err != nil {
+			reached = true
+		}
+	}()
+	if !reached {
+		t.Fatal("pinned halloween theme should have reached the query; a clean empty result means the fetch re-read the clock and found itself off-season")
+	}
+	if clock.reads != 1 {
+		t.Fatalf("clock read %d times, want exactly 1 for the whole fetch", clock.reads)
+	}
+}
