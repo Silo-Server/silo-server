@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// maxEpisodeNumberDigits bounds the episode numbers this package reports.
+// Absolute-numbered shows reach four digits (One Piece S23E1162), so five
+// leaves room to spare; a longer run is not an episode number and must not be
+// handed to the catalog, whose episode columns are 32-bit.
+const maxEpisodeNumberDigits = 5
+
 var (
 	// folderTagRe matches strict provider-ID tags in square, curly, or round
 	// brackets, including Plex-style bare IMDb tags such as (tt0473100).
@@ -17,8 +23,12 @@ var (
 	// titleYearRe matches "Title (Year)" with optional trailing content.
 	titleYearRe = regexp.MustCompile(`^(.+?)\s*\((\d{4})\)`)
 
-	// seasonEpisodeRe matches S01E01 or s01e05 patterns in filenames.
-	seasonEpisodeRe = regexp.MustCompile(`(?i)[Ss](\d{1,4})[Ee](\d{1,3})`)
+	// seasonEpisodeRe matches S01E01 or s01e05 patterns in filenames. The
+	// episode group consumes every consecutive digit so absolute-numbered shows
+	// (S23E1162) are read in full: a bounded group silently truncates the
+	// number, and refusing to match a longer run would drop the episodic
+	// evidence that keeps the file classified as series.
+	seasonEpisodeRe = regexp.MustCompile(`(?i)[Ss](\d{1,4})[Ee](\d+)`)
 
 	// airDateRe matches daily/by-date episode names using Jellyfin-style
 	// separators: yyyy-MM-dd, yyyy.MM.dd, yyyy_MM_dd, or yyyy MM dd.
@@ -66,7 +76,11 @@ func ResolvePathContext(filePath string, libraryType string) *PathContext {
 	parsedAirDate := ""
 	if m := seasonEpisodeRe.FindStringSubmatch(nameNoExt); m != nil {
 		parsedSeason, _ = strconv.Atoi(m[1])
-		parsedEpisode, _ = strconv.Atoi(m[2])
+		// A digit run too long to be an episode number still marks the file as
+		// episodic; it just carries no usable number.
+		if digits := m[2]; len(digits) <= maxEpisodeNumberDigits {
+			parsedEpisode, _ = strconv.Atoi(digits)
+		}
 		ctx.HasEpisodePattern = true
 	}
 	if airDate, ok := parseAirDate(nameNoExt); ok {

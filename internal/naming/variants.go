@@ -10,8 +10,12 @@ import (
 )
 
 var (
-	plexEditionTagRe      = regexp.MustCompile(`(?i)\{edition-([^}]+)\}`)
-	multiEpisodeRangeRe   = regexp.MustCompile(`(?i)[Ss](\d{1,4})[Ee](\d{1,3})\s*[-_]\s*[Ee]?(\d{1,3})`)
+	plexEditionTagRe = regexp.MustCompile(`(?i)\{edition-([^}]+)\}`)
+	// Episode bounds allow four digits so absolute-numbered ranges
+	// (S23E1162-E1163) are recognized. Unlike seasonEpisodeRe a longer run
+	// simply fails to match, which only drops an optional multi-episode hint
+	// instead of reporting a truncated range.
+	multiEpisodeRangeRe   = regexp.MustCompile(`(?i)[Ss](\d{1,4})[Ee](\d{1,4})\s*[-_]\s*[Ee]?(\d{1,4})`)
 	presentationPartRe    = regexp.MustCompile(`(?i)(?:^|[.\-_\s])(cd|disc|part|pt)(?:\s*|[._-]?)(\d{1,2})(?:$|[.\-_\s])`)
 	variantReleaseGroupRe = regexp.MustCompile(`(?i)(?:^|[.\s_-])(?:remux|web[ ._-]?dl|webrip|bluray|bdrip|brrip|hdr|dv|2160p|1080p|720p|x264|x265|h\.?264|h\.?265|hevc|av1|aac|ac3|eac3|dts|truehd|atmos).*-([a-z0-9][a-z0-9-]{1,31})$`)
 	variantCleanupSepRe   = regexp.MustCompile(`[.\-_]+`)

@@ -119,6 +119,24 @@ func TestParseFilename(t *testing.T) {
 			wantEp:     1,
 		},
 		{
+			name:        "four digit episode number",
+			path:        "/tv/Long Running Show/Season 23/Long Running Show S23E1162.mkv",
+			libraryType: "series",
+			wantTitle:   "Long Running Show",
+			wantType:    "series",
+			wantSeason:  23,
+			wantEp:      1162,
+		},
+		{
+			name:        "episode number reads the whole digit run",
+			path:        "/tv/Long Running Show/Season 23/Long Running Show S23E11620.mkv",
+			libraryType: "series",
+			wantTitle:   "Long Running Show",
+			wantType:    "series",
+			wantSeason:  23,
+			wantEp:      11620,
+		},
+		{
 			name:       "extras maps to season zero",
 			path:       "/tv/Show Name/Extras/Show.Name.S00E01.mkv",
 			wantTitle:  "Show Name",
@@ -391,6 +409,63 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			name:                    "five digit episode number is not truncated",
+			path:                    "/tv/Long Running Show/Long Running Show S23E11620.mkv",
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Long Running Show",
+			wantTitle:               "Long Running Show",
+			wantSeason:              23,
+			wantEpisode:             11620,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A long episode token must not cost the file its episodic
+			// evidence: in a mixed library that is the only thing keeping it
+			// from being classified as a movie.
+			name:                    "mixed library keeps long episode token as series",
+			path:                    "/mixed/Show Name/Show Name S01E12345.mkv",
+			libraryType:             "mixed",
+			wantType:                "series",
+			wantRoot:                "/mixed/Show Name",
+			wantTitle:               "Show Name",
+			wantSeason:              1,
+			wantEpisode:             12345,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			name:                    "mixed library numeric season dir with long episode token stays series",
+			path:                    "/mixed/Show Name/23/Show Name S23E11620.mkv",
+			libraryType:             "mixed",
+			wantType:                "series",
+			wantRoot:                "/mixed/Show Name",
+			wantTitle:               "Show Name",
+			wantSeason:              23,
+			wantEpisode:             11620,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// Too long to be an episode number, so no number is reported, but
+			// the file is still episodic.
+			name:                    "oversized episode token reports no episode number",
+			path:                    "/mixed/Show Name/Show Name S01E1234567.mkv",
+			libraryType:             "mixed",
+			wantType:                "series",
+			wantRoot:                "/mixed/Show Name",
+			wantTitle:               "Show Name",
+			wantSeason:              1,
+			wantEpisode:             0,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			name:                    "mixed season dir stays series",
 			path:                    "/mixed/Show Name/Season 01/Show Name S01E03.mkv",
 			libraryType:             "mixed",
@@ -603,5 +678,39 @@ func TestDetectCanonicalRoot(t *testing.T) {
 				t.Errorf("Type = %q, want %q", cr.Type, tt.wantType)
 			}
 		})
+	}
+}
+
+// TestEpisodePatternAgreesAcrossClassifiers guards the two path classifiers
+// against drifting apart. They used to compile their own copy of the
+// season/episode pattern, so a fix to one silently left the other behind and
+// the same file was reported as both a series and a movie.
+func TestEpisodePatternAgreesAcrossClassifiers(t *testing.T) {
+	paths := []string{
+		"/mixed/Show Name/Show Name S01E03.mkv",
+		"/mixed/Show Name/Show Name S23E1162.mkv",
+		"/mixed/Show Name/Show Name S23E11620.mkv",
+		"/mixed/Show Name/Show Name S01E1234567.mkv",
+		"/mixed/Some Movie (2019)/Some Movie (2019).mkv",
+	}
+
+	_, assignments := InferRootAssignments(paths, "mixed", 1, nil)
+	for _, filePath := range paths {
+		assignment, ok := assignments[filePath]
+		if !ok {
+			t.Fatalf("no root assignment for %q", filePath)
+		}
+		ctx := ResolvePathContext(filePath, "mixed")
+		if ctx == nil {
+			t.Fatalf("ResolvePathContext(%q) = nil", filePath)
+		}
+		if assignment.HasEpisodePattern != ctx.HasEpisodePattern {
+			t.Errorf("%q: HasEpisodePattern = %v (inference) and %v (path context)",
+				filePath, assignment.HasEpisodePattern, ctx.HasEpisodePattern)
+		}
+		if assignment.InferredType != ctx.Type {
+			t.Errorf("%q: type = %q (inference) and %q (path context)",
+				filePath, assignment.InferredType, ctx.Type)
+		}
 	}
 }

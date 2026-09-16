@@ -27,7 +27,12 @@ const (
 )
 
 var (
-	episodeCodePattern          = regexp.MustCompile(`(?i)s\d{1,4}e\d{1,3}(?:e\d{1,3})?`)
+	// The episode groups are unbounded so the whole code is consumed before the
+	// title starts. Capping them at three digits leaves the tail of a
+	// four-digit episode (S23E1162) in front of the title, which then fails
+	// every comparison in validateSeriesMatchByEpisodes. Keep this in step with
+	// naming.ParseFilename, whose episode numbers these titles are paired with.
+	episodeCodePattern          = regexp.MustCompile(`(?i)s\d{1,4}e\d+(?:e\d+)?`)
 	episodeReleaseSuffixPattern = regexp.MustCompile(
 		`(?i)(?:^|[ ._-])(?:2160p|1080p|720p|576p|480p|webrip|web[ ._-]?dl|bluray|blu[ ._-]?ray|bdrip|hdtv|dvdrip|remux|x26[45]|h26[45]|hevc|av1|aac|ac3|eac3|dts(?:[ ._-]?hd)?|flac|hdr10?|dolby[ ._-]?vision)(?:$|[ ._-])`,
 	)
