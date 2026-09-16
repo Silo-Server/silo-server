@@ -208,12 +208,11 @@ func intInSlice(value int, values []int) bool {
 	return false
 }
 
-// FilterMediaFilesByAccess drops file versions the viewer cannot access:
-// files in libraries outside their allowed set, in libraries they disabled,
-// or above their effective quality ceiling — the same predicate as
-// FileAllowedByAccess.
+// FilterMediaFilesByAccess applies FileAllowedByAccess and, when requested,
+// limits file versions to the presentation library.
 func FilterMediaFilesByAccess(files []*models.MediaFile, filter AccessFilter) []*models.MediaFile {
 	unrestricted := filter.AllowedLibraryIDs == nil &&
+		filter.PresentationLibraryID == nil &&
 		len(filter.DisabledLibraryIDs) == 0 &&
 		strings.TrimSpace(filter.MaxPlaybackQuality) == ""
 	if len(files) == 0 || unrestricted {
@@ -222,7 +221,8 @@ func FilterMediaFilesByAccess(files []*models.MediaFile, filter AccessFilter) []
 
 	filtered := make([]*models.MediaFile, 0, len(files))
 	for _, file := range files {
-		if FileAllowedByAccess(file, filter) {
+		if FileAllowedByAccess(file, filter) &&
+			(filter.PresentationLibraryID == nil || file.MediaFolderID == *filter.PresentationLibraryID) {
 			filtered = append(filtered, file)
 		}
 	}
