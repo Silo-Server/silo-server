@@ -29,12 +29,12 @@ func (h *NodeHandler) CheckAdminNode(ctx context.Context, id int) (AdminNodeChec
 	return h.checkNodeView(ctx, node), nil
 }
 func (h *NodeHandler) checkNodeView(ctx context.Context, node *nodepool.Node) AdminNodeCheckView {
-	healthy, jobs, egress, hash, stats := nodepool.CheckNode(ctx, node)
-	err := h.repo.UpdateHealth(ctx, node.ID, node.URL, healthy, jobs, egress, stats)
+	healthy, jobs, egress, hash, stats, networkAccess := nodepool.CheckNode(ctx, node)
+	err := h.repo.UpdateHealth(ctx, node.ID, node.URL, healthy, jobs, egress, stats, networkAccess)
 	if err != nil {
 		slog.ErrorContext(ctx, "persisting health check result", "component", "api", "node_id", node.ID, "error", err)
 	}
-	h.applyHealthToPools(node, healthy, jobs, egress, hash, stats)
+	h.applyHealthToPools(node, healthy, jobs, egress, hash, stats, networkAccess)
 	return AdminNodeCheckView{Healthy: healthy, ActiveJobs: jobs, EgressKbps: egress, CapabilitiesHash: hash, HealthPersisted: err == nil}
 }
 func (h *NodeHandler) ReprobeAdminNode(w http.ResponseWriter, r *http.Request, id int) (ReprobeNodeResult, error) {

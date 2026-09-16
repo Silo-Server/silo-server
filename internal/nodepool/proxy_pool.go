@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // ProxyPool manages proxy nodes with round-robin selection.
@@ -83,10 +85,10 @@ func (p *ProxyPool) Nodes() []*Node {
 
 // ApplyHealth records a health check result by swapping the node for an
 // updated copy, keeping published *Node values immutable.
-func (p *ProxyPool) ApplyHealth(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, checkedAt time.Time) {
+func (p *ProxyPool) ApplyHealth(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, checkedAt)
+	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, checkedAt)
 }
 
 // ApplyCapabilities records a freshly fetched capability report by swapping the

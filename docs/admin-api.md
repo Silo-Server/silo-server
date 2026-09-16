@@ -199,6 +199,7 @@ configuration, last health result, and last stored hardware inventory. See
 | `hw_accel_override`, `hw_device_override` | string | This node's own acceleration policy (see below). Omitted when the node inherits the cluster-wide settings, which is the normal case. |
 | `capability_drift` | string | Human-readable note describing how the node's hardware got worse at the last capability refetch. Omitted when the last refetch found no regression (see below). |
 | `capability_drift_baseline` | object | What that note is waiting on — `{"backends": ["nvenc"], "devices": [{"uuid": "GPU-8a7b…", "aliases": ["GPU-8a7b…", "0000:03:00.0", "/dev/dri/renderD128"]}]}`. Never present without `capability_drift`; absent with it only for a note written before this field existed (see below). Each device carries every stable name it answered to, so it is recognized if it returns renumbered; `uuid` is held apart because it is the only name that can prove a *different* card, a replacement in the same slot inheriting both the slot and the render path. Either key is omitted when empty. |
+| `network_access` | object | The node's last report about the network access provider plugins running beside it, keyed by provider slug — `{"tailscale": {"state": "connected", "origin": "https://proxy-1.tail1234.ts.net", "hostname": "proxy-1.tail1234.ts.net", "updated_at": "…"}}`. `state` is one of `disconnected`, `awaiting_authorization`, `connecting`, `connected`, `error`; `origin`, `hostname` and `updated_at` are omitted when the provider did not report them. Written by the same health check that writes `last_stats`, so it is exactly as fresh as `last_health_check`, and a check that carries no report clears it. Omitted when the node reports no providers. Only proxy nodes report it: clients never talk to transcode nodes. See [proxy origins by access path](#proxy-origins-by-access-path). |
 
 ### Acceleration overrides
 
@@ -215,10 +216,39 @@ denominator. A homogeneous deployment should leave both unset and configure
 
 Repointing a node's `url` to a different machine clears the identity-bound
 state on that row — `capabilities`, `capabilities_hash`,
-`capabilities_refreshed_at`, `last_stats`, and the drift note with its baseline
-— because all of it describes the worker the old address reached, and the pools
-are reloaded from the row immediately. The replacement is treated as newly
-registered until its first health check and capability fetch.
+`capabilities_refreshed_at`, `last_stats`, `network_access`, and the drift note
+with its baseline — because all of it describes the worker the old address
+reached, and the pools are reloaded from the row immediately. The replacement
+is treated as newly registered until its first health check and capability
+fetch.
+
+### Proxy origins by access path
+
+A request reaches Silo on an *access path*: the default path (LAN, `public_url`,
+a reverse proxy) or the overlay of a network access provider plugin, which
+stamps the requests it forwards with a per-process ingress token. Stream and
+download URLs that name a proxy node are built for the path the request came
+in on:
+
+- Default path: the proxy's `public_url` when set, otherwise its `url` — the
+  behavior described under `public_url` above.
+- Provider path (for example a tailnet client): the `origin` that the same
+  provider reports on that proxy in `network_access`, and only while its
+  `state` is `connected`. A proxy without a connected origin for the client's
+  provider is excluded from proxy egress for that request *before* a route is
+  reserved, so the existing fallbacks apply unchanged: an API-relative stream
+  URL, and the API relaying the transcode node. A client on an overlay is never
+  handed a LAN origin it cannot open.
+
+Routing policies interact with this the way they interact with any pool
+shortage. Under `prefer_proxy` a provider-path request with no reachable proxy
+falls back to API egress; under `proxy_only` it fails with the existing
+`route_capacity_unavailable` outcome until a proxy enrolls with that provider.
+Downloads served through `/downloads/{id}/file-proxy` and
+`/direct-download-proxy` follow the same rule: the `Location` names the
+provider origin, or the file is served from the API server when the planned
+proxy has none. The Jellyfin-compatible playback redirects use the same
+accessor.
 
 A node finds its own row by URL first: `NODE_URL` on the node is matched
 against `stream_nodes.url`, ignoring a trailing slash on either side. Set
@@ -2587,6 +2617,20 @@ version from the installation's repository (a network fetch) and clears the mark
 installation without a recorded update or without a repository is 409 (v1 answered 500).
 Success is 200. Non-retryable: no replay identity, and a lost response may follow a
 committed update.
+
+`POST /api/v2/admin/plugins/installations/{id}/restart` stops the installation's process
+and, for a resident plugin, starts it again with a fresh failure budget; a non-resident plugin
+is only stopped and launches on its next use. A disabled installation is 409. Success is 200
+with the installation, whose `runtime` reports the outcome, including a launch that failed.
+Repeating the request converges on one running process, so it is naturally idempotent.
+
+Every installation carries `runtime`: `resident` (true when the server supervises the
+process: it starts at boot once the API listener is bound, restarts after a crash with
+exponential backoff from 1 s to 60 s, and is parked as `failed` after ten consecutive
+failures until restarted or reconfigured), `state` (`stopped`, `starting`, `running`,
+`backoff`, `failed`), `restart_count`, `last_error`, `last_started_at` and `next_restart_at`.
+Plugins declaring `network_access_provider.v1` are resident; every other plugin starts on
+first use and reports only `running` or `stopped`.
 
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete

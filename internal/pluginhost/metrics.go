@@ -26,6 +26,7 @@ var pluginOperations = func() map[string]string {
 		&pluginv1.RequestRouter_ServiceDesc, &pluginv1.EventConsumer_ServiceDesc,
 		&pluginv1.AuthProvider_ServiceDesc, &pluginv1.HttpRoutes_ServiceDesc,
 		&pluginv1.WatchSyncProvider_ServiceDesc, &pluginv1.WatchSyncDeviceAuthorizationService_ServiceDesc,
+		&pluginv1.NetworkAccessProvider_ServiceDesc,
 	} {
 		for _, method := range service.Methods {
 			ops["/"+service.ServiceName+"/"+method.MethodName] = strings.TrimPrefix(service.ServiceName, "silo.plugin.v1.") + "." + method.MethodName

@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -1963,9 +1964,13 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 // never receives a token, and therefore never a proxy origin either, since a
 // proxy authenticates from the token in the URL path alone. It gets the
 // API-local manifest path, which the client fetches with its own credential.
-func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyNode *nodepool.Node, requireMediaAuth bool) string {
+//
+// path is the client's access path. A proxy with no origin on it is the same
+// as no proxy: the manifest stays API-local and this server relays the node.
+func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyNode *nodepool.Node, requireMediaAuth bool, path netaccess.Path) string {
 	localURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", card.SessionID)
-	if proxyNode == nil {
+	base := proxyNode.ClientURLFor(path)
+	if base == "" {
 		return appendStreamToken(localURL, h.signSessionToken(card, requireMediaAuth))
 	}
 	card.RoutingEgressNodeID = proxyNode.ID
@@ -1973,7 +1978,7 @@ func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyN
 	if token == "" {
 		return appendStreamToken(localURL, token)
 	}
-	return nodepool.NodeEndpoint(proxyNode.ClientURL(), "/stream/transcode/"+token+"/master.m3u8")
+	return nodepool.NodeEndpoint(base, "/stream/transcode/"+token+"/master.m3u8")
 }
 
 // proxyToTranscodeNode forwards a request to the remote transcode node.

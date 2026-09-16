@@ -140,7 +140,7 @@ type directPlannerFixture struct {
 	plans, releases int
 }
 
-func (p *directPlannerFixture) PlanDownload(string, ...string) nodepool.Plan {
+func (p *directPlannerFixture) PlanDownloadWith(string, func(*nodepool.Node) bool, ...string) nodepool.Plan {
 	p.plans++
 	return nodepool.Plan{ProxyNode: &nodepool.Node{URL: p.url}}
 }

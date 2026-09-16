@@ -173,6 +173,9 @@ GET /api/v2/admin/markers/items/{id}/history	non-media
 GET /api/v2/admin/markers/providers	non-media
 PUT /api/v2/admin/markers/providers/{provider}	non-media
 POST /api/v2/admin/markers/providers/{provider}/validate	non-media
+POST /api/v2/admin/network-access/{provider}/connect	non-media
+POST /api/v2/admin/network-access/{provider}/disconnect	non-media
+GET /api/v2/admin/network-access/{provider}/status	non-media
 GET /api/v2/admin/node-sessions	non-media
 GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
@@ -208,6 +211,7 @@ PUT /api/v2/admin/plugins/installations/{id}	non-media
 PUT /api/v2/admin/plugins/installations/{id}/auth-binding	non-media
 PUT /api/v2/admin/plugins/installations/{id}/config	non-media
 POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
+POST /api/v2/admin/plugins/installations/{id}/restart	non-media
 PUT /api/v2/admin/plugins/installations/{id}/task-bindings/{capability_id}	non-media
 POST /api/v2/admin/plugins/installations/{id}/update	non-media
 GET /api/v2/admin/plugins/repositories	non-media
@@ -538,6 +542,7 @@ PUT /api/v2/markers/files/{file_id}	non-media
 DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
+GET /api/v2/network-access/capabilities	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media
@@ -1304,6 +1309,9 @@ GET /api/v2/admin/markers/items/{id}/history	non-media
 GET /api/v2/admin/markers/providers	non-media
 PUT /api/v2/admin/markers/providers/{provider}	non-media
 POST /api/v2/admin/markers/providers/{provider}/validate	non-media
+POST /api/v2/admin/network-access/{provider}/connect	non-media
+POST /api/v2/admin/network-access/{provider}/disconnect	non-media
+GET /api/v2/admin/network-access/{provider}/status	non-media
 GET /api/v2/admin/node-sessions	non-media
 GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
@@ -1339,6 +1347,7 @@ PUT /api/v2/admin/plugins/installations/{id}	non-media
 PUT /api/v2/admin/plugins/installations/{id}/auth-binding	non-media
 PUT /api/v2/admin/plugins/installations/{id}/config	non-media
 POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
+POST /api/v2/admin/plugins/installations/{id}/restart	non-media
 PUT /api/v2/admin/plugins/installations/{id}/task-bindings/{capability_id}	non-media
 POST /api/v2/admin/plugins/installations/{id}/update	non-media
 GET /api/v2/admin/plugins/repositories	non-media
@@ -1669,6 +1678,7 @@ PUT /api/v2/markers/files/{file_id}	non-media
 DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
+GET /api/v2/network-access/capabilities	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media

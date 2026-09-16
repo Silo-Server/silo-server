@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -92,6 +93,37 @@ type Server struct {
 	// countProbesInFlight overrides the detached-probe count the re-probe route
 	// refuses on. Tests set it; production leaves it nil.
 	countProbesInFlight func() int
+
+	// networkAccess reports the network access provider plugins running beside
+	// this proxy, for the API's health pull. Nil until a plugin host is wired
+	// (SetNetworkAccessStatus), which leaves the health field absent — the same
+	// as a build that predates it.
+	networkAccess NetworkAccessStatusSource
+	// networkAccessHost drives the provider instances for the bearer
+	// network-access routes; nil answers 503 there. See network_access.go.
+	networkAccessHost NetworkAccessProviderHost
+	// ingressTokens validates the X-Silo-Ingress-Token a provider plugin
+	// stamps on requests it proxies to this listener, so the access path is
+	// known here too. Nil accepts no tokens (the header is still stripped).
+	ingressTokens *netaccess.Registry
+}
+
+// SetIngressTokens wires the ingress-token registry the listener validates
+// provider-stamped requests against. Call it during construction.
+func (s *Server) SetIngressTokens(registry *netaccess.Registry) {
+	s.ingressTokens = registry
+}
+
+// NetworkAccessStatusSource answers what a proxy reports about its network
+// access providers. *netaccess.StatusCache satisfies it.
+type NetworkAccessStatusSource interface {
+	NodeNetworkAccess() netaccess.NodeNetworkAccess
+}
+
+// SetNetworkAccessStatus wires the provider status source /health reports
+// from. Call it during construction; nil leaves the field absent.
+func (s *Server) SetNetworkAccessStatus(source NetworkAccessStatusSource) {
+	s.networkAccess = source
 }
 
 type remoteArtifactMissReporter interface {
@@ -228,6 +260,9 @@ func (s *Server) router() chi.Router {
 	if s.clientIP != nil {
 		r.Use(clientip.Middleware(s.clientIP))
 	}
+	if s.ingressTokens != nil {
+		r.Use(netaccess.Middleware(s.ingressTokens))
+	}
 	// hls.js uses XHR for manifest/segment fetches which are subject to
 	// CORS when the proxy runs on a different origin than the web app.
 	r.Use(cors.Handler(cors.Options{
@@ -289,6 +324,12 @@ func (s *Server) router() chi.Router {
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
+		// Network access providers running beside this proxy; the API fans its
+		// admin status/connect/disconnect out to these with the node bearer.
+		r.Get("/network-access/status", s.handleNetworkAccessStatus)
+		r.Get("/network-access/{provider}/status", s.handleNetworkAccessProviderStatus)
+		r.Post("/network-access/{provider}/connect", s.handleNetworkAccessConnect)
+		r.Post("/network-access/{provider}/disconnect", s.handleNetworkAccessDisconnect)
 	})
 	return r
 }
@@ -474,6 +515,12 @@ type healthResponse struct {
 	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
 	// Build identifies the binary this proxy runs; see transcodenode.HealthResponse.
 	Build buildinfo.Info `json:"build"`
+	// NetworkAccess is the last status of each network access provider plugin
+	// running beside this proxy, keyed by provider slug. The API stores it on
+	// the node row and hands overlay clients the matching origin. Absent when no
+	// provider runs here; carries no auth URL or error text, since this route
+	// takes no credential.
+	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -482,6 +529,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		activeJobs = s.tracker.ActiveCount()
 	}
 	snapshot := s.metrics.Snapshot().RedactPaths()
+	var networkAccess netaccess.NodeNetworkAccess
+	if s.networkAccess != nil {
+		networkAccess = s.networkAccess.NodeNetworkAccess()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(healthResponse{
 		Status:           "ok",
@@ -493,6 +544,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Attribution:      snapshot.Attribution,
 		SampledAt:        snapshot.SampledAt,
 		Build:            buildinfo.Current(),
+		NetworkAccess:    networkAccess,
 	})
 }
 

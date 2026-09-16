@@ -822,6 +822,10 @@ var traitOnlyRules = []authRule{
 var infrastructureMiddleware = []string{
 	"apimw.RequestID", mwRequestID, "middleware.Recoverer", "apimw.RequestLogger", "apimw.Metrics",
 	"httpstream.CompressExcept", "httpstream.CompressWithExclusions", "clientip.Middleware", "activitylog.NewMiddleware",
+	// netaccess.Middleware validates and strips the network access ingress
+	// token on every listener; it records the access path and never grants
+	// or changes authorization.
+	"netaccess.Middleware",
 }
 
 func classifyAuth(middleware []string) (string, []string) {

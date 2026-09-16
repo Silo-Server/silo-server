@@ -391,6 +391,10 @@ export const adminKeys = {
   restartKeys: () => ["admin", "restartKeys"] as const,
   catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
+  networkAccessCapabilities: () => ["admin", "networkAccess", "capabilities"] as const,
+  networkAccessStatusRoot: () => ["admin", "networkAccess", "status"] as const,
+  networkAccessStatus: (provider: string) =>
+    ["admin", "networkAccess", "status", provider] as const,
   requestsRoot: () => ["admin", "requests"] as const,
   requests: (params: Record<string, unknown>) => ["admin", "requests", params] as const,
   requestSettings: () => ["admin", "requests", "settings"] as const,

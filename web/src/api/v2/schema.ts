@@ -2178,6 +2178,57 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/network-access/{provider}/connect": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ask the provider on the named hosts (every host when hosts is omitted) to bring its overlay identity up and start proxying. Answers 202 with the state each host reached within ten seconds; enrollment may continue in the background (awaiting_authorization carries the auth_url), so poll status for the final state. Repeating the request converges on one connected instance per host. Hosts not named answer their current status; an unknown host id is 422. */
+    post: operations["connectNetworkAccess"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/network-access/{provider}/disconnect": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ask the provider on the named hosts (every host when hosts is omitted) to tear its overlay listener down and clear its desired-connected intent. Answers 202 with the state each host reached within ten seconds. Repeating the request converges on disconnected. Hosts not named answer their current status; an unknown host id is 422. */
+    post: operations["disconnectNetworkAccess"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/network-access/{provider}/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the provider's live state on every host that runs it, asking each plugin instance directly with a ten-second timeout. A host whose plugin process is not running answers state unavailable with the supervisor's last error. An unknown provider slug is 404. */
+    get: operations["getAdminNetworkAccessStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/node-sessions": {
     parameters: {
       query?: never;
@@ -2655,6 +2706,23 @@ export interface paths {
     put?: never;
     /** Probe one prospective configuration by starting a temporary plugin instance and running its connection check; nothing is stored. The check calls the plugin's provider and is bounded by a server timeout; never automatically retry an uncertain result. A failed check is a 200 result with success false. */
     post: operations["testAdminPluginInstallationConfig"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/plugins/installations/{id}/restart": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Stop the installation's process and, for a resident plugin (one the server supervises, such as a network access provider), start it again with a fresh failure budget; the response's runtime reports the outcome, including a launch that failed. A non-resident plugin is only stopped and launches on its next use. A disabled installation is 409. Repeating the request converges on one running process. */
+    post: operations["restartAdminPluginInstallation"];
     delete?: never;
     options?: never;
     head?: never;
@@ -7097,6 +7165,23 @@ export interface paths {
     get: operations["getItemMarkers"];
     /** Update supplied manual marker segments atomically. */
     put: operations["setItemMarkers"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/network-access/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the installed network access providers (overlay networks such as Tailscale that reach this server without port forwarding). available when an enabled plugin declares one; not_configured otherwise. Read from plugin manifests; no plugin is launched and no health is implied. */
+    get: operations["getNetworkAccessCapabilities"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -12527,6 +12612,10 @@ export interface components {
       /** Format: int64 */
       max_jobs: number | null;
       name: string;
+      /** @description Last network access provider status the node reported on its health check, keyed by provider slug. Omitted when the node reports no providers. */
+      network_access?: {
+        [key: string]: components["schemas"]["AdminNodeNetworkAccess"];
+      };
       physical_gpu_keys?: string[];
       public_url?: string;
       /** @enum {string} */
@@ -12554,6 +12643,19 @@ export interface components {
       /** @description The URL-fenced persistence call returned successfully; it may have ignored a concurrently repointed node. Not a revision receipt. */
       health_persisted: boolean;
       healthy: boolean;
+    };
+    AdminNodeNetworkAccess: {
+      /** @description Overlay DNS name of the node. */
+      hostname?: string;
+      /** @description scheme://host[:port] clients on the provider's overlay use to reach this node. Only used while state is connected. */
+      origin?: string;
+      /** @description disconnected | awaiting_authorization | connecting | connected | error */
+      state: string;
+      /**
+       * Format: date-time
+       * @description When the node last heard from the provider, on the node's clock.
+       */
+      updated_at?: string;
     };
     AdminNodeReloadOutputBody: {
       results: components["schemas"]["AdminNodeReloadResult"][];
@@ -13251,6 +13353,7 @@ export interface components {
       repository_id?: string;
       repository_name?: string;
       routes: components["schemas"]["PluginRoute"][];
+      runtime: components["schemas"]["AdminPluginRuntime"];
       /** @enum {string} */
       source_kind: "silo" | "approved_community" | "external";
       task_bindings: components["schemas"]["AdminPluginTaskBinding"][];
@@ -13328,6 +13431,32 @@ export interface components {
       display_name?: string;
       enabled?: boolean;
       url?: string;
+    };
+    AdminPluginRuntime: {
+      /** @description Why the process last stopped or failed to start */
+      last_error?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      last_started_at?: string;
+      /**
+       * Format: date-time
+       * @description Scheduled automatic restart while in backoff
+       */
+      next_restart_at?: string;
+      /** @description True when the server supervises this plugin's process */
+      resident: boolean;
+      /**
+       * Format: int64
+       * @description Automatic restarts since the plugin last ran stably or was restarted by an administrator
+       */
+      restart_count: number;
+      /**
+       * @description Process state; backoff and failed occur only for resident plugins
+       * @enum {string}
+       */
+      state: "stopped" | "starting" | "running" | "backoff" | "failed";
     };
     AdminPluginTaskBinding: {
       capability_id: string;
@@ -19912,6 +20041,75 @@ export interface components {
        * @example true
        */
       present: boolean;
+    };
+    NetworkAccessCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      providers: components["schemas"]["NetworkAccessProviderSummary"][];
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    NetworkAccessCommand: {
+      /** @description Host ids to act on (api, node:<id>); omitted means every host */
+      hosts?: string[];
+    };
+    NetworkAccessHostRef: {
+      /** @description api for the API server; node:<id> for a proxy node */
+      id: string;
+      /** @description Server name for the API host; node name for a proxy */
+      name: string;
+      /** @enum {string} */
+      role: "api" | "proxy";
+    };
+    NetworkAccessHostStatus: {
+      /** @description Overlay IP addresses */
+      addresses: string[];
+      /** @description Interactive enrollment URL, only while awaiting_authorization; admin-only, never logged */
+      auth_url?: string;
+      error?: string;
+      host: components["schemas"]["NetworkAccessHostRef"];
+      /** @description Overlay DNS name */
+      hostname?: string;
+      /** @description scheme://host[:port] clients reach the API listener at over the overlay */
+      origin?: string;
+      provider_version?: string;
+      /** @description the provider's own state string when it is not one of the published states */
+      raw_state?: string;
+      /**
+       * @description Published host state; provider states outside this vocabulary map to error
+       * @enum {string}
+       */
+      state:
+        | "disconnected"
+        | "awaiting_authorization"
+        | "connecting"
+        | "connected"
+        | "error"
+        | "unavailable";
+      /**
+       * Format: date-time
+       * @description When the host last heard from the provider; absent while unavailable
+       */
+      updated_at?: string;
+    };
+    NetworkAccessProviderSummary: {
+      display_name: string;
+      /**
+       * @description Plugin installation declaring network_access_provider.v1
+       * @example 1
+       */
+      installation_id: string;
+      /** @description Stable provider slug used in the admin routes, e.g. tailscale */
+      provider: string;
+    };
+    NetworkAccessStatus: {
+      hosts: components["schemas"]["NetworkAccessHostStatus"][];
+      provider: string;
     };
     NodeHWAccel: {
       error?: string;
@@ -46198,6 +46396,392 @@ export interface operations {
       };
     };
   };
+  connectNetworkAccess: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        provider: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["NetworkAccessCommand"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NetworkAccessStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  disconnectNetworkAccess: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        provider: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["NetworkAccessCommand"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NetworkAccessStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminNetworkAccessStatus: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        provider: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NetworkAccessStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminNodeSessions: {
     parameters: {
       query?: {
@@ -50553,6 +51137,124 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  restartAdminPluginInstallation: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPluginInstallation"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -90573,6 +91275,116 @@ export interface operations {
       /** @description Unsupported Media Type */
       415: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getNetworkAccessCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NetworkAccessCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {

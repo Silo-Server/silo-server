@@ -50,7 +50,7 @@
       "id": "proxy",
       "entrypoint": "internal/proxy.(*Server).Handler",
       "description": "Proxy node listener: media relay, node control, and its own health/metrics probes.",
-      "route_count": 25
+      "route_count": 29
     },
     {
       "id": "transcode_node",
@@ -60,7 +60,7 @@
     }
   ],
   "totals": {
-    "routes": 863,
+    "routes": 867,
     "conditional_routes": 691,
     "streaming_routes": 42,
     "websocket_routes": 4
@@ -75,6 +75,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -87,6 +88,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -100,6 +102,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -114,6 +117,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -129,6 +133,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -145,6 +150,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -162,6 +168,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -179,6 +186,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -196,6 +204,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -213,6 +222,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -227,6 +237,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -241,6 +252,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -255,6 +267,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -269,6 +282,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -283,6 +297,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -296,6 +311,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -309,6 +325,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -322,6 +339,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -335,6 +353,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -348,6 +367,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -361,6 +381,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -374,6 +395,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -387,6 +409,7 @@
       "middleware": [
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
         "apimw.RequestLogger(deps.NodeID)",
         "middleware.Recoverer",
         "apimw.Metrics",
@@ -399,6 +422,7 @@
       "id": 24,
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
         "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })"
       ]
     },
@@ -406,6 +430,7 @@
       "id": 25,
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
         "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
         "s.meterEgress"
       ]
@@ -414,6 +439,7 @@
       "id": 26,
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
         "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
         "s.requireBearer"
       ]
@@ -27147,6 +27173,118 @@
       "conditional": false,
       "request_kind": "unknown",
       "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/network-access/status",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleNetworkAccessStatus",
+      "handler_expr": "s.handleNetworkAccessStatus",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/network-access/{provider}/connect",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleNetworkAccessConnect",
+      "handler_expr": "s.handleNetworkAccessConnect",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/network-access/{provider}/disconnect",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleNetworkAccessDisconnect",
+      "handler_expr": "s.handleNetworkAccessDisconnect",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/network-access/{provider}/status",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleNetworkAccessProviderStatus",
+      "handler_expr": "s.handleNetworkAccessProviderStatus",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 26,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "cors",
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
       "delegates_to": "",
       "streams": false,
       "upgrades_websocket": false,
