@@ -218,7 +218,8 @@ func (h *HistoryImportHandler) writeHistoryImportError(w http.ResponseWriter, er
 		errors.Is(err, historyimport.ErrConnectSessionUsed),
 		errors.Is(err, historyimport.ErrPlexSessionExpired),
 		errors.Is(err, historyimport.ErrPlexSessionUsed),
-		errors.Is(err, historyimport.ErrNoAdminToken):
+		errors.Is(err, historyimport.ErrNoAdminToken),
+		errors.Is(err, historyimport.ErrNoSecurePlexAddress):
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 	case errors.Is(err, historyimport.ErrActiveRunExists),
 		errors.Is(err, historyimport.ErrMappingDuplicate):

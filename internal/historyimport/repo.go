@@ -26,6 +26,11 @@ var (
 	ErrPlexSessionNotFound    = errors.New("plex session not found")
 	ErrPlexSessionExpired     = errors.New("plex session expired")
 	ErrPlexSessionUsed        = errors.New("plex session already used")
+	// ErrNoSecurePlexAddress is returned when a profile OAuth import names a
+	// Plex server whose every advertised address is cleartext. The public
+	// transport would refuse each one at round-trip time; saying so up front
+	// points at the only way to import from such a server.
+	ErrNoSecurePlexAddress = errors.New("profile Plex imports require an https:// server address; ask an administrator to add this server as a saved source")
 )
 
 type Repository struct {

@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -229,6 +231,14 @@ func TestPublicPlexAddress(t *testing.T) {
 		{address: "2002::1", want: false},
 		{address: "fc00::1", want: false},
 		{address: "fe80::1", want: false},
+		{address: "fec0::1", want: false},
+		// netip.Prefix.Contains reports false for every zoned address, so a
+		// zone would otherwise carry a private literal straight past the deny
+		// list. Docker and podman hand out ULA addresses by default.
+		{address: "fc00::1%eth0", want: false},
+		{address: "fd00::1%eth0", want: false},
+		{address: "fe80::1%eth0", want: false},
+		{address: "2606:4700:4700::1111%eth0", want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.address, func(t *testing.T) {
@@ -237,6 +247,24 @@ func TestPublicPlexAddress(t *testing.T) {
 				t.Fatalf("publicPlexAddress(%s) = %v, want %v", address, got, test.want)
 			}
 		})
+	}
+}
+
+// TestPublicPlexDialRejectsZonedLiteral exercises the path a crafted
+// plex_base_urls entry actually takes: https://[fd00::1%25eth0]:32400 reaches
+// the dialer as a zoned literal, and the deny list has to catch it before the
+// Plex token is handed to a private address.
+func TestPublicPlexDialRejectsZonedLiteral(t *testing.T) {
+	t.Parallel()
+
+	dial := publicPlexDialContext(&net.Dialer{Timeout: time.Second})
+	conn, err := dial(context.Background(), "tcp", "[fd00::1%eth0]:32400")
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("zoned ULA literal was dialed, want a private-destination rejection")
+	}
+	if !errors.Is(err, errPrivatePlexDestination) {
+		t.Fatalf("dial error = %v, want %v", err, errPrivatePlexDestination)
 	}
 }
 
@@ -276,6 +304,67 @@ func TestPublicPlexRedirectDropsTokenCrossHost(t *testing.T) {
 				t.Fatalf("token forwarded = %v, want %v", got, test.wantToken)
 			}
 		})
+	}
+}
+
+// TestPublicPlexRedirectKeepsTokenStrippedAfterSameHostHop drives the real
+// net/http redirect machinery. Deleting X-Plex-Token inside CheckRedirect only
+// clears it for that one hop: the stdlib re-copies the *original* request's
+// headers onto every redirect, and only its own sensitive-header list survives
+// that. Comparing each destination against the previous hop therefore hands an
+// attacker host the token the moment it redirects to itself.
+func TestPublicPlexRedirectKeepsTokenStrippedAfterSameHostHop(t *testing.T) {
+	t.Parallel()
+
+	const originHost = "plex.example.com"
+	const attackerHost = "evil.example"
+
+	var mu sync.Mutex
+	tokensByURL := map[string]string{}
+	client := &http.Client{
+		CheckRedirect: checkPublicPlexRedirect,
+		Transport: plexTestRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			mu.Lock()
+			tokensByURL[req.URL.String()] = req.Header.Get("X-Plex-Token")
+			mu.Unlock()
+
+			response := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader("{}")),
+				Request:    req,
+			}
+			switch req.URL.String() {
+			case "https://" + originHost + "/library/sections":
+				response.StatusCode = http.StatusFound
+				response.Header.Set("Location", "https://"+attackerHost+"/hop1")
+			case "https://" + attackerHost + "/hop1":
+				response.StatusCode = http.StatusFound
+				response.Header.Set("Location", "https://"+attackerHost+"/hop2")
+			}
+			return response, nil
+		}),
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://"+originHost+"/library/sections", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("X-Plex-Token", "server-access-token")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("redirect chain: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if got := tokensByURL["https://"+originHost+"/library/sections"]; got == "" {
+		t.Fatal("origin request lost its Plex token")
+	}
+	for _, path := range []string{"/hop1", "/hop2"} {
+		if got := tokensByURL["https://"+attackerHost+path]; got != "" {
+			t.Fatalf("%s received the Plex token %q, want it stripped for the whole cross-host chain", path, got)
+		}
 	}
 }
 
@@ -392,5 +481,46 @@ func TestPlexBaseURLCandidatesPreservesPrimaryAndBoundsFallbacks(t *testing.T) {
 	}
 	if got[0] != "https://preferred.example" || got[1] != "https://fallback-1.example" {
 		t.Fatalf("candidate order = %v, want preferred then advertised fallbacks", got)
+	}
+}
+
+// TestPlexOAuthBaseURLCandidatesDropsCleartextBeforeTheCap covers the topology
+// this whole change exists for: the promoted remote address is down and the
+// connection that still works — the Plex relay — is advertised last, behind
+// more cleartext entries than the cap allows. Filtering after the cap would
+// discard it unprobed.
+func TestPlexOAuthBaseURLCandidatesDropsCleartextBeforeTheCap(t *testing.T) {
+	t.Parallel()
+
+	alternatives := []string{}
+	for i := 0; i < 10; i++ {
+		alternatives = append(alternatives, "http://192.168.1.10:3240"+strconv.Itoa(i))
+	}
+	alternatives = append(alternatives, "https://relay.plex.direct:443")
+
+	got := plexOAuthBaseURLCandidates("https://down.plex.direct:32400", alternatives)
+	want := []string{"https://down.plex.direct:32400", "https://relay.plex.direct:443"}
+	if len(got) != len(want) {
+		t.Fatalf("candidates = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidates = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestPlexOAuthBaseURLCandidatesKeepsLegacySessionLocalURL covers a Plex
+// session persisted before ConnectionURLs existed: its encrypted JSON decodes
+// with an empty ConnectionURLs, so the stored LocalURL is the only address the
+// run has left.
+func TestPlexOAuthBaseURLCandidatesKeepsLegacySessionLocalURL(t *testing.T) {
+	t.Parallel()
+
+	server := PlexServer{LocalURL: "https://192-168-1-5.hash.plex.direct:32400", HasLocalURL: true}
+
+	got := plexSessionBaseURLCandidates(server)
+	if len(got) != 1 || got[0] != server.LocalURL {
+		t.Fatalf("candidates = %v, want the stored local address %q", got, server.LocalURL)
 	}
 }

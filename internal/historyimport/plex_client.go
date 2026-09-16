@@ -64,6 +64,9 @@ var (
 		netip.MustParsePrefix("2002::/16"),
 		netip.MustParsePrefix("fc00::/7"),
 		netip.MustParsePrefix("fe80::/10"),
+		// Deprecated IPv6 site-local. Go still reports it as global unicast,
+		// so a deployment that routes it would otherwise reach internal hosts.
+		netip.MustParsePrefix("fec0::/10"),
 	}
 )
 
@@ -120,6 +123,13 @@ func newPublicPlexHTTPClient(timeout time.Duration) *http.Client {
 // cross-host redirect but knows nothing about X-Plex-Token, so a redirect from
 // a user-supplied Plex address to an attacker's host would otherwise hand that
 // host the user's token. Same-host redirects (including a port change) keep it.
+//
+// The comparison is against via[0], the address the token was minted for, and
+// not the previous hop: net/http re-copies the *original* request's headers
+// onto every redirect and only its own sensitive-header list survives that, so
+// deleting X-Plex-Token here clears it for this hop alone. A chain that leaves
+// the origin host and then redirects within the new host would otherwise get
+// the token back on the second hop.
 func checkPublicPlexRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("too many Plex redirects")
@@ -128,8 +138,8 @@ func checkPublicPlexRedirect(req *http.Request, via []*http.Request) error {
 		return errInsecurePlexDestination
 	}
 	if len(via) > 0 {
-		previous := via[len(via)-1].URL
-		if !strings.EqualFold(previous.Hostname(), req.URL.Hostname()) {
+		origin := via[0].URL
+		if !strings.EqualFold(origin.Hostname(), req.URL.Hostname()) {
 			req.Header.Del("X-Plex-Token")
 		}
 	}
@@ -246,6 +256,13 @@ func publicPlexDialContext(dialer *net.Dialer) func(context.Context, string, str
 }
 
 func publicPlexAddress(address netip.Addr) bool {
+	// netip.Prefix.Contains reports false for any address carrying a zone, so
+	// a zoned literal such as fd00::1%eth0 would slip past every prefix below.
+	// A zone scopes an address to one local interface and never names a public
+	// destination, so reject it outright rather than trying to match it.
+	if address.Zone() != "" {
+		return false
+	}
 	if address.Is4In6() {
 		address = address.Unmap()
 	}

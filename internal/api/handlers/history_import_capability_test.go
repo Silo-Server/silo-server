@@ -43,3 +43,31 @@ func TestHistoryImportCapabilityReportsPlexConnectionFallback(t *testing.T) {
 			got.MaxPlexConnectionCandidates, historyimport.MaxPlexConnectionCandidates)
 	}
 }
+
+// TestHistoryImportRejectsInsecurePlexAddressAsBadRequest pins the error to a
+// 400 carrying its own text. writeHistoryImportError's default branch turns
+// anything it does not recognize into a generic 500, which would leave a
+// profile whose Plex server advertises only cleartext addresses with no way to
+// learn why the import will not start.
+func TestHistoryImportRejectsInsecurePlexAddressAsBadRequest(t *testing.T) {
+	handler := &HistoryImportHandler{}
+	rec := httptest.NewRecorder()
+	handler.writeHistoryImportError(rec, historyimport.ErrNoSecurePlexAddress)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding error body: %v (%s)", err, rec.Body.String())
+	}
+	if got.Error != "bad_request" {
+		t.Errorf("error = %q, want bad_request", got.Error)
+	}
+	if got.Message != historyimport.ErrNoSecurePlexAddress.Error() {
+		t.Errorf("message = %q, want the sentinel's own text", got.Message)
+	}
+}

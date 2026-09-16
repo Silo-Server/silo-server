@@ -40,9 +40,6 @@ describe("getPlexServerURLs", () => {
       hasLocalURL: true,
     } as BrowserPlexServer;
 
-    expect(getPlexServerURLs(server)).toEqual([
-      "https://plex.example.com",
-      "http://plex:32400",
-    ]);
+    expect(getPlexServerURLs(server)).toEqual(["https://plex.example.com", "http://plex:32400"]);
   });
 });

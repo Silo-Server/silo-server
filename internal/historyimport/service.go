@@ -371,11 +371,9 @@ func (s *Service) resolvePlexAuth(ctx context.Context, userID int, input CreateR
 		if server == nil {
 			return nil, "", fmt.Errorf("selected Plex server not found in session")
 		}
-		// ConnectionURLs already carries every advertised connection, local
-		// ones included, so only the preferred remote address is promoted.
-		baseURLs := plexBaseURLCandidates(server.RemoteURL, server.ConnectionURLs)
+		baseURLs := plexSessionBaseURLCandidates(*server)
 		if len(baseURLs) == 0 {
-			return nil, "", fmt.Errorf("selected Plex server has no usable address")
+			return nil, "", ErrNoSecurePlexAddress
 		}
 		if err := s.repo.ConsumePlexSession(ctx, session.ID); err != nil {
 			return nil, "", err
@@ -383,10 +381,15 @@ func (s *Service) resolvePlexAuth(ctx context.Context, userID int, input CreateR
 		return &plexAuth{BaseURLs: baseURLs, Token: server.AccessToken, AccountToken: session.AuthToken}, ConnectionModePlexOAuth, nil
 	}
 
-	baseURLs := plexBaseURLCandidates(input.PlexBaseURL, input.PlexBaseURLs)
-	if len(baseURLs) > 0 {
+	// The unfiltered set only answers "did the request name a server at all".
+	// What the run actually probes is the HTTPS-only subset below.
+	if requested := plexBaseURLCandidates(input.PlexBaseURL, input.PlexBaseURLs); len(requested) > 0 {
 		if input.PlexToken == "" {
 			return nil, "", fmt.Errorf("plex_token is required for browser Plex imports")
+		}
+		baseURLs := plexOAuthBaseURLCandidates(input.PlexBaseURL, input.PlexBaseURLs)
+		if len(baseURLs) == 0 {
+			return nil, "", ErrNoSecurePlexAddress
 		}
 		// Prefer the explicit account token: in the browser OAuth flow
 		// PlexToken is a PMS access token, which account-level APIs (the
@@ -446,6 +449,52 @@ func plexBaseURLCandidates(primary string, alternatives []string) []string {
 		appendCandidate(candidate)
 	}
 	return result
+}
+
+// plexSessionBaseURLCandidates resolves the addresses a persisted Plex OAuth
+// session still offers, preferred remote address first.
+//
+// ConnectionURLs carries every advertised connection, local ones included.
+// LocalURL is appended for sessions persisted before that field existed: their
+// encrypted JSON decodes with ConnectionURLs empty, so the stored local
+// address is all a local-only server has left.
+func plexSessionBaseURLCandidates(server PlexServer) []string {
+	alternatives := make([]string, 0, len(server.ConnectionURLs)+1)
+	alternatives = append(alternatives, server.ConnectionURLs...)
+	alternatives = append(alternatives, server.LocalURL)
+	return plexOAuthBaseURLCandidates(server.RemoteURL, alternatives)
+}
+
+// plexOAuthBaseURLCandidates is plexBaseURLCandidates for a profile OAuth run:
+// the same normalization, minus every candidate the public HTTPS-only
+// transport would refuse anyway.
+//
+// The filter has to run before the cap, not after. A server advertising more
+// than MaxPlexConnectionCandidates connections would otherwise spend the whole
+// budget on http:// entries and never probe a working https:// one — typically
+// the Plex relay, which plex.tv advertises last and which is exactly the
+// fallback that rescues a broken port forward.
+func plexOAuthBaseURLCandidates(primary string, alternatives []string) []string {
+	usable := make([]string, 0, len(alternatives))
+	for _, candidate := range alternatives {
+		if isSecurePlexURL(candidate) {
+			usable = append(usable, candidate)
+		}
+	}
+	if !isSecurePlexURL(primary) {
+		primary = ""
+	}
+	return plexBaseURLCandidates(primary, usable)
+}
+
+// isSecurePlexURL applies publicPlexTransport's scheme rule early enough to
+// matter for the candidate cap.
+func isSecurePlexURL(candidate string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(candidate))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https")
 }
 
 // addToWatchlist puts a matched watchlist import onto the importing
