@@ -384,8 +384,10 @@ function SeasonalParamField({ params, onChange }: ParamFieldProps) {
       </div>
       <p className="text-[11px] text-white/50">
         The section auto-cycles: it shows whichever enabled holiday is currently in season, and
-        hides itself when none match. Per-holiday titles override the section name only while that
-        holiday is active.
+        hides itself when none match. While a holiday is active it renames the section — to the
+        title set above, or to the holiday&rsquo;s own name when that box is empty. A section
+        you&rsquo;ve given your own name keeps it instead; fill in a title above to override that
+        for one holiday.
       </p>
     </div>
   );

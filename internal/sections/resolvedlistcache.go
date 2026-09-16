@@ -253,7 +253,9 @@ func cloneMediaItems(items []*models.MediaItem) []*models.MediaItem {
 // mood_collection, trending_on_server, new_to_library, most_watched,
 // trending_discover, admin_curated_list, or the library-collection path) reads
 // the section's own ID to determine which items it contains — the sole s.ID read
-// lives in the non-cacheable user-collection branch. Dropping the arbitrary ID
+// lives in the non-cacheable user-collection branch. The one extra input is the
+// clock, which seasonal_themed resolves a theme from; FetchOne folds that theme
+// in via appendSeasonalThemeKey. Dropping the arbitrary ID
 // lets two sections that share type+config+limit+scope collapse to ONE shared
 // entry: e.g. a natively configured "recently added" library rail and the
 // jellyfin-compat /Items/Latest for that same library are built once and reused
@@ -290,6 +292,23 @@ func resolvedListCacheKey(resolved ResolvedSection, libraryID *int, libraryIDs [
 	filter.WriteAccessScopeCacheKey(&b)
 
 	return b.String()
+}
+
+// appendSeasonalThemeKey scopes a resolved-list cache key to the seasonal theme
+// that produced the items.
+//
+// seasonal_themed is the one cacheable type whose membership depends on the
+// calendar as well as on type+config+limit+scope: two themes enabled on the
+// same section (Halloween and Saturday-morning cartoons, say) hash to the same
+// config but return different items, and off-season the section returns none at
+// all. Without this suffix a list built inside one window would keep being
+// served for up to resolvedListTTL after the next window opened — and the title
+// FetchOne applies, which is recomputed per request, would disagree with it.
+//
+// theme is "" off-season, which is itself a distinct key: the empty list cached
+// there is dropped the moment a theme comes into season.
+func appendSeasonalThemeKey(key, theme string) string {
+	return key + "|seasonal_theme=" + theme
 }
 
 func hashSectionConfig(config json.RawMessage) string {

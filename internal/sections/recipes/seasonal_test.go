@@ -2,6 +2,10 @@ package recipes
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"testing"
 	"time"
 )
@@ -275,62 +279,164 @@ func TestSeasonalTitleOverridePicksActiveThemeTitle(t *testing.T) {
 		},
 	}
 
+	// A configured per-theme title wins over the section's own name, so this
+	// holds for a renamed section too.
+	const sectionTitle = "Mom's Picks"
+
 	// October — halloween fires.
-	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
+	got := SeasonalTitleOverride(p, sectionTitle, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
 	if got != "Spooky Picks" {
 		t.Errorf("Oct 14 → %q, want Spooky Picks", got)
 	}
 
 	// December — christmas fires.
-	got = SeasonalTitleOverride(p, time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), nil)
+	got = SeasonalTitleOverride(p, sectionTitle, time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), nil)
 	if got != "Festive Films" {
 		t.Errorf("Dec 20 → %q, want Festive Films", got)
 	}
 
 	// April — nothing fires, no override.
-	got = SeasonalTitleOverride(p, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC), nil)
+	got = SeasonalTitleOverride(p, sectionTitle, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC), nil)
 	if got != "" {
 		t.Errorf("Apr 15 → %q, want empty", got)
 	}
 }
 
-// TestSeasonalTitleOverrideUsesDefaultTitle verifies that an active theme with
-// no custom title uses the same label advertised by the section editor.
+// seasonalDefaultTitleCases pins one in-season instant and the expected default
+// label for every supported theme. Keyed by theme so
+// TestSeasonalThemeDefaultTitlesCoverEveryTheme can require an entry per
+// SeasonalPredicates key: adding a tenth theme fails here until it gets both a
+// default title and a case, instead of silently reintroducing issue #585.
+var seasonalDefaultTitleCases = map[string]struct {
+	now  time.Time
+	want string
+}{
+	"valentines":         {time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC), "Valentine's Day"},
+	"st_patricks":        {time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC), "St. Patrick's Day"},
+	"thanksgiving":       {time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC), "Thanksgiving"},
+	"christmas":          {time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), "Christmas"},
+	"halloween":          {time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), "Halloween"},
+	"saturday_morning":   {time.Date(2026, 3, 7, 10, 0, 0, 0, time.UTC), "Saturday Morning Cartoons"},
+	"family_movie_night": {time.Date(2026, 4, 10, 19, 0, 0, 0, time.UTC), "Family Movie Night"},
+	"summer_blockbuster": {time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC), "Summer Blockbusters"},
+	"summer":             {time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC), "Summer"},
+}
+
+// TestSeasonalTitleOverrideUsesDefaultTitle verifies that an in-season theme
+// with no custom title lends a section still carrying its preset name the same
+// label the section editor advertises (issue #585).
 func TestSeasonalTitleOverrideUsesDefaultTitle(t *testing.T) {
-	tests := []struct {
-		theme       string
-		customTitle string
-		now         time.Time
-		want        string
-	}{
-		{theme: "valentines", now: time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC), want: "Valentine's Day"},
-		{theme: "st_patricks", now: time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC), want: "St. Patrick's Day"},
-		{theme: "thanksgiving", now: time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC), want: "Thanksgiving"},
-		{theme: "christmas", customTitle: " 	", now: time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), want: "Christmas"},
-		{theme: "halloween", now: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), want: "Halloween"},
-		{theme: "saturday_morning", now: time.Date(2026, 3, 7, 10, 0, 0, 0, time.UTC), want: "Saturday Morning Cartoons"},
-		{theme: "family_movie_night", now: time.Date(2026, 4, 10, 19, 0, 0, 0, time.UTC), want: "Family Movie Night"},
-		{theme: "summer_blockbuster", now: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC), want: "Summer Blockbusters"},
-		{theme: "summer", now: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC), want: "Summer"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.theme, func(t *testing.T) {
-			p := SeasonalThemedParams{EnabledThemes: []string{tt.theme}}
-			if tt.customTitle != "" {
-				p.ThemeTitles = map[string]string{tt.theme: tt.customTitle}
+	for theme, tc := range seasonalDefaultTitleCases {
+		t.Run(theme, func(t *testing.T) {
+			p := SeasonalThemedParams{EnabledThemes: []string{theme}}
+			if got := SeasonalTitleOverride(p, SeasonalPicksTitle, tc.now, nil); got != tc.want {
+				t.Errorf("SeasonalTitleOverride() = %q, want %q", got, tc.want)
 			}
-			if got := SeasonalTitleOverride(p, tt.now, nil); got != tt.want {
-				t.Errorf("SeasonalTitleOverride() = %q, want %q", got, tt.want)
+			// A blank entry is not a title: it falls through to the default.
+			p.ThemeTitles = map[string]string{theme: " \t "}
+			if got := SeasonalTitleOverride(p, SeasonalPicksTitle, tc.now, nil); got != tc.want {
+				t.Errorf("blank custom title → %q, want %q", got, tc.want)
 			}
 		})
 	}
+}
 
-	p := SeasonalThemedParams{
-		EnabledThemes: []string{"christmas"},
-		ThemeTitles:   map[string]string{"christmas": "Festive Films"},
+// TestSeasonalThemeDefaultTitlesCoverEveryTheme ties the default-title table to
+// the themes that actually exist: every predicate needs a non-empty label, the
+// table may not carry labels for themes that were removed, and every theme
+// needs a case above.
+func TestSeasonalThemeDefaultTitlesCoverEveryTheme(t *testing.T) {
+	for theme := range SeasonalPredicates {
+		if seasonalThemeDefaultTitles[theme] == "" {
+			t.Errorf("theme %q has a predicate but no default title", theme)
+		}
+		if _, ok := seasonalDefaultTitleCases[theme]; !ok {
+			t.Errorf("theme %q has no seasonalDefaultTitleCases entry", theme)
+		}
 	}
-	if got := SeasonalTitleOverride(p, time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), nil); got != "Festive Films" {
-		t.Errorf("custom title = %q, want Festive Films", got)
+	for theme := range seasonalThemeDefaultTitles {
+		if _, ok := SeasonalPredicates[theme]; !ok {
+			t.Errorf("default title for unknown theme %q", theme)
+		}
+	}
+	for theme, tc := range seasonalDefaultTitleCases {
+		pred, ok := SeasonalPredicates[theme]
+		if !ok {
+			t.Errorf("case for unknown theme %q", theme)
+			continue
+		}
+		if !pred(tc.now) {
+			t.Errorf("theme %q: sample time %s is not in season", theme, tc.now)
+		}
+	}
+}
+
+// TestSeasonalThemeDefaultTitlesMatchEditorLabels keeps the backend defaults in
+// step with the labels the section editor prints in its "defaults to …"
+// placeholder. The two lists are duplicated across languages, so a rename on
+// one side only would make the editor advertise a title the API never applies —
+// exactly the mismatch issue #585 reported.
+func TestSeasonalThemeDefaultTitlesMatchEditorLabels(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "web", "src", "components", "RecipeGallery", "RecipeParamFields.tsx")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading section editor source: %v", err)
+	}
+	block := regexp.MustCompile(`(?s)const SEASONAL_THEMES.*?\n\];`).Find(source)
+	if block == nil {
+		t.Fatalf("SEASONAL_THEMES not found in %s", path)
+	}
+
+	entries := regexp.MustCompile(`key:\s*"([^"]+)",\s*label:\s*"([^"]+)"`).FindAllStringSubmatch(string(block), -1)
+	if len(entries) == 0 {
+		t.Fatalf("no themes parsed out of SEASONAL_THEMES in %s", path)
+	}
+	var seen []string
+	for _, entry := range entries {
+		theme, label := entry[1], entry[2]
+		seen = append(seen, theme)
+		if _, ok := SeasonalPredicates[theme]; !ok {
+			t.Errorf("editor offers theme %q, which the backend does not support", theme)
+			continue
+		}
+		if want := seasonalThemeDefaultTitles[theme]; label != want {
+			t.Errorf("theme %q: editor label %q, backend default %q", theme, label, want)
+		}
+	}
+	sort.Strings(seen)
+	t.Logf("checked editor themes: %v", seen)
+}
+
+// TestSeasonalTitleKeepsAdminChosenName verifies a renamed section keeps its
+// name in season. The default label is a stand-in for a section the admin never
+// named; replacing "Mom's Picks" with "Halloween" every October would lose a
+// deliberate choice, and per-theme titles remain the way to opt back in.
+func TestSeasonalTitleKeepsAdminChosenName(t *testing.T) {
+	const halloweenDefault = "Halloween"
+	oct := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	p := SeasonalThemedParams{EnabledThemes: []string{"halloween", "christmas"}}
+
+	if got := SeasonalTitleOverride(p, "Mom's Picks", oct, nil); got != "" {
+		t.Errorf("renamed section → %q, want empty (section keeps its title)", got)
+	}
+	// Legacy pinned sections went through the same path before this change.
+	legacy := SeasonalThemedParams{Theme: "christmas", Mode: "pinned"}
+	dec := time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC)
+	if got := SeasonalTitleOverride(legacy, "Holiday Classics", dec, nil); got != "" {
+		t.Errorf("renamed legacy section → %q, want empty", got)
+	}
+
+	// Both preset names count as unnamed, whatever the casing or padding.
+	for _, title := range []string{SeasonalPicksTitle, FamilyMovieNightTitle, "  seasonal picks  ", ""} {
+		if got := SeasonalTitleOverride(p, title, oct, nil); got != halloweenDefault {
+			t.Errorf("section title %q → %q, want %s", title, got, halloweenDefault)
+		}
+	}
+
+	// An explicit per-theme title still overrides a renamed section.
+	p.ThemeTitles = map[string]string{"halloween": "  Spooky  "}
+	if got := SeasonalTitleOverride(p, "Mom's Picks", oct, nil); got != "Spooky" {
+		t.Errorf("custom title on renamed section → %q, want Spooky (trimmed)", got)
 	}
 }
 
@@ -342,11 +448,11 @@ func TestSeasonalTitleOverrideLegacyMode(t *testing.T) {
 		Mode:        "auto",
 		ThemeTitles: map[string]string{"halloween": "Spooky"},
 	}
-	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
+	got := SeasonalTitleOverride(p, SeasonalPicksTitle, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
 	if got != "Spooky" {
 		t.Errorf("legacy in-season → %q, want Spooky", got)
 	}
-	got = SeasonalTitleOverride(p, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC), nil)
+	got = SeasonalTitleOverride(p, SeasonalPicksTitle, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC), nil)
 	if got != "" {
 		t.Errorf("legacy off-season → %q, want empty", got)
 	}
@@ -435,11 +541,11 @@ func TestSeasonalTitleOverrideHonorsUsableFilter(t *testing.T) {
 	}
 	saturdayInDecember := time.Date(2026, time.December, 12, 9, 0, 0, 0, time.UTC)
 
-	if got := SeasonalTitleOverride(p, saturdayInDecember, nil); got != "Christmas Movies" {
+	if got := SeasonalTitleOverride(p, SeasonalPicksTitle, saturdayInDecember, nil); got != "Christmas Movies" {
 		t.Errorf("nil filter: got %q, want Christmas Movies", got)
 	}
 	noChristmas := func(theme string) bool { return theme != "christmas" }
-	if got := SeasonalTitleOverride(p, saturdayInDecember, noChristmas); got != "Saturday Cartoons" {
+	if got := SeasonalTitleOverride(p, SeasonalPicksTitle, saturdayInDecember, noChristmas); got != "Saturday Cartoons" {
 		t.Errorf("filtered: got %q, want Saturday Cartoons", got)
 	}
 }

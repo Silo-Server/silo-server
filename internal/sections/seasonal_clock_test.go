@@ -119,19 +119,69 @@ func TestSeasonalThemedInSeasonAttemptsQuery(t *testing.T) {
 	}
 }
 
-// TestSeasonalTitleOverrideWithoutCustomTitles verifies the fetcher still
-// resolves the active theme's default label when theme_titles is omitted.
+// TestSeasonalTitleOverrideWithoutCustomTitles verifies the fetcher resolves
+// the in-season theme's default label when theme_titles is omitted, and that it
+// leaves a section the admin renamed alone.
 func TestSeasonalTitleOverrideWithoutCustomTitles(t *testing.T) {
 	f := &Fetcher{
 		Clock: recipes.FixedClock(time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)),
 	}
 	section := ResolvedSection{
 		SectionType: SectionSeasonalThemed,
-		Title:       "Seasonal Picks",
+		Title:       recipes.SeasonalPicksTitle,
 		Config:      json.RawMessage(`{"enabled_themes":["summer_blockbuster"]}`),
 	}
 
-	if got := f.seasonalTitleOverride(section); got != "Summer Blockbusters" {
+	theme := f.inSeasonTheme(section)
+	if theme != "summer_blockbuster" {
+		t.Fatalf("inSeasonTheme() = %q, want summer_blockbuster", theme)
+	}
+	if got := f.seasonalTitleOverride(section, theme); got != "Summer Blockbusters" {
 		t.Fatalf("seasonalTitleOverride() = %q, want Summer Blockbusters", got)
+	}
+
+	renamed := section
+	renamed.Title = "Mom's Picks"
+	if got := f.seasonalTitleOverride(renamed, theme); got != "" {
+		t.Fatalf("renamed section = %q, want empty so the stored title stands", got)
+	}
+}
+
+// TestInSeasonThemeOffSeason verifies the fetcher reports no theme outside every
+// enabled window, which both leaves the title alone and keeps the off-season
+// cache entry separate from the in-season one.
+func TestInSeasonThemeOffSeason(t *testing.T) {
+	f := &Fetcher{
+		Clock: recipes.FixedClock(time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)),
+	}
+	section := ResolvedSection{
+		SectionType: SectionSeasonalThemed,
+		Title:       recipes.SeasonalPicksTitle,
+		Config:      json.RawMessage(`{"enabled_themes":["halloween","christmas"]}`),
+	}
+
+	if got := f.inSeasonTheme(section); got != "" {
+		t.Fatalf("inSeasonTheme() = %q, want empty in April", got)
+	}
+	if got := f.seasonalTitleOverride(section, ""); got != "" {
+		t.Fatalf("seasonalTitleOverride() = %q, want empty off-season", got)
+	}
+}
+
+// TestInSeasonThemeIgnoresPinnedLegacyMode verifies a legacy pinned section,
+// which renders its theme's items year-round, is not treated as in season: the
+// section keeps its own title outside the theme's window.
+func TestInSeasonThemeIgnoresPinnedLegacyMode(t *testing.T) {
+	f := &Fetcher{
+		Clock: recipes.FixedClock(time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)),
+	}
+	section := ResolvedSection{
+		SectionType: SectionSeasonalThemed,
+		Title:       recipes.SeasonalPicksTitle,
+		Config:      json.RawMessage(`{"theme":"christmas","mode":"pinned"}`),
+	}
+
+	if got := f.inSeasonTheme(section); got != "" {
+		t.Fatalf("inSeasonTheme() = %q, want empty for a pinned section in April", got)
 	}
 }

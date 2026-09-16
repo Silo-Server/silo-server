@@ -12,7 +12,14 @@ import (
 // the seasonal window.
 type DatePredicate func(time.Time) bool
 
-const familyMovieNightTitle = "Family Movie Night"
+// The seasonal recipe's own preset names. They are exported because the
+// default home layout seeds a section with SeasonalPicksTitle, and
+// seasonalPresetTitles below treats a section still carrying either name as
+// unnamed by the admin.
+const (
+	SeasonalPicksTitle    = "Seasonal Picks"
+	FamilyMovieNightTitle = "Family Movie Night"
+)
 
 // inMonth returns a predicate that matches any time within the given month.
 func inMonth(m time.Month) DatePredicate {
@@ -94,8 +101,12 @@ var SeasonalThemeOrder = []string{
 	"summer",
 }
 
-// seasonalThemeDefaultTitles maps supported theme keys to the display names
-// used when a section does not configure a per-theme title.
+// seasonalThemeDefaultTitles maps theme keys to the display name the section
+// editor advertises for that theme ("defaults to …" in the per-theme title
+// placeholder). Every key in SeasonalPredicates must have an entry, and the
+// entries must match the SEASONAL_THEMES labels in
+// web/src/components/RecipeGallery/RecipeParamFields.tsx; both are enforced by
+// tests in this package.
 var seasonalThemeDefaultTitles = map[string]string{
 	"valentines":         "Valentine's Day",
 	"st_patricks":        "St. Patrick's Day",
@@ -103,9 +114,24 @@ var seasonalThemeDefaultTitles = map[string]string{
 	"christmas":          "Christmas",
 	"halloween":          "Halloween",
 	"saturday_morning":   "Saturday Morning Cartoons",
-	"family_movie_night": familyMovieNightTitle,
+	"family_movie_night": FamilyMovieNightTitle,
 	"summer_blockbuster": "Summer Blockbusters",
 	"summer":             "Summer",
+}
+
+// seasonalPresetTitles are the names Silo itself gives a seasonal section: the
+// gallery preset labels, which the create dialog prefills and the default home
+// layout seeds. A section still carrying one of these has no name of its own,
+// so the active theme's default title may take it over. Any other title was
+// typed by a person and is kept year-round unless that theme has an explicit
+// ThemeTitles entry.
+var seasonalPresetTitles = map[string]bool{
+	normalizeSeasonalTitle(SeasonalPicksTitle):    true,
+	normalizeSeasonalTitle(FamilyMovieNightTitle): true,
+}
+
+func normalizeSeasonalTitle(title string) string {
+	return strings.ToLower(strings.TrimSpace(title))
 }
 
 // SeasonalThemedParams configures the seasonal_themed resolver.
@@ -125,8 +151,11 @@ var seasonalThemeDefaultTitles = map[string]string{
 // EnabledThemes takes precedence when both fields are populated.
 //
 // ThemeTitles is an optional per-theme display-name override. While a theme is
-// active, the API uses its custom title when it contains non-whitespace
-// characters and otherwise uses the theme's default display name.
+// active, a non-blank entry replaces the section's title for the duration of
+// that window — letting one section read "Halloween Picks" in October and
+// "Christmas Movies" in December. With no entry, a section that still carries
+// one of the recipe's own preset names falls back to the theme's default title
+// (see SeasonalTitleFor).
 type SeasonalThemedParams struct {
 	EnabledThemes []string          `json:"enabled_themes,omitempty"`
 	ThemeTitles   map[string]string `json:"theme_titles,omitempty"`
@@ -196,7 +225,7 @@ func (seasonalRecipe) Definition() RecipeDefinition {
 		Presets: []GalleryPreset{
 			{
 				Key:              "se_auto",
-				DisplayName:      "Seasonal Picks",
+				DisplayName:      SeasonalPicksTitle,
 				Icon:             "🗓️",
 				DescriptionShort: "Cycles automatically — Halloween in October, Christmas in December, etc.",
 				DescriptionLong:  "One section that swaps in different theme picks based on the calendar. Toggle which holidays this profile celebrates from the Add section dialog.",
@@ -206,7 +235,7 @@ func (seasonalRecipe) Definition() RecipeDefinition {
 			},
 			{
 				Key:              "se_family_movie_night",
-				DisplayName:      familyMovieNightTitle,
+				DisplayName:      FamilyMovieNightTitle,
 				Icon:             "🍿",
 				DescriptionShort: "Family picks on Friday and Saturday evenings.",
 				DefaultParams:    json.RawMessage(`{"enabled_themes":["family_movie_night"]}`),
@@ -215,29 +244,52 @@ func (seasonalRecipe) Definition() RecipeDefinition {
 	}
 }
 
-// SeasonalTitleOverride returns the custom or default display name for the
-// active theme, or "" when no theme is active. The usable filter must match
-// the one passed to ActiveSeasonalThemeWhere so the title tracks the theme
-// that actually resolved; pass nil to consider every theme usable.
-func SeasonalTitleOverride(p SeasonalThemedParams, now time.Time, usable func(theme string) bool) string {
-	var theme string
+// InSeasonTheme returns the theme whose window contains now, or "" when the
+// section is off-season. Unlike the resolution in the fetch path it ignores the
+// legacy "pinned" mode, which renders a theme's items outside its own window:
+// a pinned section is not in season, so nothing should rename it.
+//
+// The usable filter must match the one passed to ActiveSeasonalThemeWhere in
+// the fetch path so callers track the theme that actually resolved; pass nil to
+// consider every theme usable.
+func InSeasonTheme(p SeasonalThemedParams, now time.Time, usable func(theme string) bool) string {
 	switch {
 	case len(p.EnabledThemes) > 0:
-		theme = ActiveSeasonalThemeWhere(p.EnabledThemes, now, usable)
+		return ActiveSeasonalThemeWhere(p.EnabledThemes, now, usable)
 	case p.Theme != "":
-		// Legacy mode — only honour an override if the predicate currently fires.
-		pred, ok := SeasonalPredicates[p.Theme]
-		if ok && pred(now) {
-			theme = p.Theme
+		if pred, ok := SeasonalPredicates[p.Theme]; ok && pred(now) {
+			return p.Theme
 		}
 	}
+	return ""
+}
+
+// SeasonalTitleFor returns the display name a seasonal section should use while
+// theme is in season, or "" to keep the section's own sectionTitle.
+//
+// An explicit ThemeTitles entry always wins. Otherwise the theme's default
+// title applies only while the section still carries the generic name Silo gave
+// it ("Seasonal Picks", "Family Movie Night") — that is the case issue #585 is
+// about, where the editor advertises a default the backend never applied.
+// Renaming the section is how an admin opts out: "Mom's Picks" stays "Mom's
+// Picks" in October unless they also fill in Halloween's title field.
+func SeasonalTitleFor(p SeasonalThemedParams, theme, sectionTitle string) string {
 	if theme == "" {
 		return ""
 	}
-	if title := p.ThemeTitles[theme]; strings.TrimSpace(title) != "" {
+	if title := strings.TrimSpace(p.ThemeTitles[theme]); title != "" {
 		return title
 	}
+	if name := normalizeSeasonalTitle(sectionTitle); name != "" && !seasonalPresetTitles[name] {
+		return ""
+	}
 	return seasonalThemeDefaultTitles[theme]
+}
+
+// SeasonalTitleOverride resolves the in-season theme and its display name in
+// one step. It returns "" when the section is off-season or keeps its own name.
+func SeasonalTitleOverride(p SeasonalThemedParams, sectionTitle string, now time.Time, usable func(theme string) bool) string {
+	return SeasonalTitleFor(p, InSeasonTheme(p, now, usable), sectionTitle)
 }
 
 // ActiveSeasonalTheme returns the highest-priority enabled theme whose

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 // DefaultHomeSections returns the canonical default sections for the home scope.
@@ -62,8 +63,10 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 			Scope:       "home",
 			Position:    position,
 			SectionType: SectionSeasonalThemed,
-			Title:       "Seasonal Picks",
-			ItemLimit:   15,
+			// recipes owns this name: while the section still carries it, an
+			// in-season theme's default title takes over (see SeasonalTitleFor).
+			Title:     recipes.SeasonalPicksTitle,
+			ItemLimit: 15,
 			Config: json.RawMessage(
 				`{"enabled_themes":["halloween","christmas","valentines","st_patricks","thanksgiving","summer_blockbuster","saturday_morning"]}`,
 			),
