@@ -1423,8 +1423,8 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// Check downloaded subtitles (from S3).
-	if h.SubtitleRepo != nil && h.S3Client != nil {
+	// Check downloaded subtitles (from blob storage).
+	if h.SubtitleRepo != nil && h.SubtitleBlobs != nil {
 		downloaded, _ := h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), file.ID)
 		// Compute the base index for downloaded subtitles to match how PlaybackInfo assigns them.
 		// Downloaded subs are indexed after all existing streams (last existing index + 1).
@@ -1432,7 +1432,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		downloadedIndex := trackIndex - baseIndex
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
 			dl := downloaded[downloadedIndex]
-			data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, dl.S3Key)
+			data, err := h.SubtitleBlobs.Get(r.Context(), dl.S3Key)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle from storage")
 				return

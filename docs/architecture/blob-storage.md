@@ -4,20 +4,19 @@
 The store owns its filesystem root or S3 bucket; callers use their own logical
 keys.
 
-Artwork, branding assets, intro/credit markers, and chapter thumbnails go
-through it today. Downloaded subtitles, diagnostic bundles, and job artifacts
-still use their own bucket-oriented code in `internal/subtitles`,
-`internal/diagnostics`, and `internal/adminjob`, and still require S3; they move
-onto the store in later changes. The prefixes reserved for them are listed below
-so the namespaces do not have to be renegotiated when they do.
+Artwork, branding assets, intro/credit markers, chapter thumbnails, and
+downloaded subtitles go through it today. Diagnostic bundles and job artifacts
+still use their own bucket-oriented code in `internal/diagnostics` and
+`internal/adminjob`, and still require S3; they move onto the store in a later
+change. The prefixes reserved for them are listed below so the namespaces do not
+have to be renegotiated when they do.
 
 ## The two stores
 
 `blobstore.Open` returns a `Stores` pair:
 
 - **Assets** — artwork, branding assets, intro/credit markers, chapter
-  thumbnails, and (once migrated) downloaded subtitles. Carries the recorded
-  storage identity.
+  thumbnails, and downloaded subtitles. Carries the recorded storage identity.
 - **Operational** — diagnostic bundles, job artifacts, and profile avatars.
 
 These are separate because the public bucket can serve browsers directly under

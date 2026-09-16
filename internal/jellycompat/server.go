@@ -117,9 +117,8 @@ type Dependencies struct {
 	SettingsRepo SettingsReader
 
 	// Subtitle support (optional)
-	SubtitleRepo subtitles.Repository // optional; downloaded subtitle support
-	S3Client     subtitles.S3Client   // optional
-	S3Bucket     string               // optional
+	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
+	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
 }
 
 // CurrentConfig returns the live config when hot reload is wired, falling

@@ -3084,9 +3084,8 @@ func main() {
 				catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 			}
 
-			if deps.S3Public != nil {
-				compatDeps.S3Client = deps.S3Public
-				compatDeps.S3Bucket = deps.S3Public.Bucket()
+			if blobs := blobstore.NewByteStore(deps.Blobs.Assets); blobs != nil {
+				compatDeps.SubtitleBlobs = blobs
 			}
 			compatDeps.PosterPresigner = jellycompat.NewResolverPosterPresigner(deps.ArtworkResolver)
 

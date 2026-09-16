@@ -306,7 +306,7 @@ export function StorageStep() {
           description={
             artworkLocked
               ? "Locked: files have already been stored on this backend and cannot be moved."
-              : "Where Silo keeps artwork and other library assets."
+              : "Where Silo keeps artwork, subtitles, and other library assets."
           }
           onChange={(value) => {
             form.setValue("artwork.storage_backend", value);

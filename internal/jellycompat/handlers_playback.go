@@ -294,8 +294,7 @@ type PlaybackHandler struct {
 	// round-trip a native stream token.
 	tm                     *playback.TranscodeManager
 	SubtitleRepo           subtitles.Repository  // optional; enables downloaded subtitles
-	S3Client               subtitles.S3Client    // optional; for serving S3 subtitles
-	S3Bucket               string                // bucket for subtitle storage
+	SubtitleBlobs          subtitles.BlobStore   // optional; backs downloaded subtitle reads
 	SettingsRepo           SettingsReader        // optional; reads watched threshold setting
 	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
 	WatchScrobbler         PlaybackWatchScrobbler

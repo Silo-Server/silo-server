@@ -1284,11 +1284,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 	}
 
-	// Wire subtitle repo and S3 client onto streamHandler for S3-stored subtitle serving.
-	if streamHandler != nil && subtitleRepo != nil && deps.S3Public != nil {
+	// Wire the subtitle repo and blob store onto streamHandler so downloaded
+	// subtitles serve from whichever backend stores them.
+	subtitleBlobs := blobstore.NewByteStore(deps.Blobs.Assets)
+	if streamHandler != nil && subtitleRepo != nil && subtitleBlobs != nil {
 		streamHandler.SubtitleRepo = subtitleRepo
-		streamHandler.S3Client = deps.S3Public
-		streamHandler.S3Bucket = deps.S3Public.Bucket()
+		streamHandler.SubtitleBlobs = subtitleBlobs
 	}
 	if streamHandler != nil && deps.Config != nil {
 		streamHandler.PlaybackConfig = func() config.PlaybackConfig {
@@ -1473,10 +1474,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminSubtitleHandler = handlers.NewAdminSubtitleHandler(subtitleRepo)
 	}
 
-	// Build subtitle search handler if we have DB and S3.
+	// Build the subtitle search handler if we have a database and somewhere to
+	// store subtitle files. Either backend will do.
 	var subtitleSearchHandler *handlers.SubtitleSearchHandler
-	if deps.DB != nil && deps.S3Public != nil && subtitleRepo != nil {
-		subtitleManager = subtitles.NewManager(subtitleRepo, deps.S3Public, deps.S3Public.Bucket())
+	if deps.DB != nil && subtitleBlobs != nil && subtitleRepo != nil {
+		subtitleManager = subtitles.NewManager(subtitleRepo, subtitleBlobs)
 
 		// Load provider configs from DB and register enabled providers.
 		providerConfigs, _ := subtitleRepo.ListProviderConfigs(deps.AppContext)

@@ -835,7 +835,7 @@ export default function InfrastructureSettings() {
             description={
               artworkLocked
                 ? `Locked to ${artworkStorage?.backend === "s3" ? "S3" : "local disk"}: files have been stored here and cannot be moved between backends.`
-                : "Where Silo keeps artwork and other library assets."
+                : "Where Silo keeps artwork, subtitles, and other library assets."
             }
             restartRequired={restartKeys.has("artwork.storage_backend")}
           />

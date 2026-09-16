@@ -151,8 +151,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
-		playbackHandler.S3Client = deps.S3Client
-		playbackHandler.S3Bucket = deps.S3Bucket
+		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections

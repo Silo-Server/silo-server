@@ -116,8 +116,8 @@ func TestResolveUploadLanguagePrefersFilename(t *testing.T) {
 
 func TestManagerUploadDetectsLanguageFromFilename(t *testing.T) {
 	repo := newMockSubtitleRepo()
-	s3 := newMockS3Client()
-	manager := NewManager(repo, s3, "test-bucket")
+	s3 := newMockBlobStore()
+	manager := NewManager(repo, s3)
 
 	data := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
 	sub, err := manager.Upload(t.Context(), UploadRequest{

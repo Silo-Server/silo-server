@@ -1,5 +1,14 @@
 # Downloaded subtitle storage
 
+Subtitle objects live in the assets blob store (`internal/blobstore`), so either
+a local filesystem root or the public S3 bucket backs them; see
+[blob-storage.md](blob-storage.md). Subtitles own the `subtitles/` key prefix,
+which is what separates them from artwork when a local backend puts both in one
+root. Bytes always flow through the server — a client never receives a signed
+storage URL for a subtitle — so the backend is invisible across the API and to
+compatibility clients. The `downloaded_subtitles.s3_key` column keeps its name
+and holds a backend-neutral object key.
+
 Downloaded subtitle content has separate logical and physical identities. The
 logical identity is the media file, provider, language, format, and full SHA-256
 of the bytes. PostgreSQL enforces uniqueness for rows with a known digest. Every

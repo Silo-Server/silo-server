@@ -393,8 +393,7 @@ func TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500(t *testing.T) {
 
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
 	handler.SubtitleRepo = &handlerMockSubtitleRepo{listErr: errors.New("db unavailable")}
-	handler.S3Client = newMockS3ClientForHandler()
-	handler.S3Bucket = "test-bucket"
+	handler.SubtitleBlobs = newMockBlobStoreForHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
 	req = req.WithContext(newAuthorizedPlaybackContext())
@@ -437,11 +436,10 @@ func TestHandleSubtitleUsesBoundDownloadedIdentityAfterInventoryReorder(t *testi
 	}
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
 	handler.SubtitleRepo = repo
-	handler.S3Client = subtitleContentS3Client{objects: map[string][]byte{
+	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{
 		"selected-71.vtt": []byte("WEBVTT\n\n00:00.000 --> 00:01.000\nselected-71\n"),
 		"other-72.vtt":    []byte("WEBVTT\n\n00:00.000 --> 00:01.000\nother-72\n"),
 	}}
-	handler.S3Bucket = "test-bucket"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt?file_id=42&downloaded_subtitle_id=71", nil)
 	req = req.WithContext(newAuthorizedPlaybackContext())
@@ -457,15 +455,15 @@ func TestHandleSubtitleUsesBoundDownloadedIdentityAfterInventoryReorder(t *testi
 	}
 }
 
-type subtitleContentS3Client struct {
+type subtitleContentBlobStore struct {
 	objects map[string][]byte
 }
 
-func (subtitleContentS3Client) PutObject(context.Context, string, string, []byte) error { return nil }
-func (c subtitleContentS3Client) GetObject(_ context.Context, _, key string) ([]byte, error) {
+func (subtitleContentBlobStore) Put(context.Context, string, []byte) error { return nil }
+func (c subtitleContentBlobStore) Get(_ context.Context, key string) ([]byte, error) {
 	return append([]byte(nil), c.objects[key]...), nil
 }
-func (subtitleContentS3Client) DeleteObject(context.Context, string, string) error { return nil }
+func (subtitleContentBlobStore) Delete(context.Context, string) error { return nil }
 
 func TestHandleSubtitle_NilMediaFileReturns404(t *testing.T) {
 	baseMgr := playback.NewSessionManager(0, 0)

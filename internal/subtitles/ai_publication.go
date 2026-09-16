@@ -42,7 +42,7 @@ func (m *Manager) storeAISubtitle(ctx context.Context, req StoreSubtitleRequest)
 		return nil, fmt.Errorf("check legacy AI subtitle: %w", err)
 	}
 	if legacy != nil {
-		data, readErr := m.s3.GetObject(ctx, m.s3Bucket, legacy.S3Key)
+		data, readErr := m.blobs.Get(ctx, legacy.S3Key)
 		if readErr != nil {
 			return nil, fmt.Errorf("verify legacy AI subtitle: %w", readErr)
 		}
@@ -50,10 +50,10 @@ func (m *Manager) storeAISubtitle(ctx context.Context, req StoreSubtitleRequest)
 			legacy = nil
 		}
 	}
-	// Upload outside the transaction. Cancellation is allowed to win while S3
+	// Upload outside the transaction. Cancellation is allowed to win while storage
 	// is slow; the candidate is private until the guarded metadata commit.
 	sub.S3Key = fmt.Sprintf("subtitles/%d/%s.%s", req.MediaFileID, uuid.NewString(), req.Format)
-	if err := m.s3.PutObject(ctx, m.s3Bucket, sub.S3Key, req.Data); err != nil {
+	if err := m.blobs.Put(ctx, sub.S3Key, req.Data); err != nil {
 		return nil, fmt.Errorf("upload AI subtitle: %w", err)
 	}
 	published, err := repo.PublishAISubtitle(ctx, sub, *req.Publication, legacy)
