@@ -5,8 +5,8 @@
 > bridge window and is then retired. See
 > [the native API contract](architecture/api-contract.md).
 
-Silo caches artwork at a fixed ladder of widths and returns a presigned URL for
-one of them. By default the server picks the width from context — card rows get
+Silo caches artwork at a fixed ladder of widths and returns a URL for one of them.
+The URL is either a direct object-storage URL or a signed server route. By default the server picks the width from context — card rows get
 narrow images, hero areas get wide ones. A client that knows better can ask for a
 specific size instead.
 
@@ -76,6 +76,12 @@ closest image it has, so the widths above are indicative rather than exact.
 
 Do not hardcode this table. Read it from the capability endpoint: the ladder is
 allowed to change, and the endpoint is generated from it.
+
+The capability response also includes `storage_backend` (`local` or `s3`) and
+`delivery` (`server` or `direct`). Local artwork URLs are root-relative signed
+routes such as `/api/v2/artwork/{key}`. They return `404` for an invalid or
+expired signature, `503` for a storage failure, support `HEAD`, `Range`, and
+`ETag`, and enqueue repair for a missing revisioned cache object.
 
 ## Capability endpoint
 

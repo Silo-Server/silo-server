@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 )
 
 const JobTypeImageCacheCleanup = "image_cache_cleanup"
@@ -27,14 +29,14 @@ type imageCacheCleanupExecutor interface {
 }
 
 type ImageCacheCleanupExecutor struct {
-	s3 S3PrefixDeleter
+	store artworkstore.Store
 }
 
-func NewImageCacheCleanupExecutor(s3 S3PrefixDeleter) *ImageCacheCleanupExecutor {
-	if s3 == nil {
+func NewImageCacheCleanupExecutor(store artworkstore.Store) *ImageCacheCleanupExecutor {
+	if store == nil {
 		return nil
 	}
-	return &ImageCacheCleanupExecutor{s3: s3}
+	return &ImageCacheCleanupExecutor{store: store}
 }
 
 func (e *ImageCacheCleanupExecutor) Execute(
@@ -42,7 +44,7 @@ func (e *ImageCacheCleanupExecutor) Execute(
 	req ImageCacheCleanupRequest,
 	progress func(current, total int, message string),
 ) (*ImageCacheCleanupResult, error) {
-	if e == nil || e.s3 == nil {
+	if e == nil || e.store == nil {
 		return nil, fmt.Errorf("image cache cleanup executor is not configured")
 	}
 	if len(req.Prefixes) == 0 {
@@ -57,13 +59,11 @@ func (e *ImageCacheCleanupExecutor) Execute(
 	total := len(req.Prefixes)
 	deletedPrefixes := 0
 	deletedObjects := 0
-	bucket := e.s3.Bucket()
-
 	for index, prefix := range req.Prefixes {
 		if progress != nil {
 			progress(index, total, fmt.Sprintf("Cleaning cached images %d/%d", index+1, total))
 		}
-		n, err := e.s3.DeletePrefix(ctx, bucket, prefix)
+		n, err := e.store.DeletePrefix(ctx, prefix)
 		if err != nil {
 			slog.WarnContext(ctx, "image cache cleanup: s3 delete failed", "component", "adminjob", "prefix", prefix, "error", err)
 			continue

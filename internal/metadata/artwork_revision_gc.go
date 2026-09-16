@@ -29,8 +29,7 @@ const (
 
 // ArtworkRevisionDeleter is the object-storage surface used by revision GC.
 type ArtworkRevisionDeleter interface {
-	DeleteObjects(ctx context.Context, bucket string, keys []string) (int, error)
-	Bucket() string
+	Delete(context.Context, []string) (int, error)
 }
 
 // ArtworkRevisionGCStats summarizes one bounded cleanup pass.
@@ -363,7 +362,7 @@ func (g *ArtworkRevisionGarbageCollector) processCandidatesToHeal(
 	}
 	var deleteErr error
 	if len(keys) > 0 {
-		count, err := g.s3.DeleteObjects(ctx, g.s3.Bucket(), keys)
+		count, err := g.s3.Delete(ctx, keys)
 		deleteErr = err
 		if err == nil && count != len(keys) {
 			deleteErr = fmt.Errorf("deleted %d of %d artwork objects", count, len(keys))

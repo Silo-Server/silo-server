@@ -28,9 +28,7 @@ type blockingArtworkRevisionDeleter struct {
 	deleted [][]string
 }
 
-func (d *blockingArtworkRevisionDeleter) Bucket() string { return "artwork" }
-
-func (d *blockingArtworkRevisionDeleter) DeleteObjects(ctx context.Context, _ string, keys []string) (int, error) {
+func (d *blockingArtworkRevisionDeleter) Delete(ctx context.Context, keys []string) (int, error) {
 	d.once.Do(func() { close(d.started) })
 	if d.release != nil {
 		select {
@@ -493,7 +491,7 @@ func TestArtworkRevisionGCExpandsTriggerManifestFromImageType(t *testing.T) {
 	deleted := deleter.deleted
 	deleter.mu.Unlock()
 	if len(deleted) != 1 {
-		t.Fatalf("DeleteObjects calls = %d, want 1", len(deleted))
+		t.Fatalf("Delete calls = %d, want 1", len(deleted))
 	}
 	want := artworkkey.ObjectKeys(originalPath, "backdrop")
 	if !slices.Equal(deleted[0], want) {
@@ -1058,8 +1056,7 @@ type callbackArtworkRevisionDeleter struct {
 	delete func(context.Context, []string) (int, error)
 }
 
-func (d callbackArtworkRevisionDeleter) Bucket() string { return "artwork" }
-func (d callbackArtworkRevisionDeleter) DeleteObjects(ctx context.Context, _ string, keys []string) (int, error) {
+func (d callbackArtworkRevisionDeleter) Delete(ctx context.Context, keys []string) (int, error) {
 	return d.delete(ctx, keys)
 }
 

@@ -27,7 +27,7 @@ func newAdminEditorFixture(t *testing.T) adminEditorFixture {
 	f := newPagingIntegrationFixture(t)
 	repo := catalog.NewLibraryCollectionRepository(f.pool)
 	groups := catalog.NewLibraryCollectionGroupRepository(f.pool)
-	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), 0, nil, nil)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
 	h.GroupRepo = groups
 	return adminEditorFixture{f, repo, groups, h, NewLibraryCollectionGroupHandler(groups, repo, f.pool)}
 }

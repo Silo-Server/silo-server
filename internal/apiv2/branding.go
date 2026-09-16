@@ -14,8 +14,8 @@ import (
 )
 
 type BrandingService interface {
-	Load(context.Context) branding.Snapshot
 	HasStorage() bool
+	Load(context.Context) branding.Snapshot
 	GetAsset(context.Context, branding.AssetKind) ([]byte, string, string, error)
 }
 type ThemeOverrideService interface {

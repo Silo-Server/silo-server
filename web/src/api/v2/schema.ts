@@ -4360,6 +4360,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/artwork/{key}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read cached artwork. */
+    get: operations["getArtwork"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    /** Read cached artwork. */
+    head: operations["headArtwork"];
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/audio-prefs/{series_id}": {
     parameters: {
       query?: never;
@@ -10302,6 +10320,10 @@ export interface components {
       /** @enum {string} */
       rate_tier: "standard" | "elevated";
     };
+    AdminArtworkStorageStatus: {
+      backend?: string;
+      locked: boolean;
+    };
     AdminAuditLog: {
       client_ip: string;
       /** Format: int64 */
@@ -14097,6 +14119,7 @@ export interface components {
       title?: string;
     };
     AdminServerStatus: {
+      artwork_storage: components["schemas"]["AdminArtworkStorageStatus"];
       health: components["schemas"]["AdminServerHealth"];
       /** Format: int64 */
       restart_mark_count: number;
@@ -18540,6 +18563,8 @@ export interface components {
     ImageCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @enum {string} */
+      delivery: "server" | "direct";
       /** Format: int64 */
       original_max_width_px: number;
       param: string;
@@ -18553,6 +18578,8 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @enum {string} */
+      storage_backend: "local" | "s3";
       widths: {
         [key: string]: components["schemas"]["ImageSizeWidths"];
       };
@@ -66575,6 +66602,120 @@ export interface operations {
         content: {
           "application/problem+json": components["schemas"]["Problem"];
         };
+      };
+    };
+  };
+  getArtwork: {
+    parameters: {
+      query: {
+        exp: number;
+        sig: string;
+      };
+      header?: {
+        "If-None-Match"?: string;
+        Range?: string;
+      };
+      path: {
+        /** @description Logical artwork key including its nested path. */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Artwork bytes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/*": string;
+        };
+      };
+      /** @description Partial artwork bytes */
+      206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/*": string;
+        };
+      };
+      /** @description Artwork not modified */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Artwork not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Artwork storage unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  headArtwork: {
+    parameters: {
+      query: {
+        exp: number;
+        sig: string;
+      };
+      header?: {
+        "If-None-Match"?: string;
+        Range?: string;
+      };
+      path: {
+        /** @description Logical artwork key including its nested path. */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Artwork bytes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Partial artwork bytes */
+      206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Artwork not modified */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Artwork not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Artwork storage unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

@@ -25,6 +25,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/branding"
@@ -87,6 +89,16 @@ import (
 )
 
 // Dependencies holds all shared dependencies that handlers need.
+// ArtworkDelivery describes how clients read artwork. External is true only
+// when reads go through a separately configured public or token endpoint that
+// can lag behind a storage write; that is the one case the delivery verifier
+// and the per-response published-variant lookup exist for. Scope changes when
+// the delivery configuration does, invalidating earlier verification.
+type ArtworkDelivery struct {
+	Scope    string
+	External bool
+}
+
 type Dependencies struct {
 	Config *config.Config
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
@@ -103,10 +115,18 @@ type Dependencies struct {
 	// graceful-shutdown deadline. Nil is valid in tests and embedded routers.
 	RegisterShutdownWork func(<-chan struct{})
 
-	DB                *pgxpool.Pool
-	SecretCipher      *secret.Cipher // at-rest credential cipher (required when DB is set)
-	FrontendFS        fs.FS
-	S3Public          *s3client.Client              // public assets bucket client (may be nil)
+	DB              *pgxpool.Pool
+	SecretCipher    *secret.Cipher // at-rest credential cipher (required when DB is set)
+	FrontendFS      fs.FS
+	S3Public        *s3client.Client   // public assets bucket client (may be nil)
+	Artwork         artworkstore.Store // backend-neutral artwork store
+	ArtworkBackend  string             // resolved artwork backend name
+	ArtworkDelivery ArtworkDelivery
+	ArtworkSigner   *artworkurl.Signer
+	ArtworkResolver artworkurl.Resolver
+	ArtworkRepair   interface {
+		EnqueueArtworkRepair(context.Context, []string, int) (int, error)
+	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
 	S3UserDB          *s3client.Client              // user-db bucket client (may be nil)
 	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
@@ -323,7 +343,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		pgPinger = deps.DB
 	}
 
-	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker)
+	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker, deps.Artwork)
 
 	// Resolves whether a declared profile belongs to the user and is the
 	// household primary profile. Nil (no user store) disables the
@@ -594,9 +614,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		// Library poster uploads are writable client-facing assets, so they
 		// belong in the public assets bucket.
-		if deps.S3Public != nil {
-			libraryHandler.S3Meta = deps.S3Public
-		}
+		libraryHandler.ArtworkStore = deps.Artwork
+		libraryHandler.ArtworkResolver = deps.ArtworkResolver
 
 		// Wire provider chain repos for per-library provider priority management.
 		if deps.DB != nil && deps.PluginService != nil {
@@ -916,7 +935,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler.UserRepo = userRepo
 		profileHandler.EventsHub = deps.EventsHub
 		profileHandler.ProfileTokens = profileTokenService
-		profileHandler.AvatarStore = deps.S3Private
+		// Private S3 preserves existing avatar keys and presigned delivery. Local
+		// avatars use the signed artwork endpoint. Never use public S3 here.
+		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Artwork, deps.S3Private, deps.ArtworkBackend)
+		profileHandler.AvatarResolver = deps.ArtworkResolver
 		profileHandler.SessionsReader = playbackSessionsLoader
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
 		if detailSvc != nil {
@@ -943,10 +965,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			collectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		}
-		if deps.S3Public != nil {
-			collectionHandler.S3GP = deps.S3Public
-			collectionHandler.PresignTTL = 4 * time.Hour
-		}
+		collectionHandler.ArtworkStore = deps.Artwork
+		collectionHandler.ArtworkResolver = deps.ArtworkResolver
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.
@@ -957,10 +977,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 				deps.UserCollectionScheduler,
 				nil,
 				deps.MDBListClient,
-				deps.S3Public,
 				deps.FrontendFS,
-				4*time.Hour,
 			)
+			userImportHandler.ArtworkStore = deps.Artwork
+			userImportHandler.ArtworkResolver = deps.ArtworkResolver
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
 		settingsHandler.EventsHub = deps.EventsHub
@@ -1313,15 +1333,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.RestartStatus = restartStatus
 		adminHandler.CatalogSearchStatus = catalogSearchService
 		adminHandler.DiagnosticsStore = diagnosticsStore
-		// Same source branding asset uploads and the metadata image cacher use:
-		// the public S3 client only exists when a public bucket is configured,
-		// and both features are wired off it.
-		publicAssetStore := deps.S3Public
-		adminHandler.PublicStorageConfigured = func() bool { return publicAssetStore != nil }
 		if settingsRepo != nil {
 			adminHandler.SettingsRepo = settingsRepo
 		}
 		adminHandler.Config = deps.Config
+		adminHandler.ArtworkBackend = deps.ArtworkBackend
 		if deps.OnUserSessionsRevoked != nil {
 			adminHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
 		}
@@ -1727,10 +1743,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 			libraryCollectionRepo,
 			libraryCollectionService,
 			itemRepo,
-			4*time.Hour,
 			nil,
-			deps.S3Public,
 		)
+		libraryCollectionHandler.ArtworkStore = deps.Artwork
+		libraryCollectionHandler.ArtworkResolver = deps.ArtworkResolver
 		libraryCollectionHandler.FrontendFS = deps.FrontendFS
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		libraryCollectionHandler.SectionRepo = sectionRepo
@@ -4579,6 +4595,10 @@ func v2Dependencies(
 		ViewerAccess:    viewer,
 		ActingAdmin:     actingAdmin,
 		PermissionGates: map[string]func(http.Handler) http.Handler{},
+		ArtworkStore:    deps.Artwork,
+		ArtworkBackend:  deps.ArtworkBackend,
+		ArtworkSigner:   deps.ArtworkSigner,
+		ArtworkRepair:   deps.ArtworkRepair,
 	}
 	if metadataCuration != nil {
 		out.PermissionGates[policy.PermissionMetadataCuration] = metadataCuration

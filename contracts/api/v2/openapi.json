@@ -1069,6 +1069,21 @@
         },
         "type": "object"
       },
+      "AdminArtworkStorageStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "locked"
+        ],
+        "type": "object"
+      },
       "AdminAuditLog": {
         "additionalProperties": false,
         "properties": {
@@ -12113,6 +12128,9 @@
       "AdminServerStatus": {
         "additionalProperties": false,
         "properties": {
+          "artwork_storage": {
+            "$ref": "#/components/schemas/AdminArtworkStorageStatus"
+          },
           "health": {
             "$ref": "#/components/schemas/AdminServerHealth"
           },
@@ -12162,7 +12180,8 @@
           "restart_required",
           "restart_mark_count",
           "restart_requested",
-          "health"
+          "health",
+          "artwork_storage"
         ],
         "type": "object"
       },
@@ -23884,6 +23903,13 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "delivery": {
+            "enum": [
+              "server",
+              "direct"
+            ],
+            "type": "string"
+          },
           "original_max_width_px": {
             "format": "int64",
             "type": "integer"
@@ -23915,6 +23941,13 @@
             ],
             "type": "string"
           },
+          "storage_backend": {
+            "enum": [
+              "local",
+              "s3"
+            ],
+            "type": "string"
+          },
           "widths": {
             "additionalProperties": {
               "$ref": "#/components/schemas/ImageSizeWidths"
@@ -23928,6 +23961,8 @@
           "sizes",
           "widths",
           "original_max_width_px",
+          "storage_backend",
+          "delivery",
           "revision",
           "state",
           "allowed"
@@ -101435,6 +101470,168 @@
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/artwork/{key}": {
+      "get": {
+        "operationId": "getArtwork",
+        "parameters": [
+          {
+            "description": "Logical artwork key including its nested path.",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exp",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sig",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Artwork bytes"
+          },
+          "206": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Partial artwork bytes"
+          },
+          "304": {
+            "description": "Artwork not modified"
+          },
+          "404": {
+            "description": "Artwork not found"
+          },
+          "503": {
+            "description": "Artwork storage unavailable"
+          }
+        },
+        "summary": "Read cached artwork.",
+        "tags": [
+          "artwork"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "artwork-image",
+        "x-silo-raw-reason": "Artwork bytes and range semantics bypass JSON encoding.",
+        "x-silo-service-backed": true,
+        "x-silo-wildcard-param": "key"
+      },
+      "head": {
+        "operationId": "headArtwork",
+        "parameters": [
+          {
+            "description": "Logical artwork key including its nested path.",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exp",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sig",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artwork bytes"
+          },
+          "206": {
+            "description": "Partial artwork bytes"
+          },
+          "304": {
+            "description": "Artwork not modified"
+          },
+          "404": {
+            "description": "Artwork not found"
+          },
+          "503": {
+            "description": "Artwork storage unavailable"
+          }
+        },
+        "summary": "Read cached artwork.",
+        "tags": [
+          "artwork"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "artwork-image",
+        "x-silo-raw-reason": "Artwork bytes and range semantics bypass JSON encoding.",
+        "x-silo-service-backed": true,
+        "x-silo-wildcard-param": "key"
       }
     },
     "/api/v2/audio-prefs/{series_id}": {

@@ -688,6 +688,7 @@ func registerAll(reg *Registry) {
 	registerAdminNodeSessions(reg)
 	registerUserLibraries(reg)
 	registerPolicyCapability(reg)
+	registerArtwork(reg)
 	registerBranding(reg)
 	registerThemeCatalog(reg)
 	registerAdminInviteCodes(reg)

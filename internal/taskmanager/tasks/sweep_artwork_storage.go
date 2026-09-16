@@ -7,15 +7,15 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
-// ArtworkStorageSweepCheckpointKey holds the machine-managed cursor for the
-// storage sweep. It is scoped to the storage identity for the same reason the
-// reconcile checkpoint is: a bucket move must never resume an older bucket's
-// walk, because a continuation token from one bucket means nothing in another.
-const ArtworkStorageSweepCheckpointKey = "s3.public_storage_sweep_checkpoint"
+// ArtworkStorageSweepCheckpointKey is the machine-managed sweep cursor. It is
+// scoped to the storage identity for the same reason the reconcile checkpoint
+// is: a storage move must never resume an older location's walk.
+const ArtworkStorageSweepCheckpointKey = config.ArtworkStorageSweepCheckpointKey
 
 // artworkSweepPrefixes are the artwork namespaces the sweep owns. Listing them
 // explicitly rather than walking the bucket root is deliberate: the bucket also

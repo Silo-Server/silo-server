@@ -3,6 +3,7 @@ package apiv2
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 )
@@ -23,8 +24,21 @@ func reconcileSpec(observed []string, doc []byte) (unaccounted, unserved []strin
 	}
 	expected := map[string]string{}
 	for path, item := range parsed.Paths {
-		for method := range item {
-			expected[strings.ToUpper(method)+" "+path] = "openapi.json"
+		for method, operation := range item {
+			methodUpper := strings.ToUpper(method)
+			switch methodUpper {
+			case http.MethodGet, http.MethodPut, http.MethodPost, http.MethodPatch,
+				http.MethodDelete, http.MethodHead, http.MethodOptions, http.MethodTrace:
+			default:
+				continue
+			}
+			var raw struct {
+				Wildcard string `json:"x-silo-wildcard-param"`
+			}
+			if err := json.Unmarshal(operation, &raw); err != nil {
+				return nil, nil, fmt.Errorf("decode %s %s: %w", methodUpper, path, err)
+			}
+			expected[methodUpper+" "+rawRouterPath(path, raw.Wildcard)] = "openapi.json"
 		}
 	}
 	if parsed.PluginContent != nil {

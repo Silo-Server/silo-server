@@ -5,8 +5,14 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+)
+
+const (
+	artworkDeliveryServer = "server"
+	artworkDeliveryDirect = "direct"
 )
 
 // imageTypesWithWidths is every artwork type a client can receive a URL for.
@@ -51,7 +57,9 @@ type ImagesCapabilityResponse struct {
 	Widths map[string]ImageSizeWidths `json:"widths"`
 	// OriginalMaxWidthPx bounds the "original" size: cached originals are
 	// downscaled to this on ingest, so asking for original never yields more.
-	OriginalMaxWidthPx int `json:"original_max_width_px"`
+	OriginalMaxWidthPx int    `json:"original_max_width_px"`
+	StorageBackend     string `json:"-"`
+	Delivery           string `json:"-"`
 }
 
 // HandleImagesCapability reports the image_size contract.
@@ -61,7 +69,11 @@ func HandleImagesCapability(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetImagesCapability derives the shared size discovery view from the actual ladder.
-func GetImagesCapability() ImagesCapabilityResponse {
+func GetImagesCapability(backend ...string) ImagesCapabilityResponse {
+	storageBackend, delivery := artworkstore.BackendLocal, artworkDeliveryServer
+	if len(backend) > 0 && backend[0] == "s3" {
+		storageBackend, delivery = artworkstore.BackendS3, artworkDeliveryDirect
+	}
 	widths := make(map[string]ImageSizeWidths, len(imageTypesWithWidths))
 	for _, imageType := range imageTypesWithWidths {
 		widths[imageType] = ImageSizeWidths{
@@ -78,6 +90,8 @@ func GetImagesCapability() ImagesCapabilityResponse {
 		Sizes:                  imagesize.All,
 		Widths:                 widths,
 		OriginalMaxWidthPx:     imageutil.MaxCachedOriginalDimension,
+		StorageBackend:         storageBackend,
+		Delivery:               delivery,
 	}
 }
 

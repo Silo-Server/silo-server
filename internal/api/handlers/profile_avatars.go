@@ -12,6 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -41,13 +43,7 @@ var supportedDiceBearAvatarStyles = map[string]struct{}{
 	"pixel-art-neutral": {},
 }
 
-type profileAvatarStore interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	DeleteObject(ctx context.Context, bucket, key string) error
-	ListObjects(ctx context.Context, bucket, prefix string) ([]string, error)
-	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
-	Bucket() string
-}
+type profileAvatarStore interface{ artworkstore.Store }
 
 func normalizePresetAvatarReference(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
@@ -86,7 +82,7 @@ func avatarRefReplacesUpload(currentRef, nextRef string) bool {
 	return isUploadedAvatarRef(currentRef) && strings.TrimSpace(currentRef) != strings.TrimSpace(nextRef)
 }
 
-func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl time.Duration, ref string) (source string, url string) {
+func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl time.Duration, ref string, resolvers ...artworkurl.Resolver) (source string, url string) {
 	trimmed := strings.TrimSpace(ref)
 	if trimmed == "" {
 		return "none", ""
@@ -107,11 +103,18 @@ func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl tim
 		if presignTTL <= 0 {
 			presignTTL = 15 * time.Minute
 		}
-		presignedURL, err := store.PresignGetURL(ctx, store.Bucket(), displayKey, presignTTL)
-		if err != nil {
+		if direct, ok := store.(artworkstore.DirectURLer); ok {
+			if resolved, err := direct.DirectURL(ctx, displayKey, presignTTL); err == nil && resolved != "" {
+				return "upload", resolved
+			}
 			return "upload", ""
 		}
-		return "upload", presignedURL
+		if len(resolvers) > 0 && resolvers[0] != nil {
+			if resolved := resolvers[0].ResolveURLs(ctx, []string{displayKey})[displayKey]; resolved.URL != "" {
+				return "upload", resolved.URL
+			}
+		}
+		return "upload", ""
 	}
 	if isKnownPresetAvatarID(trimmed) {
 		return "preset", bundledProfileAvatarURL(trimmed)
@@ -187,16 +190,8 @@ func deleteUploadedAvatarObjects(ctx context.Context, store profileAvatarStore, 
 	if store == nil {
 		return nil
 	}
-	keys, err := store.ListObjects(ctx, store.Bucket(), profileAvatarPrefix(userID, profileID)+"/")
-	if err != nil {
-		return err
-	}
-	for _, key := range keys {
-		if err := store.DeleteObject(ctx, store.Bucket(), key); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := store.DeletePrefix(ctx, profileAvatarPrefix(userID, profileID)+"/")
+	return err
 }
 
 func (h *ProfileHandler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
@@ -299,11 +294,10 @@ func (h *ProfileHandler) UploadAvatar(ctx context.Context, up ProfileAvatarUploa
 		return none, apiError(http.StatusBadRequest, "bad_request", "Invalid image file")
 	}
 
-	bucket := h.AvatarStore.Bucket()
 	originalKey := uploadedAvatarOriginalKey(userID, profileID)
 	for _, variant := range result.Variants {
 		key := profileAvatarPrefix(userID, profileID) + "/" + variant.Key + result.Ext
-		if err := h.AvatarStore.PutObject(ctx, bucket, key, variant.Data); err != nil {
+		if err := h.AvatarStore.Put(ctx, key, variant.Data); err != nil {
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store avatar")
 		}
 	}

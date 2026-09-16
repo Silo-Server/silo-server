@@ -96,8 +96,8 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 	if req.MetadataLanguage != "" && !validMetadataLanguages[req.MetadataLanguage] {
 		return LibraryView{}, fieldError("metadata_language", "Invalid metadata_language; must be a valid ISO 639-1 code")
 	}
-	if req.ChapterThumbnailsEnabled && h.S3Meta == nil {
-		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured public asset S3 storage")
+	if req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
+		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
 	}
 
 	folder, err := h.folderRepo.Create(ctx, catalog.CreateFolderInput{
@@ -174,8 +174,8 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	if req.MetadataLanguage != nil && *req.MetadataLanguage != "" && !validMetadataLanguages[*req.MetadataLanguage] {
 		return LibraryView{}, fieldError("metadata_language", "Invalid metadata_language; must be a valid ISO 639-1 code")
 	}
-	if req.ChapterThumbnailsEnabled != nil && *req.ChapterThumbnailsEnabled && h.S3Meta == nil {
-		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured public asset S3 storage")
+	if req.ChapterThumbnailsEnabled != nil && *req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
+		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
 	}
 
 	// Fetch the folder before updating so we can detect path changes.
@@ -1138,7 +1138,7 @@ func (h *LibraryHandler) RefreshLibraryMetadata(ctx context.Context, id, userID 
 // UploadLibraryPoster stores a poster image for the library, replacing any
 // previous one, and answers the library with its new presigned poster URL.
 func (h *LibraryHandler) UploadLibraryPoster(ctx context.Context, id int, contentType string, data []byte) (LibraryView, error) {
-	if h.S3Meta == nil {
+	if h.ArtworkStore == nil {
 		return LibraryView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Image storage is not configured")
 	}
 	folder, err := h.folderRepo.GetByID(ctx, id)
@@ -1157,10 +1157,10 @@ func (h *LibraryHandler) UploadLibraryPoster(ctx context.Context, id int, conten
 	}
 	s3Key := fmt.Sprintf("library-posters/%d%s", id, ext)
 	if folder.PosterPath != "" && folder.PosterPath != s3Key {
-		_ = h.S3Meta.DeleteObject(ctx, h.S3Meta.Bucket(), folder.PosterPath)
+		_, _ = h.ArtworkStore.Delete(ctx, []string{folder.PosterPath})
 	}
-	if err := h.S3Meta.PutObject(ctx, h.S3Meta.Bucket(), s3Key, data); err != nil {
-		slog.ErrorContext(ctx, "uploading library poster", "component", "api", "library_id", id, "error", err)
+	if putErr := h.ArtworkStore.Put(ctx, s3Key, data); putErr != nil {
+		slog.ErrorContext(ctx, "uploading library poster", "component", "api", "library_id", id, "error", putErr)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to upload poster")
 	}
 	if err := h.folderRepo.SetPosterPath(ctx, id, s3Key); err != nil {
@@ -1174,7 +1174,7 @@ func (h *LibraryHandler) UploadLibraryPoster(ctx context.Context, id int, conten
 // DeleteLibraryPoster removes the library's poster; a library without one
 // is left as is.
 func (h *LibraryHandler) DeleteLibraryPoster(ctx context.Context, id int) error {
-	if h.S3Meta == nil {
+	if h.ArtworkStore == nil {
 		return apiError(http.StatusServiceUnavailable, "unavailable", "Image storage is not configured")
 	}
 	folder, err := h.folderRepo.GetByID(ctx, id)
@@ -1185,7 +1185,7 @@ func (h *LibraryHandler) DeleteLibraryPoster(ctx context.Context, id int) error 
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch library")
 	}
 	if folder.PosterPath != "" {
-		_ = h.S3Meta.DeleteObject(ctx, h.S3Meta.Bucket(), folder.PosterPath)
+		_, _ = h.ArtworkStore.Delete(ctx, []string{folder.PosterPath})
 		if err := h.folderRepo.ClearPosterPath(ctx, id); err != nil {
 			slog.ErrorContext(ctx, "clearing library poster path", "component", "api", "library_id", id, "error", err)
 			return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear poster")

@@ -15,8 +15,7 @@ import (
 
 type artworkRevisionDeleteFunc func(context.Context, []string) (int, error)
 
-func (f artworkRevisionDeleteFunc) Bucket() string { return "artwork" }
-func (f artworkRevisionDeleteFunc) DeleteObjects(ctx context.Context, _ string, keys []string) (int, error) {
+func (f artworkRevisionDeleteFunc) Delete(ctx context.Context, keys []string) (int, error) {
 	return f(ctx, keys)
 }
 

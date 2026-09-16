@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -66,14 +65,8 @@ func (h *LibraryHandler) ListUserLibraries(ctx context.Context, userID int) ([]U
 			Type:      f.Type,
 			SortOrder: f.SortOrder,
 		}
-		if f.PosterPath != "" && h.S3Meta != nil {
-			ttl := h.PresignTTL
-			if ttl <= 0 {
-				ttl = 4 * time.Hour
-			}
-			if url, err := h.S3Meta.PresignGetURL(ctx, h.S3Meta.Bucket(), f.PosterPath, ttl); err == nil {
-				entry.PosterURL = url
-			}
+		if f.PosterPath != "" && h.ArtworkResolver != nil {
+			entry.PosterURL = h.ArtworkResolver.ResolveURLs(ctx, []string{f.PosterPath})[f.PosterPath].URL
 		}
 		resp = append(resp, entry)
 	}

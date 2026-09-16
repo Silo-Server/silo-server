@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 // The artwork revision GC only ever sees revisions that were enqueued into
@@ -30,7 +30,7 @@ import (
 // objects, 178 GB, 27% of the artwork bucket.
 
 const (
-	// artworkSweepPageSize is the S3 listing page size. One page costs one
+	// artworkSweepPageSize is the storage listing page size. One page costs one
 	// list call, one database query and at most one delete call, so larger
 	// pages mean proportionally fewer round trips against storage that
 	// charges per call rather than per object.
@@ -67,8 +67,8 @@ const artworkStorageSweepAdvisoryLock int64 = 0x53494C4F53574550 // "SILOSWEP"
 // ArtworkStorageLister is the storage surface the sweep needs on top of
 // deletion: a bounded, resumable listing.
 type ArtworkStorageLister interface {
-	ArtworkRevisionDeleter
-	ListObjectInfosPage(ctx context.Context, bucket, prefix, token string, limit int) ([]s3client.ObjectInfo, string, error)
+	Delete(ctx context.Context, keys []string) (int, error)
+	List(ctx context.Context, prefix, cursor string, limit int) ([]artworkstore.ObjectInfo, string, error)
 }
 
 // ArtworkStorageSweepStats summarizes one bounded sweep.
@@ -88,9 +88,9 @@ type ArtworkStorageSweepStats struct {
 // ArtworkStorageSweeper deletes stored artwork objects that no catalog surface
 // references.
 type ArtworkStorageSweeper struct {
-	pool *pgxpool.Pool
-	s3   ArtworkStorageLister
-	now  func() time.Time
+	pool  *pgxpool.Pool
+	store ArtworkStorageLister
+	now   func() time.Time
 	// lookup resolves which candidate paths the catalog still references.
 	// Defaults to the database query; tests substitute it so the deletion
 	// guards can be exercised without a live catalog.
@@ -99,11 +99,11 @@ type ArtworkStorageSweeper struct {
 
 // NewArtworkStorageSweeper returns nil when the sweep cannot run, matching the
 // garbage collector's construction contract.
-func NewArtworkStorageSweeper(pool *pgxpool.Pool, s3 ArtworkStorageLister) *ArtworkStorageSweeper {
-	if pool == nil || s3 == nil {
+func NewArtworkStorageSweeper(pool *pgxpool.Pool, store ArtworkStorageLister) *ArtworkStorageSweeper {
+	if pool == nil || store == nil {
 		return nil
 	}
-	sweeper := &ArtworkStorageSweeper{pool: pool, s3: s3, now: time.Now}
+	sweeper := &ArtworkStorageSweeper{pool: pool, store: store, now: time.Now}
 	sweeper.lookup = sweeper.referencedOriginals
 	return sweeper
 }
@@ -113,7 +113,7 @@ func NewArtworkStorageSweeper(pool *pgxpool.Pool, s3 ArtworkStorageLister) *Artw
 type artworkObjectKey struct {
 	key      string
 	original string
-	modified *time.Time
+	modified time.Time
 }
 
 // parseArtworkObjectKey rebuilds the path the catalog would hold for an object.
@@ -128,7 +128,7 @@ type artworkObjectKey struct {
 // Returns false for anything that does not decompose, which the caller counts
 // and skips. Refusing to guess is the point: an unrecognized key shape is the
 // one case where deleting could destroy something this code does not model.
-func parseArtworkObjectKey(info s3client.ObjectInfo) (artworkObjectKey, bool) {
+func parseArtworkObjectKey(info artworkstore.ObjectInfo) (artworkObjectKey, bool) {
 	dir, file := path.Split(info.Key)
 	if dir == "" || file == "" {
 		return artworkObjectKey{}, false
@@ -144,7 +144,7 @@ func parseArtworkObjectKey(info s3client.ObjectInfo) (artworkObjectKey, bool) {
 	return artworkObjectKey{
 		key:      info.Key,
 		original: dir + "original." + hash + "." + ext,
-		modified: info.LastModified,
+		modified: info.ModTime,
 	}, true
 }
 
@@ -207,7 +207,7 @@ func (s *ArtworkStorageSweeper) SweepPrefix(ctx context.Context, prefix, token s
 	cutoff := s.now().Add(-artworkSweepMinAge)
 
 	for page := 0; page < maxPages; page++ {
-		infos, next, err := s.s3.ListObjectInfosPage(ctx, s.s3.Bucket(), prefix, stats.NextToken, artworkSweepPageSize)
+		infos, next, err := s.store.List(ctx, prefix, stats.NextToken, artworkSweepPageSize)
 		if err != nil {
 			return stats, fmt.Errorf("artwork storage sweep: list %s: %w", prefix, err)
 		}
@@ -231,7 +231,7 @@ func (s *ArtworkStorageSweeper) SweepPrefix(ctx context.Context, prefix, token s
 			// an ancient one, and guessing "old" there would silently disable
 			// the age floor for every object it applies to. Skipping costs a
 			// little unreclaimed space; guessing costs freshly cached artwork.
-			if object.modified == nil || object.modified.After(cutoff) {
+			if object.modified.IsZero() || object.modified.After(cutoff) {
 				stats.TooNew++
 				continue
 			}
@@ -265,7 +265,7 @@ func (s *ArtworkStorageSweeper) SweepPrefix(ctx context.Context, prefix, token s
 		}
 
 		if len(doomed) > 0 {
-			deleted, delErr := s.s3.DeleteObjects(ctx, s.s3.Bucket(), doomed)
+			deleted, delErr := s.store.Delete(ctx, doomed)
 			stats.Deleted += deleted
 			if delErr != nil {
 				return stats, fmt.Errorf("artwork storage sweep: delete: %w", delErr)

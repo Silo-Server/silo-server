@@ -1,6 +1,6 @@
 # S3 Storage Setup
 
-Silo uses S3-compatible object storage for caching artwork, catalog exports, and other operational data. Any S3-compatible backend works (AWS S3, Ceph RGW, MinIO, Cloudflare R2, etc.).
+S3 is optional for artwork. A single-node install uses local artwork storage by default; S3 is recommended for multi-node deployments and remains available for catalog exports and other operational data. Any S3-compatible backend works (AWS S3, Ceph RGW, MinIO, Cloudflare R2, etc.).
 
 ## Core Settings
 

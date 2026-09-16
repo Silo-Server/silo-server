@@ -66,6 +66,13 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(requestLoggerMiddleware)
 	r.Use(middleware.Recoverer)
 
+	artworkHandler := deps.ArtworkHandler
+	if artworkHandler == nil {
+		artworkHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
+	}
+	r.Method(http.MethodGet, "/api/v2/artwork/*", artworkHandler)
+	r.Method(http.MethodHead, "/api/v2/artwork/*", artworkHandler)
+
 	systemHandler := NewSystemHandler(deps.CurrentConfig)
 	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator)
 	nextUpRepo := catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)

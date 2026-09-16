@@ -12,8 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -23,9 +24,9 @@ type CollectionHandler struct {
 	LibraryCollections collectionPreferenceLibraryReader
 	Executor           *catalog.QueryExecutor
 	ItemReader         collectionMutationItemReader
-	S3GP               *s3client.Client
+	ArtworkStore       artworkstore.Store
+	ArtworkResolver    artworkurl.Resolver
 	HTTPClient         *http.Client
-	PresignTTL         time.Duration
 }
 
 // NewCollectionHandler creates a new CollectionHandler.
@@ -528,13 +529,14 @@ func (h *CollectionHandler) processCollectionPoster(
 		fileData = downloaded
 	}
 
-	if h.S3GP == nil {
-		return true, fmt.Errorf("poster upload requires configured object storage")
+	artwork := h.ArtworkStore
+	if artwork == nil {
+		return true, fmt.Errorf("poster upload requires configured artwork storage")
 	}
-	if err := removeCollectionImageVariants(ctx, h.S3GP, userCollectionImagePrefix, collectionID, "poster"); err != nil {
+	if err := removeCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster"); err != nil {
 		return true, fmt.Errorf("clearing previous poster: %w", err)
 	}
-	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, h.S3GP, userCollectionImagePrefix, collectionID, "poster", fileData)
+	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", fileData)
 	if err != nil {
 		return true, fmt.Errorf("poster: %w", err)
 	}
@@ -566,18 +568,11 @@ func (h *CollectionHandler) presignUserCollectionPoster(ctx context.Context, pat
 	if strings.HasPrefix(path, "/") {
 		return path
 	}
-	if h.S3GP == nil {
+	if h.ArtworkResolver == nil {
 		return ""
 	}
-	ttl := h.PresignTTL
-	if ttl <= 0 {
-		ttl = 4 * time.Hour
-	}
-	url, err := h.S3GP.PresignGetURL(ctx, h.S3GP.Bucket(), cardThumbnailPath(path), ttl)
-	if err != nil {
-		return ""
-	}
-	return url
+	key := cardThumbnailPath(path)
+	return h.ArtworkResolver.ResolveURLs(ctx, []string{key})[key].URL
 }
 
 // previewCollectionRequest is shared with the library collection bridge handler.

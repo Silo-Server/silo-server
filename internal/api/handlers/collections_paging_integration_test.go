@@ -241,7 +241,7 @@ func TestSmartLibraryCollectionPagingAdapterDB(t *testing.T) {
 		_ = repo.Delete(context.Background(), c.ID)
 		_, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collection_revisions WHERE collection_id=$1`, c.ID)
 	})
-	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), 0, nil, nil)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
 	h.FolderRepo = catalog.NewFolderRepository(f.pool)
 	h.Executor = &catalog.QueryExecutor{Pool: f.pool}
 	ctx := access.SetScope(t.Context(), access.Scope{AllowedLibraryIDs: []int{f.library}, LibrariesRestricted: true})

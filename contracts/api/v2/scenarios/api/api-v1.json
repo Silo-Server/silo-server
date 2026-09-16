@@ -121,7 +121,7 @@
           "requires": ["database_unavailable"],
           "expect": {
             "status": 503,
-            "body": [{ "pointer": "", "op": "keys_equal", "value": ["status", "postgres", "s3"] }]
+            "body": [{ "pointer": "", "op": "keys_equal", "value": ["status", "postgres", "s3", "artwork"] }]
           },
           "notes": "Asymmetric shape: booleans exist only when status is error. Flagged for the section PR; an unconfigured S3 reports as healthy (true).",
           "v2_expectation": null

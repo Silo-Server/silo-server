@@ -109,6 +109,7 @@ volumes. `SILO_DATA_ROOT` defaults to `/opt/silo` and contains:
 | `/opt/silo/postgres` | Durable PostgreSQL data |
 | `/opt/silo/redis` | Redis persistence |
 | `/opt/silo/plugins` | Installed plugin cache |
+| `/opt/silo/artwork` | Local artwork cache and uploaded artwork |
 | `/opt/silo/compat` | Compatibility assets |
 | `/opt/silo/transcode` | Transient transcode output mounted at `/tmp/silo-transcode` |
 | `/opt/silo/catalog-seeds` | Read-only catalog seed data |

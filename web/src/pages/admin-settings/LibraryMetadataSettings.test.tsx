@@ -102,7 +102,7 @@ describe("LibraryMetadataSettings", () => {
     const rendered = text(render({ "catalog.search.provider": "postgres" }));
 
     expect(rendered).toContain("Library & Metadata");
-    expect(rendered).toContain("Store artwork in your bucket");
+    expect(rendered).toContain("Keep provider artwork");
     expect(rendered).toContain("Find intros and credits");
     expect(rendered).toContain("Search engine");
   });
@@ -188,39 +188,17 @@ describe("LibraryMetadataSettings", () => {
   it("leaves artwork storage editable and unannotated while public storage is active", () => {
     const rendered = render({ "s3.public_bucket": "silo-public" });
 
-    expect(text(rendered)).toContain("Store artwork in your bucket");
+    expect(text(rendered)).toContain("Keep provider artwork");
     expect(text(rendered)).not.toContain("Restart the server for artwork storage to start");
     expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
+    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
   });
 
-  it("keeps artwork storage settable when the bucket is saved but not active yet", () => {
+  it("allows caching provider artwork without an S3 bucket", () => {
     storageAvailableMock.mockReturnValue(false);
-
-    const rendered = render({ "s3.public_bucket": "silo-public" });
-
-    expect(text(rendered)).toContain("Restart the server for artwork storage to start");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
-  });
-
-  it("disables artwork storage and links to Storage & Database when no bucket is configured", () => {
-    storageAvailableMock.mockReturnValue(false);
-
     const rendered = render({});
-
-    expect(text(rendered)).toContain("Artwork storage needs a public S3 bucket");
-    expect(text(rendered)).toContain("Storage & Database");
-    expect(rendered).toContain("/admin/settings/infrastructure");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(true);
-  });
-
-  it("still allows switching artwork storage off when the bucket went away", () => {
-    storageAvailableMock.mockReturnValue(false);
-
-    const rendered = render({ "metadata.cache_images": "true" });
-
-    expect(text(rendered)).toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
+    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
+    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
   });
 
   it("says it once for a group where every field needs a restart", () => {

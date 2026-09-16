@@ -19,7 +19,7 @@ import (
 // would panic rather than pass.
 func TestLibraryViewsRefuseLibraryOutsideViewerScope(t *testing.T) {
 	sectionsHandler := NewSectionHandler(nil, nil)
-	collections := NewLibraryCollectionHandler(nil, nil, nil, 0, nil, nil)
+	collections := NewLibraryCollectionHandler(nil, nil, nil, nil)
 	router := chi.NewRouter()
 	router.Get("/library/{id}/layout", sectionsHandler.HandleLibraryLayout)
 	router.Get("/library/{id}/sections", sectionsHandler.HandleLibrarySections)

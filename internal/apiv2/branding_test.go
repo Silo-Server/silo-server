@@ -1,13 +1,16 @@
 package apiv2
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 )
 
@@ -18,10 +21,12 @@ func (s brandingSettings) Set(_ context.Context, key, value string) error    { s
 
 type brandingAssets struct{}
 
-func (brandingAssets) Bucket() string                                          { return "synthetic" }
-func (brandingAssets) PutObject(context.Context, string, string, []byte) error { return nil }
-func (brandingAssets) GetObject(context.Context, string, string) ([]byte, error) {
-	return []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), nil
+func (brandingAssets) Put(context.Context, string, []byte) error { return nil }
+func (brandingAssets) Get(_ context.Context, key string) (io.ReadCloser, artworkstore.ObjectInfo, error) {
+	return io.NopCloser(bytes.NewReader([]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`))), artworkstore.ObjectInfo{Key: key, Size: 42}, nil
+}
+func (brandingAssets) Stat(context.Context, string) (artworkstore.ObjectInfo, error) {
+	return artworkstore.ObjectInfo{}, nil
 }
 func brandingHandler() http.Handler {
 	settings := brandingSettings{branding.KeyServerName: "Synthetic Server", "branding.favicon_ref": "abc.svg", "ui.admin_theme_vars": `{"--primary":"red"}`, "ui.admin_custom_css": "body { color: red; }"}
@@ -77,4 +82,29 @@ func TestBrandingAssetConditionalVersionAndHead(t *testing.T) {
 	requireProblem(t, do(t, h, "GET", Prefix+"/branding/assets/unknown", "", nil), TypeNotFound)
 	requireProblem(t, do(t, h, "GET", Prefix+"/branding/assets/mark", "", nil), TypeNotFound)
 	requireProblem(t, do(t, NewHandler(Dependencies{}), "GET", path, "", nil), TypeDependencyUnavailable)
+}
+
+func TestBrandingWithoutAssetStore(t *testing.T) {
+	h := NewHandler(Dependencies{Branding: branding.NewService(brandingSettings{branding.KeyServerName: "Configured"}, nil)})
+	for _, path := range []string{"/theme/branding", "/theme/capabilities"} {
+		got := do(t, h, "GET", Prefix+path, "", nil)
+		var body map[string]any
+		if err := json.Unmarshal(got.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if got.Code != http.StatusOK || body["storage_available"] != false {
+			t.Fatal(got.Code, got.Body.String())
+		}
+	}
+}
+
+func TestBrandingUploadWithoutAssetStore(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.AdminBrandingAssets = handlers.NewBrandingHandler(branding.NewService(brandingSettings{}, nil))
+	body, ct := posterForm(t, "file", "image/png", 64)
+	got := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/admin/branding/assets/wordmark", body, with(bearer(adminToken), "Content-Type", ct))
+	requireProblem(t, got, TypeDependencyUnavailable)
+	if got.Code != http.StatusServiceUnavailable {
+		t.Fatal(got.Code, got.Body.String())
+	}
 }

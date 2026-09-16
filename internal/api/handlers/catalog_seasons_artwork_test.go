@@ -26,19 +26,13 @@ type seasonsNoProbeStore struct {
 	signs int
 }
 
-func (s *seasonsNoProbeStore) Bucket() string             { return "test" }
-func (s *seasonsNoProbeStore) UsesExternalDelivery() bool { return true }
-func (s *seasonsNoProbeStore) PresignGetURL(_ context.Context, _, key string, _ time.Duration) (string, error) {
-	s.signs++
-	return "https://images.example/" + key, nil
-}
-func (s *seasonsNoProbeStore) ObjectExists(context.Context, string, string) (bool, error) {
-	s.t.Fatal("metadata probed storage")
-	return false, nil
-}
-func (s *seasonsNoProbeStore) ObjectAvailable(context.Context, string, string) (bool, error) {
-	s.t.Fatal("metadata probed delivery")
-	return false, nil
+func (s *seasonsNoProbeStore) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := make(map[string]catalog.ResolvedImageURL, len(keys))
+	for _, key := range keys {
+		s.signs++
+		out[key] = catalog.ResolvedImageURL{URL: "https://images.example/" + key}
+	}
+	return out
 }
 
 func TestSeasonListArtworkHTTP(t *testing.T) {
@@ -91,7 +85,7 @@ func TestSeasonListArtworkHTTP(t *testing.T) {
 				resolver := metadata.NewPluginImageResolver()
 				t.Cleanup(resolver.Close)
 				storage := &seasonsNoProbeStore{t: t}
-				resolver.SetS3Presigner(storage, time.Hour)
+				resolver.SetArtworkResolver(storage)
 				resolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(pool, "test", true))
 				svc := catalog.NewDetailService(itemsRepo, episodes, seasons, catalog.NewPersonRepository(pool), scanner.NewFileRepository(pool))
 				svc.SetImageResolver(resolver)
@@ -131,7 +125,7 @@ func TestSeasonListArtworkHTTP(t *testing.T) {
 				// Use a fresh resolver so the HTTP request's signature cache cannot mask work.
 				typedResolver := metadata.NewPluginImageResolver()
 				t.Cleanup(typedResolver.Close)
-				typedResolver.SetS3Presigner(storage, time.Hour)
+				typedResolver.SetArtworkResolver(storage)
 				typedResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(pool, "test", true))
 				svc.SetImageResolver(typedResolver)
 				viewer := ItemViewer{Access: catalog.AccessFilter{ImageSize: imagesize.Size(size)}}

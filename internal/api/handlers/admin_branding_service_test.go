@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 )
 
@@ -21,14 +24,24 @@ func (m *memBrandingSettings) Set(_ context.Context, key, value string) error {
 
 type memBrandingStore struct{ objects map[string][]byte }
 
-func (m *memBrandingStore) PutObject(_ context.Context, _, key string, data []byte) error {
+func (m *memBrandingStore) Put(_ context.Context, key string, data []byte) error {
 	m.objects[key] = data
 	return nil
 }
-func (m *memBrandingStore) GetObject(_ context.Context, _, key string) ([]byte, error) {
-	return m.objects[key], nil
+func (m *memBrandingStore) Get(_ context.Context, key string) (io.ReadCloser, artworkstore.ObjectInfo, error) {
+	data, ok := m.objects[key]
+	if !ok {
+		return nil, artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+	}
+	return io.NopCloser(bytes.NewReader(data)), artworkstore.ObjectInfo{Key: key, Size: int64(len(data))}, nil
 }
-func (m *memBrandingStore) Bucket() string { return "synthetic" }
+func (m *memBrandingStore) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
+	data, ok := m.objects[key]
+	if !ok {
+		return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+	}
+	return artworkstore.ObjectInfo{Key: key, Size: int64(len(data))}, nil
+}
 
 // The v2 seam keeps the v1 decisions: kind and image-type failures are field
 // validation errors, missing storage is unavailability, and a favicon upload

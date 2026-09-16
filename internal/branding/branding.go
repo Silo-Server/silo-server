@@ -75,9 +75,6 @@ const AssetContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline
 
 // Errors returned by Service. Handlers map these to HTTP status codes.
 var (
-	// ErrStorageUnavailable indicates S3 is not configured; branding image
-	// upload/serving is unavailable but text branding still works.
-	ErrStorageUnavailable = errors.New("branding: asset storage is not configured")
 	// ErrAssetNotConfigured indicates no custom asset of the requested kind is set.
 	ErrAssetNotConfigured = errors.New("branding: asset not configured")
 	// ErrInvalidKind indicates an unknown asset kind.
@@ -91,3 +88,6 @@ func IsValidKind(s string) bool {
 	_, ok := assetSpecs[AssetKind(s)]
 	return ok
 }
+
+// ErrStorageUnavailable indicates that branding asset storage is not configured.
+var ErrStorageUnavailable = errors.New("branding asset storage is not configured")

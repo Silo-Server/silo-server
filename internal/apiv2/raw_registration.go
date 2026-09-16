@@ -20,6 +20,9 @@ type RawOperation struct {
 	Operation
 	Protocol string
 	Reason   string
+	// WildcardParam names a terminal path parameter that captures nested paths.
+	// OpenAPI retains {name}; Chi receives its corresponding /* route.
+	WildcardParam string
 }
 
 // RawImpliedStatuses lists only failures of the shared authorization gates.
@@ -130,7 +133,7 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 		}
 	}
 	for _, declared := range reg.Declared() {
-		if declared.Method == op.Method && declared.Path == op.Path {
+		if declared.Method == op.Method && declared.Path == rawRouterPath(op.Path, raw.WildcardParam) {
 			fail("duplicate raw route")
 		}
 	}
@@ -158,6 +161,12 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 	}
 	op.Extensions["x-silo-raw-protocol"] = raw.Protocol
 	op.Extensions["x-silo-raw-reason"] = raw.Reason
+	if raw.WildcardParam != "" {
+		if !strings.HasSuffix(op.Path, "/{"+raw.WildcardParam+"}") {
+			fail("wildcard parameter must be the final path component")
+		}
+		op.Extensions["x-silo-wildcard-param"] = raw.WildcardParam
+	}
 	if op.RetrySafety != "" {
 		op.Extensions[extRetrySafety] = string(op.RetrySafety)
 	}
@@ -180,8 +189,10 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 		}
 	}
 	reg.api.OpenAPI().AddOperation(&op.Operation)
+	routeOp := op.Operation
+	routeOp.Path = rawRouterPath(op.Path, raw.WildcardParam)
 	reg.mu.Lock()
-	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class, RetrySafety: op.RetrySafety})
+	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: routeOp.Path, OperationID: op.OperationID, Class: op.Class, RetrySafety: op.RetrySafety})
 	reg.mu.Unlock()
 	serve := func(ctx huma.Context) {
 		r, w := humachi.Unwrap(ctx)
@@ -191,7 +202,14 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 		next := serve
 		serve = func(ctx huma.Context) { middleware(ctx, next) }
 	}
-	reg.api.Adapter().Handle(&op.Operation, serve)
+	reg.api.Adapter().Handle(&routeOp, serve)
+}
+
+func rawRouterPath(documentPath, wildcard string) string {
+	if wildcard == "" {
+		return documentPath
+	}
+	return strings.TrimSuffix(documentPath, "{"+wildcard+"}") + "*"
 }
 
 func rawResponseHeader(response *huma.Response, name string) bool {

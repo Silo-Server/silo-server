@@ -21,13 +21,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go/middleware"
+
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
 // ErrNotFound is returned when the requested S3 object does not exist.
@@ -88,6 +89,7 @@ type ObjectInfo struct {
 	Key          string
 	SizeBytes    int64
 	LastModified *time.Time
+	ETag         string
 }
 
 // NewClient creates a new S3 Client from the given BucketConfig.
@@ -151,6 +153,12 @@ func (c *Client) Bucket() string {
 	return c.bucket
 }
 
+// Endpoint returns the S3 API endpoint objects are written to.
+func (c *Client) Endpoint() string { return c.endpoint }
+
+// KeyPrefix returns the normalized key prefix applied to every object key.
+func (c *Client) KeyPrefix() string { return c.keyPrefix }
+
 // GetObject fetches the object at the given key and returns its contents.
 // Returns ErrNotFound if the object does not exist.
 func (c *Client) GetObject(ctx context.Context, bucket, key string) ([]byte, error) {
@@ -178,6 +186,12 @@ func (c *Client) GetObject(ctx context.Context, bucket, key string) ([]byte, err
 // GetObjectStream fetches the object at the given key and returns a streaming
 // body. The caller must close the returned ReadCloser.
 func (c *Client) GetObjectStream(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
+	body, _, err := c.GetObjectStreamInfo(ctx, bucket, key)
+	return body, err
+}
+
+// GetObjectStreamInfo returns metadata from the same read as the object bytes.
+func (c *Client) GetObjectStreamInfo(ctx context.Context, bucket, key string) (io.ReadCloser, ObjectInfo, error) {
 	objectKey := c.prefixedKey(key)
 	out, err := c.s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
@@ -185,12 +199,12 @@ func (c *Client) GetObjectStream(ctx context.Context, bucket, key string) (io.Re
 	})
 	if err != nil {
 		if isNotFoundErr(err) {
-			return nil, ErrNotFound
+			return nil, ObjectInfo{}, ErrNotFound
 		}
-		return nil, fmt.Errorf("s3 GetObject %s/%s: %w", bucket, key, err)
+		return nil, ObjectInfo{}, fmt.Errorf("s3 GetObject %s/%s: %w", bucket, key, err)
 	}
 
-	return out.Body, nil
+	return out.Body, ObjectInfo{Key: key, SizeBytes: aws.ToInt64(out.ContentLength), LastModified: out.LastModified, ETag: aws.ToString(out.ETag)}, nil
 }
 
 // PutObject uploads data to the given key, inferring Content-Type from the
@@ -442,19 +456,27 @@ func (c *Client) HeadBucket(ctx context.Context, bucket string) error {
 
 // ObjectExists checks whether an object exists at the given key.
 func (c *Client) ObjectExists(ctx context.Context, bucket, key string) (bool, error) {
+	_, err := c.HeadObject(ctx, bucket, key)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// HeadObject returns metadata for an object without downloading its bytes.
+func (c *Client) HeadObject(ctx context.Context, bucket, key string) (ObjectInfo, error) {
 	objectKey := c.prefixedKey(key)
-	_, err := c.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+	result, err := c.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
 		if isNotFoundErr(err) {
-			return false, nil
+			return ObjectInfo{}, ErrNotFound
 		}
-		return false, fmt.Errorf("s3 HeadObject %s/%s: %w", bucket, key, err)
+		return ObjectInfo{}, fmt.Errorf("s3 HeadObject %s/%s: %w", bucket, key, err)
 	}
-
-	return true, nil
+	return ObjectInfo{Key: key, SizeBytes: aws.ToInt64(result.ContentLength), LastModified: result.LastModified, ETag: aws.ToString(result.ETag)}, nil
 }
 
 // ArtworkDeliveryScope invalidates verification when storage or delivery

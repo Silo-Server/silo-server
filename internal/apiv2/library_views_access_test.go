@@ -38,7 +38,7 @@ func scopedViewerDeps(t *testing.T, policy *access.Scope, sectionsSvc LibrarySec
 // nil repositories here and would panic if the check were skipped.
 func TestLibraryViewsRefuseLibraryOutsideViewerScope(t *testing.T) {
 	policy := &access.Scope{AllowedLibraryIDs: []int{2}, LibrariesRestricted: true}
-	h := newTestHandler(t, scopedViewerDeps(t, policy, handlers.NewSectionHandler(nil, nil), handlers.NewLibraryCollectionHandler(nil, nil, nil, 0, nil, nil)))
+	h := newTestHandler(t, scopedViewerDeps(t, policy, handlers.NewSectionHandler(nil, nil), handlers.NewLibraryCollectionHandler(nil, nil, nil, nil)))
 	for _, path := range []string{
 		"/api/v2/library/1/layout",
 		"/api/v2/library/1/sections",
@@ -137,7 +137,7 @@ func TestLibraryViewsRefuseUnknownLibraryDB(t *testing.T) {
 // repositories, so the refusal must come from the scope check alone.
 func TestLibraryViewsRefuseHiddenLibrary(t *testing.T) {
 	policy := &access.Scope{DisabledLibraryIDs: []int{1}}
-	h := newTestHandler(t, scopedViewerDeps(t, policy, handlers.NewSectionHandler(nil, nil), handlers.NewLibraryCollectionHandler(nil, nil, nil, 0, nil, nil)))
+	h := newTestHandler(t, scopedViewerDeps(t, policy, handlers.NewSectionHandler(nil, nil), handlers.NewLibraryCollectionHandler(nil, nil, nil, nil)))
 	for _, path := range []string{
 		"/api/v2/library/1/layout",
 		"/api/v2/library/1/sections",
@@ -187,7 +187,7 @@ func TestLibraryCollectionReadsRefuseUnknownLibraryDB(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	libraryID := seedLibrary(t, pool, fmt.Sprintf("coll-known-%d", suffix))
 	disabledID := seedLibraryEnabled(t, pool, fmt.Sprintf("coll-disabled-%d", suffix), false)
-	svc := handlers.NewLibraryCollectionHandler(catalogpkg.NewLibraryCollectionRepository(pool), nil, catalogpkg.NewItemRepository(pool), 0, nil, nil)
+	svc := handlers.NewLibraryCollectionHandler(catalogpkg.NewLibraryCollectionRepository(pool), nil, catalogpkg.NewItemRepository(pool), nil)
 	svc.FolderRepo = catalogpkg.NewFolderRepository(pool)
 	svc.UserCollectionPool = pool
 	h := newTestHandler(t, scopedViewerDeps(t, &access.Scope{}, &fakeLibraryViews{}, svc))

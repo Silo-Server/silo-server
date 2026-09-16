@@ -26,6 +26,8 @@ type ImageCapabilities struct {
 	Sizes                  []imagesize.Size           `json:"sizes"`
 	Widths                 map[string]ImageSizeWidths `json:"widths"`
 	OriginalMaxWidthPx     int                        `json:"original_max_width_px"`
+	StorageBackend         string                     `json:"storage_backend" enum:"local,s3"`
+	Delivery               string                     `json:"delivery" enum:"server,direct"`
 }
 
 type ImageCapabilitiesOutput struct {
@@ -46,14 +48,15 @@ func registerOperationalDiscovery(reg *Registry) {
 		})
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/images/capabilities", "getImageCapabilities", "images", "Available image sizes and their pixel widths."), Class: ClassProfileScoped, ProfileOptional: true},
 		func(context.Context, *CapabilityInput) (*ImageCapabilitiesOutput, error) {
-			view := handlers.GetImagesCapability()
+			view := handlers.GetImagesCapability(reg.deps.ArtworkBackend)
 			widths := make(map[string]ImageSizeWidths, len(view.Widths))
 			for key, value := range view.Widths {
 				widths[key] = ImageSizeWidths(value)
 			}
 			return &ImageCapabilitiesOutput{Body: ImageCapabilities{
 				SeasonListArtworkParam: view.SeasonListArtworkParam,
-				Capability:             Capability{State: StateAvailable}, Param: view.Param, Sizes: view.Sizes, Widths: widths, OriginalMaxWidthPx: view.OriginalMaxWidthPx,
+				StorageBackend:         view.StorageBackend, Delivery: view.Delivery,
+				Capability: Capability{State: StateAvailable}, Param: view.Param, Sizes: view.Sizes, Widths: widths, OriginalMaxWidthPx: view.OriginalMaxWidthPx,
 			}}, nil
 		})
 }

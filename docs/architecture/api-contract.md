@@ -1116,7 +1116,7 @@ tombstone. The retained contract is:
   dependency and answers identically with the database unreachable.
 - **API `GET /api/v1/ready`** (readiness): `200 {"status":"ok"}` when Postgres answers a ping and
   either no S3 client is configured or its `HeadBucket` succeeds; otherwise `503` with
-  `{"status":"error","postgres":<bool>,"s3":<bool>}`. The per-dependency booleans appear only on
+  `{"status":"error","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`. The per-dependency booleans appear only on
   failure; an unconfigured S3 reports `true`. `Content-Type: application/json` on both branches.
 - **Proxy / transcode-node `GET /api/v1/health`**: `200 application/json`
   `{"status":"ok","active_jobs":n,"capabilities_hash":…,"system":…,"gpu":…}` (proxy also

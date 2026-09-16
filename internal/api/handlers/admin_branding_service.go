@@ -29,21 +29,16 @@ type BrandingAssetView struct {
 // upload; a delayed retry replaces whatever an administrator chose in between,
 // so the v2 operation is non_retryable. Size limits are the caller's.
 func (h *BrandingHandler) UploadAdminBrandingAsset(ctx context.Context, kind, contentType string, data []byte) (BrandingAssetView, error) {
-	if h == nil || h.svc == nil {
+	if h == nil || !h.svc.HasStorage() {
 		return BrandingAssetView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Branding is not configured")
 	}
 	if !branding.IsValidKind(kind) {
 		return BrandingAssetView{}, unknownBrandingKind()
 	}
-	if !h.svc.HasStorage() {
-		return BrandingAssetView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Asset upload storage (S3) is not configured")
-	}
 	ref, err := h.svc.UploadAsset(ctx, branding.AssetKind(kind), data, contentType)
 	switch {
 	case errors.Is(err, branding.ErrUnsupportedImage):
 		return BrandingAssetView{}, fieldError(brandingFieldFile, "Unsupported image type; use PNG, JPEG, WebP (or PNG/ICO/SVG for favicon)")
-	case errors.Is(err, branding.ErrStorageUnavailable):
-		return BrandingAssetView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Asset upload storage (S3) is not configured")
 	case errors.Is(err, branding.ErrInvalidKind):
 		return BrandingAssetView{}, unknownBrandingKind()
 	case err != nil:

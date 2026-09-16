@@ -76,6 +76,7 @@ services:
     volumes:
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
       - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
+      - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
       - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
@@ -149,6 +150,7 @@ services:
   #   volumes:
   #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
   #     - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
+  #     - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
   #     - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
   #     # See the note on the integrated service above: a node reports its own
   #     # CPU, load, and memory rather than the physical machine's only with

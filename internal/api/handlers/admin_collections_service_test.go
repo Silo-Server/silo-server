@@ -25,7 +25,7 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 func TestAdminCollectionServiceCanonicalGuardAndMembershipDB(t *testing.T) {
 	f := newPagingIntegrationFixture(t)
 	repo := catalog.NewLibraryCollectionRepository(f.pool)
-	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), 0, nil, nil)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
 	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: f.library, Title: "Admin editor", CollectionType: "manual", PosterURL: "poster/path", BackdropURL: "backdrop/path"})
 	if err != nil {
 		t.Fatal(err)

@@ -38,6 +38,19 @@ type adminServerStatusResponse struct {
 	RestartRequested   bool              `json:"restart_requested"`
 	RestartRequestedAt *time.Time        `json:"restart_requested_at,omitempty"`
 	Health             adminServerHealth `json:"health"`
+	// ArtworkStorage tells the settings UI whether the artwork backend can
+	// still be chosen. Once artwork has been written the backend is locked to
+	// the recorded storage.
+	ArtworkStorage adminArtworkStorageStatus `json:"artwork_storage"`
+}
+
+// adminArtworkStorageStatus is the settings-page view of artwork storage.
+// Backend is the resolved backend of this process ("local" or "s3", empty
+// in modes that do not open artwork). Locked is true once the first artwork
+// write recorded the store identity.
+type adminArtworkStorageStatus struct {
+	Backend string `json:"backend,omitempty"`
+	Locked  bool   `json:"locked"`
 }
 
 // adminServerHealth backs the dashboard health strip. Version, uptime and node
@@ -189,6 +202,9 @@ func (h *AdminHandler) ReadAdminServerStatus(ctx context.Context) AdminServerSta
 		settingsCtx, cancel := context.WithTimeout(ctx, adminHealthProbeTimeout)
 		settings, err := h.SettingsRepo.GetAll(settingsCtx)
 		cancel()
+		if err == nil {
+			resp.ArtworkStorage.Locked = artworkStorageLocked(settings)
+		}
 		if err == nil && jellycompat.WebComponentStatusForConfig(h.Config, settings).RestartRequired {
 			resp.RestartRequired = true
 			if resp.RestartRequiredReason == "" {
@@ -203,6 +219,7 @@ func (h *AdminHandler) ReadAdminServerStatus(ctx context.Context) AdminServerSta
 		}
 	}
 
+	resp.ArtworkStorage.Backend = h.ArtworkBackend
 	resp.Health = h.collectHealth(ctx)
 
 	return resp

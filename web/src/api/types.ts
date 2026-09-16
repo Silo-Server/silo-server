@@ -4496,6 +4496,16 @@ export interface AdminServerStatus {
   restart_requested_at?: string;
   /** Absent on servers predating the dashboard health summary. */
   health?: AdminServerHealth;
+  /**
+   * Resolved artwork backend and whether artwork.storage_backend is locked to
+   * it. Absent on servers predating local artwork storage.
+   */
+  artwork_storage?: AdminArtworkStorageStatus;
+}
+
+export interface AdminArtworkStorageStatus {
+  backend?: string;
+  locked: boolean;
 }
 
 // GET /admin/stats/playback-activity. `buckets` carries only hours that saw a

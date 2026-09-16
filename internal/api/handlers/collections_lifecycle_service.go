@@ -346,7 +346,7 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 		return err
 	}
 
-	if err := removeCollectionImageVariants(ctx, h.S3GP, userCollectionImagePrefix, collectionID, imageType); err != nil {
+	if err := removeCollectionImageVariants(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID, imageType); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete images")
 	}
 	empty := ""

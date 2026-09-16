@@ -113,6 +113,8 @@ GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
+GET /api/v2/artwork/*	non-media
+HEAD /api/v2/artwork/*	non-media
 GET /socket	non-media
 GET /web	non-media
 CONNECT /web/*	non-media
@@ -239,6 +241,8 @@ GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
+GET /api/v2/artwork/*	non-media
+HEAD /api/v2/artwork/*	non-media
 GET /socket	non-media
 GET /web	non-media
 CONNECT /web/*	non-media

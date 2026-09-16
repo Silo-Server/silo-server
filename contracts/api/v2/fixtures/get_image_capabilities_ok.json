@@ -1,5 +1,5 @@
 {
-  "revision": "e95fabeff7aeae83d7d9ad3f75a723007c94da4cc25aa8664396784582303ddc",
+  "revision": "1b7ba6e0dc9e801bc0d927cd7f3880cf5a232d1e970d18d1e9360fb680d440e4",
   "state": "available",
   "allowed": true,
   "season_list_artwork_param": "include_artwork",
@@ -37,5 +37,7 @@
       "large": 780
     }
   },
-  "original_max_width_px": 1920
+  "original_max_width_px": 1920,
+  "storage_backend": "local",
+  "delivery": "server"
 }

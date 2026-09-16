@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 )
 
 func TestParseArtworkObjectKeyRebuildsOriginalVariant(t *testing.T) {
 	t.Parallel()
-	got, ok := parseArtworkObjectKey(s3client.ObjectInfo{
+	got, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{
 		Key: "local/movies/31190/19f56348/poster/w780.abc123.webp",
 	})
 	if !ok {
@@ -31,7 +31,7 @@ func TestParseArtworkObjectKeyLeavesOriginalUnchanged(t *testing.T) {
 	// The original variant must map to itself, or every currently-referenced
 	// object would look unreferenced and be deleted.
 	key := "tmdb/people/1352462/profile/original.deadbeef.webp"
-	got, ok := parseArtworkObjectKey(s3client.ObjectInfo{Key: key})
+	got, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{Key: key})
 	if !ok {
 		t.Fatal("expected the original variant to parse")
 	}
@@ -54,7 +54,7 @@ func TestParseArtworkObjectKeyRejectsUnrecognizedShapes(t *testing.T) {
 		"local/movies/31190/poster/w300.abc123.",  // empty extension
 		"local/movies/31190/poster/",              // directory marker
 	} {
-		if _, ok := parseArtworkObjectKey(s3client.ObjectInfo{Key: key}); ok {
+		if _, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{Key: key}); ok {
 			t.Errorf("key %q parsed but should have been rejected", key)
 		}
 	}
@@ -63,14 +63,14 @@ func TestParseArtworkObjectKeyRejectsUnrecognizedShapes(t *testing.T) {
 func TestParseArtworkObjectKeyCarriesModifiedTime(t *testing.T) {
 	t.Parallel()
 	when := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
-	got, ok := parseArtworkObjectKey(s3client.ObjectInfo{
-		Key:          "local/movies/1/poster/w300.abc.webp",
-		LastModified: &when,
+	got, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{
+		Key:     "local/movies/1/poster/w300.abc.webp",
+		ModTime: when,
 	})
 	if !ok {
 		t.Fatal("expected key to parse")
 	}
-	if got.modified == nil || !got.modified.Equal(when) {
+	if got.modified.IsZero() || !got.modified.Equal(when) {
 		t.Fatalf("modified = %v, want %v", got.modified, when)
 	}
 }
@@ -121,20 +121,18 @@ func TestArtworkSweepAnomalyGuardThresholds(t *testing.T) {
 // fakeArtworkStorage records what the sweep asked it to delete so the
 // destructive path can be asserted rather than inferred.
 type fakeArtworkStorage struct {
-	pages   [][]s3client.ObjectInfo
+	pages   [][]artworkstore.ObjectInfo
 	tokens  []string
 	deleted []string
 	calls   int
 }
 
-func (f *fakeArtworkStorage) Bucket() string { return "test-bucket" }
-
-func (f *fakeArtworkStorage) DeleteObjects(_ context.Context, _ string, keys []string) (int, error) {
+func (f *fakeArtworkStorage) Delete(_ context.Context, keys []string) (int, error) {
 	f.deleted = append(f.deleted, keys...)
 	return len(keys), nil
 }
 
-func (f *fakeArtworkStorage) ListObjectInfosPage(_ context.Context, _, _, _ string, _ int) ([]s3client.ObjectInfo, string, error) {
+func (f *fakeArtworkStorage) List(_ context.Context, _, _ string, _ int) ([]artworkstore.ObjectInfo, string, error) {
 	if f.calls >= len(f.pages) {
 		return nil, "", nil
 	}
@@ -143,14 +141,14 @@ func (f *fakeArtworkStorage) ListObjectInfosPage(_ context.Context, _, _, _ stri
 	return page, token, nil
 }
 
-func ageingObjects(prefix string, n int, age time.Duration) []s3client.ObjectInfo {
+func ageingObjects(prefix string, n int, age time.Duration) []artworkstore.ObjectInfo {
 	when := time.Now().Add(-age)
-	out := make([]s3client.ObjectInfo, 0, n)
+	out := make([]artworkstore.ObjectInfo, 0, n)
 	for i := 0; i < n; i++ {
 		stamp := when
-		out = append(out, s3client.ObjectInfo{
-			Key:          fmt.Sprintf("%s/item%d/poster/w300.hash%d.webp", prefix, i, i),
-			LastModified: &stamp,
+		out = append(out, artworkstore.ObjectInfo{
+			Key:     fmt.Sprintf("%s/item%d/poster/w300.hash%d.webp", prefix, i, i),
+			ModTime: stamp,
 		})
 	}
 	return out
@@ -161,7 +159,7 @@ func ageingObjects(prefix string, n int, age time.Duration) []s3client.ObjectInf
 // set of original-variant paths to treat as still in use.
 func sweepWithoutDatabase(t *testing.T, storage *fakeArtworkStorage, referenced map[string]struct{}, maxPages int) (ArtworkStorageSweepStats, error) {
 	t.Helper()
-	sweeper := &ArtworkStorageSweeper{s3: storage, now: time.Now}
+	sweeper := &ArtworkStorageSweeper{store: storage, now: time.Now}
 	sweeper.lookup = func(_ context.Context, paths []string) (map[string]struct{}, error) {
 		found := make(map[string]struct{})
 		for _, p := range paths {
@@ -182,7 +180,7 @@ func TestSweepDeletesOnlyUnreferencedObjects(t *testing.T) {
 		"local/item1/poster/original.hash1.webp": {},
 		"local/item2/poster/original.hash2.webp": {},
 	}
-	storage := &fakeArtworkStorage{pages: [][]s3client.ObjectInfo{objects}, tokens: []string{""}}
+	storage := &fakeArtworkStorage{pages: [][]artworkstore.ObjectInfo{objects}, tokens: []string{""}}
 
 	stats, err := sweepWithoutDatabase(t, storage, referenced, 1)
 	if err != nil {
@@ -203,7 +201,7 @@ func TestSweepSkipsObjectsUnderTheAgeFloor(t *testing.T) {
 	t.Parallel()
 	// Nothing is referenced, so only the age floor can save these.
 	storage := &fakeArtworkStorage{
-		pages:  [][]s3client.ObjectInfo{ageingObjects("local", 5, time.Hour)},
+		pages:  [][]artworkstore.ObjectInfo{ageingObjects("local", 5, time.Hour)},
 		tokens: []string{""},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{}, 1)
@@ -223,7 +221,7 @@ func TestSweepFailsClosedOnMissingTimestamp(t *testing.T) {
 	// Storage that reports no modification time gives no way to tell a
 	// just-written object from an old one, so the sweep must not delete it.
 	storage := &fakeArtworkStorage{
-		pages:  [][]s3client.ObjectInfo{{{Key: "local/item0/poster/w300.hash0.webp"}}},
+		pages:  [][]artworkstore.ObjectInfo{{{Key: "local/item0/poster/w300.hash0.webp"}}},
 		tokens: []string{""},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{}, 1)
@@ -243,7 +241,7 @@ func TestSweepStopsInsteadOfDeletingAnAnomalousPage(t *testing.T) {
 	// A full page where nothing resolves is the signature of a broken
 	// reference check, not an empty catalog.
 	storage := &fakeArtworkStorage{
-		pages:  [][]s3client.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
+		pages:  [][]artworkstore.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
 		tokens: []string{"next"},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{}, 1)
@@ -265,7 +263,7 @@ func TestSweepResumesAcrossPagesAndStopsAtMaxPages(t *testing.T) {
 		referenced[fmt.Sprintf("local/item%d/poster/original.hash%d.webp", i, i)] = struct{}{}
 	}
 	storage := &fakeArtworkStorage{
-		pages: [][]s3client.ObjectInfo{
+		pages: [][]artworkstore.ObjectInfo{
 			ageingObjects("local", 100, 72*time.Hour),
 			ageingObjects("local", 100, 72*time.Hour),
 			ageingObjects("local", 100, 72*time.Hour),
@@ -293,7 +291,7 @@ func TestSweepWithoutAPoolSkipsClusterLocking(t *testing.T) {
 	// still run rather than dereference nil — pglock's nil-pool behavior is
 	// not safe to rely on.
 	storage := &fakeArtworkStorage{
-		pages:  [][]s3client.ObjectInfo{ageingObjects("local", 2, 72*time.Hour)},
+		pages:  [][]artworkstore.ObjectInfo{ageingObjects("local", 2, 72*time.Hour)},
 		tokens: []string{""},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{

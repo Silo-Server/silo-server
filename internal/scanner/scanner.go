@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,12 +16,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 // videoExtensions is the set of file extensions recognized as media files.
@@ -151,7 +152,7 @@ type Scanner struct {
 	episodeRepo          *catalog.EpisodeRepository
 	extraRepo            *catalog.ExtraRepository
 	ffprobePath          string
-	s3Client             *s3client.Client // public assets bucket (may be nil)
+	artworkStore         artworkstore.Store // artwork backend (may be nil)
 	imageCacher          scannerImageCacher
 	// workers is atomic so admin settings changes can resize the per-scan
 	// worker pool while a scan is running (applies to the next scan).
@@ -233,7 +234,7 @@ type SeriesQueueSyncer interface {
 }
 
 // NewScanner creates a new Scanner with the given dependencies.
-func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client.Client, workers int, emptyTrashAfterScan bool, fileRemovalGrace time.Duration) *Scanner {
+func NewScanner(fileRepo *FileRepository, ffprobePath string, artworkStore artworkstore.Store, workers int, emptyTrashAfterScan bool, fileRemovalGrace time.Duration) *Scanner {
 	if workers < 1 {
 		workers = 8
 	}
@@ -257,7 +258,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		episodeRepo:          catalog.NewEpisodeRepository(fileRepo.Pool()),
 		extraRepo:            catalog.NewExtraRepository(fileRepo.Pool()),
 		ffprobePath:          ffprobePath,
-		s3Client:             s3Client,
+		artworkStore:         artworkStore,
 		emptyTrashAfterScan:  emptyTrashAfterScan,
 		fileRemovalGrace:     fileRemovalGrace,
 		markerFetcher:        nil,
@@ -1022,10 +1023,9 @@ func (s *Scanner) scanPaths(
 	}
 
 	// Best-effort S3 image cleanup for orphaned items.
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
+	if s.artworkStore != nil && len(orphanedImageDirs) > 0 {
 		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
+			_, _ = s.artworkStore.DeletePrefix(ctx, dir)
 		}
 	}
 
@@ -1427,10 +1427,9 @@ func (s *Scanner) scanFolderByRoots(
 		)
 	}
 
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
+	if s.artworkStore != nil && len(orphanedImageDirs) > 0 {
 		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
+			_, _ = s.artworkStore.DeletePrefix(ctx, dir)
 		}
 	}
 
@@ -2355,10 +2354,9 @@ func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.M
 			return 0, 0, 0, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
 	}
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
+	if s.artworkStore != nil && len(orphanedImageDirs) > 0 {
 		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
+			_, _ = s.artworkStore.DeletePrefix(ctx, dir)
 		}
 	}
 	return trashed, removedMemberships, deletedItems, nil
@@ -3942,16 +3940,23 @@ func (s *Scanner) probeFile(ctx context.Context, filePath string) (*ProbeData, s
 	return nil, "local"
 }
 
-// fetchMarkers checks S3 for intro/credits markers for the given file hash.
+// fetchMarkers reads intro/credits markers for the given file hash from
+// artwork storage, where an external process may have placed them under
+// markers/{hash}.json.
 func (s *Scanner) fetchMarkers(ctx context.Context, fileHash string) *IntroCreditsMarkers {
-	if fileHash == "" || s.s3Client == nil {
+	if fileHash == "" || s.artworkStore == nil {
 		return nil
 	}
 
 	key := fmt.Sprintf("markers/%s.json", fileHash)
-	data, err := s.s3Client.GetObject(ctx, s.s3Client.Bucket(), key)
+	reader, _, err := s.artworkStore.Get(ctx, key)
 	if err != nil {
 		// Not found is expected; don't log it.
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, 1<<20))
+	_ = reader.Close()
+	if err != nil {
 		return nil
 	}
 

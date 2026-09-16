@@ -17,7 +17,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
+import {
+  useAdminServerStatus,
+  useCheckAdminSettingsConnection,
+} from "@/hooks/queries/admin/settings";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 
@@ -95,7 +98,14 @@ const LOG_ADVANCED_KEYS = [
 
 const LOG_KEYS = [...LOG_ESSENTIAL_KEYS, ...LOG_ADVANCED_KEYS];
 
-const KEYS = [...REDIS_KEYS, ...DATABASE_KEYS, ...PUBLIC_S3_KEYS, ...PRIVATE_S3_KEYS, ...LOG_KEYS];
+const KEYS = [
+  "artwork.storage_backend",
+  ...REDIS_KEYS,
+  ...DATABASE_KEYS,
+  ...PUBLIC_S3_KEYS,
+  ...PRIVATE_S3_KEYS,
+  ...LOG_KEYS,
+];
 
 function countDirty(form: SettingsForm, keys: string[]): number {
   return keys.filter((key) => form.isDirty(key)).length;
@@ -725,6 +735,8 @@ function LogsGroup({ form, restartKeys }: { form: SettingsForm; restartKeys: Res
 export default function InfrastructureSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
+  const artworkStorage = useAdminServerStatus().data?.artwork_storage;
+  const artworkLocked = artworkStorage?.locked === true;
   const [saveInProgress, setSaveInProgress] = useState(false);
   const saveInProgressRef = useRef(false);
 
@@ -801,6 +813,33 @@ export default function InfrastructureSettings() {
       <SettingsPageHeader title="Storage & Database" className="mb-8" />
 
       <div className="flex-1 space-y-5">
+        <FieldGroup label="Artwork storage" restartAll={restartKeys.has("artwork.storage_backend")}>
+          <SettingField
+            label="Backend"
+            type="select"
+            value={form.getValue("artwork.storage_backend") || "auto"}
+            onChange={(value) => form.setValue("artwork.storage_backend", value)}
+            options={[
+              { value: "auto", label: "Automatic" },
+              { value: "local", label: "Local disk" },
+              { value: "s3", label: "S3" },
+            ]}
+            disabled={artworkLocked}
+            description={
+              artworkLocked
+                ? `Locked to ${artworkStorage?.backend === "s3" ? "S3" : "local disk"}: artwork has been stored here and cannot be moved between backends.`
+                : undefined
+            }
+            restartRequired={restartKeys.has("artwork.storage_backend")}
+          />
+          <SettingField
+            label="Local artwork path"
+            value={form.getValue("artwork.local_path") || "/var/lib/silo/artwork"}
+            onChange={() => {}}
+            disabled
+            description="Set by configuration; mount a volume here in Docker"
+          />
+        </FieldGroup>
         <RedisGroup form={form} restartKeys={restartKeys} secrets={secrets} />
         <S3Group
           form={form}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -89,7 +90,7 @@ func TestStoreBundledCollectionPosterIfS3Configured_IgnoresNonTemplatePath(t *te
 
 	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
 		context.Background(),
-		recorder.client(),
+		artworkstore.NewS3(recorder.client()),
 		fstest.MapFS{},
 		"collection-1",
 		adminCollectionImagePrefix,
@@ -122,7 +123,7 @@ func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *tes
 
 	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
 		context.Background(),
-		recorder.client(),
+		artworkstore.NewS3(recorder.client()),
 		frontendFS,
 		"collection-1",
 		adminCollectionImagePrefix,

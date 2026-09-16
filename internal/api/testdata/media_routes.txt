@@ -334,6 +334,8 @@ GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
 DELETE /api/v2/api-keys/{id}	non-media
+GET /api/v2/artwork/*	non-media
+HEAD /api/v2/artwork/*	non-media
 DELETE /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media
@@ -1465,6 +1467,8 @@ GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
 DELETE /api/v2/api-keys/{id}	non-media
+GET /api/v2/artwork/*	non-media
+HEAD /api/v2/artwork/*	non-media
 DELETE /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media

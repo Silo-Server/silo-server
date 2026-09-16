@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -23,6 +24,23 @@ type LibraryPosterPresigner interface {
 	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
 	Bucket() string
 }
+
+type resolverPosterPresigner struct{ resolver artworkurl.Resolver }
+
+func NewResolverPosterPresigner(resolver artworkurl.Resolver) LibraryPosterPresigner {
+	if resolver == nil {
+		return nil
+	}
+	return resolverPosterPresigner{resolver: resolver}
+}
+func (p resolverPosterPresigner) PresignGetURL(ctx context.Context, _ string, key string, _ time.Duration) (string, error) {
+	urls := p.resolver.ResolveURLs(ctx, []string{key})
+	if value := urls[key]; value.URL != "" {
+		return value.URL, nil
+	}
+	return "", fmt.Errorf("artwork URL unavailable")
+}
+func (resolverPosterPresigner) Bucket() string { return "" }
 
 // browseSource is the subset of *catalog.BrowseRepository that
 // directContentService relies on. Defined as an interface so tests can

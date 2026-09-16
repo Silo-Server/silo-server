@@ -321,6 +321,16 @@ func TestHandleItemImageAcceptsLibraryPosterTagWithoutSessionOrCache(t *testing.
 	}
 }
 
+func TestLocalArtworkUsesRelativeRedirect(t *testing.T) {
+	h := &ImagesHandler{}
+	u := "/api/v2/artwork/provider/images/poster.webp?exp=123&sig=test"
+	rec := httptest.NewRecorder()
+	h.serveImageURL(rec, httptest.NewRequest(http.MethodGet, "/Items/id/Images/Primary", nil), u)
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != u || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("redirect: %d %v", rec.Code, rec.Header())
+	}
+}
+
 func TestHandleItemImageAcceptsLegacyCachedURLTagWithoutRouteFallback(t *testing.T) {
 	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

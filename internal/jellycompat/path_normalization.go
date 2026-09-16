@@ -99,6 +99,9 @@ func normalizeCompatPathMiddleware(next http.Handler) http.Handler {
 }
 
 func canonicalizeCompatPath(path string) string {
+	if strings.HasPrefix(path, "/api/v2/artwork/") {
+		return path
+	}
 	if path == "" || path == "/" {
 		return path
 	}

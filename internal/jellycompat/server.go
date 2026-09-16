@@ -27,6 +27,8 @@ import (
 // Dependencies holds the pluggable pieces used by the compat server.
 type Dependencies struct {
 	Config *config.Config
+	// ArtworkHandler serves signed native asset URLs after compatibility redirects.
+	ArtworkHandler http.Handler
 	// AppContext is the process lifecycle context. When set, it bounds the
 	// periodic orphan-transcode sweep so it stops on shutdown; nil (tests) makes
 	// the sweep a single boot-time run instead of a long-lived ticker.

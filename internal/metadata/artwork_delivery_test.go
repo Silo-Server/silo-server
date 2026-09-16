@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 type deliveryTestChecker struct {
@@ -24,8 +26,7 @@ type deliveryTestChecker struct {
 	hookErr     error
 }
 
-func (c *deliveryTestChecker) Bucket() string { return "test" }
-func (c *deliveryTestChecker) ObjectExists(_ context.Context, _, key string) (bool, error) {
+func (c *deliveryTestChecker) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
 	c.mu.Lock()
 	hook := c.beforeCheck
 	c.beforeCheck = nil
@@ -35,15 +36,18 @@ func (c *deliveryTestChecker) ObjectExists(_ context.Context, _, key string) (bo
 			c.mu.Lock()
 			c.hookErr = err
 			c.mu.Unlock()
-			return false, err
+			return artworkstore.ObjectInfo{}, err
 		}
 	}
-	if c.existing != nil {
-		return c.existing[key], c.err
+	if c.err != nil {
+		return artworkstore.ObjectInfo{}, c.err
 	}
-	return true, c.err
+	if c.existing != nil && !c.existing[key] {
+		return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+	}
+	return artworkstore.ObjectInfo{Key: key}, nil
 }
-func (c *deliveryTestChecker) ObjectAvailable(_ context.Context, _, key string) (bool, error) {
+func (c *deliveryTestChecker) ObjectAvailable(_ context.Context, key string) (bool, error) {
 	return c.available[key], c.err
 }
 
@@ -217,7 +221,7 @@ func TestDeliveryCheckerConcurrentHook(t *testing.T) {
 	}}
 	var group sync.WaitGroup
 	for range 32 {
-		group.Go(func() { _, _ = checker.ObjectExists(t.Context(), "test", "key") })
+		group.Go(func() { _, _ = checker.Stat(t.Context(), "key") })
 	}
 	group.Wait()
 	if calls.Load() != 1 {

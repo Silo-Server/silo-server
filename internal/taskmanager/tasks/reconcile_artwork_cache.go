@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/metadata"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -21,33 +21,18 @@ import (
 // missing records to be reset for an explicit backfill or cleared.
 var ErrArtworkReconcileManualRunRequired = errors.New("artwork storage changed; manual reconcile required")
 
-// ArtworkStorageIdentityKey is the server_settings key holding the storage
-// identity fingerprint of the public S3 bucket the artwork cache was last
-// reconciled against. Machine-managed; not an admin-editable setting.
+// ArtworkStorageIdentityKey records the storage the catalog's artwork keys
+// belong to. artworkstore.Open records it on the first write and refuses a
+// different store at startup; this task certifies it after a manual reconcile
+// so a deliberate move (copy the tree, clear the row, restart) has one record
+// to clear. Machine-managed; not an admin-editable setting.
 const (
-	ArtworkStorageIdentityKey = "s3.public_storage_identity"
+	ArtworkStorageIdentityKey = artworkstore.IdentitySettingKey
 	// ArtworkStorageReconcileCheckpointKey holds a machine-managed verify
 	// cursor. It is scoped to both the stored and target identities so a later
-	// storage move can never resume an older bucket's sweep.
+	// storage move can never resume an older location's sweep.
 	ArtworkStorageReconcileCheckpointKey = config.ArtworkStorageReconcileCheckpointKey
 )
-
-// ArtworkStorageIdentity builds the fingerprint of the public S3 storage the
-// cached artwork lives in. Only fields that determine *where objects are
-// stored* participate: the read endpoint and URL-auth settings affect how
-// objects are served, not where they live, so changing them must not trigger
-// a reconcile.
-//
-// Normalization mirrors how each field is actually used: endpoints (hostnames)
-// and bucket names are case-insensitive, but the key prefix feeds into
-// case-sensitive object keys, so it keeps its case and is normalized exactly
-// like s3client applies it (slash- and whitespace-trimmed). A case-only prefix
-// edit is a real storage move and must change the fingerprint; a slash-only
-// edit is not and must not.
-func ArtworkStorageIdentity(endpoint, bucket, keyPrefix string) string {
-	insensitive := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
-	return insensitive(endpoint) + "|" + insensitive(bucket) + "|" + s3client.NormalizeKeyPrefix(keyPrefix)
-}
 
 // ArtworkReconcileSettingsStore is the server-settings surface the task needs.
 // Satisfied by *catalog.ServerSettingsRepo and its encrypting decorator.

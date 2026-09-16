@@ -94,31 +94,6 @@ type fakeProgress struct {
 func (f *fakeProgress) Report(_ float64, message string)   { f.lastMessage = message }
 func (f *fakeProgress) SetResultData(data json.RawMessage) { f.resultData = data }
 
-func TestArtworkStorageIdentityNormalizes(t *testing.T) {
-	// Endpoint and bucket are case-insensitive; whitespace is trimmed.
-	a := ArtworkStorageIdentity(" https://S3.Example.com ", "Assets", "silo/prod")
-	b := ArtworkStorageIdentity("https://s3.example.com", "assets", "silo/prod")
-	if a != b {
-		t.Fatalf("identity not normalized: %q != %q", a, b)
-	}
-	// The key prefix is slash-insensitive (the s3client trims slashes, so
-	// 'art' and '/art/' are the same storage location)...
-	if ArtworkStorageIdentity("e", "b", "art") != ArtworkStorageIdentity("e", "b", " /art/ ") {
-		t.Fatal("slash-only prefix differences must not change the identity")
-	}
-	// ...but case-SENSITIVE: S3 object keys are case-sensitive, so a
-	// case-only prefix edit is a real storage move and must reconcile.
-	if ArtworkStorageIdentity("e", "b", "Art") == ArtworkStorageIdentity("e", "b", "art") {
-		t.Fatal("case-only prefix differences are real storage moves and must change the identity")
-	}
-	if a == ArtworkStorageIdentity("https://s3.example.com", "assets", "") {
-		t.Fatal("key prefix must participate in the identity")
-	}
-	if a == ArtworkStorageIdentity("https://other.example.com", "assets", "silo/prod") {
-		t.Fatal("endpoint must participate in the identity")
-	}
-}
-
 func TestReconcileArtworkCacheShouldRun(t *testing.T) {
 	runner := &fakeReconcileRunner{}
 	store := &fakeSettingsStore{values: map[string]string{}}

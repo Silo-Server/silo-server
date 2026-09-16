@@ -630,6 +630,11 @@ func (h *ImagesHandler) serveImageURL(w http.ResponseWriter, r *http.Request, im
 	// App-relative references (bundled collection-template posters) have no
 	// remote origin to redirect or proxy to, so serve their bytes from the
 	// embedded frontend assets instead.
+	if strings.HasPrefix(imageURL, "/api/") {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, imageURL, http.StatusFound)
+		return
+	}
 	if strings.HasPrefix(imageURL, "/") {
 		h.serveBundledAsset(w, imageURL)
 		return
