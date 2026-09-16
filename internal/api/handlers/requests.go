@@ -53,6 +53,17 @@ type RequestsHandler struct {
 	service RequestService
 }
 
+type requestListResponse struct {
+	Requests []*mediarequests.Request `json:"requests"`
+}
+
+func newRequestListResponse(requests []*mediarequests.Request) requestListResponse {
+	if requests == nil {
+		requests = []*mediarequests.Request{}
+	}
+	return requestListResponse{Requests: requests}
+}
+
 func NewRequestsHandler(service RequestService) *RequestsHandler {
 	return &RequestsHandler{service: service}
 }
@@ -266,9 +277,7 @@ func (h *RequestsHandler) HandleListMine(w http.ResponseWriter, r *http.Request)
 		writeRequestServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Requests []*mediarequests.Request `json:"requests"`
-	}{Requests: requests})
+	writeJSON(w, http.StatusOK, newRequestListResponse(requests))
 }
 
 func (h *RequestsHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
@@ -294,9 +303,7 @@ func (h *RequestsHandler) HandleAdminList(w http.ResponseWriter, r *http.Request
 		writeRequestServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Requests []*mediarequests.Request `json:"requests"`
-	}{Requests: requests})
+	writeJSON(w, http.StatusOK, newRequestListResponse(requests))
 }
 
 func (h *RequestsHandler) HandleApprove(w http.ResponseWriter, r *http.Request) {
