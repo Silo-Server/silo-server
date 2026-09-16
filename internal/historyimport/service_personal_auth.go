@@ -90,18 +90,22 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 				return out, fmt.Errorf("%w: selected server is not in the Plex session", ErrInvalidInput)
 			}
 			selected := session.Servers[index]
-			baseURL := firstNonEmpty(selected.RemoteURL, selected.LocalURL)
-			if baseURL == "" {
+			candidates := plexSessionCandidates(selected)
+			if len(candidates) == 0 {
 				return out, fmt.Errorf("%w: selected Plex server has no usable address", ErrInvalidInput)
 			}
 			out.PlexSession = session
 			out.SelectedServerID = selected.ClientIdentifier
-			out.Credentials = personalRunCredentials{BaseURL: baseURL, ServerToken: selected.AccessToken, AccountToken: session.AuthToken}
-		case input.PlexBaseURL != "":
+			out.Credentials = plexRunCredentials(candidates, selected.AccessToken, session.AuthToken)
+		case input.PlexBaseURL != "" || len(plexBaseURLCandidates("", input.PlexBaseURLs)) > 0:
 			if input.PlexToken == "" {
 				return out, fmt.Errorf("%w: Plex token is required", ErrInvalidInput)
 			}
-			out.Credentials = personalRunCredentials{BaseURL: input.PlexBaseURL, ServerToken: input.PlexToken, AccountToken: firstNonEmpty(input.PlexAccountToken, input.PlexToken)}
+			candidates := plexOAuthBaseURLCandidates(input.PlexBaseURL, input.PlexBaseURLs)
+			if len(candidates) == 0 {
+				return out, fmt.Errorf("%w: Plex server address is required", ErrInvalidInput)
+			}
+			out.Credentials = plexRunCredentials(candidates, input.PlexToken, firstNonEmpty(input.PlexAccountToken, input.PlexToken))
 		case input.SourceID > 0:
 			if input.PlexToken == "" {
 				return out, fmt.Errorf("%w: Plex token is required", ErrInvalidInput)

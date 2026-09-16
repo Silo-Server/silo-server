@@ -295,6 +295,7 @@ export const v2Operations = {
   "GET /api/v2/favorites": "listFavorites",
   "GET /api/v2/favorites/{item_id}": "getFavorite",
   "GET /api/v2/history": "listHistory",
+  "GET /api/v2/history-imports/capability": "getHistoryImportCapability",
   "GET /api/v2/history-imports/runs": "listHistoryImportRuns",
   "GET /api/v2/history-imports/runs/{id}": "getHistoryImportRun",
   "GET /api/v2/history-imports/sources": "listHistoryImportSources",

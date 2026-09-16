@@ -43,6 +43,12 @@ type Service struct {
 	runCancels   map[string]context.CancelFunc
 	runCancelsMu sync.Mutex
 	observers    []Observer
+
+	// allowPrivatePlexProfileDestinations is set only by tests, which drive
+	// profile OAuth runs against a loopback HTTP stand-in for a Plex server.
+	// In production a profile OAuth run always gets the public HTTPS-only
+	// transport; see TestProfilePlexRunsAreRestrictedByDefault.
+	allowPrivatePlexProfileDestinations bool
 }
 
 func NewService(bgContext context.Context, repo *Repository, storeProvider userstore.UserStoreProvider) *Service {

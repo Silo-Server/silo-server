@@ -154,21 +154,41 @@ type runPosition struct {
 // source needs depend on source; the service rejects an incomplete
 // combination with a validation problem.
 type HistoryImportRunCreate struct {
-	ProfileID        ID     `json:"profile_id" minLength:"1" doc:"The profile to write history into" example:"p-owner"`
-	Source           string `json:"source" enum:"emby,jellyfin,plex" doc:"Which kind of server to import from" example:"plex"`
-	ConnectSessionID string `json:"connect_session_id,omitempty" doc:"Emby: the session from loginEmbyConnect" example:"9c3e1f0a-1b2c-4d5e-8f6a-7b8c9d0e1f2a"`
-	ServerID         string `json:"server_id,omitempty" doc:"Emby: the server chosen from the connect session"`
-	SourceID         *ID    `json:"source_id,omitempty" nullable:"false" doc:"Emby or Plex: a configured source from listHistoryImportSources" example:"1"`
-	Username         string `json:"username,omitempty" doc:"Emby: the source server user name when importing from a configured source"`
-	Password         string `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source"`
-	JellyfinBaseURL  string `json:"jellyfin_base_url,omitempty" doc:"Jellyfin: the server address" example:"https://jellyfin.example.test"`
-	JellyfinUsername string `json:"jellyfin_username,omitempty" doc:"Jellyfin: the user name"`
-	JellyfinPassword string `json:"jellyfin_password,omitempty" doc:"Jellyfin: the password"`
-	PlexSessionID    string `json:"plex_session_id,omitempty" doc:"Plex: the authenticated session from createPlexPin"`
-	PlexServerID     string `json:"plex_server_id,omitempty" doc:"Plex: the client identifier of the server chosen from checkPlexPin"`
-	PlexBaseURL      string `json:"plex_base_url,omitempty" doc:"Plex: a server address when the client holds its own token"`
-	PlexToken        string `json:"plex_token,omitempty" doc:"Plex: the server access token that goes with plex_base_url"`
-	PlexAccountToken string `json:"plex_account_token,omitempty" doc:"Plex: the plex.tv account token, for watchlist import alongside a server token"`
+	ProfileID        ID       `json:"profile_id" minLength:"1" doc:"The profile to write history into" example:"p-owner"`
+	Source           string   `json:"source" enum:"emby,jellyfin,plex" doc:"Which kind of server to import from" example:"plex"`
+	ConnectSessionID string   `json:"connect_session_id,omitempty" doc:"Emby: the session from loginEmbyConnect" example:"9c3e1f0a-1b2c-4d5e-8f6a-7b8c9d0e1f2a"`
+	ServerID         string   `json:"server_id,omitempty" doc:"Emby: the server chosen from the connect session"`
+	SourceID         *ID      `json:"source_id,omitempty" nullable:"false" doc:"Emby or Plex: a configured source from listHistoryImportSources" example:"1"`
+	Username         string   `json:"username,omitempty" doc:"Emby: the source server user name when importing from a configured source"`
+	Password         string   `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source"`
+	JellyfinBaseURL  string   `json:"jellyfin_base_url,omitempty" doc:"Jellyfin: the server address" example:"https://jellyfin.example.test"`
+	JellyfinUsername string   `json:"jellyfin_username,omitempty" doc:"Jellyfin: the user name"`
+	JellyfinPassword string   `json:"jellyfin_password,omitempty" doc:"Jellyfin: the password"`
+	PlexSessionID    string   `json:"plex_session_id,omitempty" doc:"Plex: the authenticated session from createPlexPin"`
+	PlexServerID     string   `json:"plex_server_id,omitempty" doc:"Plex: the client identifier of the server chosen from checkPlexPin"`
+	PlexBaseURL      string   `json:"plex_base_url,omitempty" doc:"Plex: a server address when the client holds its own token"`
+	PlexBaseURLs     []string `json:"plex_base_urls,omitempty" maxItems:"8" doc:"Plex: the other addresses plex.tv advertised for the same server, in preference order. The run races them and keeps the first that answers, so a server whose preferred address is unreachable still imports. plex_base_url stays the preferred one." example:"[\"https://relay.plex.direct:443\"]"`
+	PlexToken        string   `json:"plex_token,omitempty" doc:"Plex: the server access token that goes with plex_base_url"`
+	PlexAccountToken string   `json:"plex_account_token,omitempty" doc:"Plex: the plex.tv account token, for watchlist import alongside a server token"`
+}
+
+// HistoryImportCapability describes what a client may rely on when it submits
+// an import run. Without it a client cannot tell a server that races
+// plex_base_urls from one that accepts the field and ignores it: the request
+// decoder drops members it does not know, so both answer the same way until
+// the import fails.
+type HistoryImportCapability struct {
+	Capability
+	PlexConnectionFallback bool `json:"plex_connection_fallback" doc:"Whether plex_base_urls is honored and the advertised connections are raced" example:"true"`
+	MaxPlexConnections     int  `json:"max_plex_connections" doc:"How many Plex addresses one run races, counting plex_base_url" example:"8"`
+}
+
+// HistoryImportCapabilityOutput is the getHistoryImportCapability response.
+type HistoryImportCapabilityOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         HistoryImportCapability
 }
 
 // HistoryImportRunCreateInput is the createHistoryImportRun request.
@@ -299,6 +319,25 @@ func registerHistoryImports(reg *Registry) {
 
 	Register(reg, accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/emby-connect/login", "loginEmbyConnect", "history-imports",
 		"Sign in to Emby Connect and list the account's servers in a short-lived session.")), reg.loginEmbyConnect)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/history-imports/capability", "getHistoryImportCapability", "history-imports",
+			"Describe what an import run may rely on, including Plex connection fallback."),
+		Class: ClassAuthenticated,
+	}, reg.getHistoryImportCapability)
+}
+
+// getHistoryImportCapability answers from constants and the wiring check, so
+// it stays usable on a deployment whose import service cannot reach anything.
+func (reg *Registry) getHistoryImportCapability(_ context.Context, _ *CapabilityInput) (*HistoryImportCapabilityOutput, error) {
+	return &HistoryImportCapabilityOutput{
+		CacheControl: cachePrivateNoCache,
+		Body: HistoryImportCapability{
+			Capability:             Capability{State: configuredCapabilityState(reg.deps.HistoryImports != nil)},
+			PlexConnectionFallback: true,
+			MaxPlexConnections:     historyimport.MaxPlexConnectionCandidates,
+		},
+	}, nil
 }
 
 // historyImports is the wired service, or the fail-closed problem.
@@ -494,6 +533,7 @@ func (b HistoryImportRunCreate) toInput() (historyimport.CreateRunInput, *Proble
 		PlexSessionID:    b.PlexSessionID,
 		PlexServerID:     b.PlexServerID,
 		PlexBaseURL:      b.PlexBaseURL,
+		PlexBaseURLs:     b.PlexBaseURLs,
 		PlexToken:        b.PlexToken,
 		PlexAccountToken: b.PlexAccountToken,
 	}

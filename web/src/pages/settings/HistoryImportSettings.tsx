@@ -28,6 +28,7 @@ import {
   createPlexPin,
   buildPlexAuthURL,
   getPreferredPlexServerURL,
+  getPlexServerURLs,
   type BrowserPlexServer,
 } from "@/lib/plexAuth";
 import {
@@ -154,6 +155,11 @@ export default function HistoryImportSettings() {
   const selectedPlexOAuthServerURL = selectedPlexOAuthServer
     ? getPreferredPlexServerURL(selectedPlexOAuthServer)
     : "";
+  // The server races these and keeps the first that answers, so a server whose
+  // preferred address is blocked by a reverse proxy still imports.
+  const selectedPlexOAuthServerURLs = selectedPlexOAuthServer
+    ? getPlexServerURLs(selectedPlexOAuthServer)
+    : [];
 
   useEffect(() => {
     if (returnedPlexAuth !== "1") {
@@ -273,6 +279,7 @@ export default function HistoryImportSettings() {
           profile_id: effectiveProfileId,
           source: "plex",
           plex_base_url: selectedPlexOAuthServerURL,
+          plex_base_urls: selectedPlexOAuthServerURLs,
           plex_token: selectedPlexOAuthServer.accessToken,
           plex_account_token: plexAccountToken || undefined,
         });

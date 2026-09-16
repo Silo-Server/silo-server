@@ -137,7 +137,14 @@ func (s *Service) providerForClaim(ctx context.Context, run *Run, claim RunClaim
 		case SourceTypeJellyfin:
 			return NewJellyfinProvider(s.jellyfin, jellyfinLocalAuth{BaseURL: credential.BaseURL, UserID: credential.ExternalUserID, AccessToken: credential.ServerToken}), nil
 		case SourceTypePlex:
-			return NewPlexServerProvider(s.plex, credential.BaseURL, credential.ServerToken).WithAccountToken(credential.AccountToken), nil
+			provider := NewPlexServerProvider(s.plex, credential.candidates(), credential.ServerToken).WithAccountToken(credential.AccountToken)
+			if run.ConnectionMode == ConnectionModePlexOAuth && !s.allowPrivatePlexProfileDestinations {
+				// Profile OAuth addresses come from user-controlled discovery
+				// data. Only an administrator-configured source may name a
+				// private destination.
+				provider.WithPublicConnectionsOnly()
+			}
+			return provider, nil
 		default:
 			return nil, ErrPersonalCredentialsUnavailable
 		}

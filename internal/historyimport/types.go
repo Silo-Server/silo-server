@@ -91,9 +91,14 @@ type PlexServer struct {
 	AccessToken      string `json:"access_token"`
 	RemoteURL        string `json:"remote_url"`
 	LocalURL         string `json:"local_url"`
-	Owned            bool   `json:"owned"`
-	HasRemoteURL     bool   `json:"has_remote_url"`
-	HasLocalURL      bool   `json:"has_local_url"`
+	// ConnectionURLs is every address plex.tv advertised for this server, in
+	// the order it advertised them. RemoteURL and LocalURL are picked out of
+	// this same list. Sessions persisted before this field existed decode with
+	// it empty, so those two remain the fallback.
+	ConnectionURLs []string `json:"connection_urls,omitempty"`
+	Owned          bool     `json:"owned"`
+	HasRemoteURL   bool     `json:"has_remote_url"`
+	HasLocalURL    bool     `json:"has_local_url"`
 }
 
 type PlexSession struct {
@@ -221,7 +226,10 @@ type CreateRunInput struct {
 	PlexSessionID    string `json:"plex_session_id,omitempty"`
 	PlexServerID     string `json:"plex_server_id,omitempty"`
 	PlexBaseURL      string `json:"plex_base_url,omitempty"`
-	PlexToken        string `json:"plex_token,omitempty"`
+	// PlexBaseURLs carries the other addresses advertised for the same server.
+	// PlexBaseURL stays the preferred one, for clients that send only it.
+	PlexBaseURLs []string `json:"plex_base_urls,omitempty"`
+	PlexToken    string   `json:"plex_token,omitempty"`
 	// PlexAccountToken is the plex.tv account token from a browser-side
 	// PIN/OAuth flow. PlexToken is a PMS access token in that flow and is
 	// rejected by account-level APIs (the watchlist), so clients that hold

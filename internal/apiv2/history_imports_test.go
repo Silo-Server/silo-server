@@ -322,3 +322,46 @@ func TestHistoryImportDemoGuard(t *testing.T) {
 		t.Fatalf("admin demo write: %d %s", r.Code, r.Body)
 	}
 }
+
+// TestHistoryImportCapabilityAndPlexBaseURLs covers the pair a client needs
+// together: the capability that says fallback is honored, and the request
+// member it enables. Without the capability a client cannot tell this server
+// from one that accepts plex_base_urls and ignores it, because the decoder
+// drops members it does not know and both answer the same way.
+func TestHistoryImportCapabilityAndPlexBaseURLs(t *testing.T) {
+	fake := fixtureHistoryImports()
+	h := newTestHandler(t, historyImportDeps(fake))
+
+	rec := do(t, h, http.MethodGet, Prefix+"/history-imports/capability", "", bearer(memberToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capability: %d %s", rec.Code, rec.Body)
+	}
+	var capability HistoryImportCapability
+	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil {
+		t.Fatalf("decoding capability: %v (%s)", err, rec.Body)
+	}
+	if capability.State != StateAvailable || !capability.PlexConnectionFallback {
+		t.Fatalf("capability = %+v, want available with fallback", capability)
+	}
+	// A client sizes its list against this number, so it has to be the bound
+	// the service enforces rather than a restated constant.
+	if capability.MaxPlexConnections != historyimport.MaxPlexConnectionCandidates {
+		t.Errorf("max_plex_connections = %d, want %d", capability.MaxPlexConnections, historyimport.MaxPlexConnectionCandidates)
+	}
+
+	body := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_base_urls":["https://relay.plex.direct:443"],"plex_token":"server-token"}`
+	if rec = do(t, h, http.MethodPost, Prefix+"/history-imports/runs", body, bearer(memberToken)); rec.Code != http.StatusAccepted {
+		t.Fatalf("create run: %d %s", rec.Code, rec.Body)
+	}
+	in := fake.lastCreate
+	if in == nil || len(in.PlexBaseURLs) != 1 || in.PlexBaseURLs[0] != "https://relay.plex.direct:443" {
+		t.Fatalf("plex_base_urls did not reach the service: %+v", in)
+	}
+	if in.PlexBaseURL != "https://primary.plex.direct:32400" {
+		t.Errorf("plex_base_url = %q, want the preferred address preserved", in.PlexBaseURL)
+	}
+
+	// The documented bound is enforced by the schema, not only by the service.
+	over := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_token":"t","plex_base_urls":["https://a1","https://a2","https://a3","https://a4","https://a5","https://a6","https://a7","https://a8","https://a9"]}`
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/history-imports/runs", over, bearer(memberToken)), TypeValidationFailed)
+}

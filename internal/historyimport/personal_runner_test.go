@@ -178,6 +178,10 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 			for range 2 {
 				restarted := NewService(ctx, restartedRepo, pgstore.NewPostgresProvider(repo.pool))
 				restarted.plex.discoverBaseURL = discover.URL
+				// The upstream stand-in is loopback HTTP, which a profile OAuth
+				// run refuses in production. TestProfilePlexRunsAreRestrictedByDefault
+				// covers that the restriction is on when nothing relaxes it.
+				restarted.allowPrivatePlexProfileDestinations = true
 				restarted.SetStableIdentityResolver(watchstate.NewStableIdentityResolver(startupIdentityItems{}, nil, startupIdentityProviders{}))
 				restarted.AddObserver(queueObserverFunc(func(run Run) { observed <- run }))
 				restarted.StartBackgroundWork()
