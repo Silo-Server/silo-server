@@ -6,5 +6,6 @@
   "cancelable": false,
   "created_at": "2026-01-02T03:04:05.678Z",
   "library_ids": [],
-  "artifact_size_bytes": 0
+  "artifact_size_bytes": 0,
+  "public_link_supported": false
 }

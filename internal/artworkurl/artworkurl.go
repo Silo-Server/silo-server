@@ -21,16 +21,42 @@ var (
 	ErrBadSignature = errors.New("artwork URL signature invalid")
 )
 
+// Capability domains. Each names a distinct kind of signed URL: a key derived
+// from one domain cannot verify a URL minted under another, so an artwork
+// capability can never be replayed as a job-artifact download.
+const (
+	artworkDomain     = "silo-artwork-url-v1"
+	artworkLabel      = "artwork-v1"
+	artworkRoute      = "/api/v2/artwork/"
+	jobArtifactDomain = "silo-job-artifact-url-v1"
+	jobArtifactLabel  = "job-artifact-v1"
+	jobArtifactRoute  = "/api/v2/admin/jobs/"
+)
+
 type Signer struct {
-	key []byte
-	ttl time.Duration
+	key   []byte
+	label string
+	route string
+	ttl   time.Duration
 }
 
 func NewSigner(jwtSecret string, ttl time.Duration) *Signer {
+	return newSigner(jwtSecret, artworkDomain, artworkLabel, artworkRoute, ttl)
+}
+
+// NewJobArtifactSigner signs admin job artifact downloads. A presigned S3 URL
+// authorizes itself, so its replacement must too: the browser opens the URL in
+// a new tab and sends no Authorization header. The route is
+// "/api/v2/admin/jobs/<id>/artifact", so the signed key is the job ID.
+func NewJobArtifactSigner(jwtSecret string, ttl time.Duration) *Signer {
+	return newSigner(jwtSecret, jobArtifactDomain, jobArtifactLabel, jobArtifactRoute, ttl)
+}
+
+func newSigner(jwtSecret, domain, label, route string, ttl time.Duration) *Signer {
 	ttl = clampTTL(ttl, 4*time.Hour)
 	h := hmac.New(sha256.New, []byte(jwtSecret))
-	_, _ = h.Write([]byte("silo-artwork-url-v1"))
-	return &Signer{key: h.Sum(nil), ttl: ttl}
+	_, _ = h.Write([]byte(domain))
+	return &Signer{key: h.Sum(nil), label: label, route: route, ttl: ttl}
 }
 
 // clampTTL bounds a URL lifetime to [1m, 24h], substituting fallback for a
@@ -44,7 +70,7 @@ func clampTTL(ttl, fallback time.Duration) time.Duration {
 
 func (s *Signer) signature(key string, exp int64) string {
 	h := hmac.New(sha256.New, s.key)
-	_, _ = fmt.Fprintf(h, "artwork-v1\n%s\n%d", key, exp)
+	_, _ = fmt.Fprintf(h, "%s\n%s\n%d", s.label, key, exp)
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil)[:16])
 }
 func (s *Signer) Sign(key string, now time.Time) (string, time.Time) {
@@ -62,8 +88,17 @@ func (s *Signer) SignFor(key string, now time.Time, ttl time.Duration) (string, 
 	bucket := min(15*time.Minute, ttl)
 	expires := now.Truncate(bucket).Add(bucket + ttl)
 	exp := expires.Unix()
-	route := &url.URL{Path: "/api/v2/artwork/" + strings.TrimPrefix(key, "/")}
+	route := &url.URL{Path: s.route + strings.TrimPrefix(key, "/") + s.suffix()}
 	return route.EscapedPath() + "?exp=" + strconv.FormatInt(exp, 10) + "&sig=" + s.signature(key, exp), expires
+}
+
+// suffix completes a route whose signed key sits in the middle of the path
+// rather than at the end. A job artifact lives at ".../jobs/<id>/artifact".
+func (s *Signer) suffix() string {
+	if s.label == jobArtifactLabel {
+		return "/artifact"
+	}
+	return ""
 }
 func (s *Signer) Verify(key string, exp int64, sig string, now time.Time) error {
 	if now.Unix() >= exp {

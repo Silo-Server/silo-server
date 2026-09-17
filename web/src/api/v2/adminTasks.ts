@@ -32,6 +32,7 @@ export function adminTaskJobFromV2(job: components["schemas"]["AdminTaskJob"]): 
     download_url: job.download_url,
     download_expires_at: job.download_expires_at,
     public_url: job.public_url,
+    public_link_supported: job.public_link_supported,
   };
 }
 export async function fetchAdminTaskJob(id: string) {

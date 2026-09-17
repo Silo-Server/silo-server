@@ -96,7 +96,7 @@ func (h *CatalogSeedHandler) HandleExport(w http.ResponseWriter, r *http.Request
 
 func (h *CatalogSeedHandler) HandleCreateExportJob(w http.ResponseWriter, r *http.Request) {
 	if h.jobRepo == nil || h.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog export jobs require the private internal S3 bucket")
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog export jobs require configured storage")
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *CatalogSeedHandler) HandlePublishExportJob(w http.ResponseWriter, r *ht
 
 func (h *CatalogSeedHandler) HandleListImportSources(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog imports from S3 require the private internal S3 bucket")
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog imports from stored artifacts require configured storage")
 		return
 	}
 
@@ -306,7 +306,7 @@ func writeCatalogSeedError(w http.ResponseWriter, status int, code, message stri
 const defaultLocalImportDir = "/catalog-seeds"
 
 var (
-	errCatalogSeedImportSourceUnavailable = errors.New("Catalog imports from S3 require the private internal S3 bucket")
+	errCatalogSeedImportSourceUnavailable = errors.New("catalog imports from stored artifacts require configured storage")
 	errCatalogSeedImportInvalidLocalPath  = errors.New("Local path must point to an existing .json.gz file")
 	errCatalogSeedImportInvalidRemoteURL  = errors.New("Remote URL must point to an http(s) .json.gz file")
 )

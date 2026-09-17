@@ -152,7 +152,9 @@ GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
 POST /api/v2/admin/jellyfin-compat/web/remove	non-media
 GET /api/v2/admin/jobs	non-media
+GET /api/v2/admin/jobs/capabilities	non-media
 GET /api/v2/admin/jobs/{id}	non-media
+GET /api/v2/admin/jobs/{id}/artifact	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
@@ -1285,7 +1287,9 @@ GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
 POST /api/v2/admin/jellyfin-compat/web/remove	non-media
 GET /api/v2/admin/jobs	non-media
+GET /api/v2/admin/jobs/capabilities	non-media
 GET /api/v2/admin/jobs/{id}	non-media
+GET /api/v2/admin/jobs/{id}/artifact	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media

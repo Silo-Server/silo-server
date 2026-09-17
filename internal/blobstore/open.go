@@ -3,6 +3,7 @@ package blobstore
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -171,8 +172,21 @@ func (s *recordingDirectStore) ObjectAvailable(ctx context.Context, key string) 
 	return checker.ObjectAvailable(ctx, key)
 }
 
+// Every write method the Store interface gains must be forwarded here. A write
+// that reached the embedded store directly would publish an object without
+// recording where it went, leaving the location editable and every key that
+// references it orphaned by the next change. On a local backend the first write
+// is often a diagnostic bundle or a job artifact, not artwork, so PutStream
+// matters as much as Put.
 func (s *recordingStore) Put(ctx context.Context, key string, data []byte) error {
 	if err := s.Store.Put(ctx, key, data); err != nil {
+		return err
+	}
+	return s.recordBackend(ctx)
+}
+
+func (s *recordingStore) PutStream(ctx context.Context, key string, r io.Reader, contentType string) error {
+	if err := s.Store.PutStream(ctx, key, r, contentType); err != nil {
 		return err
 	}
 	return s.recordBackend(ctx)

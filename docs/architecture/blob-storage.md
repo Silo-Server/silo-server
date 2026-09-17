@@ -4,12 +4,9 @@
 The store owns its filesystem root or S3 bucket; callers use their own logical
 keys.
 
-Artwork, branding assets, intro/credit markers, chapter thumbnails, and
-downloaded subtitles go through it today. Diagnostic bundles and job artifacts
-still use their own bucket-oriented code in `internal/diagnostics` and
-`internal/adminjob`, and still require S3; they move onto the store in a later
-change. The prefixes reserved for them are listed below so the namespaces do not
-have to be renegotiated when they do.
+Every blob Silo owns goes through it: artwork, branding assets, intro/credit
+markers, chapter thumbnails, downloaded subtitles, diagnostic bundles, job
+artifacts, and profile avatars.
 
 ## The two stores
 
@@ -65,6 +62,50 @@ cost a migration and an upgrade hazard for no operator benefit. They do not
 govern the operational store when a private bucket is configured, which owns
 itself. An S3 backend with no private bucket leaves Operational nil, which is how
 diagnostics and job artifacts detect that they have nowhere to write.
+
+## The bucket-shaped API
+
+Diagnostics, admin jobs, and catalog seed were written against S3 and pass the
+bucket an object was written to, so a bucket change does not orphan it. They
+keep receiving `*s3client.Client` directly on an S3 backend, unchanged. A local
+backend supplies `blobstore.BucketAPI`, which accepts and ignores the bucket
+argument, reports `"local"` as its bucket name, and normalizes not-found to each
+caller's sentinel.
+
+The bucket name has to be non-empty because readers treat an empty one as
+"storage unavailable". `"local"` is recorded into `admin_jobs.artifact_bucket`
+and `client_diagnostic_reports.blob_bucket` and handed back on read, where it is
+ignored.
+
+## Presigning and download URLs
+
+Only S3 can mint a URL that authorizes itself off this server. `BucketAPI`
+answers `ErrNoPresign`, and `SupportsPresign` lets a caller ask before offering
+a feature that would always fail. Three consequences:
+
+- **Diagnostic bundles** already streamed through the API host on `/api/v2`, and
+  the `/api/v1` handler falls through to streaming when presigning fails. No
+  change was needed.
+- **Job artifacts** gained `GET /api/v2/admin/jobs/{id}/artifact`. It is
+  authorized by a signed capability, not a session: the presigned URL it
+  replaces authorized itself, and the web UI opens `download_url` in a new tab
+  with no `Authorization` header. The capability is minted by
+  `artworkurl.NewJobArtifactSigner` under its own domain, so an artwork URL
+  cannot be replayed against it and a capability for one job does not open
+  another's artifact. Every rejection answers 404, so the route never reveals
+  whether a job exists.
+- **Seven-day public links** cannot exist without presigning. The API answers
+  `409` and the job projection carries `public_link_supported` so the UI hides
+  the action instead of offering one that always fails.
+
+`GET /api/v2/admin/jobs/capabilities` reports both answers before a client
+fetches a job, since each depends on the configured backend rather than the
+release.
+
+Once the capability on an artifact URL verifies, the caller has proven it was
+given that URL, so only a genuinely absent job or artifact answers 404 from
+there; unreachable storage answers 503 rather than reporting a download as
+permanently gone.
 
 Only API and integrated processes open blob storage. Worker processes do not
 probe it or compare the catalog's recorded backend with their local settings.
@@ -168,8 +209,9 @@ show.
 Intro and credits markers that an external process places under
 `markers/<file hash>.json` are read through the same store.
 
-Profile avatars use private S3 whenever it is configured, preserving existing
-uploads even when catalog artwork uses local storage. Without private S3,
-avatars can use local artwork storage with signed delivery. A public artwork
-bucket alone does not enable avatar uploads. Avatar URL generation does not
-probe storage.
+Profile avatars live in the operational store, so private S3 keeps existing
+uploads and their presigned delivery even when artwork is local, and a local
+backend serves them from the shared root with signed delivery. A public artwork
+bucket alone does not enable avatar uploads: an S3 deployment without a private
+bucket has no operational store, and uploads stay unavailable. Avatar URL
+generation does not probe storage.

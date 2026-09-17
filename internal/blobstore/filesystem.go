@@ -109,6 +109,47 @@ func temporary(root *os.Root, dir, prefix string) (*os.File, string, error) {
 	return f, name, err
 }
 func (f *Filesystem) Put(ctx context.Context, key string, data []byte) error {
+	return f.publish(ctx, key, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
+}
+
+// PutStream publishes an object without holding it in memory. The content type
+// is ignored: local objects carry no metadata, and reads derive a media type
+// from the key's extension. Large operational blobs — diagnostic bundles, job
+// artifacts — are written this way.
+//
+// The copy observes ctx. A local reader never blocks on the network, so without
+// this an upload deadline would elapse unnoticed and the object would still be
+// renamed into place; the admin job runner's upload timeout would be inert for
+// exactly the large exports it exists to bound.
+func (f *Filesystem) PutStream(ctx context.Context, key string, r io.Reader, _ string) error {
+	return f.publish(ctx, key, func(w io.Writer) error {
+		_, err := io.Copy(w, &contextReader{ctx: ctx, r: r})
+		return err
+	})
+}
+
+// contextReader fails the next read once ctx is done, so a canceled write stops
+// instead of running to the end of its reader. publish discards the temporary
+// file on any error, so nothing partial is published.
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c *contextReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+// publish writes an object through a temporary file and renames it into place,
+// so a crash after it returns cannot leave a caller referencing a key the store
+// does not show. write fills the temporary file.
+func (f *Filesystem) publish(ctx context.Context, key string, write func(io.Writer) error) error {
 	if err := ValidateKey(key); err != nil {
 		return err
 	}
@@ -133,7 +174,7 @@ func (f *Filesystem) Put(ctx context.Context, key string, data []byte) error {
 	}
 	defer func() { _ = tmp.Close(); _ = root.Remove(name) }()
 	if err = tmp.Chmod(0644); err == nil {
-		_, err = tmp.Write(data)
+		err = write(tmp)
 	}
 	if err == nil {
 		err = tmp.Sync()

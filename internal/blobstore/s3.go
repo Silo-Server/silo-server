@@ -20,6 +20,12 @@ func (s *S3) Put(ctx context.Context, key string, data []byte) error {
 	}
 	return s.client.PutObject(ctx, s.client.Bucket(), key, data)
 }
+func (s *S3) PutStream(ctx context.Context, key string, r io.Reader, contentType string) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
+	return s.client.PutObjectStream(ctx, s.client.Bucket(), key, r, contentType)
+}
 func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
 	if err := ValidateKey(key); err != nil {
 		return nil, ObjectInfo{}, err

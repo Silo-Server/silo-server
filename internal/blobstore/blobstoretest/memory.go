@@ -34,6 +34,13 @@ func (m *Memory) Put(_ context.Context, key string, data []byte) error {
 	m.Calls = append(m.Calls, Call{"put", key})
 	return nil
 }
+func (m *Memory) PutStream(ctx context.Context, key string, r io.Reader, _ string) error {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	return m.Put(ctx, key, data)
+}
 func (m *Memory) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()

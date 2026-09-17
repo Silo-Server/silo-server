@@ -2494,6 +2494,8 @@ func main() {
 		var diagnosticsStore diagnostics.ObjectStore
 		if deps.S3Private != nil {
 			diagnosticsStore = diagnostics.NewS3ObjectStore(deps.S3Private)
+		} else {
+			diagnosticsStore = diagnostics.NewLocalObjectStore(deps.Blobs.Operational)
 		}
 		taskMgr.Register(tasks.NewClientDiagnosticsCleanupTask(
 			diagnostics.NewPostgresRepository(deps.DB),
@@ -2962,10 +2964,18 @@ func main() {
 			templateBundleApplyExecutor = collectionHandler
 		}
 
+		// Private S3 keeps its existing artifact keys and presigned downloads.
+		// Without it, artifacts go to the operational blob store.
+		var artifactStore adminjob.ArtifactStore
+		if deps.S3Private != nil {
+			artifactStore = deps.S3Private
+		} else if api := blobstore.NewBucketAPI(deps.Blobs.Operational); api != nil {
+			artifactStore = api
+		}
 		adminJobRunner = adminjob.NewRunner(
 			adminjob.NewRepository(deps.DB),
 			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)),
-			deps.S3Private,
+			artifactStore,
 			itemRefreshExecutor,
 			libraryRefreshExecutor,
 			adminjob.NewLibraryDeleteExecutor(deps.FolderRepo, sectionRepo,

@@ -636,7 +636,9 @@ export default function AdminCatalogMaintenance() {
                         Download
                       </Button>
                     ) : null}
-                    {job.status === "completed" && !job.public_url ? (
+                    {job.status === "completed" &&
+                    !job.public_url &&
+                    job.public_link_supported !== false ? (
                       <Button
                         variant="outline"
                         size="sm"

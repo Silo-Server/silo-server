@@ -46,7 +46,9 @@ seed or administrator filesystem operation.
 | `POST /api/v2/admin/catalog/export-jobs` | `202` after a queued export job is persisted |
 | `POST /api/v2/admin/catalog/import` | `200` after the catalog import transaction commits |
 | `POST /api/v2/admin/catalog/import-jobs` | `202` after a queued import job is persisted |
-| `POST /api/v2/admin/catalog/export-jobs/{id}/publish` | `200` with a saved signed download URL |
+| `POST /api/v2/admin/catalog/export-jobs/{id}/publish` | `200` with a saved signed download URL, or `409` when storage cannot presign |
+| `GET /api/v2/admin/jobs/capabilities` | Whether artifact download and public links are supported |
+| `GET /api/v2/admin/jobs/{id}/artifact` | Streams a completed job's artifact to a signed capability |
 | `GET /api/v2/admin/catalog/search/status` | Current catalog search runtime status |
 
 Export requests use JSON `{}` for the entire catalog or `library_ids` containing
@@ -83,6 +85,26 @@ with a seven-day signature lifetime and returns `job_id`, `url`, and `expires_at
 It does not change the storage ACL. Repeating it returns the saved URL and original
 expiry, even after expiry; it does not renew the link. Artifact retention or
 removal can make the link unavailable before its signature expires.
+
+Publishing needs object storage that can presign. A server storing artifacts on
+local disk cannot produce a URL that works off the server, and publish answers
+`409 conflict` there. Read `public_links` from
+`GET /api/v2/admin/jobs/capabilities` before offering the action; the same answer
+appears per job as `public_link_supported`.
+
+## Artifact download
+
+`GET /api/v2/admin/jobs/{id}/artifact` streams a completed job's artifact as
+`application/gzip`. It is authorized by the `exp` and `sig` capability carried in
+the job's `download_url`, not by a session, so the URL works in a browser tab
+that sends no `Authorization` header — the same property the presigned storage
+URL has. The capability is scoped to one job, expires with `download_expires_at`,
+and answers `404` when it is absent, invalid, expired, issued for another job, or
+when the job or artifact does not exist. Storage that is configured but
+unreachable answers `503`.
+
+Read `download_url` from the job rather than constructing this URL. An S3-backed
+server returns a presigned storage URL there instead, and both forms are opaque.
 
 Search status retains the existing runtime/provider/index information, uses UTC
 millisecond instants, and represents `last_processed_event_id` as a string. Its

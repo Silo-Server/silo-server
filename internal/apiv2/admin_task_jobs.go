@@ -17,6 +17,7 @@ type AdminTaskJobsService interface {
 	ListAdminTaskJobs(context.Context, string, time.Time, string, int) ([]*models.AdminJob, error)
 	GetAdminTaskJob(context.Context, string) (*models.AdminJob, error)
 	AdminTaskJobDownload(context.Context, *models.AdminJob) (string, *time.Time)
+	AdminTaskJobPublicLinkSupported() bool
 }
 type AdminTaskJobCatalogResult struct {
 	FormatVersion        int `json:"format_version"`
@@ -60,14 +61,15 @@ type AdminTaskJob struct {
 	LibraryName   string                     `json:"library_name,omitempty"`
 	LibraryResult *AdminTaskJobLibraryResult `json:"library_result,omitempty"`
 	AdminJob
-	LibraryIDs        []ID                       `json:"library_ids"`
-	SourceLabel       string                     `json:"source_label,omitempty"`
-	CatalogResult     *AdminTaskJobCatalogResult `json:"catalog_result,omitempty"`
-	ItemResult        *AdminTaskJobItemResult    `json:"item_result,omitempty"`
-	ArtifactSizeBytes int64                      `json:"artifact_size_bytes"`
-	DownloadURL       string                     `json:"download_url,omitempty"`
-	DownloadExpiresAt *Instant                   `json:"download_expires_at,omitempty"`
-	PublicURL         string                     `json:"public_url,omitempty"`
+	LibraryIDs          []ID                       `json:"library_ids"`
+	SourceLabel         string                     `json:"source_label,omitempty"`
+	CatalogResult       *AdminTaskJobCatalogResult `json:"catalog_result,omitempty"`
+	ItemResult          *AdminTaskJobItemResult    `json:"item_result,omitempty"`
+	ArtifactSizeBytes   int64                      `json:"artifact_size_bytes"`
+	DownloadURL         string                     `json:"download_url,omitempty"`
+	DownloadExpiresAt   *Instant                   `json:"download_expires_at,omitempty"`
+	PublicURL           string                     `json:"public_url,omitempty"`
+	PublicLinkSupported bool                       `json:"public_link_supported" doc:"Whether this server can mint a shareable seven-day link. False when exports are stored locally, because only storage-side presigning produces a URL usable off this server."`
 }
 type AdminTaskJobsInput struct {
 	Kind   string `query:"kind"`
@@ -156,6 +158,7 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 		out.DownloadURL = url
 		out.DownloadExpiresAt = instantPtr(expiry)
 		out.PublicURL = job.PublicURL
+		out.PublicLinkSupported = reg.deps.AdminTaskJobs.AdminTaskJobPublicLinkSupported()
 	}
 	return out
 }

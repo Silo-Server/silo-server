@@ -165,6 +165,8 @@ type Dependencies struct {
 	AdminMetadataTranslation        AdminMetadataTranslationService
 	AdminPeople                     AdminPeopleService
 	AdminDiagnosticDownloads        AdminDiagnosticDownloadService
+	AdminJobArtifacts               AdminJobArtifactService
+	AdminJobArtifactSigner          *artworkurl.Signer
 	AdminDiagnosticReads            AdminDiagnosticReadsService
 	AdminDashboardInsights          AdminDashboardInsightsService
 	AdminNodesRead                  AdminNodesReadService

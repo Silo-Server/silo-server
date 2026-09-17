@@ -32,8 +32,10 @@ func TestProfileAvatarStorePreservesPrivateBucketWithoutLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, artwork := range []blobstore.Store{public, local, nil} {
-		store := NewProfileAvatarStore(artwork, private, "")
+	// Whatever backs assets, a configured private bucket owns avatars: existing
+	// keys and their presigned delivery must survive.
+	for _, assets := range []blobstore.Store{public, local, nil} {
+		store := NewProfileAvatarStore(blobstore.Stores{Assets: assets, Operational: blobstore.NewS3(private)})
 		before := requests.Load()
 		kind, url := resolveProfileAvatar(context.Background(), store, time.Minute, "upload:profile-avatars/1/main/original.webp")
 		if kind != "upload" || !strings.Contains(url, "/private/profile-avatars/") || !strings.Contains(url, "X-Amz-Signature=") {
@@ -57,7 +59,7 @@ func TestProfileAvatarStoreAllowsOnlyLocalWithoutPrivateS3(t *testing.T) {
 		t.Fatal(backend)
 	}
 	local := localStores.Assets
-	store := NewProfileAvatarStore(local, nil, blobstore.BackendLocal)
+	store := NewProfileAvatarStore(localStores)
 	if store != local {
 		t.Fatal("local storage not selected")
 	}
@@ -77,11 +79,13 @@ func TestProfileAvatarStoreAllowsOnlyLocalWithoutPrivateS3(t *testing.T) {
 	if err := signer.Verify(strings.TrimPrefix(signed.Path, "/api/v2/artwork/"), exp, signed.Query().Get("sig"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	// An S3 deployment with no private bucket has nowhere to put avatars. The
+	// public artwork bucket is never a substitute.
 	public := blobstore.NewS3(&s3client.Client{})
-	if NewProfileAvatarStore(public, nil, blobstore.BackendS3) != nil {
+	if NewProfileAvatarStore(blobstore.Stores{Assets: public}) != nil {
 		t.Fatal("public S3 accepted for avatars")
 	}
-	if NewProfileAvatarStore(nil, nil, "") != nil {
+	if NewProfileAvatarStore(blobstore.Stores{}) != nil {
 		t.Fatal("missing storage accepted")
 	}
 }

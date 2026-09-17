@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -37,6 +38,9 @@ type AdminJobsHandler struct {
 	store          AdminJobArtifactStore
 	CancelRegistry *adminjob.CancelRegistry
 	RealtimeHub    *notifications.Hub
+	// ArtifactSigner mints self-authorizing download URLs for stores that
+	// cannot presign. Nil leaves download_url empty, as before.
+	ArtifactSigner *artworkurl.Signer
 }
 
 func NewAdminJobsHandler(repo adminJobRepository, store AdminJobArtifactStore) *AdminJobsHandler {

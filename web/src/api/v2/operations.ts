@@ -140,7 +140,9 @@ export const v2Operations = {
   "GET /api/v2/admin/items/{id}/metadata-translation/jobs": "listAdminMetadataTranslationJobs",
   "GET /api/v2/admin/jellyfin-compat/status": "getAdminJellyfinCompatStatus",
   "GET /api/v2/admin/jobs": "listAdminJobs",
+  "GET /api/v2/admin/jobs/capabilities": "getAdminJobCapabilities",
   "GET /api/v2/admin/jobs/{id}": "getAdminJob",
+  "GET /api/v2/admin/jobs/{id}/artifact": "downloadAdminJobArtifact",
   "GET /api/v2/admin/libraries/{library_id}/collection-groups": "listAdminCollectionGroups",
   "GET /api/v2/admin/libraries/{library_id}/collection-groups/order":
     "getAdminCollectionGroupOrder",

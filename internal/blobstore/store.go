@@ -42,6 +42,12 @@ type ObjectInfo struct {
 type Store interface {
 	// Put idempotently overwrites an object. Content matching is not required.
 	Put(ctx context.Context, key string, data []byte) error
+	// PutStream is Put for an object too large to hold in memory. A local
+	// backend ignores contentType and derives a media type from the key.
+	//
+	// Every write method must be forwarded by recordingStore, or a store whose
+	// first write arrives here would never record its identity.
+	PutStream(ctx context.Context, key string, r io.Reader, contentType string) error
 	Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error)
 	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	// Delete counts absent keys as deleted, matching S3 batch deletion.

@@ -94,6 +94,36 @@ func TestOpenLocalSharesOneRecordedStore(t *testing.T) {
 	}
 }
 
+// recordingStore must forward every write method. A diagnostic bundle or job
+// artifact is often the first thing a local install writes, and those arrive
+// through PutStream; if it reached the embedded store directly the identity
+// would never be recorded, the configured root would stay editable, and every
+// key referencing it would be orphaned by the next change.
+func TestOpenRecordsIdentityOnFirstStreamedWrite(t *testing.T) {
+	for name, write := range map[string]func(Store) error{
+		"put": func(s Store) error {
+			return s.Put(context.Background(), "diagnostics/1/report.tar.gz", []byte("x"))
+		},
+		"put stream": func(s Store) error {
+			return s.PutStream(context.Background(), "diagnostics/1/report.tar.gz", strings.NewReader("x"), "application/gzip")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			settings := &testSettings{values: map[string]string{}}
+			stores, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), Settings: settings})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := write(stores.Operational); err != nil {
+				t.Fatal(err)
+			}
+			if settings.values[IdentitySettingKey] != stores.Assets.Identity() {
+				t.Fatalf("identity not recorded: %#v", settings.values)
+			}
+		})
+	}
+}
+
 // The private bucket is a different location from the catalog's assets. Its
 // identity must never be recorded, or the next start would refuse the real
 // assets store as a mismatch.

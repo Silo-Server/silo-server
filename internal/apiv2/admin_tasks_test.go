@@ -18,6 +18,7 @@ type fakeAdminTasks struct {
 	starts, writes, reads int
 	expected              int64
 	mismatch              bool
+	publicLinks           bool
 }
 
 func newFakeAdminTasks() *fakeAdminTasks {
@@ -92,6 +93,7 @@ func (f *fakeAdminTasks) GetAdminTaskJob(_ context.Context, id string) (*models.
 func (f *fakeAdminTasks) AdminTaskJobDownload(context.Context, *models.AdminJob) (string, *time.Time) {
 	return "", nil
 }
+func (f *fakeAdminTasks) AdminTaskJobPublicLinkSupported() bool { return f.publicLinks }
 func adminTasksTestHandler(t *testing.T, f *fakeAdminTasks) http.Handler {
 	deps, _ := libraryDeps(t)
 	deps.AdminTasks = f

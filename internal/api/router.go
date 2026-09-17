@@ -411,9 +411,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		accessGroupStore = access.NewGroupStore(deps.DB)
 	}
+	// Private S3 keeps its existing keys and presigned delivery. Without it,
+	// bundles go to the operational blob store and download by streaming.
 	var diagnosticsStore diagnostics.ObjectStore
 	if deps.S3Private != nil {
 		diagnosticsStore = diagnostics.NewS3ObjectStore(deps.S3Private)
+	} else {
+		diagnosticsStore = diagnostics.NewLocalObjectStore(deps.Blobs.Operational)
 	}
 	var diagnosticsHandler *handlers.DiagnosticsHandler
 	if deps.DB != nil {
@@ -936,7 +940,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
-		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Blobs.Assets, deps.S3Private, deps.ArtworkBackend)
+		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Blobs)
 		profileHandler.AvatarResolver = deps.ArtworkResolver
 		profileHandler.SessionsReader = playbackSessionsLoader
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
@@ -1350,11 +1354,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.DB != nil {
 		jobRepo := adminjob.NewRepository(deps.DB)
-		// Avoid wrapping a nil *s3client.Client in a non-nil interface;
-		// handlers rely on interface-nil checks to gate S3 features.
+		// Avoid wrapping a nil store in a non-nil interface; handlers rely on
+		// interface-nil checks to gate artifact features.
 		var privateStore handlers.CatalogSeedArtifactStore
 		if deps.S3Private != nil {
 			privateStore = deps.S3Private
+		} else if api := blobstore.NewBucketAPI(deps.Blobs.Operational); api != nil {
+			privateStore = api
 		}
 		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB)), jobRepo, privateStore)
 		catalogSeedHandler.RealtimeHub = deps.RealtimeHub
@@ -2290,6 +2296,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if adminJobsHandler != nil {
 		v2deps.AdminTaskJobs = adminJobsHandler
+		// Only a store that cannot presign needs the signed streaming route, so
+		// an S3 deployment keeps handing out presigned URLs and never mints a
+		// capability. Both sides share one signer so they cannot disagree.
+		if deps.Config != nil && deps.S3Private == nil {
+			signer := artworkurl.NewJobArtifactSigner(deps.CurrentConfig().Auth.JWTSecret, adminJobArtifactURLTTL)
+			adminJobsHandler.ArtifactSigner = signer
+			v2deps.AdminJobArtifacts = adminJobsHandler
+			v2deps.AdminJobArtifactSigner = signer
+		}
 	}
 	if catalogSeedHandler != nil {
 		v2deps.AdminCatalogSources = catalogSeedHandler
@@ -4444,6 +4459,10 @@ func (a *tmdbDiscoverAdapter) Discover(ctx context.Context, mediaType string, pa
 // not in config.restartRequiredKeys: the adapter re-reads it before every
 // upstream call, so a saved change converges without a restart.
 const traktClientIDSettingKey = "watchsync.trakt.client_id"
+
+// adminJobArtifactURLTTL matches the presigned lifetime an S3 deployment hands
+// out, so the two backends expire a download link on the same schedule.
+const adminJobArtifactURLTTL = 15 * time.Minute
 
 type traktCollectionAdapter struct {
 	client *metatrakt.Client
