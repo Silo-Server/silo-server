@@ -200,6 +200,9 @@ const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 // arrives. The budget is small so a genuinely blocked autoplay settles into a
 // paused player with working controls instead of retrying forever.
 const AUTOPLAY_RETRY_DELAY_MS = 400;
+// Mouse clicks on the video surface wait this long for a second click
+// (fullscreen toggle) before toggling play/pause.
+const DOUBLE_CLICK_WINDOW_MS = 250;
 const MAX_AUTOPLAY_ATTEMPTS = 4;
 
 interface PlaybackNoticeState {
@@ -2386,10 +2389,53 @@ export function VideoPlayer({
     video.pause();
   }, [sessionId, showWatchTogetherNotice, watchTogether, watchTogetherRoomId, watchTogetherSync]);
 
+  const handleFullscreenToggle = useCallback(() => {
+    const video = videoRef.current as
+      | (HTMLVideoElement & {
+          webkitSupportsFullscreen?: boolean;
+          webkitDisplayingFullscreen?: boolean;
+          webkitEnterFullscreen?: () => void;
+          webkitExitFullscreen?: () => void;
+        })
+      | null;
+
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (video?.webkitDisplayingFullscreen) {
+      video.webkitExitFullscreen?.();
+    } else if (containerRef.current?.requestFullscreen) {
+      containerRef.current.requestFullscreen().catch(() => {
+        if (
+          video?.webkitSupportsFullscreen !== false &&
+          typeof video?.webkitEnterFullscreen === "function"
+        ) {
+          video.webkitEnterFullscreen();
+        }
+      });
+    } else if (
+      video?.webkitSupportsFullscreen !== false &&
+      typeof video?.webkitEnterFullscreen === "function"
+    ) {
+      video.webkitEnterFullscreen();
+    }
+  }, []);
+
   const handleSurfaceTap = useCallback(
     (event?: React.MouseEvent<HTMLElement>) => {
       if (!isCoarsePointer) {
-        handlePlayPause();
+        // Mouse: single click toggles play/pause, double click toggles
+        // fullscreen. Play/pause is deferred so a double click doesn't
+        // pause and immediately resume before entering fullscreen.
+        if (surfaceTapTimerRef.current) {
+          clearTimeout(surfaceTapTimerRef.current);
+          surfaceTapTimerRef.current = null;
+          handleFullscreenToggle();
+          return;
+        }
+        surfaceTapTimerRef.current = setTimeout(() => {
+          surfaceTapTimerRef.current = null;
+          handlePlayPause();
+        }, DOUBLE_CLICK_WINDOW_MS);
         return;
       }
       if (surfaceTapTimerRef.current) {
@@ -2426,6 +2472,7 @@ export function VideoPlayer({
       controlsVisible,
       currentTime,
       duration,
+      handleFullscreenToggle,
       handlePlayPause,
       handlePlayerSeek,
       isCoarsePointer,
@@ -2550,37 +2597,6 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     video.muted = m;
-  }, []);
-
-  const handleFullscreenToggle = useCallback(() => {
-    const video = videoRef.current as
-      | (HTMLVideoElement & {
-          webkitSupportsFullscreen?: boolean;
-          webkitDisplayingFullscreen?: boolean;
-          webkitEnterFullscreen?: () => void;
-          webkitExitFullscreen?: () => void;
-        })
-      | null;
-
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else if (video?.webkitDisplayingFullscreen) {
-      video.webkitExitFullscreen?.();
-    } else if (containerRef.current?.requestFullscreen) {
-      containerRef.current.requestFullscreen().catch(() => {
-        if (
-          video?.webkitSupportsFullscreen !== false &&
-          typeof video?.webkitEnterFullscreen === "function"
-        ) {
-          video.webkitEnterFullscreen();
-        }
-      });
-    } else if (
-      video?.webkitSupportsFullscreen !== false &&
-      typeof video?.webkitEnterFullscreen === "function"
-    ) {
-      video.webkitEnterFullscreen();
-    }
   }, []);
 
   // -- Keyboard shortcuts --
@@ -3198,7 +3214,7 @@ export function VideoPlayer({
           onVolumeChange={handleVolumeChange}
           onMutedChange={handleMutedChange}
           onFullscreenToggle={handleFullscreenToggle}
-          onSurfaceTap={isCoarsePointer ? handleSurfaceTap : undefined}
+          onSurfaceTap={handleSurfaceTap}
           showPlaybackInfo={showPlaybackInfo}
           onTogglePlaybackInfo={() => setShowPlaybackInfo((v) => !v)}
           hasPrevEpisode={!!prevEpisodeRef}

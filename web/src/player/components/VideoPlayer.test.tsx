@@ -214,6 +214,42 @@ describe("VideoPlayer plan failure recovery", () => {
     vi.restoreAllMocks();
   });
 
+  it("toggles play on a mouse single click and fullscreen on a double click", async () => {
+    vi.useFakeTimers();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    try {
+      const { container } = renderPlayer({ shouldAutoPlay: false });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+      Object.defineProperty(video, "paused", { configurable: true, value: false });
+      fireEvent.canPlay(video);
+      await vi.waitFor(() => expect(controls.current?.onSurfaceTap).toBeTypeOf("function"));
+
+      const playerContainer = video.parentElement;
+      if (!playerContainer) throw new Error("expected player container");
+      const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(playerContainer, "requestFullscreen", {
+        configurable: true,
+        value: requestFullscreen,
+      });
+
+      fireEvent.click(video);
+      expect(pause).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(250));
+      expect(pause).toHaveBeenCalledOnce();
+      expect(requestFullscreen).not.toHaveBeenCalled();
+
+      fireEvent.click(video);
+      fireEvent.click(video);
+      expect(requestFullscreen).toHaveBeenCalledOnce();
+      act(() => vi.advanceTimersByTime(250));
+      expect(pause).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("toggles controls on a coarse-pointer single tap and seeks on a left double tap", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
