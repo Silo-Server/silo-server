@@ -56,4 +56,10 @@ func TestSkippedRootPageSearchBeforePagination(t *testing.T) {
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("literal wildcard: %+v %v", empty, err)
 	}
+	// The total uses the page's search and spans every page.
+	for search, want := range map[string]int{name: 4, second[1].RootPath: 1, name + "%": 0} {
+		if total, err := repo.Count(ctx, search); err != nil || total != want {
+			t.Fatalf("Count(%q) = %d, %v; want %d", search, total, err, want)
+		}
+	}
 }

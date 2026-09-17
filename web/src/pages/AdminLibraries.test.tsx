@@ -402,6 +402,121 @@ describe("AdminLibraries", () => {
     expect(mocks.useStaleMediaIDs).toHaveBeenCalledWith({ enabled: false, search: "" });
   });
 
+  describe("diagnostic section header counts", () => {
+    const infinite = (data: unknown, extra: Record<string, unknown> = {}) => ({
+      data,
+      isLoading: false,
+      isError: false,
+      isFetched: data !== undefined,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      ...extra,
+    });
+    const skippedRoot = {
+      library_id: 1,
+      library_name: "Movies",
+      root_path: "/media/movies/Unknown Movie",
+      reason: "missing_provider_ids",
+      file_count: 2,
+      sample_file_path: "/media/movies/Unknown Movie/movie.mkv",
+      first_seen_at: "2026-03-23T20:00:00Z",
+      last_seen_at: "2026-03-23T21:00:00Z",
+    };
+    const header = (name: RegExp) => screen.getByRole("button", { name });
+    const renderInteractive = () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <AdminLibraries />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    };
+
+    it("shows an unknown count instead of 0 while the sections are collapsed and unloaded", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined));
+      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined));
+      renderInteractive();
+
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
+        expect(within(header(name)).queryByText("0")).toBeNull();
+      }
+    });
+
+    it("keeps the count unknown while the first page loads after opening", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined, { isLoading: true }));
+      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined, { isLoading: true }));
+      renderInteractive();
+
+      fireEvent.click(header(/Troubleshooting/));
+      fireEvent.click(header(/Stale External IDs/));
+      expect(mocks.useSkippedLibraryRoots).toHaveBeenLastCalledWith({ enabled: true, search: "" });
+      expect(mocks.useStaleMediaIDs).toHaveBeenLastCalledWith({ enabled: true, search: "" });
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
+      }
+    });
+
+    it("shows 0 once the server confirms an empty result", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(
+        infinite({ pages: [{ roots: [], nextCursor: undefined, total: 0 }] }),
+      );
+      mocks.useStaleMediaIDs.mockReturnValue(
+        infinite({ pages: [{ staleIDs: [], nextCursor: undefined, total: 0 }] }),
+      );
+      renderInteractive();
+
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("0")).toBeDefined();
+        expect(within(header(name)).queryByText("Count not loaded")).toBeNull();
+      }
+    });
+
+    it("shows the server total rather than the rows loaded so far", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(
+        infinite({ pages: [{ roots: [skippedRoot], nextCursor: "next", total: 1 }] }),
+      );
+      mocks.useStaleMediaIDs.mockReturnValue(
+        infinite(
+          {
+            pages: [
+              {
+                staleIDs: [staleID("a", "Alpha"), staleID("b", "Bravo")],
+                nextCursor: "next",
+                total: 120,
+              },
+              { staleIDs: [staleID("c", "Charlie")], nextCursor: "later", total: 120 },
+            ],
+          },
+          { hasNextPage: true },
+        ),
+      );
+      renderInteractive();
+
+      expect(within(header(/Troubleshooting/)).getByText("1")).toBeDefined();
+      expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
+      fireEvent.click(header(/Stale External IDs/));
+      expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
+      expect(within(header(/Stale External IDs/)).queryByText("3")).toBeNull();
+    });
+
+    it("keeps the count unknown when the listing fails to load", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined, { isError: true }));
+      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined, { isError: true }));
+      renderInteractive();
+
+      fireEvent.click(header(/Troubleshooting/));
+      fireEvent.click(header(/Stale External IDs/));
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
+        expect(within(header(name)).queryByText("0")).toBeNull();
+      }
+    });
+  });
+
   it("reopens Stale External IDs after an empty result to show newly discovered IDs", () => {
     const emptyResult = {
       data: { pages: [{ staleIDs: [], nextCursor: undefined }] },

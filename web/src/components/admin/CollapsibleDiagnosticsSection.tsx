@@ -16,13 +16,23 @@ export function CollapsibleDiagnosticsSection({
 }: {
   title: string;
   description: string;
-  count: number;
+  /** Undefined until the count has loaded, so an unknown count never reads as 0. */
+  count: number | undefined;
   icon: ReactNode;
   iconClassName?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
 }) {
+  const countLabel =
+    count === undefined ? (
+      <>
+        <span aria-hidden="true">&mdash;</span>
+        <span className="sr-only">Count not loaded</span>
+      </>
+    ) : (
+      count
+    );
   return (
     <section className="surface-panel-subtle overflow-hidden rounded-2xl">
       <button
@@ -45,10 +55,10 @@ export function CollapsibleDiagnosticsSection({
         </div>
         {open ? (
           <Badge variant="secondary" className="text-[11px] tabular-nums">
-            {count}
+            {countLabel}
           </Badge>
         ) : (
-          <div className="text-2xl leading-none font-bold tabular-nums">{count}</div>
+          <div className="text-2xl leading-none font-bold tabular-nums">{countLabel}</div>
         )}
         <ChevronDown
           className={cn(

@@ -23548,6 +23548,12 @@ export interface components {
       items: components["schemas"]["SkippedRoot"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+      /**
+       * Format: int64
+       * @description Skipped roots matching the filter across every page
+       * @example 1
+       */
+      total: number;
     };
     StaleMediaID: {
       /** @example movie:heat-1995 */
@@ -23590,6 +23596,12 @@ export interface components {
       items: components["schemas"]["StaleMediaID"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+      /**
+       * Format: int64
+       * @description Stale identifiers matching the filter across every page
+       * @example 1
+       */
+      total: number;
     };
     StartDeviceLoginInputBody: {
       /**

@@ -35889,9 +35889,18 @@
           "page": {
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
+          },
+          "total": {
+            "description": "Skipped roots matching the filter across every page",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
+          "total",
           "items"
         ],
         "type": "object"
@@ -35998,9 +36007,18 @@
           "page": {
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
+          },
+          "total": {
+            "description": "Stale identifiers matching the filter across every page",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
+          "total",
           "items"
         ],
         "type": "object"

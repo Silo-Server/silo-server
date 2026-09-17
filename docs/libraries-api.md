@@ -5,8 +5,8 @@ complete request and response schemas are generated in `contracts/api/v2/openapi
 The frozen v1 bridge keeps its existing responses.
 
 `GET /api/v2/libraries/roots`, `GET /api/v2/libraries/skipped-roots`, and
-`GET /api/v2/libraries/stale-ids` return `{items, page}` collections. Roots additionally
-return `total`, counting the matches across every page. `limit` defaults to 50 and is
+`GET /api/v2/libraries/stale-ids` return `{items, page, total}` collections, where `total`
+counts the matches across every page. `limit` defaults to 50 and is
 at most 200. Continue with `page.next_cursor` while `page.has_more` is true. A cursor
 is bound to the acting administrator and query filters; changing a filter starts a
 new listing without a cursor.

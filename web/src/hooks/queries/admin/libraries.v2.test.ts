@@ -303,6 +303,7 @@ describe("library admin hooks on the v2 contract", () => {
         page: url.searchParams.has("cursor")
           ? { has_more: false }
           : { has_more: true, next_cursor: "next" },
+        total: 120,
       }),
     );
     const { result, rerender } = renderHook(
@@ -313,6 +314,7 @@ describe("library admin hooks on the v2 contract", () => {
     rerender({ enabled: true });
     await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.data?.pages[0]?.total).toBe(120);
     await result.current.fetchNextPage();
     await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -499,6 +501,9 @@ describe("library admin hooks on the v2 contract", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.current.hasNextPage).toBe(true);
+    // The total spans every page, not only the rows loaded so far.
+    expect(result.current.data?.pages[0]?.total).toBe(listStaleIdsOk.total);
+    expect(listStaleIdsOk.total).toBeGreaterThan(listStaleIdsOk.items.length);
     expect(flattenStaleMediaIDs(result.current.data).map((s) => s.library_id)).toEqual(
       listStaleIdsOk.items.map((s) => Number(s.library_id)),
     );

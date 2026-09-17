@@ -134,6 +134,7 @@ export function useSkippedLibraryRoots({
       return {
         roots: page.items.map(skippedRootFromV2),
         nextCursor: page.page?.has_more ? page.page.next_cursor : undefined,
+        total: page.total,
       };
     },
     initialPageParam: undefined as string | undefined,
@@ -258,6 +259,8 @@ export interface StaleMediaIDsPage {
   staleIDs: StaleMediaID[];
   /** Cursor of the next page, or undefined on the last page. */
   nextCursor: string | undefined;
+  /** Stale IDs matching the filter across every page, for the section header. */
+  total: number;
 }
 
 /**
@@ -280,6 +283,7 @@ export async function fetchStaleMediaIDsPage(
   return {
     staleIDs: page.items.map(staleMediaIDFromV2),
     nextCursor: page.page?.has_more && page.page.next_cursor ? page.page.next_cursor : undefined,
+    total: page.total,
   };
 }
 
