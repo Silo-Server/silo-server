@@ -241,11 +241,20 @@ describe("VideoPlayer plan failure recovery", () => {
       expect(pause).toHaveBeenCalledOnce();
       expect(requestFullscreen).not.toHaveBeenCalled();
 
-      fireEvent.click(video);
-      fireEvent.click(video);
+      fireEvent.click(video, { detail: 1 });
+      fireEvent.click(video, { detail: 2 });
       expect(requestFullscreen).toHaveBeenCalledOnce();
       act(() => vi.advanceTimersByTime(250));
       expect(pause).toHaveBeenCalledOnce();
+
+      // Two rapid clicks the browser does not count as a double (detail 1
+      // both times, e.g. far apart) toggle play/pause once and never enter
+      // fullscreen.
+      fireEvent.click(video, { detail: 1 });
+      fireEvent.click(video, { detail: 1 });
+      act(() => vi.advanceTimersByTime(250));
+      expect(requestFullscreen).toHaveBeenCalledOnce();
+      expect(pause).toHaveBeenCalledTimes(2);
 
       // A double click slower than our window but recognized by the browser
       // (event.detail === 2) reverts the play/pause that already fired,
@@ -253,19 +262,19 @@ describe("VideoPlayer plan failure recovery", () => {
       // fullscreen.
       fireEvent.click(video, { detail: 1 });
       act(() => vi.advanceTimersByTime(250));
-      expect(pause).toHaveBeenCalledTimes(2);
+      expect(pause).toHaveBeenCalledTimes(3);
       expect(play).not.toHaveBeenCalled();
       act(() => vi.advanceTimersByTime(5_000));
       fireEvent.click(video, { detail: 2 });
       expect(requestFullscreen).toHaveBeenCalledTimes(2);
-      expect(pause).toHaveBeenCalledTimes(2);
+      expect(pause).toHaveBeenCalledTimes(3);
       expect(play).toHaveBeenCalledOnce();
 
       // The third click of a triple click is ignored.
       fireEvent.click(video, { detail: 3 });
       act(() => vi.advanceTimersByTime(250));
       expect(requestFullscreen).toHaveBeenCalledTimes(2);
-      expect(pause).toHaveBeenCalledTimes(2);
+      expect(pause).toHaveBeenCalledTimes(3);
       expect(play).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
