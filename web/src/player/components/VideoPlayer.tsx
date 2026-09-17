@@ -203,9 +203,6 @@ const AUTOPLAY_RETRY_DELAY_MS = 400;
 // Mouse clicks on the video surface wait this long for a second click
 // (fullscreen toggle) before toggling play/pause.
 const DOUBLE_CLICK_WINDOW_MS = 250;
-// Upper bound on how long after a fired single click a browser-recognized
-// second click (event.detail === 2) still reverts that click's play/pause.
-const SLOW_DOUBLE_CLICK_MAX_MS = 1_000;
 const MAX_AUTOPLAY_ATTEMPTS = 4;
 
 interface PlaybackNoticeState {
@@ -1939,7 +1936,9 @@ export function VideoPlayer({
   const isCoarsePointer = useCoarsePointer();
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfaceTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const singleClickFiredAtRef = useRef(0);
+  // Inverse of the play/pause a fired single-click timer applied, so a
+  // browser-recognized second click (event.detail === 2) can undo it.
+  const singleClickRevertRef = useRef<"play" | "pause" | null>(null);
 
   const clearControlsTimer = useCallback(() => {
     if (hideTimerRef.current) {
@@ -2353,45 +2352,53 @@ export function VideoPlayer({
   ]);
 
   // -- Control callbacks --
-  const handlePlayPause = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (
-      watchTogetherRoomId &&
-      !watchTogether.closedReason &&
-      (watchTogether.connectionState !== "connected" || !watchTogether.room)
-    ) {
-      showWatchTogetherNotice(
-        "Reconnecting to room. Controls are temporarily unavailable.",
-        "warning",
-      );
-      return;
-    }
-    if (watchTogether.room && !watchTogether.room.self_can_control_transport) {
-      showWatchTogetherNotice("Only the host can control playback.", "warning");
-      return;
-    }
-    if (watchTogether.room && watchTogetherSync.attachedSessionId !== sessionId) {
-      showWatchTogetherNotice("Joining room playback. Try again in a moment.", "info");
-      return;
-    }
+  const setPlayback = useCallback(
+    (action: "play" | "pause" | "toggle") => {
+      const video = videoRef.current;
+      if (!video) return;
+      const shouldPlay = action === "toggle" ? video.paused : action === "play";
+      if (
+        watchTogetherRoomId &&
+        !watchTogether.closedReason &&
+        (watchTogether.connectionState !== "connected" || !watchTogether.room)
+      ) {
+        showWatchTogetherNotice(
+          "Reconnecting to room. Controls are temporarily unavailable.",
+          "warning",
+        );
+        return;
+      }
+      if (watchTogether.room && !watchTogether.room.self_can_control_transport) {
+        showWatchTogetherNotice("Only the host can control playback.", "warning");
+        return;
+      }
+      if (watchTogether.room && watchTogetherSync.attachedSessionId !== sessionId) {
+        showWatchTogetherNotice("Joining room playback. Try again in a moment.", "info");
+        return;
+      }
 
-    if (watchTogether.room) {
-      watchTogetherSync.requestTransport(
-        video.paused ? "play" : "pause",
-        currentTimeRef.current,
-        !video.paused,
-      );
-      return;
-    }
+      if (watchTogether.room) {
+        watchTogetherSync.requestTransport(
+          shouldPlay ? "play" : "pause",
+          currentTimeRef.current,
+          !shouldPlay,
+        );
+        return;
+      }
 
-    if (video.paused) {
-      video.play().catch(() => {});
-      return;
-    }
+      if (shouldPlay) {
+        video.play().catch(() => {});
+        return;
+      }
 
-    video.pause();
-  }, [sessionId, showWatchTogetherNotice, watchTogether, watchTogetherRoomId, watchTogetherSync]);
+      video.pause();
+    },
+    [sessionId, showWatchTogetherNotice, watchTogether, watchTogetherRoomId, watchTogetherSync],
+  );
+
+  // Zero-argument form for button and keyboard handlers, which pass the
+  // click event as the first argument.
+  const handlePlayPause = useCallback(() => setPlayback("toggle"), [setPlayback]);
 
   const handleFullscreenToggle = useCallback(() => {
     const video = videoRef.current as
@@ -2430,28 +2437,30 @@ export function VideoPlayer({
         // Mouse: single click toggles play/pause, double click toggles
         // fullscreen. Play/pause is deferred so a fast double click doesn't
         // pause and immediately resume before entering fullscreen. The
-        // browser's own click count (event.detail) is honored too: a double
-        // click slower than our window but inside the user's OS-configured
-        // interval reverts the play/pause that already fired, and clicks
-        // beyond the second in one sequence are ignored.
+        // browser's own click count (event.detail) stays authoritative: a
+        // double click slower than our window but inside the user's
+        // OS-configured interval undoes the play/pause that already fired
+        // by sending the explicit inverse action, and clicks beyond the
+        // second in one sequence are ignored.
         const clickCount = event?.detail ?? 1;
         if (clickCount >= 3) return;
         if (clickCount === 2 || surfaceTapTimerRef.current) {
           if (surfaceTapTimerRef.current) {
             clearTimeout(surfaceTapTimerRef.current);
             surfaceTapTimerRef.current = null;
-          } else if (Date.now() - singleClickFiredAtRef.current < SLOW_DOUBLE_CLICK_MAX_MS) {
-            handlePlayPause();
+          } else if (singleClickRevertRef.current) {
+            setPlayback(singleClickRevertRef.current);
           }
-          singleClickFiredAtRef.current = 0;
+          singleClickRevertRef.current = null;
           handleFullscreenToggle();
           return;
         }
-        singleClickFiredAtRef.current = 0;
+        singleClickRevertRef.current = null;
         surfaceTapTimerRef.current = setTimeout(() => {
           surfaceTapTimerRef.current = null;
-          singleClickFiredAtRef.current = Date.now();
-          handlePlayPause();
+          const willPlay = videoRef.current?.paused ?? false;
+          singleClickRevertRef.current = willPlay ? "pause" : "play";
+          setPlayback(willPlay ? "play" : "pause");
         }, DOUBLE_CLICK_WINDOW_MS);
         return;
       }
@@ -2494,6 +2503,7 @@ export function VideoPlayer({
       handlePlayerSeek,
       isCoarsePointer,
       resetControlsTimer,
+      setPlayback,
     ],
   );
 

@@ -217,6 +217,7 @@ describe("VideoPlayer plan failure recovery", () => {
   it("toggles play on a mouse single click and fullscreen on a double click", async () => {
     vi.useFakeTimers();
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
     try {
       const { container } = renderPlayer({ shouldAutoPlay: false });
       const video = container.querySelector("video");
@@ -247,20 +248,25 @@ describe("VideoPlayer plan failure recovery", () => {
       expect(pause).toHaveBeenCalledOnce();
 
       // A double click slower than our window but recognized by the browser
-      // (event.detail === 2) reverts the play/pause that already fired and
-      // toggles fullscreen.
+      // (event.detail === 2) reverts the play/pause that already fired,
+      // regardless of how long the OS double-click interval is, and toggles
+      // fullscreen.
       fireEvent.click(video, { detail: 1 });
       act(() => vi.advanceTimersByTime(250));
       expect(pause).toHaveBeenCalledTimes(2);
+      expect(play).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(5_000));
       fireEvent.click(video, { detail: 2 });
       expect(requestFullscreen).toHaveBeenCalledTimes(2);
-      expect(pause).toHaveBeenCalledTimes(3);
+      expect(pause).toHaveBeenCalledTimes(2);
+      expect(play).toHaveBeenCalledOnce();
 
       // The third click of a triple click is ignored.
       fireEvent.click(video, { detail: 3 });
       act(() => vi.advanceTimersByTime(250));
       expect(requestFullscreen).toHaveBeenCalledTimes(2);
-      expect(pause).toHaveBeenCalledTimes(3);
+      expect(pause).toHaveBeenCalledTimes(2);
+      expect(play).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
