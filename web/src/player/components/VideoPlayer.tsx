@@ -2424,10 +2424,15 @@ export function VideoPlayer({
     (event?: React.MouseEvent<HTMLElement>) => {
       if (!isCoarsePointer) {
         // Mouse: single click toggles play/pause, double click toggles
-        // fullscreen. Play/pause is deferred so a double click doesn't
-        // pause and immediately resume before entering fullscreen.
-        if (surfaceTapTimerRef.current) {
-          clearTimeout(surfaceTapTimerRef.current);
+        // fullscreen. Play/pause is deferred so a fast double click doesn't
+        // pause and immediately resume before entering fullscreen. The
+        // browser's own click count (event.detail) is honored too, so a
+        // double click slower than our window but inside the user's
+        // OS-configured interval still reaches fullscreen instead of
+        // toggling playback a second time.
+        const isBrowserDoubleClick = (event?.detail ?? 0) >= 2;
+        if (surfaceTapTimerRef.current || isBrowserDoubleClick) {
+          if (surfaceTapTimerRef.current) clearTimeout(surfaceTapTimerRef.current);
           surfaceTapTimerRef.current = null;
           handleFullscreenToggle();
           return;

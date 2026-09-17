@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
   Info,
   ListVideo,
@@ -101,7 +101,7 @@ interface PlayerControlsProps {
   onVolumeChange: (volume: number) => void;
   onMutedChange: (muted: boolean) => void;
   onFullscreenToggle: () => void;
-  onSurfaceTap?: () => void;
+  onSurfaceTap?: (event: MouseEvent<HTMLElement>) => void;
 }
 
 /** Skip amount for the ±seconds buttons, matching keyboard shortcuts. */

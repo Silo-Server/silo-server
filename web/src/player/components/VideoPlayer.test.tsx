@@ -245,6 +245,17 @@ describe("VideoPlayer plan failure recovery", () => {
       expect(requestFullscreen).toHaveBeenCalledOnce();
       act(() => vi.advanceTimersByTime(250));
       expect(pause).toHaveBeenCalledOnce();
+
+      // A double click slower than our window but recognized by the browser
+      // (event.detail === 2) still toggles fullscreen without a second
+      // play/pause toggle.
+      fireEvent.click(video, { detail: 1 });
+      act(() => vi.advanceTimersByTime(250));
+      expect(pause).toHaveBeenCalledTimes(2);
+      fireEvent.click(video, { detail: 2 });
+      expect(requestFullscreen).toHaveBeenCalledTimes(2);
+      act(() => vi.advanceTimersByTime(250));
+      expect(pause).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
