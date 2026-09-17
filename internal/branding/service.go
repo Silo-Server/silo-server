@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"path"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // SettingsStore is the subset of the server settings repository the branding
@@ -22,8 +22,8 @@ type SettingsStore interface {
 // AssetStore stores branding asset bytes in the selected artwork backend.
 type AssetStore interface {
 	Put(context.Context, string, []byte) error
-	Get(context.Context, string) (io.ReadCloser, artworkstore.ObjectInfo, error)
-	Stat(context.Context, string) (artworkstore.ObjectInfo, error)
+	Get(context.Context, string) (io.ReadCloser, blobstore.ObjectInfo, error)
+	Stat(context.Context, string) (blobstore.ObjectInfo, error)
 }
 
 // Service is the single source of truth for branding. It assembles a Snapshot
@@ -126,7 +126,7 @@ func (s *Service) GetAsset(ctx context.Context, kind AssetKind) (data []byte, co
 		_ = reader.Close()
 	}
 	if err != nil {
-		if errors.Is(err, artworkstore.ErrNotFound) {
+		if errors.Is(err, blobstore.ErrNotFound) {
 			return nil, "", "", ErrAssetNotConfigured
 		}
 		return nil, "", "", err
@@ -156,7 +156,7 @@ func (s *Service) ReconcileMissingAssets(ctx context.Context) (checked, cleared 
 		_, getErr := s.store.Stat(ctx, key)
 		switch {
 		case getErr == nil:
-		case errors.Is(getErr, artworkstore.ErrNotFound):
+		case errors.Is(getErr, blobstore.ErrNotFound):
 			if setErr := s.settings.Set(ctx, spec.settingKey, ""); setErr != nil {
 				return checked, cleared, setErr
 			}

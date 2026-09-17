@@ -62,16 +62,16 @@ describe("StorageStep", () => {
     });
     setup();
     render(<StorageStep />);
-    expect(screen.getByRole("combobox", { name: "Artwork storage" })).toBeDisabled();
-    expect(screen.getByText(/Locked: artwork has already been stored/)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Storage" })).toBeDisabled();
+    expect(screen.getByText(/Locked: files have already been stored/)).toBeInTheDocument();
   });
 
-  it("completes without S3 and reports local artwork", async () => {
+  it("completes without S3 and reports local storage", async () => {
     const { markDone, setSummary, save } = setup();
     render(<StorageStep />);
     expect(screen.queryByLabelText("Bucket")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Local artwork path")).toBeEnabled();
-    expect(setSummary).toHaveBeenCalledWith("storage", "Local artwork");
+    expect(screen.getByLabelText("Local storage path")).toBeEnabled();
+    expect(setSummary).toHaveBeenCalledWith("storage", "Local storage");
     await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
     await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
     expect(save).toHaveBeenCalledOnce();
@@ -80,7 +80,7 @@ describe("StorageStep", () => {
   it("reveals S3 fields and stages the backend selection", async () => {
     const { setValue } = setup();
     render(<StorageStep />);
-    await userEvent.click(screen.getByRole("combobox", { name: "Artwork storage" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Storage" }));
     await userEvent.click(screen.getByRole("option", { name: "S3" }));
     expect(screen.getByLabelText("Bucket")).toBeInTheDocument();
     expect(setValue).toHaveBeenCalledWith("artwork.storage_backend", "s3");

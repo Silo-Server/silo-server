@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 func TestParseArtworkObjectKeyRebuildsOriginalVariant(t *testing.T) {
 	t.Parallel()
-	got, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{
+	got, ok := parseArtworkObjectKey(blobstore.ObjectInfo{
 		Key: "local/movies/31190/19f56348/poster/w780.abc123.webp",
 	})
 	if !ok {
@@ -31,7 +31,7 @@ func TestParseArtworkObjectKeyLeavesOriginalUnchanged(t *testing.T) {
 	// The original variant must map to itself, or every currently-referenced
 	// object would look unreferenced and be deleted.
 	key := "tmdb/people/1352462/profile/original.deadbeef.webp"
-	got, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{Key: key})
+	got, ok := parseArtworkObjectKey(blobstore.ObjectInfo{Key: key})
 	if !ok {
 		t.Fatal("expected the original variant to parse")
 	}
@@ -54,7 +54,7 @@ func TestParseArtworkObjectKeyRejectsUnrecognizedShapes(t *testing.T) {
 		"local/movies/31190/poster/w300.abc123.",  // empty extension
 		"local/movies/31190/poster/",              // directory marker
 	} {
-		if _, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{Key: key}); ok {
+		if _, ok := parseArtworkObjectKey(blobstore.ObjectInfo{Key: key}); ok {
 			t.Errorf("key %q parsed but should have been rejected", key)
 		}
 	}
@@ -63,7 +63,7 @@ func TestParseArtworkObjectKeyRejectsUnrecognizedShapes(t *testing.T) {
 func TestParseArtworkObjectKeyCarriesModifiedTime(t *testing.T) {
 	t.Parallel()
 	when := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
-	got, ok := parseArtworkObjectKey(artworkstore.ObjectInfo{
+	got, ok := parseArtworkObjectKey(blobstore.ObjectInfo{
 		Key:     "local/movies/1/poster/w300.abc.webp",
 		ModTime: when,
 	})
@@ -121,7 +121,7 @@ func TestArtworkSweepAnomalyGuardThresholds(t *testing.T) {
 // fakeArtworkStorage records what the sweep asked it to delete so the
 // destructive path can be asserted rather than inferred.
 type fakeArtworkStorage struct {
-	pages   [][]artworkstore.ObjectInfo
+	pages   [][]blobstore.ObjectInfo
 	tokens  []string
 	deleted []string
 	calls   int
@@ -132,7 +132,7 @@ func (f *fakeArtworkStorage) Delete(_ context.Context, keys []string) (int, erro
 	return len(keys), nil
 }
 
-func (f *fakeArtworkStorage) List(_ context.Context, _, _ string, _ int) ([]artworkstore.ObjectInfo, string, error) {
+func (f *fakeArtworkStorage) List(_ context.Context, _, _ string, _ int) ([]blobstore.ObjectInfo, string, error) {
 	if f.calls >= len(f.pages) {
 		return nil, "", nil
 	}
@@ -141,12 +141,12 @@ func (f *fakeArtworkStorage) List(_ context.Context, _, _ string, _ int) ([]artw
 	return page, token, nil
 }
 
-func ageingObjects(prefix string, n int, age time.Duration) []artworkstore.ObjectInfo {
+func ageingObjects(prefix string, n int, age time.Duration) []blobstore.ObjectInfo {
 	when := time.Now().Add(-age)
-	out := make([]artworkstore.ObjectInfo, 0, n)
+	out := make([]blobstore.ObjectInfo, 0, n)
 	for i := 0; i < n; i++ {
 		stamp := when
-		out = append(out, artworkstore.ObjectInfo{
+		out = append(out, blobstore.ObjectInfo{
 			Key:     fmt.Sprintf("%s/item%d/poster/w300.hash%d.webp", prefix, i, i),
 			ModTime: stamp,
 		})
@@ -172,6 +172,27 @@ func sweepWithoutDatabase(t *testing.T, storage *fakeArtworkStorage, referenced 
 	return sweeper.SweepPrefix(context.Background(), "local/", "", maxPages)
 }
 
+// A local backend keeps subtitles, diagnostic bundles, job artifacts, and
+// avatars in the same root as artwork. An empty prefix would walk all of them,
+// and parseArtworkObjectKey would read a name like "report.tar.gz" as a
+// revisioned variant and delete it.
+func TestSweepRefusesAnEmptyPrefix(t *testing.T) {
+	t.Parallel()
+	storage := &fakeArtworkStorage{
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 2, 72*time.Hour)},
+		tokens: []string{""},
+	}
+	sweeper := &ArtworkStorageSweeper{store: storage, now: time.Now}
+	for _, prefix := range []string{"", "   "} {
+		if _, err := sweeper.SweepPrefix(context.Background(), prefix, "", 1); err == nil {
+			t.Fatalf("prefix %q: unbounded sweep accepted", prefix)
+		}
+	}
+	if len(storage.deleted) != 0 {
+		t.Fatalf("deleted %v on a refused sweep", storage.deleted)
+	}
+}
+
 func TestSweepDeletesOnlyUnreferencedObjects(t *testing.T) {
 	t.Parallel()
 	objects := ageingObjects("local", 4, 72*time.Hour)
@@ -180,7 +201,7 @@ func TestSweepDeletesOnlyUnreferencedObjects(t *testing.T) {
 		"local/item1/poster/original.hash1.webp": {},
 		"local/item2/poster/original.hash2.webp": {},
 	}
-	storage := &fakeArtworkStorage{pages: [][]artworkstore.ObjectInfo{objects}, tokens: []string{""}}
+	storage := &fakeArtworkStorage{pages: [][]blobstore.ObjectInfo{objects}, tokens: []string{""}}
 
 	stats, err := sweepWithoutDatabase(t, storage, referenced, 1)
 	if err != nil {
@@ -201,7 +222,7 @@ func TestSweepSkipsObjectsUnderTheAgeFloor(t *testing.T) {
 	t.Parallel()
 	// Nothing is referenced, so only the age floor can save these.
 	storage := &fakeArtworkStorage{
-		pages:  [][]artworkstore.ObjectInfo{ageingObjects("local", 5, time.Hour)},
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 5, time.Hour)},
 		tokens: []string{""},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{}, 1)
@@ -221,7 +242,7 @@ func TestSweepFailsClosedOnMissingTimestamp(t *testing.T) {
 	// Storage that reports no modification time gives no way to tell a
 	// just-written object from an old one, so the sweep must not delete it.
 	storage := &fakeArtworkStorage{
-		pages:  [][]artworkstore.ObjectInfo{{{Key: "local/item0/poster/w300.hash0.webp"}}},
+		pages:  [][]blobstore.ObjectInfo{{{Key: "local/item0/poster/w300.hash0.webp"}}},
 		tokens: []string{""},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{}, 1)
@@ -241,7 +262,7 @@ func TestSweepStopsInsteadOfDeletingAnAnomalousPage(t *testing.T) {
 	// A full page where nothing resolves is the signature of a broken
 	// reference check, not an empty catalog.
 	storage := &fakeArtworkStorage{
-		pages:  [][]artworkstore.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
 		tokens: []string{"next"},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{}, 1)
@@ -263,7 +284,7 @@ func TestSweepResumesAcrossPagesAndStopsAtMaxPages(t *testing.T) {
 		referenced[fmt.Sprintf("local/item%d/poster/original.hash%d.webp", i, i)] = struct{}{}
 	}
 	storage := &fakeArtworkStorage{
-		pages: [][]artworkstore.ObjectInfo{
+		pages: [][]blobstore.ObjectInfo{
 			ageingObjects("local", 100, 72*time.Hour),
 			ageingObjects("local", 100, 72*time.Hour),
 			ageingObjects("local", 100, 72*time.Hour),
@@ -291,7 +312,7 @@ func TestSweepWithoutAPoolSkipsClusterLocking(t *testing.T) {
 	// still run rather than dereference nil — pglock's nil-pool behavior is
 	// not safe to rely on.
 	storage := &fakeArtworkStorage{
-		pages:  [][]artworkstore.ObjectInfo{ageingObjects("local", 2, 72*time.Hour)},
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 2, 72*time.Hour)},
 		tokens: []string{""},
 	}
 	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{

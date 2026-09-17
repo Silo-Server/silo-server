@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -152,7 +152,7 @@ type Scanner struct {
 	episodeRepo          *catalog.EpisodeRepository
 	extraRepo            *catalog.ExtraRepository
 	ffprobePath          string
-	artworkStore         artworkstore.Store // artwork backend (may be nil)
+	artworkStore         blobstore.Store // artwork backend (may be nil)
 	imageCacher          scannerImageCacher
 	// workers is atomic so admin settings changes can resize the per-scan
 	// worker pool while a scan is running (applies to the next scan).
@@ -234,7 +234,7 @@ type SeriesQueueSyncer interface {
 }
 
 // NewScanner creates a new Scanner with the given dependencies.
-func NewScanner(fileRepo *FileRepository, ffprobePath string, artworkStore artworkstore.Store, workers int, emptyTrashAfterScan bool, fileRemovalGrace time.Duration) *Scanner {
+func NewScanner(fileRepo *FileRepository, ffprobePath string, artworkStore blobstore.Store, workers int, emptyTrashAfterScan bool, fileRemovalGrace time.Duration) *Scanner {
 	if workers < 1 {
 		workers = 8
 	}

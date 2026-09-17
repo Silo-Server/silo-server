@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -121,11 +121,11 @@ func (r ServerResolver) ResolveURLFor(_ context.Context, key string, ttl time.Du
 }
 
 type directResolver struct {
-	direct artworkstore.DirectURLer
+	direct blobstore.DirectURLer
 	ttl    time.Duration
 }
 
-func NewDirectResolver(direct artworkstore.DirectURLer, ttl time.Duration) Resolver {
+func NewDirectResolver(direct blobstore.DirectURLer, ttl time.Duration) Resolver {
 	if ttl <= 0 {
 		ttl = 4 * time.Hour
 	}

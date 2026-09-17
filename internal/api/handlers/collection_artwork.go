@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
 
@@ -29,7 +29,7 @@ const (
 // installs and non-template paths keep the original persisted path.
 func storeBundledCollectionPosterIfS3Configured(
 	ctx context.Context,
-	store artworkstore.Store,
+	store blobstore.Store,
 	frontendFS fs.FS,
 	collectionID, prefix, posterPath string,
 ) (storedPath, thumbhashStr string, stored bool, err error) {
@@ -124,7 +124,7 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 // the w300 variant.
 func uploadCollectionImageVariants(
 	ctx context.Context,
-	store artworkstore.Store,
+	store blobstore.Store,
 	prefix, collectionID, imageType string,
 	fileData []byte,
 ) (s3Path, thumbhashStr string, err error) {
@@ -173,7 +173,7 @@ func uploadCollectionImageVariants(
 // collection / imageType under the supplied S3 prefix.
 func removeCollectionImageVariants(
 	ctx context.Context,
-	store artworkstore.Store,
+	store blobstore.Store,
 	prefix, collectionID, imageType string,
 ) error {
 	if store == nil {

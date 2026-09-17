@@ -20,9 +20,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -61,7 +61,7 @@ type LibraryHandler struct {
 	ObservedLocationRepo  *scanner.ObservedLocationRepository
 	SectionRepo           *sections.Repository
 	StoreProvider         userstore.UserStoreProvider
-	ArtworkStore          artworkstore.Store
+	ArtworkStore          blobstore.Store
 	ArtworkResolver       artworkurl.Resolver
 	appCtx                context.Context
 	EventBus              cache.EventBus

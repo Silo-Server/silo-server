@@ -12,8 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -24,7 +24,7 @@ type CollectionHandler struct {
 	LibraryCollections collectionPreferenceLibraryReader
 	Executor           *catalog.QueryExecutor
 	ItemReader         collectionMutationItemReader
-	ArtworkStore       artworkstore.Store
+	ArtworkStore       blobstore.Store
 	ArtworkResolver    artworkurl.Resolver
 	HTTPClient         *http.Client
 }

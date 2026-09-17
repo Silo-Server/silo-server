@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 )
 
@@ -28,17 +28,17 @@ func (f *fakeAssetStore) Put(_ context.Context, key string, data []byte) error {
 	f.data[key] = data
 	return nil
 }
-func (f *fakeAssetStore) Get(_ context.Context, key string) (io.ReadCloser, artworkstore.ObjectInfo, error) {
+func (f *fakeAssetStore) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
 	if d, ok := f.data[key]; ok {
-		return io.NopCloser(bytes.NewReader(d)), artworkstore.ObjectInfo{Key: key, Size: int64(len(d))}, nil
+		return io.NopCloser(bytes.NewReader(d)), blobstore.ObjectInfo{Key: key, Size: int64(len(d))}, nil
 	}
-	return nil, artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+	return nil, blobstore.ObjectInfo{}, blobstore.ErrNotFound
 }
-func (f *fakeAssetStore) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
+func (f *fakeAssetStore) Stat(_ context.Context, key string) (blobstore.ObjectInfo, error) {
 	if d, ok := f.data[key]; ok {
-		return artworkstore.ObjectInfo{Key: key, Size: int64(len(d))}, nil
+		return blobstore.ObjectInfo{Key: key, Size: int64(len(d))}, nil
 	}
-	return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+	return blobstore.ObjectInfo{}, blobstore.ErrNotFound
 }
 
 func withBranding(t *testing.T, settings fakeSettings) {

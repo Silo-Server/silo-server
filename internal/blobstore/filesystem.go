@@ -1,4 +1,4 @@
-package artworkstore
+package blobstore
 
 import (
 	"context"

@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
-	"github.com/Silo-Server/silo-server/internal/artworkstore/artworkstoretest"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 )
 
 func TestArtworkNestedKeyBytesAndRanges(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,13 +46,13 @@ func TestArtworkNestedKeyBytesAndRanges(t *testing.T) {
 
 // Embedding the store keeps the fake focused on the read boundary exercised here.
 type artworkReadFailure struct {
-	artworkstore.Store
+	blobstore.Store
 	calls int
 }
 
-func (s *artworkReadFailure) Get(context.Context, string) (io.ReadCloser, artworkstore.ObjectInfo, error) {
+func (s *artworkReadFailure) Get(context.Context, string) (io.ReadCloser, blobstore.ObjectInfo, error) {
 	s.calls++
-	return nil, artworkstore.ObjectInfo{}, errors.New("storage offline")
+	return nil, blobstore.ObjectInfo{}, errors.New("storage offline")
 }
 
 type artworkRepairRecorder struct {
@@ -91,7 +91,7 @@ func TestArtworkRejectsInvalidSignaturesBeforeStorage(t *testing.T) {
 	}
 }
 func TestArtworkMissingRevisionEnqueuesOriginalRepair(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestArtworkStorageFailure(t *testing.T) {
 	}
 }
 func TestArtworkMutableCachePolicy(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestArtworkMutableCachePolicy(t *testing.T) {
 func TestArtworkRangesOnForwardOnlyStreams(t *testing.T) {
 	// S3 bodies are not seekable. Ranges, HEAD, and full reads must still work
 	// without buffering the object.
-	store := artworkstoretest.New()
+	store := blobstoretest.New()
 	key := "tmdb/movies/123/poster/w500.rev.webp"
 	if err := store.Put(t.Context(), key, []byte("0123456789")); err != nil {
 		t.Fatal(err)

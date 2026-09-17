@@ -14,8 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
@@ -33,7 +33,7 @@ type UserCollectionImportHandler struct {
 	scheduler       *usercollections.Scheduler
 	registry        *templates.Registry
 	mdblist         *mdblist.Client
-	ArtworkStore    artworkstore.Store
+	ArtworkStore    blobstore.Store
 	ArtworkResolver artworkurl.Resolver
 	frontendFS      fs.FS
 }
@@ -345,7 +345,7 @@ func (h *UserCollectionImportHandler) storeBundledTemplatePoster(
 	return nil
 }
 
-func (h *UserCollectionImportHandler) artworkBackend() artworkstore.Store {
+func (h *UserCollectionImportHandler) artworkBackend() blobstore.Store {
 	return h.ArtworkStore
 }
 

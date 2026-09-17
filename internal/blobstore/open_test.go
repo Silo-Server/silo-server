@@ -1,10 +1,15 @@
-package artworkstore
+package blobstore
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 type testSettings struct {
@@ -43,12 +48,130 @@ func (s *testSettings) SetIfAbsent(_ context.Context, key, value string) (bool, 
 	return true, nil
 }
 
-func TestOpenLocalRecordsBackendOnFirstPut(t *testing.T) {
+// newTestS3Client serves a bucket that accepts writes and reports every other
+// key as absent. Open only needs the client's identity and a working Put.
+func newTestS3Client(t *testing.T, bucket string) *s3client.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("ETag", `"etag"`)
+		case http.MethodGet, http.MethodHead:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, "<Error><Code>NoSuchKey</Code></Error>")
+		default:
+			t.Errorf("unexpected S3 request %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return s3client.NewClient(s3client.BucketConfig{
+		Endpoint: server.URL, Bucket: bucket, PathStyle: true, AccessKey: "test", SecretKey: "test",
+	})
+}
+
+// A local backend has one root, so every caller shares the recorded store: a
+// first write through Operational must record the identity just as one through
+// Assets does.
+func TestOpenLocalSharesOneRecordedStore(t *testing.T) {
 	settings := &testSettings{values: map[string]string{}}
-	store, backend, err := Open(context.Background(), Options{Backend: "auto", LocalPath: filepath.Join(t.TempDir(), "artwork"), Settings: settings})
+	stores, backend, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), Settings: settings})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if backend != BackendLocal {
+		t.Fatalf("backend=%q", backend)
+	}
+	if !stores.Local() || stores.Operational != stores.Assets {
+		t.Fatal("local backend did not share one store")
+	}
+	if err = stores.Operational.Put(context.Background(), "diagnostics/1/report.tar.gz", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if settings.values[IdentitySettingKey] != stores.Assets.Identity() {
+		t.Fatalf("operational write did not record identity: %#v", settings.values)
+	}
+}
+
+// The private bucket is a different location from the catalog's assets. Its
+// identity must never be recorded, or the next start would refuse the real
+// assets store as a mismatch.
+func TestOpenS3KeepsBucketsSeparateAndLeavesPrivateUnrecorded(t *testing.T) {
+	settings := &testSettings{values: map[string]string{}}
+	public := newTestS3Client(t, "assets")
+	private := newTestS3Client(t, "operational")
+	stores, backend, err := Open(context.Background(), Options{
+		Backend: BackendS3, S3: public, S3Private: private, Settings: settings,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend != BackendS3 {
+		t.Fatalf("backend=%q", backend)
+	}
+	if stores.Local() {
+		t.Fatal("s3 backend reported as local")
+	}
+	if stores.Operational == nil || stores.Operational == stores.Assets {
+		t.Fatal("s3 backend did not open a separate operational store")
+	}
+	if !strings.Contains(stores.Operational.Identity(), "operational") {
+		t.Fatalf("operational identity = %q", stores.Operational.Identity())
+	}
+	if err = stores.Operational.Put(context.Background(), "diagnostics/1/report.tar.gz", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if settings.values[IdentitySettingKey] != "" {
+		t.Fatalf("private bucket write recorded an identity: %#v", settings.values)
+	}
+}
+
+// Avatars have always lived in the private bucket, whatever backed artwork. An
+// install that configured one and then moved artwork to disk must keep reading
+// its existing profile-avatars keys, so a configured private bucket owns the
+// operational store even on a local backend.
+func TestOpenLocalStillPrefersAConfiguredPrivateBucket(t *testing.T) {
+	private := newTestS3Client(t, "operational")
+	stores, backend, err := Open(context.Background(), Options{
+		Backend: BackendLocal, LocalPath: t.TempDir(), S3Private: private,
+		Settings: &testSettings{values: map[string]string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend != BackendLocal {
+		t.Fatalf("backend=%q", backend)
+	}
+	if stores.Operational == stores.Assets || stores.Local() {
+		t.Fatal("local backend overrode the configured private bucket")
+	}
+	if !strings.Contains(stores.Operational.Identity(), "operational") {
+		t.Fatalf("operational identity = %q", stores.Operational.Identity())
+	}
+}
+
+// An S3 backend without a private bucket leaves Operational nil, which is how
+// callers detect that diagnostics and job artifacts have nowhere to go.
+func TestOpenS3WithoutPrivateBucketLeavesOperationalNil(t *testing.T) {
+	stores, _, err := Open(context.Background(), Options{
+		Backend: BackendS3, S3: newTestS3Client(t, "assets"), Settings: &testSettings{values: map[string]string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stores.Assets == nil || stores.Operational != nil {
+		t.Fatal("missing private bucket did not leave operational nil")
+	}
+}
+
+func TestOpenLocalRecordsBackendOnFirstPut(t *testing.T) {
+	settings := &testSettings{values: map[string]string{}}
+	stores, backend, err := Open(context.Background(), Options{Backend: "auto", LocalPath: filepath.Join(t.TempDir(), "artwork"), Settings: settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := stores.Assets
 	if backend != BackendLocal {
 		t.Fatalf("backend=%q", backend)
 	}
@@ -85,10 +208,11 @@ func TestOpenRejectsRecordedStorageMismatch(t *testing.T) {
 
 func TestOpenRetriesBackendRecordingAfterSettingsFailure(t *testing.T) {
 	settings := &flakySettings{testSettings: testSettings{values: map[string]string{}}, fail: true}
-	store, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: filepath.Join(t.TempDir(), "artwork"), Settings: settings})
+	stores, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: filepath.Join(t.TempDir(), "artwork"), Settings: settings})
 	if err != nil {
 		t.Fatal(err)
 	}
+	store := stores.Assets
 	if err := store.Put(context.Background(), "a.webp", []byte("x")); err == nil {
 		t.Fatal("write hid backend recording failure")
 	}

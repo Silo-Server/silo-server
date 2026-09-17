@@ -25,10 +25,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -118,9 +118,9 @@ type Dependencies struct {
 	DB              *pgxpool.Pool
 	SecretCipher    *secret.Cipher // at-rest credential cipher (required when DB is set)
 	FrontendFS      fs.FS
-	S3Public        *s3client.Client   // public assets bucket client (may be nil)
-	Artwork         artworkstore.Store // backend-neutral artwork store
-	ArtworkBackend  string             // resolved artwork backend name
+	S3Public        *s3client.Client // public assets bucket client (may be nil)
+	Blobs           blobstore.Stores // backend-neutral blob stores (assets and operational)
+	ArtworkBackend  string           // resolved blob storage backend name
 	ArtworkDelivery ArtworkDelivery
 	ArtworkSigner   *artworkurl.Signer
 	ArtworkResolver artworkurl.Resolver
@@ -128,7 +128,6 @@ type Dependencies struct {
 		EnqueueArtworkRepair(context.Context, []string, int) (int, error)
 	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
-	S3UserDB          *s3client.Client              // user-db bucket client (may be nil)
 	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
@@ -343,7 +342,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		pgPinger = deps.DB
 	}
 
-	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker, deps.Artwork)
+	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker, deps.Blobs.Assets)
 
 	// Resolves whether a declared profile belongs to the user and is the
 	// household primary profile. Nil (no user store) disables the
@@ -614,7 +613,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		// Library poster uploads are writable client-facing assets, so they
 		// belong in the public assets bucket.
-		libraryHandler.ArtworkStore = deps.Artwork
+		libraryHandler.ArtworkStore = deps.Blobs.Assets
 		libraryHandler.ArtworkResolver = deps.ArtworkResolver
 
 		// Wire provider chain repos for per-library provider priority management.
@@ -937,7 +936,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
-		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Artwork, deps.S3Private, deps.ArtworkBackend)
+		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Blobs.Assets, deps.S3Private, deps.ArtworkBackend)
 		profileHandler.AvatarResolver = deps.ArtworkResolver
 		profileHandler.SessionsReader = playbackSessionsLoader
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
@@ -965,7 +964,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			collectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		}
-		collectionHandler.ArtworkStore = deps.Artwork
+		collectionHandler.ArtworkStore = deps.Blobs.Assets
 		collectionHandler.ArtworkResolver = deps.ArtworkResolver
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
@@ -979,7 +978,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				deps.MDBListClient,
 				deps.FrontendFS,
 			)
-			userImportHandler.ArtworkStore = deps.Artwork
+			userImportHandler.ArtworkStore = deps.Blobs.Assets
 			userImportHandler.ArtworkResolver = deps.ArtworkResolver
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
@@ -1745,7 +1744,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			itemRepo,
 			nil,
 		)
-		libraryCollectionHandler.ArtworkStore = deps.Artwork
+		libraryCollectionHandler.ArtworkStore = deps.Blobs.Assets
 		libraryCollectionHandler.ArtworkResolver = deps.ArtworkResolver
 		libraryCollectionHandler.FrontendFS = deps.FrontendFS
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
@@ -4595,7 +4594,7 @@ func v2Dependencies(
 		ViewerAccess:    viewer,
 		ActingAdmin:     actingAdmin,
 		PermissionGates: map[string]func(http.Handler) http.Handler{},
-		ArtworkStore:    deps.Artwork,
+		ArtworkStore:    deps.Blobs.Assets,
 		ArtworkBackend:  deps.ArtworkBackend,
 		ArtworkSigner:   deps.ArtworkSigner,
 		ArtworkRepair:   deps.ArtworkRepair,

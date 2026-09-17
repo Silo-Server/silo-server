@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // fakeObjectChecker treats every key as present unless listed in missing or
@@ -26,7 +26,7 @@ type fakeObjectChecker struct {
 	checked  map[string]int
 }
 
-func (f *fakeObjectChecker) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
+func (f *fakeObjectChecker) Stat(_ context.Context, key string) (blobstore.ObjectInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.checked == nil {
@@ -34,12 +34,12 @@ func (f *fakeObjectChecker) Stat(_ context.Context, key string) (artworkstore.Ob
 	}
 	f.checked[key]++
 	if f.errorAll || f.erroring[key] {
-		return artworkstore.ObjectInfo{}, errors.New("simulated storage error")
+		return blobstore.ObjectInfo{}, errors.New("simulated storage error")
 	}
 	if f.missing[key] {
-		return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+		return blobstore.ObjectInfo{}, blobstore.ErrNotFound
 	}
-	return artworkstore.ObjectInfo{Key: key}, nil
+	return blobstore.ObjectInfo{Key: key}, nil
 }
 
 func TestShouldBulkReset(t *testing.T) {

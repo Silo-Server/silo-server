@@ -1,5 +1,9 @@
-// Package artworkstore stores logical artwork keys in local or S3 storage.
-package artworkstore
+// Package blobstore stores logical object keys in local or S3 storage. It backs
+// every blob Silo owns: artwork, branding assets, intro/credit markers, chapter
+// thumbnails, downloaded subtitles, diagnostic bundles, job artifacts, and
+// profile avatars. Callers own their key namespaces; see docs/architecture/
+// blob-storage.md for the reserved prefixes that keep them apart.
+package blobstore
 
 import (
 	"context"
@@ -9,8 +13,8 @@ import (
 )
 
 var (
-	ErrNotFound   = errors.New("artworkstore: object not found")
-	ErrInvalidKey = errors.New("artworkstore: invalid key")
+	ErrNotFound   = errors.New("blobstore: object not found")
+	ErrInvalidKey = errors.New("blobstore: invalid key")
 )
 
 const (
@@ -19,8 +23,10 @@ const (
 )
 
 // IdentitySettingKey is the server_settings row that records the storage the
-// catalog's artwork keys belong to. The first successful write records the
-// store's Identity; Open refuses a store whose Identity differs.
+// catalog's keys belong to. The first successful write records the store's
+// Identity; Open refuses a store whose Identity differs. The row keeps its
+// original artwork-era name so existing deployments need no migration; it
+// governs the assets store, which on a local backend is the whole root.
 const IdentitySettingKey = "artwork.storage_identity"
 
 type DirectURLer interface {

@@ -25,8 +25,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -1591,7 +1591,7 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 var machineManagedSettingKeys = map[string]bool{
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
-	artworkstore.IdentitySettingKey:             true,
+	blobstore.IdentitySettingKey:                true,
 }
 
 // Setting keys that decide where artwork lives. The s3 keys are the canonical
@@ -1610,7 +1610,7 @@ const (
 // catalog's keys live in exactly one place and there is no migrator, so every
 // setting that selects that place is read-only.
 func artworkStorageLocked(stored map[string]string) bool {
-	return strings.TrimSpace(stored[artworkstore.IdentitySettingKey]) != ""
+	return strings.TrimSpace(stored[blobstore.IdentitySettingKey]) != ""
 }
 
 var errArtworkStorageLocked = &APIError{
@@ -1626,14 +1626,14 @@ var errArtworkStorageLocked = &APIError{
 func artworkIdentityInputs(effective map[string]string) (backend string, inputs map[string]string) {
 	backend = strings.ToLower(strings.TrimSpace(effective[artworkStorageBackendKey]))
 	if backend == "" || backend == config.ArtworkBackendAuto {
-		backend = artworkstore.BackendLocal
+		backend = blobstore.BackendLocal
 		if strings.TrimSpace(effective[s3PublicBucketKey]) != "" {
-			backend = artworkstore.BackendS3
+			backend = blobstore.BackendS3
 		}
 	}
 	inputs = map[string]string{}
 	switch backend {
-	case artworkstore.BackendS3:
+	case blobstore.BackendS3:
 		for _, key := range []string{s3PublicEndpointKey, s3PublicBucketKey, s3PublicKeyPrefixKey} {
 			inputs[key] = strings.TrimSpace(effective[key])
 		}
@@ -2447,7 +2447,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				prospective[key] = value
 			}
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[artworkstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}
@@ -2805,7 +2805,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			prospective := maps.Clone(stored)
 			prospective[key] = req.Value
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[artworkstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}

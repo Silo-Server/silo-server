@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 )
 
@@ -22,11 +22,11 @@ func (s brandingSettings) Set(_ context.Context, key, value string) error    { s
 type brandingAssets struct{}
 
 func (brandingAssets) Put(context.Context, string, []byte) error { return nil }
-func (brandingAssets) Get(_ context.Context, key string) (io.ReadCloser, artworkstore.ObjectInfo, error) {
-	return io.NopCloser(bytes.NewReader([]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`))), artworkstore.ObjectInfo{Key: key, Size: 42}, nil
+func (brandingAssets) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+	return io.NopCloser(bytes.NewReader([]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`))), blobstore.ObjectInfo{Key: key, Size: 42}, nil
 }
-func (brandingAssets) Stat(context.Context, string) (artworkstore.ObjectInfo, error) {
-	return artworkstore.ObjectInfo{}, nil
+func (brandingAssets) Stat(context.Context, string) (blobstore.ObjectInfo, error) {
+	return blobstore.ObjectInfo{}, nil
 }
 func brandingHandler() http.Handler {
 	settings := brandingSettings{branding.KeyServerName: "Synthetic Server", "branding.favicon_ref": "abc.svg", "ui.admin_theme_vars": `{"--primary":"red"}`, "ui.admin_custom_css": "body { color: red; }"}

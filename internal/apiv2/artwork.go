@@ -13,8 +13,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 const (
@@ -30,7 +30,7 @@ type ArtworkRepairService interface {
 
 // NewArtworkHandler shares the signed asset protocol with secondary listeners.
 // It serves only artwork bytes; it does not mount native business operations.
-func NewArtworkHandler(store artworkstore.Store, signer *artworkurl.Signer, repair ArtworkRepairService) http.Handler {
+func NewArtworkHandler(store blobstore.Store, signer *artworkurl.Signer, repair ArtworkRepairService) http.Handler {
 	reg := &Registry{deps: Dependencies{ArtworkStore: store, ArtworkSigner: signer, ArtworkRepair: repair}}
 	return http.HandlerFunc(reg.serveArtwork)
 }
@@ -65,7 +65,7 @@ func (reg *Registry) serveArtwork(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, NewProblem(TypeNotFound, "Artwork not found."))
 		return
 	}
-	if err := artworkstore.ValidateKey(key); err != nil {
+	if err := blobstore.ValidateKey(key); err != nil {
 		writeProblem(w, r, NewProblem(TypeNotFound, "Artwork not found."))
 		return
 	}
@@ -80,7 +80,7 @@ func (reg *Registry) serveArtwork(w http.ResponseWriter, r *http.Request) {
 	}
 	reader, info, err := reg.deps.ArtworkStore.Get(r.Context(), key)
 	if err != nil {
-		if errors.Is(err, artworkstore.ErrNotFound) {
+		if errors.Is(err, blobstore.ErrNotFound) {
 			if artworkkey.Revision(key) != "" && reg.deps.ArtworkRepair != nil {
 				_, _ = reg.deps.ArtworkRepair.EnqueueArtworkRepair(r.Context(), []string{originalRepairKey(key)}, 1)
 			}
@@ -92,7 +92,7 @@ func (reg *Registry) serveArtwork(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = reader.Close() }()
 
-	w.Header().Set("Content-Type", artworkstore.MediaType(key))
+	w.Header().Set("Content-Type", blobstore.MediaType(key))
 	if info.ETag != "" {
 		w.Header().Set("ETag", info.ETag)
 	}

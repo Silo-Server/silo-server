@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 func withURLParam(req *http.Request, key, value string) *http.Request {
@@ -39,10 +39,10 @@ func TestArtworkBackendLocksOnceStorageIsRecorded(t *testing.T) {
 	}
 
 	locked := &fakeServerSettingsStore{values: map[string]string{
-		"artwork.storage_backend":       "local",
-		"s3.public_endpoint":            "https://s3.example",
-		"s3.public_bucket":              "artwork",
-		artworkstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
+		"artwork.storage_backend":    "local",
+		"s3.public_endpoint":         "https://s3.example",
+		"s3.public_bucket":           "artwork",
+		blobstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
 	}}
 	h := &AdminHandler{SettingsRepo: locked}
 	for name, rec := range map[string]*httptest.ResponseRecorder{
@@ -63,9 +63,9 @@ func TestArtworkBackendLocksOnceStorageIsRecorded(t *testing.T) {
 	}
 	// The recorded default is auto when the row was never written.
 	defaulted := &fakeServerSettingsStore{values: map[string]string{
-		"s3.public_endpoint":            "https://s3.example",
-		"s3.public_bucket":              "artwork",
-		artworkstore.IdentitySettingKey: "s3|https://s3.example|artwork|",
+		"s3.public_endpoint":         "https://s3.example",
+		"s3.public_bucket":           "artwork",
+		blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|",
 	}}
 	if rec := putOne(&AdminHandler{SettingsRepo: defaulted}, "artwork.storage_backend", "auto"); rec.Code != http.StatusOK {
 		t.Fatalf("auto on an unset locked row: %d %s", rec.Code, rec.Body.String())
@@ -106,8 +106,8 @@ func TestArtworkIdentityFieldsLockOnceStorageIsRecorded(t *testing.T) {
 
 	local := func() *fakeServerSettingsStore {
 		return &fakeServerSettingsStore{values: map[string]string{
-			"artwork.storage_backend":       "local",
-			artworkstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
+			"artwork.storage_backend":    "local",
+			blobstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
 		}}
 	}
 	conflict(t, "local path", putOne(&AdminHandler{SettingsRepo: local()}, "artwork.local_path", "/srv/artwork"))
@@ -118,7 +118,7 @@ func TestArtworkIdentityFieldsLockOnceStorageIsRecorded(t *testing.T) {
 		`{"values":{"s3.public_endpoint":"https://s3.example","s3.public_bucket":"media"}}`))
 
 	autoLocal := &fakeServerSettingsStore{values: map[string]string{
-		artworkstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
+		blobstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
 	}}
 	conflict(t, "bucket under auto-local", put(&AdminHandler{SettingsRepo: autoLocal},
 		`{"values":{"s3.public_endpoint":"https://s3.example","s3.public_bucket":"media"}}`))
@@ -128,11 +128,11 @@ func TestArtworkIdentityFieldsLockOnceStorageIsRecorded(t *testing.T) {
 
 	s3 := func() *fakeServerSettingsStore {
 		return &fakeServerSettingsStore{values: map[string]string{
-			"artwork.storage_backend":       "s3",
-			"s3.public_endpoint":            "https://s3.example",
-			"s3.public_bucket":              "artwork",
-			"s3.public_key_prefix":          "cache",
-			artworkstore.IdentitySettingKey: "s3|https://s3.example|artwork|cache",
+			"artwork.storage_backend":    "s3",
+			"s3.public_endpoint":         "https://s3.example",
+			"s3.public_bucket":           "artwork",
+			"s3.public_key_prefix":       "cache",
+			blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|cache",
 		}}
 	}
 	for key, value := range map[string]string{
@@ -205,7 +205,7 @@ func TestAdminServerStatusReportsArtworkStorageLock(t *testing.T) {
 	if got := read(fresh); got.Locked || got.Backend != "local" {
 		t.Fatalf("fresh install: %+v", got)
 	}
-	recorded := &AdminHandler{RestartStatus: NewServerRestartStatusTracker(), ArtworkBackend: "s3", SettingsRepo: &fakeServerSettingsStore{values: map[string]string{artworkstore.IdentitySettingKey: "s3|https://s3.example|artwork|"}}}
+	recorded := &AdminHandler{RestartStatus: NewServerRestartStatusTracker(), ArtworkBackend: "s3", SettingsRepo: &fakeServerSettingsStore{values: map[string]string{blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|"}}}
 	if got := read(recorded); !got.Locked || got.Backend != "s3" {
 		t.Fatalf("recorded storage: %+v", got)
 	}

@@ -9,14 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/apiv2"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
 )
 
 func TestCompatibilityListenerServesSignedArtwork(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func (noopABSMounter) Mount(chi.Router) {}
 // The ABS cover handlers redirect to root-relative signed artwork URLs, so the
 // ABS listener must answer them itself.
 func TestAudiobookshelfListenerServesSignedArtwork(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

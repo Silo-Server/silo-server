@@ -1,4 +1,4 @@
-package artworkstore
+package blobstore
 
 import (
 	"context"
@@ -52,10 +52,11 @@ func TestRecordingStoreForwardsMatches(t *testing.T) {
 func TestMatchingRetryRecordsBackendAfterWriteRecordingFailure(t *testing.T) {
 	ctx := context.Background()
 	settings := &flakySettings{testSettings: testSettings{values: map[string]string{}}, fail: true}
-	store, _, err := Open(ctx, Options{Backend: BackendLocal, LocalPath: t.TempDir(), Settings: settings})
+	stores, _, err := Open(ctx, Options{Backend: BackendLocal, LocalPath: t.TempDir(), Settings: settings})
 	if err != nil {
 		t.Fatal(err)
 	}
+	store := stores.Assets
 	if err := store.Put(ctx, "a.webp", []byte("abc")); err == nil {
 		t.Fatal("recording failure was hidden")
 	}

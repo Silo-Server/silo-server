@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -22,12 +22,12 @@ import (
 var ErrArtworkReconcileManualRunRequired = errors.New("artwork storage changed; manual reconcile required")
 
 // ArtworkStorageIdentityKey records the storage the catalog's artwork keys
-// belong to. artworkstore.Open records it on the first write and refuses a
+// belong to. blobstore.Open records it on the first write and refuses a
 // different store at startup; this task certifies it after a manual reconcile
 // so a deliberate move (copy the tree, clear the row, restart) has one record
 // to clear. Machine-managed; not an admin-editable setting.
 const (
-	ArtworkStorageIdentityKey = artworkstore.IdentitySettingKey
+	ArtworkStorageIdentityKey = blobstore.IdentitySettingKey
 	// ArtworkStorageReconcileCheckpointKey holds a machine-managed verify
 	// cursor. It is scoped to both the stored and target identities so a later
 	// storage move can never resume an older location's sweep.

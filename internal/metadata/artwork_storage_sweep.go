@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 )
 
@@ -68,7 +68,7 @@ const artworkStorageSweepAdvisoryLock int64 = 0x53494C4F53574550 // "SILOSWEP"
 // deletion: a bounded, resumable listing.
 type ArtworkStorageLister interface {
 	Delete(ctx context.Context, keys []string) (int, error)
-	List(ctx context.Context, prefix, cursor string, limit int) ([]artworkstore.ObjectInfo, string, error)
+	List(ctx context.Context, prefix, cursor string, limit int) ([]blobstore.ObjectInfo, string, error)
 }
 
 // ArtworkStorageSweepStats summarizes one bounded sweep.
@@ -128,7 +128,7 @@ type artworkObjectKey struct {
 // Returns false for anything that does not decompose, which the caller counts
 // and skips. Refusing to guess is the point: an unrecognized key shape is the
 // one case where deleting could destroy something this code does not model.
-func parseArtworkObjectKey(info artworkstore.ObjectInfo) (artworkObjectKey, bool) {
+func parseArtworkObjectKey(info blobstore.ObjectInfo) (artworkObjectKey, bool) {
 	dir, file := path.Split(info.Key)
 	if dir == "" || file == "" {
 		return artworkObjectKey{}, false
@@ -180,6 +180,14 @@ func (s *ArtworkStorageSweeper) referencedOriginals(ctx context.Context, paths [
 // resume from; an empty token with PrefixDone set means the prefix is finished.
 func (s *ArtworkStorageSweeper) SweepPrefix(ctx context.Context, prefix, token string, maxPages int) (ArtworkStorageSweepStats, error) {
 	stats := ArtworkStorageSweepStats{NextToken: token}
+	// An empty prefix lists the whole store, which on a local backend is one
+	// root shared with subtitles, diagnostic bundles, job artifacts, and
+	// avatars. parseArtworkObjectKey accepts any "a.b.c" filename, so a bundle
+	// named like a revisioned variant would parse as unreferenced artwork and
+	// be deleted. Callers name their prefixes; refuse the unbounded walk.
+	if strings.TrimSpace(prefix) == "" {
+		return stats, fmt.Errorf("artwork storage sweep: refusing to sweep an empty prefix")
+	}
 	if maxPages < 1 {
 		maxPages = 1
 	}

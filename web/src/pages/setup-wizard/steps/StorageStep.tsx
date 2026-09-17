@@ -277,7 +277,7 @@ export function StorageStep() {
   const usesS3 = artworkBackend === "s3" || (artworkBackend === "auto" && publicConfigured);
   const storageParts = [
     redisConfigured ? "Redis" : null,
-    usesS3 ? "S3 artwork" : "Local artwork",
+    usesS3 ? "S3 storage" : "Local storage",
   ].filter(Boolean);
   useStepSummary("storage", storageParts.join(" + "));
 
@@ -286,7 +286,7 @@ export function StorageStep() {
   return (
     <StepFrame
       title="Storage and cache"
-      lede="A single server works without any of this. Add Redis to run more than one node, and an S3 bucket if you want artwork and thumbnails kept somewhere other than this server."
+      lede="A single server works without any of this. Add Redis to run more than one node, and an S3 bucket if you want stored files kept somewhere other than this server."
       onSubmit={handleSubmit}
       busy={busy}
       onSkip={skip}
@@ -294,7 +294,7 @@ export function StorageStep() {
     >
       <StepSection>
         <SettingField
-          label="Artwork storage"
+          label="Storage"
           type="select"
           value={artworkBackend}
           options={[
@@ -305,8 +305,8 @@ export function StorageStep() {
           disabled={artworkLocked}
           description={
             artworkLocked
-              ? "Locked: artwork has already been stored on this backend and cannot be moved."
-              : undefined
+              ? "Locked: files have already been stored on this backend and cannot be moved."
+              : "Where Silo keeps artwork and other library assets."
           }
           onChange={(value) => {
             form.setValue("artwork.storage_backend", value);
@@ -314,7 +314,7 @@ export function StorageStep() {
           }}
         />
         <SettingField
-          label="Local artwork path"
+          label="Local storage path"
           hint="/var/lib/silo/artwork"
           value={form.getValue("artwork.local_path")}
           onChange={(value) => form.setValue("artwork.local_path", value)}

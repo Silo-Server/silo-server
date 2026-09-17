@@ -1,4 +1,4 @@
-package artworkstore
+package blobstore
 
 import (
 	"context"
@@ -243,10 +243,11 @@ func TestOpenLocalDegradedStartupRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Chmod(parent, 0755) }()
-	store, backend, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: filepath.Join(parent, "art")})
+	stores, backend, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: filepath.Join(parent, "art")})
 	if err != nil || backend != BackendLocal {
 		t.Fatalf("open: %s %v", backend, err)
 	}
+	store := stores.Assets
 	if err := store.Probe(context.Background()); err == nil {
 		t.Fatal("unwritable storage reported ready")
 	}

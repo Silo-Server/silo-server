@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // Retry parameters for the bulk-reset UPDATEs below. They run concurrently
@@ -76,7 +76,7 @@ func retryOnDeadlock(ctx context.Context, op func() error) error {
 
 // ArtworkObjectChecker is the storage surface used to verify artwork objects.
 type ArtworkObjectChecker interface {
-	Stat(context.Context, string) (artworkstore.ObjectInfo, error)
+	Stat(context.Context, string) (blobstore.ObjectInfo, error)
 }
 
 // nonProviderImageSchemesSQL mirrors isNonProviderImageScheme for use inside
@@ -757,7 +757,7 @@ func (r *ArtworkCacheReconciler) objectExistsWithRetry(ctx context.Context, key 
 		if err == nil {
 			return true, nil
 		}
-		if errors.Is(err, artworkstore.ErrNotFound) {
+		if errors.Is(err, blobstore.ErrNotFound) {
 			return false, nil
 		}
 		lastErr = err

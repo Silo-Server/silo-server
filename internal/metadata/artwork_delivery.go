@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // ArtworkDeliveryStore reads publication manifests and reconciles delivery on
@@ -55,7 +55,7 @@ func (s *ArtworkDeliveryStore) ArtworkAvailability(ctx context.Context, paths []
 }
 
 type ArtworkDeliveryChecker interface {
-	Stat(context.Context, string) (artworkstore.ObjectInfo, error)
+	Stat(context.Context, string) (blobstore.ObjectInfo, error)
 }
 
 type artworkExternalAvailabilityChecker interface {
@@ -145,7 +145,7 @@ func (s *ArtworkDeliveryStore) verifyRevision(ctx context.Context, checker Artwo
 		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_, err := checker.Stat(probeCtx, key)
 		exists := err == nil
-		if errors.Is(err, artworkstore.ErrNotFound) {
+		if errors.Is(err, blobstore.ErrNotFound) {
 			err = nil
 		}
 		if err == nil && exists && s.external {

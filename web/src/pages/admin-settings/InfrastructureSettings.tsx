@@ -820,7 +820,7 @@ export default function InfrastructureSettings() {
       <SettingsPageHeader title="Storage & Database" className="mb-8" />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Artwork storage" restartAll={restartKeys.has("artwork.storage_backend")}>
+        <FieldGroup label="Storage" restartAll={restartKeys.has("artwork.storage_backend")}>
           <SettingField
             label="Backend"
             type="select"
@@ -834,20 +834,20 @@ export default function InfrastructureSettings() {
             disabled={artworkLocked}
             description={
               artworkLocked
-                ? `Locked to ${artworkStorage?.backend === "s3" ? "S3" : "local disk"}: artwork has been stored here and cannot be moved between backends.`
-                : undefined
+                ? `Locked to ${artworkStorage?.backend === "s3" ? "S3" : "local disk"}: files have been stored here and cannot be moved between backends.`
+                : "Where Silo keeps artwork and other library assets."
             }
             restartRequired={restartKeys.has("artwork.storage_backend")}
           />
           <SettingField
-            label="Local artwork path"
+            label="Local storage path"
             hint="/var/lib/silo/artwork"
             value={form.getValue("artwork.local_path")}
             onChange={(value) => form.setValue("artwork.local_path", value)}
             disabled={artworkLocked}
             description={
               artworkLocked
-                ? "Locked: artwork has been stored here. Mount a volume at this path in Docker."
+                ? "Locked: files have been stored here. Mount a volume at this path in Docker."
                 : "Absolute path on the server. Mount a volume here in Docker."
             }
             restartRequired={restartKeys.has("artwork.local_path")}
