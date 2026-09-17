@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { SettingsSectionEntry } from "@/api/types";
+import { V2ProblemError } from "@/api/v2/request";
 
 import {
   applySectionDeletion,
   canMutateSectionSettings,
   buildSectionOverrides,
   buildProfileGallerySection,
+  canAddAdminOnlyRecipes,
   hydrateRemovedSystemSections,
+  sectionSaveErrorMessage,
   shouldRestoreLatestSaveFailure,
   shouldRestoreSelectionState,
 } from "./HomeScreenSettings";
@@ -183,5 +186,42 @@ describe("HomeScreenSettings helpers", () => {
     expect(shouldRestoreLatestSaveFailure("library:1", "library:1", 3, 3)).toBe(true);
     expect(shouldRestoreLatestSaveFailure("library:1", "library:1", 4, 3)).toBe(false);
     expect(shouldRestoreLatestSaveFailure("library:2", "library:1", 3, 3)).toBe(false);
+  });
+});
+
+describe("HomeScreenSettings custom section permission", () => {
+  it("offers admin-only recipes to admins and to profiles the server allows", () => {
+    expect(canAddAdminOnlyRecipes("admin", false)).toBe(true);
+    expect(canAddAdminOnlyRecipes("admin", undefined)).toBe(true);
+    expect(canAddAdminOnlyRecipes("user", true)).toBe(true);
+  });
+
+  it("withholds admin-only recipes from other profiles, including before the flag loads", () => {
+    expect(canAddAdminOnlyRecipes("user", false)).toBe(false);
+    expect(canAddAdminOnlyRecipes("user", undefined)).toBe(false);
+    expect(canAddAdminOnlyRecipes(undefined, undefined)).toBe(false);
+  });
+
+  it("explains a refused custom section instead of a generic save failure", () => {
+    const refused = new V2ProblemError("replaceProfileSectionOverrides", {
+      type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
+      title: "Permission denied",
+      status: 403,
+      detail: "this server does not allow profiles to build custom sections",
+      instance: "test",
+    });
+    const invalid = new V2ProblemError("replaceProfileSectionOverrides", {
+      type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+      title: "Invalid",
+      status: 422,
+      detail: "library_ids: at least one",
+      instance: "test",
+    });
+
+    expect(sectionSaveErrorMessage(refused)).toBe(
+      "This server does not allow profiles to build custom sections. Ask an admin to allow them.",
+    );
+    expect(sectionSaveErrorMessage(invalid)).toBe("Failed to save section changes");
+    expect(sectionSaveErrorMessage(new Error("network"))).toBe("Failed to save section changes");
   });
 });
