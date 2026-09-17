@@ -193,11 +193,16 @@ export function canAddAdminOnlyRecipes(
   return role === "admin" || allowProfileCustomSections === true;
 }
 
+/**
+ * A permission denial carries its cause in the detail: the custom-sections
+ * refusal and the demo-mode gate both answer 403 permission_denied.
+ */
 export function sectionSaveErrorMessage(error: unknown): string {
-  if (error instanceof V2ProblemError && error.problemType === "permission_denied") {
-    return "This server does not allow profiles to build custom sections. Ask an admin to allow them.";
-  }
-  return "Failed to save section changes";
+  const detail =
+    error instanceof V2ProblemError && error.problemType === "permission_denied"
+      ? error.problem.detail?.trim()
+      : undefined;
+  return detail ? `Failed to save section changes: ${detail}` : "Failed to save section changes";
 }
 
 export default function HomeScreenSettings() {

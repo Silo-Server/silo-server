@@ -202,7 +202,7 @@ describe("HomeScreenSettings custom section permission", () => {
     expect(canAddAdminOnlyRecipes(undefined, undefined)).toBe(false);
   });
 
-  it("explains a refused custom section instead of a generic save failure", () => {
+  it("explains a permission denial with the server's stated cause", () => {
     const refused = new V2ProblemError("replaceProfileSectionOverrides", {
       type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
       title: "Permission denied",
@@ -218,8 +218,19 @@ describe("HomeScreenSettings custom section permission", () => {
       instance: "test",
     });
 
+    const demo = new V2ProblemError("replaceProfileSectionOverrides", {
+      type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
+      title: "Permission denied",
+      status: 403,
+      detail: "This action is not available in demo mode.",
+      instance: "test",
+    });
+
     expect(sectionSaveErrorMessage(refused)).toBe(
-      "This server does not allow profiles to build custom sections. Ask an admin to allow them.",
+      "Failed to save section changes: this server does not allow profiles to build custom sections",
+    );
+    expect(sectionSaveErrorMessage(demo)).toBe(
+      "Failed to save section changes: This action is not available in demo mode.",
     );
     expect(sectionSaveErrorMessage(invalid)).toBe("Failed to save section changes");
     expect(sectionSaveErrorMessage(new Error("network"))).toBe("Failed to save section changes");
