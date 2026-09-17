@@ -203,6 +203,9 @@ const AUTOPLAY_RETRY_DELAY_MS = 400;
 // Mouse clicks on the video surface wait this long for a second click
 // (fullscreen toggle) before toggling play/pause.
 const DOUBLE_CLICK_WINDOW_MS = 250;
+// Upper bound on how long after a fired single click a browser-recognized
+// second click (event.detail === 2) still reverts that click's play/pause.
+const SLOW_DOUBLE_CLICK_MAX_MS = 1_000;
 const MAX_AUTOPLAY_ATTEMPTS = 4;
 
 interface PlaybackNoticeState {
@@ -1936,6 +1939,7 @@ export function VideoPlayer({
   const isCoarsePointer = useCoarsePointer();
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfaceTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const singleClickFiredAtRef = useRef(0);
 
   const clearControlsTimer = useCallback(() => {
     if (hideTimerRef.current) {
@@ -2426,19 +2430,27 @@ export function VideoPlayer({
         // Mouse: single click toggles play/pause, double click toggles
         // fullscreen. Play/pause is deferred so a fast double click doesn't
         // pause and immediately resume before entering fullscreen. The
-        // browser's own click count (event.detail) is honored too, so a
-        // double click slower than our window but inside the user's
-        // OS-configured interval still reaches fullscreen instead of
-        // toggling playback a second time.
-        const isBrowserDoubleClick = (event?.detail ?? 0) >= 2;
-        if (surfaceTapTimerRef.current || isBrowserDoubleClick) {
-          if (surfaceTapTimerRef.current) clearTimeout(surfaceTapTimerRef.current);
-          surfaceTapTimerRef.current = null;
+        // browser's own click count (event.detail) is honored too: a double
+        // click slower than our window but inside the user's OS-configured
+        // interval reverts the play/pause that already fired, and clicks
+        // beyond the second in one sequence are ignored.
+        const clickCount = event?.detail ?? 1;
+        if (clickCount >= 3) return;
+        if (clickCount === 2 || surfaceTapTimerRef.current) {
+          if (surfaceTapTimerRef.current) {
+            clearTimeout(surfaceTapTimerRef.current);
+            surfaceTapTimerRef.current = null;
+          } else if (Date.now() - singleClickFiredAtRef.current < SLOW_DOUBLE_CLICK_MAX_MS) {
+            handlePlayPause();
+          }
+          singleClickFiredAtRef.current = 0;
           handleFullscreenToggle();
           return;
         }
+        singleClickFiredAtRef.current = 0;
         surfaceTapTimerRef.current = setTimeout(() => {
           surfaceTapTimerRef.current = null;
+          singleClickFiredAtRef.current = Date.now();
           handlePlayPause();
         }, DOUBLE_CLICK_WINDOW_MS);
         return;

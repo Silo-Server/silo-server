@@ -247,15 +247,20 @@ describe("VideoPlayer plan failure recovery", () => {
       expect(pause).toHaveBeenCalledOnce();
 
       // A double click slower than our window but recognized by the browser
-      // (event.detail === 2) still toggles fullscreen without a second
-      // play/pause toggle.
+      // (event.detail === 2) reverts the play/pause that already fired and
+      // toggles fullscreen.
       fireEvent.click(video, { detail: 1 });
       act(() => vi.advanceTimersByTime(250));
       expect(pause).toHaveBeenCalledTimes(2);
       fireEvent.click(video, { detail: 2 });
       expect(requestFullscreen).toHaveBeenCalledTimes(2);
+      expect(pause).toHaveBeenCalledTimes(3);
+
+      // The third click of a triple click is ignored.
+      fireEvent.click(video, { detail: 3 });
       act(() => vi.advanceTimersByTime(250));
-      expect(pause).toHaveBeenCalledTimes(2);
+      expect(requestFullscreen).toHaveBeenCalledTimes(2);
+      expect(pause).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
