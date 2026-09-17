@@ -73,7 +73,7 @@ const MetadataImageWorkersSettingKey = "metadata.image_workers"
 //
 //nolint:goconst
 var adminSettingDefaults = map[string]string{
-	"auth.access_token_expiry":  "8h",
+	"auth.access_token_expiry":  defaultAccessTokenExpiryText,
 	"auth.refresh_token_expiry": "30d",
 	"server.log_level":          "info",
 	"server.log_quiet":          "",

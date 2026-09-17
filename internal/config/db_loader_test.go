@@ -7,6 +7,35 @@ import (
 	"time"
 )
 
+func TestAccessTokenExpiryDefaultsAndOverrides(t *testing.T) {
+	if got := setDefaults().Auth.AccessTokenExpiry; got != "24h" {
+		t.Fatalf("bootstrap access expiry = %q, want 24h", got)
+	}
+	for _, stored := range []string{"", "1h", "8h", "12h", "48h"} {
+		t.Run("stored="+stored, func(t *testing.T) {
+			values := map[string]string{"auth.access_token_expiry": stored}
+			want := stored
+			if want == "" {
+				want = "24h"
+			}
+			cfg, err := LoadFromDB(values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			duration, err := time.ParseDuration(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Auth.AccessTokenExpiry != duration {
+				t.Fatalf("runtime access expiry = %s, want %s", cfg.Auth.AccessTokenExpiry, duration)
+			}
+			if got := EffectiveAdminSettings(values)["auth.access_token_expiry"]; got != want {
+				t.Fatalf("admin access expiry = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestLoadFromDBMetadataPresignExpiry(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{})
 	if err != nil {

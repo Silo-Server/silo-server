@@ -376,7 +376,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// Auth
 	cfg.Auth.JWTSecret = stringOr(m, "auth.jwt_secret", "")
-	accessTokenExpiry, err := durationOr(m, "auth.access_token_expiry", 8*time.Hour)
+	accessTokenExpiry, err := durationOr(m, "auth.access_token_expiry", 24*time.Hour)
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,8 @@ const ArtworkBackendAuto = "auto"
 
 const artworkBackendAuto = ArtworkBackendAuto
 
+const defaultAccessTokenExpiryText = "24h"
+
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
 	Listen    string `yaml:"listen"`
@@ -532,7 +534,7 @@ func setDefaults() *configRaw {
 			Backend: "memory",
 		},
 		Auth: authConfigRaw{
-			AccessTokenExpiry:  "8h",
+			AccessTokenExpiry:  defaultAccessTokenExpiryText,
 			RefreshTokenExpiry: "30d",
 		},
 		JellyfinCompat: jellyfinCompatConfigRaw{
