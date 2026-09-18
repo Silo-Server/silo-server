@@ -155,6 +155,18 @@ export function useDownloadedSubtitles(mediaFileId: number | undefined) {
   });
 }
 
+/**
+ * Whether this server can search online subtitle providers. Callers should hide
+ * online search only when the server explicitly answers `enabled: false`; an
+ * unresolved or failed probe (e.g. an older server) fails open.
+ */
+export function useSubtitleProviderStatus() {
+  return useQuery({
+    queryKey: subtitleKeys.providerStatus(),
+    queryFn: () => v2("GET /api/v2/subtitles/providers/status"),
+  });
+}
+
 // Subtitle preferences feed the effective defaults on item details; a
 // series-keyed preference feeds every episode's detail, so invalidate broadly.
 function invalidateItemDetails(queryClient: ReturnType<typeof useQueryClient>): Promise<unknown> {

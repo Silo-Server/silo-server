@@ -64,6 +64,7 @@ export function SubtitleMenu({
   const [translateOpen, setTranslateOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiTranscribeEnabled, setAiTranscribeEnabled] = useState(false);
+  const [onlineSearchEnabled, setOnlineSearchEnabled] = useState(true);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -86,6 +87,28 @@ export function SubtitleMenu({
         if (cancelled) return;
         setAiEnabled(false);
         setAiTranscribeEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerConfig]);
+
+  // Online subtitle search is likewise a server-wide capability. Unlike AI this
+  // fails open: only an explicit enabled:false hides it, so older servers and
+  // probe failures keep today's behavior. Manual upload never depends on it.
+  useEffect(() => {
+    if (!playerConfig) return;
+    // A previous server's answer must not hide search on this one.
+    setOnlineSearchEnabled(true);
+    let cancelled = false;
+    playerV2(playerConfig, "GET /api/v2/subtitles/providers/status", {})
+      .then((res) => {
+        if (cancelled) return;
+        setOnlineSearchEnabled(res?.enabled !== false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOnlineSearchEnabled(true);
       });
     return () => {
       cancelled = true;
@@ -314,7 +337,7 @@ export function SubtitleMenu({
                   setOpen(false);
                 }}
               >
-                Search Online…
+                Add Subtitles…
               </button>
             )}
             {mediaFileId &&
@@ -366,6 +389,7 @@ export function SubtitleMenu({
             mediaFileId={mediaFileId}
             playerConfig={playerConfig}
             isOpen={searchOpen}
+            onlineSearchEnabled={onlineSearchEnabled}
             onClose={() => setSearchOpen(false)}
             onSubtitleDownloaded={() => {
               setSearchOpen(false);

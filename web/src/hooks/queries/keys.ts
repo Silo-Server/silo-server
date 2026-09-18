@@ -297,6 +297,7 @@ export const ratingKeys = {
 export const subtitleKeys = {
   all: ["subtitles"] as const,
   downloaded: (mediaFileId: number) => ["subtitles", "downloaded", mediaFileId] as const,
+  providerStatus: () => ["subtitles", "provider-status"] as const,
 };
 
 export const recKeys = {
