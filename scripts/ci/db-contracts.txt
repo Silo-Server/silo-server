@@ -487,3 +487,7 @@
 # The Jellyfin play-session lifetime moves from the old 6h seed to 24h and
 # keeps a value an administrator chose.
 ./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres
+
+# The artwork reconcile sweep leaves bundled app-relative collection posters
+# alone: it neither checks them against storage nor counts them as errors.
+./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
