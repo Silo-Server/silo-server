@@ -96,7 +96,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots []string) ([
 			}
 		}
 		if statErr == nil {
-			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, &scan.files, &scan.walkFailures); err != nil {
+			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, nil, &scan.files, &scan.walkFailures); err != nil {
 				return nil, err
 			}
 		}

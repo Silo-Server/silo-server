@@ -22,7 +22,7 @@ func TestParsePodcastShow(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	got, err := parsePodcastShow(ctx, ffprobePath, "testdata/podcast_fixtures/show_a")
+	got, err := parsePodcastShow(ctx, ffprobePath, "testdata/podcast_fixtures/show_a", nil)
 	if err != nil {
 		t.Fatalf("parsePodcastShow: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
 		t.Fatalf("mkdir nested: %v", err)
 	}
 
-	got, err := listPodcastShowAudioFiles(root)
+	got, err := listPodcastShowAudioFiles(root, nil)
 	if err != nil {
 		t.Fatalf("listPodcastShowAudioFiles: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
 }
 
 func TestListPodcastShowAudioFilesReturnsNoMediaForEmptyShow(t *testing.T) {
-	_, err := listPodcastShowAudioFiles(t.TempDir())
+	_, err := listPodcastShowAudioFiles(t.TempDir(), nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("empty podcast show error = %v, want errFolderHasNoMedia", err)
 	}
@@ -141,7 +141,7 @@ func TestListPodcastShowAudioFilesReturnsNoMediaForEmptyShow(t *testing.T) {
 func TestListPodcastShowAudioFilesVanishedShowSignalsNoMedia(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "renamed-away")
 
-	_, err := listPodcastShowAudioFiles(gone)
+	_, err := listPodcastShowAudioFiles(gone, nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("vanished show error = %v, want errFolderHasNoMedia", err)
 	}

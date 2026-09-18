@@ -216,9 +216,12 @@ func (r *audiobookRootScan) failed() bool {
 // walkAudiobookDirectories keeps catalog paths under the configured root while
 // following directory symlinks. Only ancestors are tracked: aliases must retain
 // their own seen paths so missing-file reconciliation does not retire them.
-func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookRootScan, ancestors map[string]bool) error {
+func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookRootScan, ancestors map[string]bool, ignoreRulesStack []ignoreRules) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if ignoreRulesMatch(ignoreRulesStack, path) {
+		return nil
 	}
 	recordFailure := func(err error) {
 		recordWalkFailure(&scan.walkFailures, path)
@@ -239,6 +242,10 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 		recordFailure(err)
 		return nil
 	}
+	if dirHasIgnoreMarker(entries) {
+		return nil
+	}
+	childRules := childIgnoreRules(ignoreRulesStack, path, path, entries)
 	directories := make([]string, 0)
 	hadAudio := false
 	for _, entry := range entries {
@@ -259,6 +266,9 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 		if isDir {
 			directories = append(directories, child)
 		} else if SupportsAudioFile(entry.Name()) {
+			if ignoreRulesMatch(childRules, child) {
+				continue
+			}
 			scan.seenPaths[child] = true
 			hadAudio = true
 		}
@@ -271,7 +281,7 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 		}
 	}
 	for _, directory := range directories {
-		if err := walkAudiobookDirectories(ctx, directory, scan, ancestors); err != nil {
+		if err := walkAudiobookDirectories(ctx, directory, scan, ancestors, childRules); err != nil {
 			return err
 		}
 	}
@@ -300,7 +310,7 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string
 			scan.rootErr = fmt.Errorf("root is not a directory after symlink resolution")
 		}
 		if statErr == nil && scan.rootErr == nil {
-			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool))
+			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool), nil)
 			if walkErr != nil {
 				if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
 					return nil, walkErr

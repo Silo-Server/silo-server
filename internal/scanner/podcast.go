@@ -31,10 +31,15 @@ type parsedPodcastEpisode struct {
 // per-episode titles surface correctly.
 //
 // Returns an errFolderHasNoMedia-wrapped error if the folder contains zero
-// audio files. Every other error (including an ffprobe binary that cannot be
-// executed) is a real failure and must be reported by the caller.
-func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string) (*parsedPodcastShow, error) {
-	audioFiles, err := listPodcastShowAudioFiles(folderPath)
+// audible episodes or is skipped by an ignore marker. Every other error
+// (including an ffprobe binary that cannot be executed) is a real failure and
+// must be reported by the caller.
+//
+// inheritedRules are the applicable .siloignore rules from the walk ancestors;
+// the show folder's own .siloignore, if any, stacks on top of them and both
+// sets are evaluated against each episode file.
+func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string, inheritedRules []ignoreRules) (*parsedPodcastShow, error) {
+	audioFiles, err := listPodcastShowAudioFiles(folderPath, inheritedRules)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +77,7 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 	return show, nil
 }
 
-func listPodcastShowAudioFiles(folderPath string) ([]string, error) {
+func listPodcastShowAudioFiles(folderPath string, inheritedRules []ignoreRules) ([]string, error) {
 	entries, err := os.ReadDir(folderPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -82,13 +87,27 @@ func listPodcastShowAudioFiles(folderPath string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("read podcast folder %s: %w", folderPath, err)
 	}
+	if dirHasIgnoreMarker(entries) {
+		// A .ignore/.nomedia marker means the show folder (and its contents)
+		// are ignored; treat it as an empty show so the caller skips instead
+		// of failing.
+		return nil, fmt.Errorf("podcast show %s: %w", folderPath, errFolderHasNoMedia)
+	}
+	// basePath is folderPath itself: show-local patterns match episode
+	// filenames relative to the show folder, and inherited root rules match
+	// nested paths such as Show/file.mp3.
+	rules := childIgnoreRules(inheritedRules, folderPath, folderPath, entries)
 	var audioFiles []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		if SupportsAudioFile(entry.Name()) {
-			audioFiles = append(audioFiles, filepath.Join(folderPath, entry.Name()))
+			audioPath := filepath.Join(folderPath, entry.Name())
+			if ignoreRulesMatch(rules, audioPath) {
+				continue
+			}
+			audioFiles = append(audioFiles, audioPath)
 		}
 	}
 	if len(audioFiles) == 0 {
