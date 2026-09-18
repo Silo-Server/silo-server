@@ -344,6 +344,10 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 		}
 	}
 
+	if err := seedCanonicalUserCollectionsGroup(ctx, tx, folder.ID); err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing create transaction: %w", err)
 	}
