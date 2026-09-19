@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -39,13 +40,25 @@ func (r *fakeSignalRepo) GetRewatchCounts(context.Context, int, string) ([]Rewat
 	return r.fallbackRewatches, nil
 }
 
-func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(_ context.Context, contentIDs []string) (map[string]struct{}, error) {
-	set := make(map[string]struct{}, len(contentIDs))
+func (r *fakeSignalRepo) ResolveCanonicalItemIDs(_ context.Context, contentIDs []string) (map[string]string, error) {
+	resolved := make(map[string]string, len(contentIDs))
 	for _, id := range contentIDs {
 		if canonical, ok := r.canonical[id]; ok {
-			set[canonical] = struct{}{}
+			resolved[id] = canonical
 			continue
 		}
+		resolved[id] = id
+	}
+	return resolved, nil
+}
+
+func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error) {
+	resolved, err := r.ResolveCanonicalItemIDs(ctx, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(resolved))
+	for _, id := range resolved {
 		set[id] = struct{}{}
 	}
 	return set, nil
@@ -115,6 +128,43 @@ func (s *fakeSignalStore) ListProgress(_ context.Context, profileID, status stri
 		end = len(filtered)
 	}
 	return filtered[offset:end], nil
+}
+
+func (s *fakeSignalStore) ListProgressPage(ctx context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
+	rows, err := s.ListProgress(ctx, profileID, status, len(s.progress), 0)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(rows, func(a, b userstore.WatchProgress) int {
+		left, right := parseSignalTime(a.UpdatedAt, time.Time{}), parseSignalTime(b.UpdatedAt, time.Time{})
+		if !left.Equal(right) {
+			if left.After(right) {
+				return -1
+			}
+			return 1
+		}
+		if a.MediaItemID > b.MediaItemID {
+			return -1
+		}
+		if a.MediaItemID < b.MediaItemID {
+			return 1
+		}
+		return 0
+	})
+	result := make([]userstore.WatchProgress, 0, limit)
+	for _, row := range rows {
+		if after != nil {
+			updated, boundary := parseSignalTime(row.UpdatedAt, time.Time{}), parseSignalTime(after.UpdatedAt, time.Time{})
+			if updated.After(boundary) || (updated.Equal(boundary) && row.MediaItemID >= after.MediaItemID) {
+				continue
+			}
+		}
+		result = append(result, row)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result, nil
 }
 
 func (s *fakeSignalStore) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
@@ -260,6 +310,60 @@ func TestSignalReaderRecentCompletedUsesStoreUpdatedOrder(t *testing.T) {
 	}
 }
 
+func TestSignalReaderRecentCompletedCanonicalizesBeforeDedupAndLimit(t *testing.T) {
+	store := &fakeSignalStore{progress: []userstore.WatchProgress{
+		{ProfileID: "p1", MediaItemID: "episode-a2", Completed: true, UpdatedAt: "2026-08-05T10:00:00Z"},
+		{ProfileID: "p1", MediaItemID: "episode-a1", Completed: true, UpdatedAt: "2026-08-04T10:00:00Z"},
+		{ProfileID: "p1", MediaItemID: "movie-b", Completed: true, UpdatedAt: "2026-08-03T10:00:00Z"},
+		{ProfileID: "p1", MediaItemID: "episode-c1", Completed: true, UpdatedAt: "2026-08-02T10:00:00Z"},
+	}}
+	repo := &fakeSignalRepo{canonical: map[string]string{
+		"episode-a2": "series-a",
+		"episode-a1": "series-a",
+		"episode-c1": "series-c",
+	}}
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+
+	ids, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 3)
+	if err != nil {
+		t.Fatalf("RecentCompletedItemIDs returned error: %v", err)
+	}
+	want := []string{"series-a", "movie-b", "series-c"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("recent completed = %#v, want %#v", ids, want)
+	}
+}
+
+func TestSignalReaderRecentCompletedPagesUntilDistinctLimitIsFilled(t *testing.T) {
+	progress := make([]userstore.WatchProgress, 0, signalPageSize+2)
+	canonical := make(map[string]string, signalPageSize)
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < signalPageSize; i++ {
+		id := fmt.Sprintf("episode-a-%04d", i)
+		progress = append(progress, userstore.WatchProgress{
+			ProfileID: "p1", MediaItemID: id, Completed: true,
+			UpdatedAt: base.Add(-time.Duration(i) * time.Second).Format(time.RFC3339Nano),
+		})
+		canonical[id] = "series-a"
+	}
+	progress = append(progress,
+		userstore.WatchProgress{ProfileID: "p1", MediaItemID: "movie-b", Completed: true, UpdatedAt: base.Add(-2000 * time.Second).Format(time.RFC3339Nano)},
+		userstore.WatchProgress{ProfileID: "p1", MediaItemID: "movie-c", Completed: true, UpdatedAt: base.Add(-2001 * time.Second).Format(time.RFC3339Nano)},
+	)
+
+	reader := NewSignalReader(
+		&fakeSignalRepo{canonical: canonical},
+		fakeSignalProvider{store: &fakeSignalStore{progress: progress}},
+	)
+	ids, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 3)
+	if err != nil {
+		t.Fatalf("RecentCompletedItemIDs returned error: %v", err)
+	}
+	if want := []string{"series-a", "movie-b", "movie-c"}; !slices.Equal(ids, want) {
+		t.Fatalf("recent completed = %#v, want %#v", ids, want)
+	}
+}
+
 func TestSignalReaderRecentCompletedIncludesEbookReaderProgress(t *testing.T) {
 	store := &fakeSignalStore{progress: []userstore.WatchProgress{
 		{ProfileID: "p1", MediaItemID: "movie", Completed: true, UpdatedAt: "2026-06-01T10:00:00Z"},
@@ -342,5 +446,27 @@ func TestProfileAccessFilterUsesStoredStableProfileRestrictions(t *testing.T) {
 	}
 	if filter.DisabledLibraryIDs != nil {
 		t.Fatalf("DisabledLibraryIDs should remain request-time only, got %#v", filter.DisabledLibraryIDs)
+	}
+}
+
+func TestSignalReaderRecentCompletedResolvesTiesAcrossPages(t *testing.T) {
+	const updated = "2026-08-10T12:00:00Z"
+	progress := make([]userstore.WatchProgress, 0, signalPageSize+1)
+	canonical := make(map[string]string, signalPageSize+1)
+	for i := 0; i < signalPageSize; i++ {
+		id := fmt.Sprintf("z-episode-%04d", i)
+		progress = append(progress, userstore.WatchProgress{ProfileID: "p1", MediaItemID: id, Completed: true, UpdatedAt: updated})
+		canonical[id] = "series-z"
+	}
+	// This leaf sorts after the entire first page, but its series wins the canonical tie.
+	progress = append(progress, userstore.WatchProgress{ProfileID: "p1", MediaItemID: "a-episode", Completed: true, UpdatedAt: updated})
+	canonical["a-episode"] = "series-a"
+	reader := NewSignalReader(&fakeSignalRepo{canonical: canonical}, fakeSignalProvider{store: &fakeSignalStore{progress: progress}})
+	got, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"series-a"}; !slices.Equal(got, want) {
+		t.Fatalf("recent completed = %v, want %v", got, want)
 	}
 }
