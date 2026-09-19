@@ -630,7 +630,7 @@ func reportAudiobookScanProgress(ctx context.Context, folderID int, total, proce
 }
 
 func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, skipped *int64) error {
-	existingContentID, isUnchanged, skipErr := s.audiobookFolderShouldSkip(ctx, folder, folderPath)
+	_, isUnchanged, skipErr := s.audiobookFolderShouldSkip(ctx, folder, folderPath)
 	if skipErr != nil {
 		slog.WarnContext(ctx, "audiobook scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
@@ -638,10 +638,8 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 			"error", skipErr,
 		)
 	} else if isUnchanged {
-		// Unchanged files still get the link repair, matching the ebook scan:
-		// a linked item short-circuits on one cheap lookup, while an item that
-		// predates the linker (or whose link failed) is repaired here.
-		s.autoLinkLiteraryWork(ctx, existingContentID)
+		// Linking runs when either format is added or its metadata changes.
+		// An unchanged, unlinked book must not repeat the candidate search.
 		atomic.AddInt64(skipped, 1)
 		return nil
 	}

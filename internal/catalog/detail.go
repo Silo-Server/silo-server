@@ -108,6 +108,10 @@ type WorkSummaryProvider interface {
 	GetSummaryForContentID(ctx context.Context, contentID string, filter AccessFilter) (*WorkSummary, error)
 }
 
+type LiteraryWorkLinker interface {
+	AutoLinkContent(ctx context.Context, contentID string) (string, bool, error)
+}
+
 type WorkSummaryBatchProvider interface {
 	ListSummariesForContentIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]*WorkSummary, error)
 }
@@ -682,6 +686,7 @@ type DetailService struct {
 	imageResolver     ImageResolver
 	userStoreProvider userstore.UserStoreProvider
 	workSummary       WorkSummaryProvider
+	workLinker        LiteraryWorkLinker
 	originalLangFn    func(context.Context, string) string
 	probeEnsurer      PlaybackProbeEnsurer
 	copySafetyRacer   CopySafetyRacer
@@ -729,6 +734,10 @@ func (s *DetailService) SetWorkSummaryProvider(provider WorkSummaryProvider) {
 	if s != nil {
 		s.workSummary = provider
 	}
+}
+
+func (s *DetailService) SetLiteraryWorkLinker(linker LiteraryWorkLinker) {
+	s.workLinker = linker
 }
 
 func (s *DetailService) SetProbeEnsurer(ensurer PlaybackProbeEnsurer) {

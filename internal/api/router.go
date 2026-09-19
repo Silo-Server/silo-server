@@ -733,12 +733,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		rootClaimRepo := catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo := catalog.NewGroupClaimRepository(deps.DB)
 		literaryRepo := literaryworks.NewRepository(deps.DB)
-		literaryWorkHandler = &handlers.LiteraryWorkHandler{Service: literaryworks.NewService(literaryRepo)}
+		literaryService := literaryworks.NewService(literaryRepo)
+		literaryWorkHandler = &handlers.LiteraryWorkHandler{Service: literaryService}
 		detailSvc = catalog.NewDetailService(itemRepo, episodeRepo, seasonRepo, deps.PersonRepo, fileFetcher)
 		detailSvc.SetFolderRepository(folderRepo)
 		detailSvc.SetRootClaimRepository(rootClaimRepo)
 		detailSvc.SetGroupClaimRepository(groupClaimRepo)
 		detailSvc.SetWorkSummaryProvider(literaryRepo)
+		detailSvc.SetLiteraryWorkLinker(literaryService)
 		detailSvc.SetProbeEnsurer(deps.ProbeEnsurer)
 		detailSvc.SetChapterThumbnailQueuer(deps.ChapterThumbnailQueuer)
 		if deps.ImageResolver != nil {
