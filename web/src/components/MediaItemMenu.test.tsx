@@ -1126,6 +1126,7 @@ describe("MediaItemMenu long-press action sheet", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    document.documentElement.removeAttribute("data-fine-pointer");
   });
 
   it("opens the sheet with the full action set after a touch hold", () => {
@@ -1205,14 +1206,10 @@ describe("MediaItemMenu long-press action sheet", () => {
   });
 
   it("keeps long press while omitting desktop-only shortcut trees on coarse-pointer devices", () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn(() => ({
-        matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    );
+    // A coarse-pointer device is now declared by the published capability
+    // rather than by the media query: the component follows the pointer that
+    // was actually observed, because the query is unreliable on hybrids.
+    document.documentElement.setAttribute("data-fine-pointer", "false");
 
     render(<LongPressCard />);
 
