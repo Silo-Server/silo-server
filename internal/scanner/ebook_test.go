@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -76,6 +77,7 @@ func TestScannerEbookEnrichmentReconciliationIsBoundedAndNonFatal(t *testing.T) 
 		nil,
 		nil,
 		true,
+		catalog.ScanWarning{},
 	); err != nil {
 		t.Fatalf("reconcileEbookScan() error = %v", err)
 	}

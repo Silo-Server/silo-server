@@ -1160,6 +1160,50 @@ func (r *FolderRepository) SetScanWarning(ctx context.Context, id int, code, mes
 	return nil
 }
 
+// ScanWarning identifies the warning observed by a scan before it walks a folder.
+type ScanWarning struct {
+	Code    *string
+	Message *string
+	At      *time.Time
+}
+
+// GetScanWarning captures warning identity, including the absence of a warning.
+func (r *FolderRepository) GetScanWarning(ctx context.Context, id int) (ScanWarning, error) {
+	var warning ScanWarning
+	err := r.pool.QueryRow(ctx, `
+		SELECT scan_warning_code, scan_warning_message, scan_warning_at
+		FROM media_folders WHERE id = $1`, id).Scan(&warning.Code, &warning.Message, &warning.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ScanWarning{}, ErrFolderNotFound
+	}
+	if err != nil {
+		return ScanWarning{}, fmt.Errorf("reading scan warning: %w", err)
+	}
+	return warning, nil
+}
+
+// UpdateScanWarningIfUnchanged leaves warnings from overlapping scans untouched.
+// An empty replacement clears the warning and its one-shot cleanup allowance;
+// changing a message retains that allowance. Identity avoids relying on clocks
+// being synchronized between scanning nodes. A changed warning is a normal no-op.
+func (r *FolderRepository) UpdateScanWarningIfUnchanged(ctx context.Context, id int, expected, replacement ScanWarning) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_folders
+		SET scan_warning_code = $2,
+			scan_warning_message = $3,
+			scan_warning_at = $4,
+			allow_empty_cleanup_once = CASE WHEN $2::text IS NULL THEN false ELSE allow_empty_cleanup_once END
+		WHERE id = $1
+			AND scan_warning_code IS NOT DISTINCT FROM $5::text
+			AND scan_warning_message IS NOT DISTINCT FROM $6::text
+			AND scan_warning_at IS NOT DISTINCT FROM $7::timestamptz`,
+		id, replacement.Code, replacement.Message, replacement.At, expected.Code, expected.Message, expected.At)
+	if err != nil {
+		return fmt.Errorf("updating unchanged scan warning: %w", err)
+	}
+	return nil
+}
+
 // ClearScanWarning clears any scan warning state and resets one-shot cleanup confirmation.
 func (r *FolderRepository) ClearScanWarning(ctx context.Context, id int) error {
 	tag, err := r.pool.Exec(ctx,

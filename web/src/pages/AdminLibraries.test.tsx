@@ -228,6 +228,33 @@ describe("AdminLibraries", () => {
     );
   });
 
+  it("shows the partial-walk failure count without offering cleanup", () => {
+    mocks.useAdminLibraries.mockReturnValue({
+      data: [
+        {
+          id: 2,
+          name: "Ebooks",
+          paths: ["/media/ebooks"],
+          type: "ebooks",
+          enabled: true,
+          last_scanned_at: null,
+          scan_warning_code: "partial_walk",
+          scan_warning_at: null,
+          scan_warning_message:
+            "Scan could not read or resolve 3 paths; some files were not scanned.",
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Partial scan");
+    expect(markup).toContain("Scan could not read or resolve 3 paths");
+    expect(markup).not.toContain("Confirm Cleanup");
+    expect(markup).not.toContain("Confirm Empty-Root Cleanup");
+  });
+
   it("offers confirmed cleanup for a suspect-empty dead-root warning", () => {
     mocks.useAdminLibraries.mockReturnValue({
       data: [

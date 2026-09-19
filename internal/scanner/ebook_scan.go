@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -96,7 +97,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots []string) ([
 			}
 		}
 		if statErr == nil {
-			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, &scan.files, &scan.walkFailures); err != nil {
+			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, &scan.files, &scan.walkFailures, os.ReadDir); err != nil {
 				return nil, err
 			}
 		}
@@ -135,6 +136,10 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	if s == nil || folder == nil {
 		return fmt.Errorf("scanEbookPaths: nil scanner or folder")
 	}
+	warning, err := s.scanWarningBeforeWalk(ctx, folder.ID, fullScan)
+	if err != nil {
+		return err
+	}
 	scans, err := collectEbookRootScans(ctx, folder.ID, roots)
 	if err != nil {
 		return err
@@ -148,7 +153,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	if len(candidates) == 0 {
-		return s.reconcileEbookScan(ctx, folder, scans, nil, fullScan)
+		return s.reconcileEbookScan(ctx, folder, scans, nil, fullScan, warning)
 	}
 
 	workers := ebookScanWorkers()
@@ -251,7 +256,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	for _, p := range candidates {
 		seenPaths[p] = true
 	}
-	return s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan)
+	return s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan, warning)
 }
 
 // ebookCleanupGuardRepo is the slice of catalog.FolderRepository the
@@ -367,9 +372,25 @@ func (s *Scanner) emptyCleanupDecision(
 
 // reconcileEbookScan applies the post-walk safety policy and then performs
 // missing-file reconciliation for the roots that walked cleanly.
-func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool) error {
+func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool, warning catalog.ScanWarning) error {
 	if folder != nil {
 		defer s.reconcileMissingEbookEnrichment(ctx, folder.ID)
+	}
+	walkFailures := 0
+	var protectedRoots []string
+	for _, scan := range scans {
+		walkFailures += len(scan.walkFailures)
+		if scan.rootErr != nil {
+			walkFailures++
+		}
+		if scan.failed() {
+			protectedRoots = append(protectedRoots, scan.root)
+		}
+	}
+	// Set this before cleanup so stronger empty/dead-root warnings take
+	// precedence. A partial inventory must never clear its warning below.
+	if err := s.setPartialWalkWarning(ctx, folder.ID, walkFailures, !fullScan); err != nil {
+		return err
 	}
 	reconcileRoots, _ := splitEbookReconcileRoots(scans)
 	if len(reconcileRoots) == 0 {
@@ -398,16 +419,19 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 		return err
 	}
 	if blockAll {
-		return nil
+		return s.setPartialWalkWarning(ctx, folder.ID, walkFailures, true)
 	}
 
-	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths, confirmedCleanup); err != nil {
+	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths, protectedRoots, confirmedCleanup); err != nil {
 		return err
+	}
+	if walkFailures > 0 {
+		return s.setPartialWalkWarning(ctx, folder.ID, walkFailures, true)
 	}
 	if fullScan && s.folderRepo != nil {
 		// The cleanup either ran with files present or was explicitly
 		// confirmed; any prior empty-root warning is stale now.
-		if err := s.folderRepo.ClearScanWarning(ctx, folder.ID); err != nil {
+		if err := s.folderRepo.UpdateScanWarningIfUnchanged(ctx, folder.ID, warning, catalog.ScanWarning{}); err != nil {
 			return fmt.Errorf("clearing scan warning for folder %d: %w", folder.ID, err)
 		}
 	}
@@ -419,7 +443,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 // folder trash is optionally emptied, and library memberships are reconciled
 // so items with no remaining files are removed (renames therefore converge on
 // the newly indexed path instead of leaving a stale duplicate item).
-func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, confirmedCleanup bool) error {
+func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, protectedRoots []string, confirmedCleanup bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -432,7 +456,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 			return fmt.Errorf("listing existing ebook files for %q: %w", root, err)
 		}
 		for _, mf := range existing {
-			if mf == nil || seenPaths[mf.FilePath] {
+			if mf == nil || seenPaths[mf.FilePath] || pathWithinAnyRoot(mf.FilePath, protectedRoots) {
 				continue
 			}
 			if mf.MissingSince == nil {
@@ -449,7 +473,9 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		}
 	}
 
-	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)
+	// The folder-wide sweep must retain the same protection as the marking
+	// pass, including rows already marked missing before this failed walk.
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup, protectedRoots...)
 	if trashed > 0 {
 		slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}

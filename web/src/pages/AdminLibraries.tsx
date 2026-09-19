@@ -503,6 +503,9 @@ export default function AdminLibraries() {
                                 {lib.scan_warning_code === "dead_root" ? (
                                   <Badge variant="destructive">Root unreachable</Badge>
                                 ) : null}
+                                {lib.scan_warning_code === "partial_walk" ? (
+                                  <Badge variant="destructive">Partial scan</Badge>
+                                ) : null}
                               </div>
                             </TableCell>
                             <TableCell className="text-muted-foreground text-xs">
@@ -674,9 +677,25 @@ export default function AdminLibraries() {
                       .filter(
                         (lib) =>
                           lib.scan_warning_code === "empty_root" ||
-                          lib.scan_warning_code === "dead_root",
+                          lib.scan_warning_code === "dead_root" ||
+                          lib.scan_warning_code === "partial_walk",
                       )
                       .map((lib) => {
+                        if (lib.scan_warning_code === "partial_walk") {
+                          return (
+                            <TableRow key={`${lib.id}-warning`}>
+                              <TableCell colSpan={7} className="bg-destructive/5 text-sm">
+                                <div className="flex flex-col gap-2 py-1">
+                                  <div className="text-destructive font-medium">Partial scan</div>
+                                  <div className="text-muted-foreground">
+                                    {lib.scan_warning_message ??
+                                      "Some paths could not be read. Run another scan after storage is available."}
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        }
                         const mountCheck = lastMountCheckByLibraryId[lib.id];
                         const isCheckingMount =
                           mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
