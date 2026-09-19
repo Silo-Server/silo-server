@@ -34,8 +34,10 @@
 ./internal/catalog TestJellycompatPredicatesPostgres
 
 # Card play targets: leaf cards and a validated anchor hint resolve without a
-# watch-progress query.
+# watch-progress query, and the in-SQL ranked path picks what the general path
+# picks.
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
+./internal/catalog TestPlayableTargetsRankedMatchesGeneral
 
 # Keyset pages: ratings and collection continuations read an index in page
 # order, with no Sort node.

@@ -190,6 +190,11 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 		}
 	}
 
+	fileFilter := strings.Join(fileConditions, " AND ")
+	if userID, ok := catalogProgressUserID(q); ok {
+		return r.resolveRanked(ctx, keysByOrd, args, fileFilter, userID, q.ProfileID)
+	}
+
 	query := fmt.Sprintf(`
 		WITH requested AS (
 			SELECT content_id, media_type, series_id, season_number, preferred_content_id, ord
@@ -348,6 +353,253 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 	// recently-added event is about), so it outranks progress-based ranking.
 	for key, hint := range hints {
 		result[key] = hint
+	}
+	return result, nil
+}
+
+// catalogProgressUserID reports whether q's progress can be ranked inside the
+// catalog query: the store must keep it in this database's user_watch_progress
+// for the same user the query is scoped to.
+func catalogProgressUserID(q PlayableTargetQuery) (int, bool) {
+	store, ok := q.ProgressStore.(userstore.CatalogProgressStore)
+	if !ok {
+		return 0, false
+	}
+	userID, ok := store.CatalogProgressUserID()
+	if !ok || userID != q.UserID {
+		return 0, false
+	}
+	return userID, true
+}
+
+// resolveRanked answers Resolve with one row per card, ranking series and
+// season candidates against the profile's progress in SQL. The general path
+// returns every available episode of every series card and then reads their
+// progress in serial batches: one card for a daily show is tens of thousands
+// of rows and dozens of round trips. Here each card instead takes the best of
+// at most a few picks, each found by an early-stopping index walk:
+//
+//   - a validated hint, which wins outright;
+//   - the newest in-progress episode, driven from the profile's own progress;
+//   - the first available episode not completed, walking the series in
+//     season/episode order from its first available episode and stopping at
+//     the first match;
+//   - failing that, that first available episode.
+//
+// Specials (season 0) are walked only when no regular episode qualifies, which
+// is the same place the general ordering puts them. Each walk is skipped when
+// a better pick already exists for the card. The ranking must stay identical
+// to preferredPlayableTarget; TestPlayableTargetsRankedMatchesGeneral pins it.
+// Progress times compare at whole seconds because the store reports them in
+// RFC 3339 without fractions, so the general path ties within a second too.
+func (r *PlayableTargetResolver) resolveRanked(ctx context.Context, keysByOrd []string, args []any, fileFilter string, userID int, profileID string) (map[string]string, error) {
+	args = append(args, userID, profileID)
+	userArg, profileArg := len(args)-1, len(args)
+	visibleProgress := fmt.Sprintf(`wp.user_id = $%[1]d AND wp.profile_id = $%[2]d
+			AND NOT EXISTS (
+				SELECT 1
+				FROM user_history_hidden_items hhi
+				WHERE hhi.user_id = wp.user_id
+				  AND hhi.profile_id = wp.profile_id
+				  AND hhi.media_item_id = wp.media_item_id
+				  AND wp.updated_at <= hhi.hidden_before
+			)`, userArg, profileArg)
+	available := fmt.Sprintf(`EXISTS (
+				SELECT 1
+				FROM media_files mf
+				WHERE mf.episode_id = e.content_id
+				  AND %s
+			)`, fileFilter)
+	notCompleted := fmt.Sprintf(`NOT EXISTS (
+				SELECT 1
+				FROM user_watch_progress wp
+				WHERE wp.media_item_id = e.content_id
+				  AND wp.completed
+				  AND %s
+			)`, visibleProgress)
+	// walk returns the first available episode of the scope, in season/episode
+	// order, at or after the episode named by from (when set) and satisfying
+	// extra. The (series_id, season_number, episode_number) unique index
+	// supplies the order and the start position, so LIMIT 1 stops at the first
+	// match.
+	walk := func(specials bool, from, extra string) string {
+		season := "e.season_number <> 0"
+		if specials {
+			season = "e.season_number = 0"
+		}
+		if from != "" {
+			extra = fmt.Sprintf(" AND (e.season_number, e.episode_number) >= (%[1]s.season_number, %[1]s.episode_number)", from) + extra
+		}
+		// The season bound is a range, not "IS NULL OR =", so the planner can
+		// use it as an index condition: with the OR a season card walks every
+		// episode of every earlier season before reaching its own.
+		return fmt.Sprintf(`SELECT e.content_id, e.season_number, e.episode_number
+			FROM episodes e
+			WHERE e.series_id = scope.series_id
+			  AND e.season_number BETWEEN COALESCE(scope.season_number, -2147483648) AND COALESCE(scope.season_number, 2147483647)
+			  AND %s
+			  AND %s%s
+			ORDER BY e.season_number, e.episode_number
+			LIMIT 1`, season, available, extra)
+	}
+
+	query := fmt.Sprintf(`
+		WITH requested AS (
+			SELECT content_id, media_type, series_id, season_number, preferred_content_id, ord
+			FROM unnest($1::text[], $2::text[], $3::text[], $4::integer[], $5::text[]) WITH ORDINALITY
+			  AS requested(content_id, media_type, series_id, season_number, preferred_content_id, ord)
+		),
+		leaf_targets AS (
+			-- Same shape as the general query: one EXISTS branch per column so
+			-- each uses its own media_files index.
+			SELECT requested.ord, requested.content_id AS play_content_id
+			FROM requested
+			WHERE (
+				requested.media_type = 'movie'
+				AND EXISTS (
+					SELECT 1
+					FROM media_files mf
+					WHERE mf.content_id = requested.content_id
+					  AND %[1]s
+				)
+			  ) OR (
+				requested.media_type = 'episode'
+				AND EXISTS (
+					SELECT 1
+					FROM media_files mf
+					WHERE mf.episode_id = requested.content_id
+					  AND %[1]s
+				)
+			  )
+		),
+		-- A scope is the episode range a series or season card draws from. A
+		-- season card can carry two: its own series/season fields and the
+		-- seasons row its content ID names, when those differ.
+		scopes AS (
+			SELECT requested.ord, requested.content_id AS series_id, NULL::integer AS season_number
+			FROM requested
+			WHERE requested.media_type = 'series'
+			UNION ALL
+			SELECT requested.ord, requested.series_id, requested.season_number
+			FROM requested
+			WHERE requested.media_type = 'season'
+			  AND requested.series_id <> ''
+			  AND requested.season_number >= 0
+			UNION ALL
+			SELECT requested.ord, season.series_id, season.season_number
+			FROM requested
+			JOIN seasons season
+			  ON requested.media_type = 'season'
+			 AND season.content_id = requested.content_id
+			 AND NOT (
+				requested.series_id <> ''
+				AND requested.season_number >= 0
+				AND requested.series_id = season.series_id
+				AND requested.season_number = season.season_number
+			 )
+		),
+		hint_targets AS (
+			SELECT scope.ord, e.content_id AS play_content_id
+			FROM scopes scope
+			JOIN requested ON requested.ord = scope.ord
+			JOIN episodes e
+			  ON e.content_id = requested.preferred_content_id
+			 AND e.series_id = scope.series_id
+			 AND (scope.season_number IS NULL OR e.season_number = scope.season_number)
+			WHERE %[2]s
+			UNION ALL
+			SELECT leaf.ord, leaf.play_content_id
+			FROM leaf_targets leaf
+			JOIN requested
+			  ON requested.ord = leaf.ord
+			 AND requested.preferred_content_id = leaf.play_content_id
+		),
+		in_progress AS MATERIALIZED (
+			SELECT e.content_id, e.series_id, e.season_number, e.episode_number,
+			       date_trunc('second', wp.updated_at) AS progress_second
+			FROM user_watch_progress wp
+			JOIN episodes e ON e.content_id = wp.media_item_id
+			WHERE wp.position_seconds > 0
+			  AND NOT wp.completed
+			  AND %[3]s
+			  AND e.series_id = ANY (ARRAY(SELECT series_id FROM scopes))
+			  AND %[2]s
+		),
+		progress_picks AS (
+			SELECT scope.ord, ip.content_id, ip.progress_second, ip.season_number, ip.episode_number
+			FROM scopes scope
+			JOIN in_progress ip
+			  ON ip.series_id = scope.series_id
+			 AND (scope.season_number IS NULL OR ip.season_number = scope.season_number)
+		),
+		walk_scopes AS (
+			SELECT scope.*
+			FROM scopes scope
+			WHERE NOT EXISTS (SELECT 1 FROM hint_targets hint WHERE hint.ord = scope.ord)
+			  AND NOT EXISTS (SELECT 1 FROM progress_picks pick WHERE pick.ord = scope.ord)
+		),
+		-- Per scope, find the first available regular episode, then walk on
+		-- from it to the first one not completed; everything before it has
+		-- no available file. Specials are walked only when no regular episode
+		-- is unwatched, since they order after every regular episode.
+		walk_picks AS (
+			SELECT scope.ord,
+			       COALESCE(unwatched.content_id, unwatched_special.content_id, first_available.content_id, first_special.content_id) AS content_id,
+			       CASE WHEN COALESCE(unwatched.content_id, unwatched_special.content_id) IS NOT NULL THEN 1 ELSE 2 END AS progress_rank,
+			       COALESCE(unwatched.season_number, unwatched_special.season_number, first_available.season_number, first_special.season_number) AS season_number,
+			       COALESCE(unwatched.episode_number, unwatched_special.episode_number, first_available.episode_number, first_special.episode_number) AS episode_number
+			FROM walk_scopes scope
+			LEFT JOIN LATERAL (%[4]s) first_available ON TRUE
+			LEFT JOIN LATERAL (%[5]s) unwatched ON first_available.content_id IS NOT NULL
+			LEFT JOIN LATERAL (%[6]s) first_special ON unwatched.content_id IS NULL
+			LEFT JOIN LATERAL (%[7]s) unwatched_special ON unwatched.content_id IS NULL AND first_special.content_id IS NOT NULL
+		),
+		picks AS (
+			SELECT ord, play_content_id, -1 AS progress_rank, NULL::timestamptz AS progress_second, -1 AS season_number, -1 AS episode_number
+			FROM hint_targets
+			UNION ALL
+			SELECT ord, play_content_id, 1, NULL, -1, -1
+			FROM leaf_targets
+			UNION ALL
+			SELECT ord, content_id, 0, progress_second, season_number, episode_number
+			FROM progress_picks
+			UNION ALL
+			SELECT ord, content_id, progress_rank, NULL, season_number, episode_number
+			FROM walk_picks
+			WHERE content_id IS NOT NULL
+		)
+		SELECT DISTINCT ON (ord) ord, play_content_id
+		FROM picks
+		ORDER BY ord,
+		         progress_rank,
+		         progress_second DESC NULLS LAST,
+		         CASE WHEN season_number = 0 THEN 1 ELSE 0 END,
+		         season_number,
+		         episode_number,
+		         play_content_id
+	`, fileFilter, available, visibleProgress,
+		walk(false, "", ""), walk(false, "first_available", " AND "+notCompleted),
+		walk(true, "", ""), walk(true, "first_special", " AND "+notCompleted))
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("resolving ranked playable poster targets: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]string, len(keysByOrd))
+	for rows.Next() {
+		var ord int64
+		var playContentID string
+		if err := rows.Scan(&ord, &playContentID); err != nil {
+			return nil, fmt.Errorf("scanning ranked playable poster target: %w", err)
+		}
+		if ord < 1 || ord > int64(len(keysByOrd)) {
+			return nil, fmt.Errorf("playable poster target ordinality %d is outside the requested set", ord)
+		}
+		result[keysByOrd[ord-1]] = playContentID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating ranked playable poster targets: %w", err)
 	}
 	return result, nil
 }

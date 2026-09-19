@@ -749,3 +749,49 @@ func TestAtomicJellycompatProgressNotifiesOnlyAfterCommit(t *testing.T) {
 		t.Fatalf("failed edit changed history: %+v %v", history, err)
 	}
 }
+
+type catalogProgressCapableStore struct {
+	userstore.UserStore
+	userID int
+}
+
+func (s *catalogProgressCapableStore) CatalogProgressUserID() (int, bool) {
+	return s.userID, true
+}
+
+// Every wrapper variant answers CatalogProgressUserID, so the answer, not the
+// method's presence, must carry the backing store's capability.
+func TestInterestTrackingStoreForwardsCatalogProgress(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+	sqlite := userdb.NewSQLiteUserStore(db)
+
+	for _, tc := range []struct {
+		name   string
+		inner  userstore.UserStore
+		wantID int
+		wantOK bool
+	}{
+		{"postgres-backed", &catalogProgressCapableStore{UserStore: sqlite, userID: 7}, 7, true},
+		{"sqlite", sqlite, 0, false},
+	} {
+		provider := WrapUserStoreProvider(preferenceTransactionTestProvider{store: tc.inner}, &System{})
+		wrapped, err := provider.ForUser(context.Background(), 7)
+		if err != nil {
+			t.Fatalf("%s: ForUser: %v", tc.name, err)
+		}
+		store, ok := wrapped.(userstore.CatalogProgressStore)
+		if !ok {
+			t.Fatalf("%s: wrapper does not expose CatalogProgressUserID", tc.name)
+		}
+		if id, ok := store.CatalogProgressUserID(); id != tc.wantID || ok != tc.wantOK {
+			t.Errorf("%s: CatalogProgressUserID() = (%d, %t), want (%d, %t)", tc.name, id, ok, tc.wantID, tc.wantOK)
+		}
+	}
+}

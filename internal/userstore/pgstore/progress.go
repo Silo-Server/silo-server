@@ -950,6 +950,16 @@ func (s *PostgresUserStore) ListProgressByMediaItems(ctx context.Context, profil
 	return result, nil
 }
 
+// Compile-time capability check: Postgres progress lives in the catalog
+// database, so catalog queries may join user_watch_progress directly.
+var _ userstore.CatalogProgressStore = (*PostgresUserStore)(nil)
+
+// CatalogProgressUserID reports that this store's progress rows are the
+// catalog database's user_watch_progress rows for s.userID.
+func (s *PostgresUserStore) CatalogProgressUserID() (int, bool) {
+	return s.userID, true
+}
+
 // Compile-time capability check: the Postgres store computes series and season
 // episode rollups in SQL (see userstore.SeriesEpisodeRollupStore).
 var _ userstore.SeriesEpisodeRollupStore = (*PostgresUserStore)(nil)
