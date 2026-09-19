@@ -361,11 +361,10 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 
 	scannedEntries := 0
 	limitReached := false
-	for index, entry := range entries {
+	for index := range entries {
 		scannedEntries = index + 1
 		r, ok := resolvedByIndex[index]
 		if !ok {
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		var chosen string
@@ -376,7 +375,6 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 			}
 		}
 		if chosen == "" {
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		matchedItems = append(matchedItems, LibraryCollectionItemInput{
@@ -498,7 +496,6 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 				"tvdb_id", entry.TVDBID,
 			)
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
@@ -660,7 +657,6 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 				"imdb_id", entry.IMDbID,
 			)
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
@@ -837,7 +833,6 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 				"tvdb_id", entry.TVDBID,
 			)
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
@@ -1080,7 +1075,6 @@ func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, c
 		}
 		if item == nil {
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
