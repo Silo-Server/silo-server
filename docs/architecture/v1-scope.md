@@ -35,17 +35,20 @@ are deferred together to a consolidated **Books** effort after 1.0, with no
 assigned release version or date. This replaces the earlier audiobook 1.0
 commitment and ebook 1.1 target.
 
-Audiobookshelf compatibility is also deferred and remains **beta**, outside
-1.0 compatibility certification. Jellyfin compatibility remains in scope.
-Existing audiobook/ebook code and API documentation describe implementation,
-not a 1.0 support promise. Do not delete existing libraries, files, or progress
-as part of enforcing this scope.
+Audiobooks, ebooks, manga, and Audiobookshelf compatibility are **not gated,
+removed, or reworked** for 1.0. They remain available in their current state
+as labeled **beta** features, outside the 1.0 support promise and outside
+compatibility certification, until the Books effort replaces them. Jellyfin
+compatibility remains in scope; its acceptance is the named-client smoke-test
+matrix in the milestone's release gates. Existing audiobook/ebook code and API
+documentation describe beta behavior, not a 1.0 support promise. Do not delete
+existing libraries, files, or progress.
 
 Validate Movies and Series for 1.0 library acceptance. Do not require audiobook
 playback, chapters, sleep timers, audiobook metadata plugins, or Audiobookshelf
-client certification to close that acceptance. Deferred-surface enforcement
-and upgrade safety still apply; follow the milestone gating requirements.
-Track future Books acceptance separately from 1.0.
+client certification to close that acceptance. Beta labeling in clients and
+docs, and upgrade safety for existing libraries, still apply. Track future
+Books acceptance separately from 1.0.
 
 ## Breaking removals taken before lock
 

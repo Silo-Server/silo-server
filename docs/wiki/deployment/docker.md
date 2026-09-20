@@ -161,9 +161,9 @@ The Jellyfin/Emby and Audiobookshelf listeners are enabled by default, so
 **Admin > Settings** (`jellyfin_compat.enabled`, `audiobookshelf_compat.enabled`)
 if you do not use compatible clients.
 
-Audiobookshelf compatibility remains beta and is outside the 1.0 milestone,
-deferred alongside audiobooks and ebooks in a later consolidated Books effort.
-The defaults above describe current builds, not 1.0 release certification.
+Audiobookshelf compatibility is a beta feature: it keeps working as-is on 1.0
+builds but is outside the 1.0 support promise and certification, until a later
+consolidated Books effort replaces it.
 
 > [!WARNING]
 > The application and compatibility port mappings listen on all host interfaces

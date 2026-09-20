@@ -27,10 +27,12 @@ audiobooks, ebooks, podcasts) are core; plugins are for interfaces where many im
 will plausibly exist (metadata, subtitle, and watch providers). Plugins are never a loophole
 for the non-goals below.
 
-For 1.0, supported library scope is Movies and Series. Audiobooks and ebooks
-are deferred to a consolidated Books effort with no assigned release date;
-Audiobookshelf compatibility remains beta and is also outside 1.0. Existing
-code and protocol documentation are not release acceptance promises. See
+For 1.0, supported library scope is Movies and Series. Audiobooks, ebooks,
+and Audiobookshelf compatibility stay available as labeled **beta** features
+in their current state, outside the 1.0 support promise, until a consolidated
+Books effort replaces them (no assigned release date). Do not gate, remove, or
+rework them for 1.0. Existing code and protocol documentation describe beta
+behavior, not release acceptance promises. See
 [scope](docs/architecture/v1-scope.md#library-scope-books-deferred).
 
 Taste: KISS and YAGNI win — the simple design beats the clever one, provided it survives both

@@ -1143,7 +1143,8 @@ server must not redirect old URLs containing tokens or secrets.
 
 Jellyfin compatibility and Audiobookshelf compatibility remain entirely outside this contract.
 For release scope, Jellyfin compatibility remains in 1.0; Audiobookshelf
-compatibility is beta and deferred alongside the consolidated Books effort.
+compatibility stays available as a beta feature, outside 1.0 certification,
+until the consolidated Books effort replaces it.
 See [the scope decision](v1-scope.md#library-scope-books-deferred). This does
 not remove the existing implementation or change its wire protocol.
 They implement other projects' wire protocols. Playback v3's normative JSON Schemas and domain
