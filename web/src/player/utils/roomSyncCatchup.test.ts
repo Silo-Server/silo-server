@@ -3,7 +3,9 @@ import {
   decideRoomCatchup,
   isNativePositionSeekable,
   roomCatchupBandSeconds,
+  roomCatchupConverged,
   roomCatchupDeadbandSeconds,
+  roomCatchupExpectedPosition,
   roomCatchupMaxRate,
   roomCatchupMinRate,
 } from "./roomSyncCatchup";
@@ -130,5 +132,32 @@ describe("decideRoomCatchup", () => {
         localPositionSeconds: base.targetPositionSeconds - roomCatchupBandSeconds - 0.5,
       }),
     ).toEqual({ kind: "seek" });
+  });
+});
+
+describe("room catch-up convergence", () => {
+  const target = { positionSeconds: 100, executeAtMs: 1_000 };
+
+  it("does not advance before the command executes", () => {
+    expect(roomCatchupExpectedPosition(target, 500)).toBe(100);
+    expect(roomCatchupExpectedPosition(target, 1_000)).toBe(100);
+  });
+
+  it("advances the room position at 1x after execution", () => {
+    expect(roomCatchupExpectedPosition(target, 4_000)).toBe(103);
+  });
+
+  it("converges when playback reaches the advancing position", () => {
+    // At 4s the room expects 103; playback at 102.8 is inside the deadband.
+    expect(roomCatchupConverged(target, 102.8, 4_000)).toBe(true);
+    expect(roomCatchupConverged(target, 102.0, 4_000)).toBe(false);
+  });
+
+  it("stops a slowed member once the advancing room position reaches it", () => {
+    // A member ahead of the room moves away from the command's static
+    // position; convergence has to come from the advancing position.
+    expect(roomCatchupConverged(target, 102.8, 1_000)).toBe(false);
+    expect(roomCatchupConverged(target, 102.8, 3_000)).toBe(false);
+    expect(roomCatchupConverged(target, 102.8, 3_500)).toBe(true);
   });
 });

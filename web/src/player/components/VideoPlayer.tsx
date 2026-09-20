@@ -68,7 +68,8 @@ import {
 import {
   decideRoomCatchup,
   isNativePositionSeekable,
-  roomCatchupDeadbandSeconds,
+  roomCatchupConverged,
+  type RoomCatchupTarget,
 } from "../utils/roomSyncCatchup";
 import { pendingServerSubtitleSelection } from "../utils/playableSubtitles";
 import {
@@ -332,9 +333,9 @@ export function VideoPlayer({
   const compatibilityFallbackKeyRef = useRef<string | null>(null);
   const lastRoomCommandIdRef = useRef<string | null>(null);
   const roomCommandTimerRef = useRef<number | null>(null);
-  // Room position a playbackRate catch-up is converging toward, when one is
-  // active. Non-null means playbackRate is intentionally not 1.
-  const roomCatchupTargetRef = useRef<number | null>(null);
+  // The advancing room position a playbackRate catch-up is converging toward,
+  // when one is active. Non-null means playbackRate is intentionally not 1.
+  const roomCatchupTargetRef = useRef<RoomCatchupTarget | null>(null);
   const performPlayerSeekRef = useRef<(seconds: number) => boolean>(() => false);
   const reportRoomReadyRef = useRef<
     (positionSeconds?: number, isPaused?: boolean) => { ok: boolean }
@@ -1812,11 +1813,10 @@ export function VideoPlayer({
       if (resolved.pendingSeekTime !== pendingSeekTime) {
         setPendingSeekTime(resolved.pendingSeekTime);
       }
-      // A rate-based room catch-up that reached its target returns to 1x.
-      if (
-        roomCatchupTargetRef.current !== null &&
-        Math.abs(roomCatchupTargetRef.current - nextTime) <= roomCatchupDeadbandSeconds
-      ) {
+      // A rate-based room catch-up that reached the advancing room position
+      // returns to 1x.
+      const catchupTarget = roomCatchupTargetRef.current;
+      if (catchupTarget !== null && roomCatchupConverged(catchupTarget, nextTime, Date.now())) {
         roomCatchupTargetRef.current = null;
         video.playbackRate = 1;
       }
@@ -2604,7 +2604,12 @@ export function VideoPlayer({
           performPlayerSeekRef.current(command.position_seconds);
         } else if (decision.kind === "rate") {
           video.playbackRate = decision.rate;
-          roomCatchupTargetRef.current = command.position_seconds;
+          // The room keeps advancing at 1x from the command's execution, so
+          // convergence tracks that moving position, not the static one.
+          roomCatchupTargetRef.current = {
+            positionSeconds: command.position_seconds,
+            executeAtMs: localExecuteAt,
+          };
         } else {
           // Already at the room position; drop any stale convergence nudge.
           resetRoomCatchupRate();

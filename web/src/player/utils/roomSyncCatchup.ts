@@ -28,6 +28,35 @@ export type RoomCatchupDecision =
   | { kind: "rate"; rate: number }
   | { kind: "none" };
 
+/**
+ * The room position a rate catch-up is converging toward. The room keeps
+ * advancing at 1x from the command's execution, so convergence has to track
+ * that moving position: against a static one, a member behind the room ends
+ * the nudge early, and a member slowed ahead of it never ends it at all.
+ */
+export interface RoomCatchupTarget {
+  positionSeconds: number;
+  /** Local wall-clock time (ms) at which `positionSeconds` starts advancing. */
+  executeAtMs: number;
+}
+
+/** The room's expected position at `nowMs`, advancing at 1x from execution. */
+export function roomCatchupExpectedPosition(target: RoomCatchupTarget, nowMs: number): number {
+  return Math.max(0, target.positionSeconds + Math.max(0, (nowMs - target.executeAtMs) / 1000));
+}
+
+/** Whether local playback has reached the advancing room position. */
+export function roomCatchupConverged(
+  target: RoomCatchupTarget,
+  localPositionSeconds: number,
+  nowMs: number,
+): boolean {
+  return (
+    Math.abs(roomCatchupExpectedPosition(target, nowMs) - localPositionSeconds) <=
+    roomCatchupDeadbandSeconds
+  );
+}
+
 export interface RoomCatchupInput {
   action: "play" | "pause" | "seek";
   /** The command's position in media time. */
