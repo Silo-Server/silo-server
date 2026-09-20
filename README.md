@@ -32,6 +32,15 @@
 > Silo is pre-release. APIs, configuration, and database migrations may change
 > before the first stable release. Back up your deployment before updating.
 
+## 1.0 release scope
+
+The [1.0 milestone](https://siloserver.org/milestone/1.0/) covers movies and
+series. Audiobooks and ebooks are deferred together to a consolidated Books
+effort, with no assigned release date. Audiobookshelf compatibility also
+remains beta and is outside 1.0 certification. The broader capabilities below
+include prerelease implementations, not a promise that every media type ships
+in 1.0. Existing library data must be preserved when upgrading.
+
 ## What Silo does
 
 <table>

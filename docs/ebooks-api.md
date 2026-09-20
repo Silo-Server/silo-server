@@ -1,5 +1,10 @@
 # Ebook reader API
 
+> Release scope: ebooks and audiobooks are deferred to a consolidated Books
+> effort after 1.0, with no assigned release date. This reference describes
+> existing code, not supported 1.0 reader functionality. See the
+> [scope decision](architecture/v1-scope.md#library-scope-books-deferred).
+
 The v2 reader progress operations share the existing reader stores and media
 authorization with the frozen v1 bridge. They require account authentication and
 a verified `X-Profile-Id`. Current item access is checked on reads; writes also

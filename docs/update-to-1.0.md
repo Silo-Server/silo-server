@@ -58,6 +58,19 @@ retains `GET /api/v1/health` and `GET /api/v1/ready` on the API listener and `GE
 on the proxy and transcode-node listeners exactly as they answer today; no root `/health` or
 `/ready` route is added. Existing probe configuration keeps working.
 
+## Deferred Books functionality
+
+Silo 1.0 supports Movies and Series. Audiobooks and ebooks are deferred to a
+consolidated Books effort with no assigned release date; Audiobookshelf
+compatibility remains beta and is outside 1.0 certification. See the
+[scope decision](architecture/v1-scope.md#library-scope-books-deferred).
+
+Before upgrading an installation that uses these features, inventory its
+libraries, progress, and Audiobookshelf clients. The release-specific upgrade
+notes must explain which entry points become unavailable and how existing
+data is preserved. Do not delete libraries or progress to enforce the scope
+change, and do not promise continued listening or reading on the 1.0 build.
+
 ## Before updating
 
 - [ ] Read the release-specific notes and confirm that the server, database, Redis, object
