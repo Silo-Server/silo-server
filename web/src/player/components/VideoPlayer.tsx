@@ -69,6 +69,7 @@ import {
   decideRoomCatchup,
   isNativePositionSeekable,
   roomCatchupConverged,
+  roomCatchupExpectedPosition,
   type RoomCatchupTarget,
 } from "../utils/roomSyncCatchup";
 import { pendingServerSubtitleSelection } from "../utils/playableSubtitles";
@@ -1794,7 +1795,10 @@ export function VideoPlayer({
     if (!video) return;
 
     const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
+    const onPause = () => {
+      resetRoomCatchupRate();
+      setPlaying(false);
+    };
     const clearBuffering = () => {
       if (bufferingTimerRef.current) {
         clearTimeout(bufferingTimerRef.current);
@@ -1934,6 +1938,7 @@ export function VideoPlayer({
   }, [
     pendingSeekTime,
     reportCurrentPlanFailure,
+    resetRoomCatchupRate,
     roomSyncWaiting,
     sessionId,
     watchTogetherRoomActive,
@@ -2543,6 +2548,9 @@ export function VideoPlayer({
     const command = watchTogether.transportCommand;
     const roomSelectionRevision = watchTogether.room?.selection_revision;
     if (
+      !watchTogetherRoomId ||
+      watchTogether.closedReason ||
+      watchTogether.connectionState !== "connected" ||
       !command ||
       roomSelectionRevision === undefined ||
       roomSelectionRevision === null ||
@@ -2588,28 +2596,35 @@ export function VideoPlayer({
         // Room corrections land here. Small drift against a target the element
         // cannot reach without a rebuild converges via playbackRate instead of
         // forcing a seek-reanchor replan; see roomSyncCatchup.ts.
+        const catchupTarget: RoomCatchupTarget = {
+          positionSeconds: command.position_seconds,
+          executeAtMs: localExecuteAt,
+        };
+        // A late play command must choose its correction against the same
+        // advancing position used to detect convergence.
+        const targetPositionSeconds =
+          command.action === "play"
+            ? roomCatchupExpectedPosition(catchupTarget, Date.now())
+            : command.position_seconds;
         const decision = decideRoomCatchup({
           action: command.action,
-          targetPositionSeconds: command.position_seconds,
+          targetPositionSeconds,
           localPositionSeconds: currentTimeRef.current,
           targetLocallySeekable:
             canSeekAnywhere ||
             isNativePositionSeekable(
               video.seekable,
-              toPlayerTime(command.position_seconds, timelineOffsetRef.current),
+              toPlayerTime(targetPositionSeconds, timelineOffsetRef.current),
             ),
         });
 
         if (decision.kind === "seek") {
-          performPlayerSeekRef.current(command.position_seconds);
+          performPlayerSeekRef.current(targetPositionSeconds);
         } else if (decision.kind === "rate") {
           video.playbackRate = decision.rate;
           // The room keeps advancing at 1x from the command's execution, so
           // convergence tracks that moving position, not the static one.
-          roomCatchupTargetRef.current = {
-            positionSeconds: command.position_seconds,
-            executeAtMs: localExecuteAt,
-          };
+          roomCatchupTargetRef.current = catchupTarget;
         } else {
           // Already at the room position; drop any stale convergence nudge.
           resetRoomCatchupRate();
@@ -2659,6 +2674,9 @@ export function VideoPlayer({
     canSeekAnywhere,
     resetRoomCatchupRate,
     sessionId,
+    watchTogetherRoomId,
+    watchTogether.closedReason,
+    watchTogether.connectionState,
     watchTogether.room?.selection_revision,
     watchTogether.serverTimeOffsetMs,
     watchTogether.transportCommand,
