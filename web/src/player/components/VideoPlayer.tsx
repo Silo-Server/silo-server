@@ -785,6 +785,10 @@ export function VideoPlayer({
   useEffect(() => {
     if (!replanError || replanning) return;
 
+    setPendingSeekTime(null);
+    const video = videoRef.current;
+    if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
+
     const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
@@ -862,12 +866,14 @@ export function VideoPlayer({
 
       if (watchTogether.room) {
         const video = videoRef.current;
-        // In a room the seek is a request: `ok` says it reached the room, and
-        // the position moves when the room's transport command comes back. That
-        // is the strongest answer available synchronously, and it is false for
-        // exactly the cases the caller cares about — a dropped socket or a
-        // session the room is not driving.
-        return watchTogetherSync.requestTransport("seek", seconds, video?.paused ?? true).ok;
+        const result = watchTogetherSync.requestTransport("seek", seconds, video?.paused ?? true);
+        if (result.ok) {
+          // Hold the requested position in the controls immediately. The media
+          // element still waits for the room's scheduled transport command.
+          setPendingSeekTime(seconds);
+          setCurrentTime(seconds);
+        }
+        return result.ok;
       }
       return performPlayerSeek(seconds);
     },
@@ -1831,8 +1837,15 @@ export function VideoPlayer({
       clearBuffering();
     };
     const onSeeked = () => {
-      setPendingSeekTime(null);
-      setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
+      const resolved = resolvePendingSeekTime(
+        toMediaTime(video.currentTime, timelineOffsetRef.current),
+        pendingSeekTime,
+      );
+      setCurrentTime(resolved.currentTime);
+      setPendingSeekTime(resolved.pendingSeekTime);
+      // Reloading a stream can finish an older native seek. It does not settle
+      // the requested seek or make this member ready at the room's new position.
+      if (resolved.pendingSeekTime !== null) return;
       markPlaybackStarted();
       clearBuffering();
       if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {

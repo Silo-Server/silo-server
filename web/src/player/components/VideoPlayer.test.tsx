@@ -21,6 +21,8 @@ const realtimeOptions = vi.hoisted(() => ({
 }));
 const controls = vi.hoisted(() => ({
   current: null as null | {
+    currentTime: number;
+    onSeek: (seconds: number) => void;
     activeSubtitleIndex: number | null;
     subtitleTracks: PlayerSubtitleInfo[];
     visible: boolean;
@@ -108,6 +110,8 @@ vi.mock("./PlayerControls", () => ({
   SKIP_FORWARD_SECONDS: 30,
   PlayerControls: vi.fn(
     (props: {
+      currentTime: number;
+      onSeek: (seconds: number) => void;
       activeSubtitleIndex: number | null;
       subtitleTracks: PlayerSubtitleInfo[];
       visible: boolean;
@@ -286,6 +290,107 @@ describe("VideoPlayer room catch-up", () => {
     };
     return { ...rendered, connection, video, command, onReanchorSeek };
   }
+
+  it.each([1500, 30])("shows a requested room seek to %ss before the command arrives", (target) => {
+    const { connection, video, rerenderPlayer, onReanchorSeek } = setup(100);
+    connection.room = { ...connection.room!, self_can_manage_room: true };
+    rerenderPlayer({ watchTogetherConnection: connection });
+
+    act(() => controls.current!.onSeek(target));
+
+    expect(connection.sendRoomMessage).toHaveBeenCalledWith({
+      type: "transport_request",
+      action: "seek",
+      position_seconds: target,
+      is_paused: true,
+    });
+    expect(controls.current!.currentTime).toBe(target);
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+    expect(playerSeek).not.toHaveBeenCalled();
+
+    video.currentTime = 100.2;
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(target);
+  });
+
+  it.each([1500, 30])("holds a room seek to %ss through stale seeked events", async (target) => {
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(100, 80);
+    const commandedConnection = {
+      ...connection,
+      room: { ...connection.room!, playback_state: "waiting" as const },
+      transportCommand: { ...command, action: "seek" as const, position_seconds: target },
+    };
+    rerenderPlayer({
+      watchTogetherConnection: commandedConnection,
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onReanchorSeek).toHaveBeenCalledWith(target);
+    expect(controls.current!.currentTime).toBe(target);
+
+    fireEvent.seeked(video);
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(target);
+    expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ready" }),
+    );
+
+    // The replacement stream starts at native time zero at the requested
+    // media position, including a backward seek before the old stream origin.
+    rerenderPlayer({
+      watchTogetherConnection: commandedConnection,
+      planRevision: 2,
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: {
+          ...directPlan.timeline,
+          source_start_seconds: target,
+          stream_origin_seconds: target,
+          timeline_offset_seconds: target,
+          player_start_seconds: 0,
+          can_seek_anywhere: false,
+        },
+      }),
+    });
+    expect(video.currentTime).toBe(0);
+    fireEvent.seeked(video);
+    expect(controls.current!.currentTime).toBe(target);
+    video.currentTime += 0.5;
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(target + 0.5);
+  });
+
+  it("keeps the actual position when a room seek cannot be sent", () => {
+    const { connection, rerenderPlayer } = setup(100);
+    connection.room = { ...connection.room!, self_can_manage_room: true };
+    vi.mocked(connection.sendRoomMessage).mockReturnValue({ ok: false });
+    rerenderPlayer({ watchTogetherConnection: connection });
+
+    act(() => controls.current!.onSeek(1500));
+    expect(controls.current!.currentTime).toBe(100);
+  });
+
+  it("restores the actual position when a seek replan fails", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    const commandedConnection = {
+      ...connection,
+      transportCommand: { ...command, action: "seek" as const, position_seconds: 1500 },
+    };
+    rerenderPlayer({ watchTogetherConnection: commandedConnection });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(controls.current!.currentTime).toBe(1500);
+
+    rerenderPlayer({ watchTogetherConnection: commandedConnection, replanning: true });
+    rerenderPlayer({
+      watchTogetherConnection: commandedConnection,
+      replanning: false,
+      replanError: "The seek failed.",
+    });
+    expect(controls.current!.currentTime).toBe(100);
+    video.currentTime = 101;
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(101);
+  });
 
   it.each([0, 80])(
     "chooses the advancing play position with a %ss timeline offset",
