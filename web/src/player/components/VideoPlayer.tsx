@@ -2708,6 +2708,9 @@ export function VideoPlayer({
       if (roomCommandTimerRef.current !== null) {
         window.clearTimeout(roomCommandTimerRef.current);
         roomCommandTimerRef.current = null;
+        // A clock or plan update can restart this effect before execution.
+        // Keep the cancelled command eligible for its replacement timer.
+        lastRoomCommandIdRef.current = null;
       }
     };
   }, [

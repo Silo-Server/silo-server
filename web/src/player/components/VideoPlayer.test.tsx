@@ -557,6 +557,73 @@ describe("VideoPlayer room catch-up", () => {
     expect(video.play).not.toHaveBeenCalled();
   });
 
+  it.each(["play", "pause", "seek"] as const)(
+    "reschedules a pending %s after clock correction without replaying it",
+    async (action) => {
+      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(100);
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 0, end: () => 2000 },
+      });
+      const commandedConnection = {
+        ...connection,
+        transportCommand: {
+          ...command,
+          action,
+          position_seconds: 1500,
+          execute_at: new Date(Date.now() + 500).toISOString(),
+        },
+      };
+      rerenderPlayer({ watchTogetherConnection: commandedConnection });
+      await act(() => vi.advanceTimersByTimeAsync(100));
+      rerenderPlayer({
+        watchTogetherConnection: { ...commandedConnection, serverTimeOffsetMs: 10 },
+      });
+      await act(() => vi.advanceTimersByTimeAsync(389));
+      expect(playerSeek).not.toHaveBeenCalled();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(playerSeek).toHaveBeenCalledExactlyOnceWith(1500);
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+      expect(action === "play" ? video.play : video.pause).toHaveBeenCalledOnce();
+
+      rerenderPlayer({
+        watchTogetherConnection: { ...commandedConnection, serverTimeOffsetMs: 20 },
+      });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(playerSeek).toHaveBeenCalledOnce();
+      expect(action === "play" ? video.play : video.pause).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("replaces a rescheduled command when a newer command arrives", async () => {
+    const { connection, command, rerenderPlayer, onReanchorSeek } = setup(100);
+    const commandedConnection = {
+      ...connection,
+      transportCommand: {
+        ...command,
+        action: "seek" as const,
+        position_seconds: 1500,
+        execute_at: new Date(Date.now() + 500).toISOString(),
+      },
+    };
+    rerenderPlayer({ watchTogetherConnection: commandedConnection });
+    rerenderPlayer({
+      watchTogetherConnection: { ...commandedConnection, serverTimeOffsetMs: 10 },
+    });
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...commandedConnection,
+        transportCommand: {
+          ...commandedConnection.transportCommand,
+          command_id: "room-command-2",
+          position_seconds: 2000,
+        },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(2000);
+  });
+
   it("ends catch-up when playback pauses outside a room transport command", async () => {
     const { connection, video, command, rerenderPlayer } = setup(101);
     rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
