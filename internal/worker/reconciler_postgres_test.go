@@ -46,6 +46,27 @@ INSERT INTO users VALUES(1),(2);`); err != nil {
 	if err = r.ReconcileNodeSessions(t.Context(), "node", sessions); err != nil {
 		t.Fatal(err)
 	}
+
+	// Default, overlay and unknown must survive SQL independently, including
+	// a replan from an overlay back to the default network.
+	for _, provider := range []*string{new("tailscale"), new(""), nil} {
+		sessions[1].RoutingNetworkProvider = provider
+		if err := r.ReconcileNodeSessions(t.Context(), "node", sessions); err != nil {
+			t.Fatal(err)
+		}
+		tx, err := pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := loadNodeSessionsSnapshot(t.Context(), tx, "node")
+		_ = tx.Rollback(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot) != 2 || !equalOptionalString(snapshot[1].RoutingNetworkProvider, provider) {
+			t.Fatalf("network route round trip: %#v", snapshot)
+		}
+	}
 	if _, err = pool.Exec(t.Context(), "DELETE FROM users WHERE id=1"); err != nil {
 		t.Fatal(err)
 	}

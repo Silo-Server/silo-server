@@ -2523,6 +2523,8 @@ export interface AdminSession {
   /** Resolved playback workload and route. Node IDs/names are omitted when
    * that phase runs on the integrated API process (or direct play has no
    * executor). */
+  /** Empty means default network; absent means unknown (older session). */
+  routing_network_provider?: string;
   routing_workload?: string;
   routing_execution?: string;
   routing_execution_node_id?: number;

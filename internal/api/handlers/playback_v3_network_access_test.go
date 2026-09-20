@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 const (
@@ -142,6 +143,25 @@ func TestPrepareTransportV3ProviderPathUsesTheProviderOrigin(t *testing.T) {
 			if !strings.HasPrefix(transport.url, mode.want) || strings.Contains(transport.url, "10.0.0.9") {
 				t.Fatalf("url = %q, want prefix %q and no LAN address", transport.url, mode.want)
 			}
+			var provider *string
+			if mode.mode.headerAuth {
+				for _, card := range handler.ProxyGrantStore.(*recordingRecipeCardStoreV3).cards {
+					provider = card.RoutingNetworkProvider
+				}
+			} else {
+				parsed, err := url.Parse(transport.url)
+				if err != nil {
+					t.Fatal(err)
+				}
+				claims, err := streamtoken.Verify(strings.TrimPrefix(parsed.Path, "/stream/direct/"), handler.JWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				provider = claims.RoutingNetworkProvider
+			}
+			if provider == nil || *provider != testTailnetProvider {
+				t.Fatalf("prepared recipe provider = %v", provider)
+			}
 			if transport.routingEgress != noderouting.EgressProxy || transport.routingEgressID != 41 {
 				t.Fatalf("egress = %q on node %d, want proxy 41", transport.routingEgress, transport.routingEgressID)
 			}
@@ -206,5 +226,16 @@ func TestProxyURLBuildersRefuseALANOnlyProxyOnAProviderPath(t *testing.T) {
 	// The default path is unchanged by the report: LAN clients keep the LAN URL.
 	if got, byProxy := handler.identityStreamURLV3(session, file, connected, netaccess.Path{}); !byProxy || !strings.HasPrefix(got, testLANProxyURL+"/stream/direct/") {
 		t.Fatalf("identityStreamURLV3 on the default path = %q (proxy %v)", got, byProxy)
+	}
+}
+
+func TestV3SessionStateRecordsValidatedNetworkProvider(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	for _, provider := range []string{"", "tailscale"} {
+		ctx := netaccess.WithPath(t.Context(), netaccess.Path{Provider: provider})
+		state := handler.v3SessionStreamState(ctx, &playback.Session{}, nil, playback.PlannerResultV3{}, preparedTransportV3{}, mediaAuthModeV3{})
+		if state.RoutingNetworkProvider == nil || *state.RoutingNetworkProvider != provider {
+			t.Fatalf("provider = %v, want %q", state.RoutingNetworkProvider, provider)
+		}
 	}
 }

@@ -8579,6 +8579,10 @@
           "routing_execution_node_name": {
             "type": "string"
           },
+          "routing_network_provider": {
+            "description": "Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier.",
+            "type": "string"
+          },
           "routing_workload": {
             "type": "string"
           },
@@ -8746,6 +8750,9 @@
           "is_jellyfin_client": {
             "type": "boolean"
           },
+          "network_access_route": {
+            "type": "boolean"
+          },
           "node_observations": {
             "type": "boolean"
           },
@@ -8802,6 +8809,7 @@
           "client_build",
           "client_channel",
           "target_audio_channels",
+          "network_access_route",
           "node_routing",
           "revision",
           "state",

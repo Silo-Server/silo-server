@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 const (
@@ -45,6 +47,19 @@ func TestBuildProxyRedirectURLUsesTheAccessPathOrigin(t *testing.T) {
 			}
 			if !strings.HasPrefix(got, compatTailnetOrigin+"/stream/") || strings.Contains(got, "10.0.0.9") {
 				t.Fatalf("redirect = %q, want the tailnet origin and no LAN address", got)
+			}
+
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+			claims, err := streamtoken.Verify(parts[2], h.JWTSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if claims.RoutingNetworkProvider == nil || *claims.RoutingNetworkProvider != "tailscale" {
+				t.Fatalf("provider = %v", claims.RoutingNetworkProvider)
 			}
 			lan, err := h.buildProxyRedirectURL("play", "upstream", method, file, PlaybackMediaSource{}, nil, time.Time{}, "http://transcode-1", 0, connected, netaccess.Path{})
 			if err != nil {
@@ -89,5 +104,34 @@ func TestResolveCompatIdentityRouteExcludesProxiesUnreachableOnTheAccessPath(t *
 	reachable := handler.resolveCompatIdentityRouteWithPolicy(compatTailnetContext(), "compat-tailnet-reachable", string(playback.PlayDirect), 8_000, false, hard)
 	if !reachable.Selected() || reachable.Plan.ProxyNode == nil || reachable.Plan.ProxyNode.ClientURLFor(netaccess.Path{Provider: "tailscale"}) != compatTailnetOrigin {
 		t.Fatalf("reachable decision = %#v, want the tailnet-connected proxy", reachable)
+	}
+}
+
+func TestCompatNetworkRouteIsMirroredAndRecoverable(t *testing.T) {
+	for _, provider := range []string{"", "tailscale"} {
+		manager := playback.NewSessionManager(0, 0)
+		session, err := manager.StartSession(7, "profile", 42, playback.PlayDirect, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := NewPlaybackSessionStore(0, nil)
+		store.Put(PlaybackSession{ID: "play", UpstreamSessionID: session.ID})
+		handler := &PlaybackHandler{sessionMgr: manager, playbackStore: store}
+		ctx := netaccess.WithPath(t.Context(), netaccess.Path{Provider: provider})
+		if err := handler.recordNodeRoutingAssignment(ctx, "play", session.ID, playback.NodeRoutingAssignment{Workload: "remux", Execution: "transcode", ExecutionNodeID: 7, Egress: "proxy", EgressNodeID: 11}); err != nil {
+			t.Fatal(err)
+		}
+		current, err := manager.GetSession(session.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.RoutingNetworkProvider == nil || *current.RoutingNetworkProvider != provider {
+			t.Fatalf("native mirror = %v", current.RoutingNetworkProvider)
+		}
+		stored, _ := store.Get("play")
+		card := handler.upstreamRecipeCard(stored, &Session{StreamAppUserID: 7, ProfileID: "profile"}, PlaybackMediaSource{FileID: 42}, "remux")
+		if card.RoutingNetworkProvider == nil || *card.RoutingNetworkProvider != provider || card.RoutingExecutionNodeID != 7 || card.RoutingEgressNodeID != 11 {
+			t.Fatalf("recovery route = %#v", card)
+		}
 	}
 }

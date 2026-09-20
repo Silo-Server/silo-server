@@ -1,9 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   NetworkAccessCapabilities,
+  NetworkAccessCommandRequest,
   NetworkAccessStatus,
 } from "@/hooks/queries/admin/networkAccess";
 
@@ -28,9 +30,24 @@ vi.mock("@/hooks/queries/admin/networkAccess", () => ({
     mocks.statusCalls.push(provider);
     return mocks.status;
   },
-  useConnectNetworkAccess: () => ({ mutate: mocks.connect, isPending: false }),
-  useDisconnectNetworkAccess: () => ({ mutate: mocks.disconnect, isPending: false }),
+  useConnectNetworkAccess: () =>
+    useMutation({
+      mutationFn: async (request: NetworkAccessCommandRequest) => mocks.connect(request),
+    }),
+  useDisconnectNetworkAccess: () =>
+    useMutation({
+      mutationFn: async (request: NetworkAccessCommandRequest) => mocks.disconnect(request),
+    }),
 }));
+
+function renderPage() {
+  const client = new QueryClient();
+  return render(
+    <QueryClientProvider client={client}>
+      <NetworkAccessSettings />
+    </QueryClientProvider>,
+  );
+}
 
 function capabilities(
   providers: NetworkAccessCapabilities["providers"] = [],
@@ -66,7 +83,7 @@ describe("NetworkAccessSettings", () => {
   });
 
   it("heads the page and explains that providers are plugins when none is installed", () => {
-    render(<NetworkAccessSettings />);
+    renderPage();
 
     expect(screen.getByRole("heading", { level: 1, name: "Network Access" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "No providers installed" })).toBeInTheDocument();
@@ -97,7 +114,7 @@ describe("NetworkAccessSettings", () => {
       error: null,
     };
 
-    render(<NetworkAccessSettings />);
+    renderPage();
 
     expect(mocks.statusCalls).toEqual(["tailscale"]);
     const group = screen.getByRole("group", { name: "Tailscale" });
@@ -131,7 +148,7 @@ describe("NetworkAccessSettings", () => {
       error: null,
     };
 
-    render(<NetworkAccessSettings />);
+    renderPage();
 
     const row = screen.getByTestId("network-access-host-tailscale-api");
     expect(within(row).getByText("Waiting for authorization")).toBeInTheDocument();
@@ -152,7 +169,7 @@ describe("NetworkAccessSettings", () => {
       error: null,
     };
 
-    render(<NetworkAccessSettings />);
+    renderPage();
 
     await user.click(screen.getByRole("button", { name: "Connect" }));
     expect(mocks.connect).toHaveBeenCalledWith({ provider: "tailscale", hosts: ["api"] });
@@ -164,10 +181,67 @@ describe("NetworkAccessSettings", () => {
       isError: false,
       error: null,
     };
-    render(<NetworkAccessSettings />);
+    renderPage();
     await user.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(mocks.disconnect).toHaveBeenCalledWith({ provider: "tailscale", hosts: ["api"] });
   });
+
+  it.each(["Connect", "Disconnect"] as const)(
+    "tracks pending %s requests independently for each host",
+    async (action) => {
+      const user = userEvent.setup();
+      let resolveFirst!: () => void;
+      let resolveSecond!: () => void;
+      const first = new Promise<void>((resolve) => {
+        resolveFirst = resolve;
+      });
+      const second = new Promise<void>((resolve) => {
+        resolveSecond = resolve;
+      });
+      const command = action === "Connect" ? mocks.connect : mocks.disconnect;
+      command.mockReturnValueOnce(first).mockReturnValueOnce(second);
+      mocks.capabilities = { data: capabilities([tailscale]), isLoading: false };
+      mocks.status.data = {
+        provider: "tailscale",
+        hosts: ["api", "node:10", "node:12"].map((id) =>
+          host({
+            host: { id, role: id === "api" ? "api" : "proxy", name: id },
+            state: action === "Connect" ? "disconnected" : "connected",
+          }),
+        ),
+      };
+      renderPage();
+      const buttonFor = (id: string) =>
+        within(screen.getByTestId(`network-access-host-tailscale-${id}`)).getByRole("button", {
+          name: action,
+        });
+      const apiButton = buttonFor("api");
+      const firstProxyButton = buttonFor("node:10");
+      const secondProxyButton = buttonFor("node:12");
+
+      await user.click(apiButton);
+      await waitFor(() => expect(apiButton).toBeDisabled());
+      expect(apiButton.querySelector(".animate-spin")).not.toBeNull();
+      expect(firstProxyButton).toBeEnabled();
+      expect(firstProxyButton.querySelector(".animate-spin")).toBeNull();
+      expect(secondProxyButton).toBeEnabled();
+      expect(secondProxyButton.querySelector(".animate-spin")).toBeNull();
+
+      await user.click(firstProxyButton);
+      await waitFor(() => expect(firstProxyButton).toBeDisabled());
+      expect(apiButton).toBeDisabled();
+      expect(secondProxyButton).toBeEnabled();
+      expect(command).toHaveBeenNthCalledWith(1, { provider: "tailscale", hosts: ["api"] });
+      expect(command).toHaveBeenNthCalledWith(2, { provider: "tailscale", hosts: ["node:10"] });
+
+      await act(async () => resolveFirst());
+      await waitFor(() => expect(apiButton).toBeEnabled());
+      expect(firstProxyButton).toBeDisabled();
+      expect(secondProxyButton).toBeEnabled();
+      await act(async () => resolveSecond());
+      await waitFor(() => expect(firstProxyButton).toBeEnabled());
+    },
+  );
 
   it("explains a host whose plugin is not running and keeps Connect disabled there", () => {
     mocks.capabilities = { data: capabilities([tailscale]), isLoading: false };
@@ -183,7 +257,7 @@ describe("NetworkAccessSettings", () => {
       error: null,
     };
 
-    render(<NetworkAccessSettings />);
+    renderPage();
 
     const row = screen.getByTestId("network-access-host-tailscale-api");
     expect(within(row).getByText("Plugin not running")).toBeInTheDocument();
@@ -201,7 +275,7 @@ describe("NetworkAccessSettings", () => {
       error: new Error("Network access provider not found."),
     };
 
-    render(<NetworkAccessSettings />);
+    renderPage();
 
     expect(screen.getByRole("group", { name: "Tailscale" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Network access provider not found.");

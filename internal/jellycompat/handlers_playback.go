@@ -184,6 +184,7 @@ type nodeRoutingAssignmentSetter interface {
 // Child HLS requests trust the durable compat marker, so its write is fatal;
 // the native mirror remains best-effort as it was before route markers existed.
 func (h *PlaybackHandler) recordNodeRoutingAssignment(ctx context.Context, playSessionID, sessionID string, assignment playback.NodeRoutingAssignment) error {
+	assignment.NetworkProvider = new(netaccess.PathFromContext(ctx).Provider)
 	if h.playbackStore != nil {
 		if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 			committed := assignment
@@ -1252,31 +1253,34 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		targetAudioCodec = compatCopyCodec
 	}
 	claims := streamtoken.Claims{
-		SessionID:           upstreamSessionID,
-		MediaPath:           file.FilePath,
-		PlayMethod:          method,
-		TranscodeAudio:      source.TranscodeAudio,
-		TargetCodecAudio:    targetAudioCodec,
-		AudioTrackIndex:     audioTrackIndex,
-		SourceAudioChannels: sourceAudioChannels,
-		AudioOnly:           file.IsAudioOnly(),
-		TranscodeNode:       transcodeNodeURL,
-		DVProfile:           file.PrimaryDVProfile(),
-		RoutingWorkload:     string(noderouting.WorkloadDirectPlay),
-		RoutingExecution:    string(noderouting.ExecutionNone),
-		RoutingEgress:       string(noderouting.EgressProxy),
-		RoutingEgressNodeID: proxyNode.ID,
+		SessionID:              upstreamSessionID,
+		MediaPath:              file.FilePath,
+		PlayMethod:             method,
+		TranscodeAudio:         source.TranscodeAudio,
+		TargetCodecAudio:       targetAudioCodec,
+		AudioTrackIndex:        audioTrackIndex,
+		SourceAudioChannels:    sourceAudioChannels,
+		AudioOnly:              file.IsAudioOnly(),
+		TranscodeNode:          transcodeNodeURL,
+		DVProfile:              file.PrimaryDVProfile(),
+		RoutingWorkload:        string(noderouting.WorkloadDirectPlay),
+		RoutingExecution:       string(noderouting.ExecutionNone),
+		RoutingEgress:          string(noderouting.EgressProxy),
+		RoutingEgressNodeID:    proxyNode.ID,
+		RoutingNetworkProvider: new(path.Provider),
 	}
 	switch method {
 	case string(playback.PlayRemux):
 		claims.RoutingWorkload = string(noderouting.WorkloadRemux)
 		claims.RoutingExecution = string(noderouting.ExecutionProxy)
+		claims.RoutingExecutionNodeID = proxyNode.ID
 	case string(playback.PlayTranscode):
 		claims.RoutingWorkload = string(noderouting.WorkloadVideoTranscode)
 		if compatHLSCopiesVideo(source) {
 			claims.RoutingWorkload = string(noderouting.WorkloadRemux)
 		}
 		claims.RoutingExecution = string(noderouting.ExecutionTranscode)
+		claims.RoutingExecutionNodeID = h.compatTranscodeNodeID(transcodeNodeURL, nil)
 	}
 	if playback.IsAudioToAACStereoDownmixV3(claims.SourceAudioChannels, claims.TargetCodecAudio, claims.TargetAudioChannels) {
 		// Compatibility AAC output is stereo by default. Freeze that effective
@@ -1826,6 +1830,8 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 			if playSession != nil {
 				card.OriginalStartedAt = playSession.CreatedAt
 				if assignment := playSession.RoutingAssignment; assignment != nil {
+					card.RoutingNetworkProvider = assignment.NetworkProvider
+					card.RoutingExecutionNodeID = assignment.ExecutionNodeID
 					card.RoutingWorkload = assignment.Workload
 					card.RoutingExecution = assignment.Execution
 					card.RoutingEgress = assignment.Egress

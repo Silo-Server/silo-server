@@ -13039,6 +13039,8 @@ export interface components {
        */
       routing_execution_node_id?: string;
       routing_execution_node_name?: string;
+      /** @description Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier. */
+      routing_network_provider?: string;
       routing_workload?: string;
       /** Format: int64 */
       season_number?: number;
@@ -13094,6 +13096,7 @@ export interface components {
       effective_play_method: boolean;
       effective_play_method_values: string[];
       is_jellyfin_client: boolean;
+      network_access_route: boolean;
       node_observations: boolean;
       node_routing: boolean;
       /** @description Opaque revision of this document */

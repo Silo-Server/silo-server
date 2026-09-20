@@ -153,6 +153,21 @@ Rows from `GET /api/v2/admin/sessions` may then include
 `routing_egress_node_name`. Node fields are absent for the integrated API
 process and for direct play's `none` executor.
 
+`network_access_route: true` on the same capability response advertises
+`routing_network_provider` on v2 session rows. A nonempty value is the validated
+network access provider identifier selected when preparing playback (for example,
+`tailscale`); an empty string means the default network, and an absent field means
+the session predates this telemetry. Default does not distinguish LAN, public URL,
+or reverse proxy access. This records the prepared route, not a live measurement
+of every media request or an inference from the client's IP address. Provider
+display names come from `/api/v2/network-access/capabilities`.
+
+The web activity views show that network alongside the named execution and egress
+nodes. API egress is labeled "API server"; its reporting identity remains in the
+tooltip. Native and Jellyfin-compatible playback both populate the route, including
+session recovery. This additive admin observation does not change Apple, Android,
+or Jellyfin playback contracts; those clients need no changes to report it.
+
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded
 `workload`, `execution`, `egress`, `outcome`, and `reason` labels. It never
 labels observations with playback-session or node identity.

@@ -102,3 +102,15 @@ func TestSyncNowCoalescesPendingPass(t *testing.T) {
 		t.Fatal("no follow-up snapshot capture ran; the coalesced sync was lost")
 	}
 }
+
+func TestSessionSnapshotsCompareNetworkProviderValues(t *testing.T) {
+	for _, a := range []*string{nil, new(""), new("tailscale")} {
+		for _, b := range []*string{nil, new(""), new("tailscale")} {
+			want := a == nil && b == nil || a != nil && b != nil && *a == *b
+			got := sessionSnapshotsEqual([]SessionSync{{SessionID: "s", RoutingNetworkProvider: a}}, []SessionSync{{SessionID: "s", RoutingNetworkProvider: b}})
+			if got != want {
+				t.Fatalf("provider comparison = %v, want %v (%v, %v)", got, want, a, b)
+			}
+		}
+	}
+}

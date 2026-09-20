@@ -32,11 +32,12 @@ type RecipeCard struct {
 	// session on another process. Stable execution and egress identities bind
 	// the artifact to the nodes whose capacity the planner reserved; internal
 	// URLs stay out of the portable recipe.
-	RoutingWorkload        string `json:"routing_workload,omitempty"`
-	RoutingExecution       string `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID int    `json:"routing_execution_node_id,omitzero"`
-	RoutingEgress          string `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID    int    `json:"routing_egress_node_id,omitempty"`
+	RoutingNetworkProvider *string `json:"routing_network_provider,omitempty"`
+	RoutingWorkload        string  `json:"routing_workload,omitempty"`
+	RoutingExecution       string  `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID int     `json:"routing_execution_node_id,omitzero"`
+	RoutingEgress          string  `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID    int     `json:"routing_egress_node_id,omitempty"`
 
 	// PlayMethod discriminates which serve path reconstructs this session
 	// (direct / remux / transcode). Empty decodes as PlayTranscode for
@@ -359,6 +360,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		RemuxDVMode:            string(c.RemuxDVMode),
 		TranscodeNode:          c.TranscodeNodeURL,
 		TranscodeTransportID:   c.TranscodeTransportID,
+		RoutingNetworkProvider: c.RoutingNetworkProvider,
 		RoutingWorkload:        c.RoutingWorkload,
 		RoutingExecution:       c.RoutingExecution,
 		RoutingExecutionNodeID: c.RoutingExecutionNodeID,
@@ -447,6 +449,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		MediaFileID:                c.MediaFileID,
 		TranscodeNodeURL:           c.TranscodeNode,
 		TranscodeTransportID:       c.TranscodeTransportID,
+		RoutingNetworkProvider:     c.RoutingNetworkProvider,
 		RoutingWorkload:            c.RoutingWorkload,
 		RoutingExecution:           c.RoutingExecution,
 		RoutingExecutionNodeID:     c.RoutingExecutionNodeID,

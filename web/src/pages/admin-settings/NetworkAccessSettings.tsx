@@ -68,19 +68,10 @@ function hostLabel(host: NetworkAccessHostStatus["host"]): string {
  * enrollment the auth URL is the one thing the admin needs, so it sits
  * beside the state rather than behind a disclosure.
  */
-function HostRow({
-  provider,
-  host,
-  busy,
-  onConnect,
-  onDisconnect,
-}: {
-  provider: string;
-  host: NetworkAccessHostStatus;
-  busy: boolean;
-  onConnect: (hostId: string) => void;
-  onDisconnect: (hostId: string) => void;
-}) {
+function HostRow({ provider, host }: { provider: string; host: NetworkAccessHostStatus }) {
+  const connect = useConnectNetworkAccess();
+  const disconnect = useDisconnectNetworkAccess();
+  const busy = connect.isPending || disconnect.isPending;
   const unavailable = host.state === "unavailable";
   const connected = host.state === "connected";
   const pending = host.state === "connecting" || host.state === "awaiting_authorization";
@@ -152,7 +143,7 @@ function HostRow({
             variant="outline"
             size="sm"
             disabled={busy}
-            onClick={() => onDisconnect(host.host.id)}
+            onClick={() => disconnect.mutate({ provider, hosts: [host.host.id] })}
           >
             {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
             Disconnect
@@ -163,7 +154,7 @@ function HostRow({
             size="sm"
             disabled={busy || unavailable}
             title={unavailable ? "Start the plugin from the Plugins page first." : undefined}
-            onClick={() => onConnect(host.host.id)}
+            onClick={() => connect.mutate({ provider, hosts: [host.host.id] })}
           >
             {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
             Connect
@@ -176,15 +167,12 @@ function HostRow({
 
 function ProviderGroup({ provider }: { provider: NetworkAccessProviderSummary }) {
   const status = useAdminNetworkAccessStatus(provider.provider);
-  const connect = useConnectNetworkAccess();
-  const disconnect = useDisconnectNetworkAccess();
-  const busy = connect.isPending || disconnect.isPending;
   const hosts = status.data?.hosts ?? [];
 
   return (
     <FieldGroup
       label={provider.display_name}
-      description={`Overlay network provided by plugin installation ${provider.installation_id}. Clients on it reach this server without port forwarding.`}
+      description={`Access Silo through your ${provider.display_name} network without port forwarding.`}
     >
       {status.isLoading ? (
         <div className="space-y-3" aria-busy="true">
@@ -200,18 +188,7 @@ function ProviderGroup({ provider }: { provider: NetworkAccessProviderSummary })
       ) : (
         <ul className="divide-border divide-y">
           {hosts.map((host) => (
-            <HostRow
-              key={host.host.id}
-              provider={provider.provider}
-              host={host}
-              busy={busy}
-              onConnect={(hostId) =>
-                connect.mutate({ provider: provider.provider, hosts: [hostId] })
-              }
-              onDisconnect={(hostId) =>
-                disconnect.mutate({ provider: provider.provider, hosts: [hostId] })
-              }
-            />
+            <HostRow key={host.host.id} provider={provider.provider} host={host} />
           ))}
         </ul>
       )}

@@ -1037,9 +1037,12 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	// Recover the playback session and local runtime as one transaction. If a
 	// frozen tone-map recipe cannot be rebuilt, the manager rolls back the exact
 	// provisional playback session before this handler returns an error.
+	// The master binds its route after persisting the executable recipe, so
+	// overlay that durable assignment before reconstructing from a child request.
+	card := h.upstreamRecipeCard(playSession, session, *source, playSession.UpstreamPlayMethod)
 	_, transcodeSession, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(
 		r.Context(), h.sessionMgr.GetSession, playSession.UpstreamSessionID,
-		session.StreamAppUserID, requestedSegment, playSession.Recipe,
+		session.StreamAppUserID, requestedSegment, &card,
 	)
 	switch status {
 	case playback.SessionMissing:
@@ -2233,6 +2236,8 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 		card.OriginalStartedAt = ps.CreatedAt
 	}
 	if ps != nil && ps.RoutingAssignment != nil {
+		card.RoutingNetworkProvider = ps.RoutingAssignment.NetworkProvider
+		card.RoutingExecutionNodeID = ps.RoutingAssignment.ExecutionNodeID
 		card.RoutingWorkload = ps.RoutingAssignment.Workload
 		card.RoutingExecution = ps.RoutingAssignment.Execution
 		card.RoutingEgress = ps.RoutingAssignment.Egress
