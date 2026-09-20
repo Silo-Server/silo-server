@@ -653,6 +653,16 @@ func (s *Service) HandleStateReportForConnection(
 		return Snapshot{}, ErrConnectionNotAttached
 	}
 
+	// While a seek or buffering barrier is pending, element positions may
+	// still describe the old stream. Keep the waiting anchor authoritative:
+	// host reports must not undo the seek, and guest corrections must not
+	// supersede the transport command that is still loading.
+	if live.room.PlaybackState == RoomPlaybackStateWaiting {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+
 	isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
 	expected := s.expectedPositionLocked(live)
 	pauseMismatch := report.IsPaused != live.room.IsPaused

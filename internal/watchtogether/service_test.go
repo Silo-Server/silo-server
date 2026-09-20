@@ -306,6 +306,90 @@ func TestGuestDriftTriggersCorrection(t *testing.T) {
 	}
 }
 
+func TestStateReportsPreservePendingSeek(t *testing.T) {
+	for _, seekPaused := range []bool{false, true} {
+		name := "playing"
+		if seekPaused {
+			name = "paused"
+		}
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 9, 20, 15, 0, 0, 0, time.UTC)
+			repo := &stubRepo{room: baseRoom(now)}
+			service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
+			t.Cleanup(service.Close)
+			members := []struct {
+				userID    int
+				profileID string
+				sessionID string
+				conn      *recordingConn
+			}{
+				{7, "host", "host-session", &recordingConn{}},
+				{8, "guest", "guest-session", &recordingConn{}},
+			}
+			for _, member := range members {
+				service.rooms[repo.room.ID].members[buildMemberKey(member.userID, member.profileID)] = &memberState{
+					userID: member.userID, profileID: member.profileID,
+					sessionID: member.sessionID, connection: member.conn,
+				}
+			}
+			const target = 1500.0
+			hostReg := registrationFor(repo.room.ID, 7, "host", members[0].conn)
+			seek, err := service.HandleTransportRequestForConnection(t.Context(), hostReg, 7, "host", TransportRequest{
+				Action: TransportActionSeek, PositionSeconds: new(target), IsPaused: seekPaused,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, member := range members {
+				member.conn.payloads = nil
+			}
+
+			// A stream rebuild can outlast several periodic reports. Until it
+			// lands, both playing and paused reports still carry the old position.
+			for _, isPaused := range []bool{false, true} {
+				for _, member := range members {
+					reg := registrationFor(repo.room.ID, member.userID, member.profileID, member.conn)
+					snapshot, err := service.HandleStateReportForConnection(t.Context(), reg, member.userID, member.profileID, StateReport{
+						SessionID: member.sessionID, PositionSeconds: 20, IsPaused: isPaused,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if snapshot.AnchorPositionSeconds != target || !snapshot.IsPaused || snapshot.PlaybackState != RoomPlaybackStateWaiting {
+						t.Fatalf("%s report changed pending seek: position=%v paused=%v state=%s", member.profileID, snapshot.AnchorPositionSeconds, snapshot.IsPaused, snapshot.PlaybackState)
+					}
+					if repo.room.Generation != seek.Generation {
+						t.Fatal("state report persisted a change while the seek was loading")
+					}
+					if len(member.conn.payloads) != 0 {
+						t.Fatal("state report dispatched a correction while the seek was loading")
+					}
+				}
+			}
+
+			for _, member := range members {
+				reg := registrationFor(repo.room.ID, member.userID, member.profileID, member.conn)
+				if _, err := service.HandleReadyForConnection(t.Context(), reg, member.userID, member.profileID, StateReport{
+					SessionID: member.sessionID, PositionSeconds: target, IsPaused: true,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wantAction := TransportActionPlay
+			if seekPaused {
+				wantAction = TransportActionPause
+			}
+			for _, member := range members {
+				last := member.conn.payloads[len(member.conn.payloads)-1]
+				command, ok := last["command"].(TransportCommand)
+				if !ok || command.Action != wantAction || command.PositionSeconds != target {
+					t.Fatalf("%s resume command = %+v, want %s at %v", member.profileID, last, wantAction, target)
+				}
+			}
+		})
+	}
+}
+
 func TestHostAttachKeepsRoomSelectionAnchor(t *testing.T) {
 	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
 	repo := &stubRepo{room: baseRoom(now)}
