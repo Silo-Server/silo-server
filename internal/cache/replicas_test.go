@@ -23,6 +23,16 @@ func TestAPIReplicaPresenceNilReportsOneReplica(t *testing.T) {
 	}
 }
 
+func TestAPIReplicaPresenceSeparatesIdenticalNodeNames(t *testing.T) {
+	client := redis.NewClient(&redis.Options{})
+	t.Cleanup(func() { _ = client.Close() })
+	first := NewAPIReplicaPresence(client, "shared-api-name")
+	second := NewAPIReplicaPresence(client, "shared-api-name")
+	if first.key() == second.key() {
+		t.Fatal("replicas with the same node name share a presence marker")
+	}
+}
+
 // Two replicas registering see each other; one whose context ends drops its
 // marker so the census shrinks again.
 func TestAPIReplicaPresenceCountsLiveReplicas(t *testing.T) {
@@ -50,13 +60,13 @@ func TestAPIReplicaPresenceCountsLiveReplicas(t *testing.T) {
 		t.Cleanup(func() { _ = client.Del(context.Background(), p.key()).Err() })
 		return p
 	}
-	first := newPresence("first")
+	first := newPresence("shared-api-name")
 	firstCtx, stopFirst := context.WithCancel(ctx)
 	defer stopFirst()
 	if err := first.Register(firstCtx); err != nil {
 		t.Fatal(err)
 	}
-	second := newPresence("second")
+	second := newPresence("shared-api-name")
 	secondCtx, stopSecond := context.WithCancel(ctx)
 	defer stopSecond()
 	if err := second.Register(secondCtx); err != nil {

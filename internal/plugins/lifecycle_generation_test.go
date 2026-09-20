@@ -148,6 +148,13 @@ func TestAdminRestartReplacesFollowerProcessOnce(t *testing.T) {
 	defer cancel()
 	follower.service.StartResidents(ctx)
 	waitState(t, follower.service, id, "follower running", running)
+	// This hook follows the real reconcile hook. Wait for its asynchronous
+	// launches too, so the assertion observes all work from the restart event.
+	reconciled := make(chan struct{})
+	follower.service.AddLifecycleHook(func(context.Context) {
+		follower.service.resident.starts.Wait()
+		close(reconciled)
+	})
 	if err := follower.service.FollowLifecycleChanges(ctx, bus, time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -160,19 +167,15 @@ func TestAdminRestartReplacesFollowerProcessOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitState(t, follower.service, id, "follower replaced its process", func(state RuntimeState, tracked bool) bool {
-		return tracked && state.State == ResidentRunning && follower.host.NextStartSeq() > before
-	})
-	// Give a second, wrong replacement time to show up before asserting.
-	settled := follower.host.NextStartSeq()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if follower.host.NextStartSeq() != settled {
-			t.Fatalf("follower restarted more than once: start seq %d -> %d", settled, follower.host.NextStartSeq())
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case <-reconciled:
+	case <-time.After(30 * time.Second):
+		t.Fatal("follower did not finish reconciling the restart event")
 	}
-	if got := settled - before; got != 1 {
+	if state, tracked := follower.service.resident.State(id); !tracked || state.State != ResidentRunning {
+		t.Fatalf("follower not running after restart: %+v, tracked=%v", state, tracked)
+	}
+	if got := follower.host.NextStartSeq() - before; got != 1 {
 		t.Fatalf("follower start count after one admin restart = %d, want 1", got)
 	}
 }

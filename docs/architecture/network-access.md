@@ -202,7 +202,8 @@ capability RPCs may only reuse the supervisor's running process.
 Two API replicas would both load the `api` scope and share one node key,
 which the overlay treats as one node flapping between two machines. Phase one
 therefore supports one API server; in `server.mode = api` each replica keeps
-a presence marker in Redis (`cache.APIReplicaPresence`, 90 s TTL) and logs a
+a unique process presence marker in Redis (`cache.APIReplicaPresence`, 90 s
+TTL), independent of shared logical node names, and logs a
 warning at start when providers are installed and more than one live replica
 is seen (best effort, no hard refusal). The census runs once per start, so
 the warning appears in the log of whichever replica starts second, not the

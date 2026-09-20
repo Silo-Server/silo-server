@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -30,15 +31,14 @@ type APIReplicaPresence struct {
 	refresh time.Duration
 }
 
-// NewAPIReplicaPresence returns a presence for the replica identified by id
-// (the process's node identity). A nil client (a Redis-less deployment, which
-// cannot have a second replica reading the same state) yields a nil presence,
-// on which every method is a no-op that reports one replica.
+// NewAPIReplicaPresence returns a unique presence for this process, even when
+// several replicas use the same logical node id. A nil client or empty id yields
+// a nil presence, on which every method is a no-op that reports one replica.
 func NewAPIReplicaPresence(client *redis.Client, id string) *APIReplicaPresence {
 	if client == nil || id == "" {
 		return nil
 	}
-	return &APIReplicaPresence{client: client, id: id, ttl: APIReplicaTTL, refresh: apiReplicaRefreshInterval}
+	return &APIReplicaPresence{client: client, id: id + ":" + uuid.NewString(), ttl: APIReplicaTTL, refresh: apiReplicaRefreshInterval}
 }
 
 // Register writes this replica's marker and renews it until ctx ends.
