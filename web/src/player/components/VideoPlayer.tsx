@@ -65,6 +65,11 @@ import {
   toMediaTime,
   toPlayerTime,
 } from "../utils/mediaTimeline";
+import {
+  decideRoomCatchup,
+  isNativePositionSeekable,
+  roomCatchupDeadbandSeconds,
+} from "../utils/roomSyncCatchup";
 import { pendingServerSubtitleSelection } from "../utils/playableSubtitles";
 import {
   copyWatchTogetherInvite,
@@ -327,6 +332,9 @@ export function VideoPlayer({
   const compatibilityFallbackKeyRef = useRef<string | null>(null);
   const lastRoomCommandIdRef = useRef<string | null>(null);
   const roomCommandTimerRef = useRef<number | null>(null);
+  // Room position a playbackRate catch-up is converging toward, when one is
+  // active. Non-null means playbackRate is intentionally not 1.
+  const roomCatchupTargetRef = useRef<number | null>(null);
   const performPlayerSeekRef = useRef<(seconds: number) => boolean>(() => false);
   const reportRoomReadyRef = useRef<
     (positionSeconds?: number, isPaused?: boolean) => { ok: boolean }
@@ -789,6 +797,16 @@ export function VideoPlayer({
   // against the plan's timeline below.
   const { handleSeek } = useRemuxSeeking(videoRef);
 
+  // Ends an active room catch-up nudge; any seek or local stop returns the
+  // element to 1x so a stale rate never survives a context change.
+  const resetRoomCatchupRate = useCallback(() => {
+    roomCatchupTargetRef.current = null;
+    const video = videoRef.current;
+    if (video && video.playbackRate !== 1) {
+      video.playbackRate = 1;
+    }
+  }, []);
+
   // Reports whether the seek was taken up, which callers that show an
   // affordance for it (the intro prompt) need in order to know whether the
   // affordance did anything.
@@ -797,23 +815,15 @@ export function VideoPlayer({
       const video = videoRef.current;
       if (!video) return false;
 
+      resetRoomCatchupRate();
       setPendingSeekTime(seconds);
       setCurrentTime(seconds);
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
-      if (canSeekAnywhere) {
+      if (canSeekAnywhere || isNativePositionSeekable(video.seekable, nativeSeconds)) {
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;
-      }
-
-      const seekable = video.seekable;
-      for (let i = 0; i < seekable.length; i++) {
-        if (nativeSeconds >= seekable.start(i) && nativeSeconds <= seekable.end(i)) {
-          if (isHlsStream) video.currentTime = nativeSeconds;
-          else handleSeek(nativeSeconds);
-          return true;
-        }
       }
 
       // Outside the server-anchored window: this is a timeline operation, not
@@ -823,7 +833,7 @@ export function VideoPlayer({
       onReanchorSeek?.(seconds);
       return onReanchorSeek !== undefined;
     },
-    [canSeekAnywhere, handleSeek, isHlsStream, onReanchorSeek],
+    [canSeekAnywhere, handleSeek, isHlsStream, onReanchorSeek, resetRoomCatchupRate],
   );
 
   const handlePlayerSeek = useCallback(
@@ -1802,6 +1812,14 @@ export function VideoPlayer({
       if (resolved.pendingSeekTime !== pendingSeekTime) {
         setPendingSeekTime(resolved.pendingSeekTime);
       }
+      // A rate-based room catch-up that reached its target returns to 1x.
+      if (
+        roomCatchupTargetRef.current !== null &&
+        Math.abs(roomCatchupTargetRef.current - nextTime) <= roomCatchupDeadbandSeconds
+      ) {
+        roomCatchupTargetRef.current = null;
+        video.playbackRate = 1;
+      }
       // timeupdate is the most reliable signal that frames are rendering.
       // Also clears any stale buffering state from HLS segment transitions
       // where `waiting` fired but `canplay`/`playing` never followed.
@@ -2563,9 +2581,33 @@ export function VideoPlayer({
           return;
         }
 
-        const delta = Math.abs(currentTimeRef.current - command.position_seconds);
-        if (command.action === "seek" || delta > 0.35) {
+        if (command.action === "pause" || command.action === "seek") {
+          resetRoomCatchupRate();
+        }
+
+        // Room corrections land here. Small drift against a target the element
+        // cannot reach without a rebuild converges via playbackRate instead of
+        // forcing a seek-reanchor replan; see roomSyncCatchup.ts.
+        const decision = decideRoomCatchup({
+          action: command.action,
+          targetPositionSeconds: command.position_seconds,
+          localPositionSeconds: currentTimeRef.current,
+          targetLocallySeekable:
+            canSeekAnywhere ||
+            isNativePositionSeekable(
+              video.seekable,
+              toPlayerTime(command.position_seconds, timelineOffsetRef.current),
+            ),
+        });
+
+        if (decision.kind === "seek") {
           performPlayerSeekRef.current(command.position_seconds);
+        } else if (decision.kind === "rate") {
+          video.playbackRate = decision.rate;
+          roomCatchupTargetRef.current = command.position_seconds;
+        } else {
+          // Already at the room position; drop any stale convergence nudge.
+          resetRoomCatchupRate();
         }
 
         if (command.action === "pause" || command.action === "seek") {
@@ -2609,11 +2651,30 @@ export function VideoPlayer({
       }
     };
   }, [
+    canSeekAnywhere,
+    resetRoomCatchupRate,
     sessionId,
     watchTogether.room?.selection_revision,
     watchTogether.serverTimeOffsetMs,
     watchTogether.transportCommand,
     showWatchTogetherNotice,
+  ]);
+
+  // A rate nudge outlives neither the room nor a connection gap: corrections
+  // stop flowing while disconnected, so playback returns to 1x immediately.
+  useEffect(() => {
+    if (
+      !watchTogetherRoomId ||
+      watchTogether.closedReason ||
+      watchTogether.connectionState !== "connected"
+    ) {
+      resetRoomCatchupRate();
+    }
+  }, [
+    watchTogetherRoomId,
+    watchTogether.closedReason,
+    watchTogether.connectionState,
+    resetRoomCatchupRate,
   ]);
 
   const handleVolumeChange = useCallback((v: number) => {
