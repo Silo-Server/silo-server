@@ -2569,15 +2569,18 @@ export function VideoPlayer({
       roomSelectionRevision === null ||
       !sessionId
     ) {
-      return;
-    }
-    if (command.command_id === lastRoomCommandIdRef.current) {
+      lastRoomCommandIdRef.current = null;
       return;
     }
     if (command.session_id && command.session_id !== sessionId) {
+      lastRoomCommandIdRef.current = null;
       return;
     }
     if (command.selection_revision !== roomSelectionRevision) {
+      lastRoomCommandIdRef.current = null;
+      return;
+    }
+    if (command.command_id === lastRoomCommandIdRef.current) {
       return;
     }
 
@@ -2594,6 +2597,50 @@ export function VideoPlayer({
       : Date.now();
     const delay = Math.max(0, localExecuteAt - Date.now());
 
+    const applyRoomPosition = (video: HTMLVideoElement): number => {
+      if (command.action === "pause" || command.action === "seek") {
+        resetRoomCatchupRate();
+      }
+
+      // Room corrections land here. Small drift against a target the element
+      // cannot reach without a rebuild converges via playbackRate instead of
+      // forcing a seek-reanchor replan; see roomSyncCatchup.ts.
+      const catchupTarget: RoomCatchupTarget = {
+        positionSeconds: command.position_seconds,
+        executeAtMs: localExecuteAt,
+      };
+      // A late play command must choose its correction against the same
+      // advancing position used to detect convergence.
+      const targetPositionSeconds =
+        command.action === "play"
+          ? roomCatchupExpectedPosition(catchupTarget, Date.now())
+          : command.position_seconds;
+      const decision = decideRoomCatchup({
+        action: command.action,
+        targetPositionSeconds,
+        localPositionSeconds: toMediaTime(video.currentTime, timelineOffsetRef.current),
+        targetLocallySeekable:
+          canSeekAnywhere ||
+          isNativePositionSeekable(
+            video.seekable,
+            toPlayerTime(targetPositionSeconds, timelineOffsetRef.current),
+          ),
+      });
+
+      if (decision.kind === "seek") {
+        performPlayerSeekRef.current(targetPositionSeconds);
+      } else if (decision.kind === "rate") {
+        video.playbackRate = decision.rate;
+        // The room keeps advancing at 1x from the command's execution, so
+        // convergence tracks that moving position, not the static one.
+        roomCatchupTargetRef.current = catchupTarget;
+      } else {
+        // Already at the room position; drop any stale convergence nudge.
+        resetRoomCatchupRate();
+      }
+      return targetPositionSeconds;
+    };
+
     roomCommandTimerRef.current = window.setTimeout(() => {
       roomCommandTimerRef.current = null;
       void (async () => {
@@ -2602,46 +2649,7 @@ export function VideoPlayer({
           return;
         }
 
-        if (command.action === "pause" || command.action === "seek") {
-          resetRoomCatchupRate();
-        }
-
-        // Room corrections land here. Small drift against a target the element
-        // cannot reach without a rebuild converges via playbackRate instead of
-        // forcing a seek-reanchor replan; see roomSyncCatchup.ts.
-        const catchupTarget: RoomCatchupTarget = {
-          positionSeconds: command.position_seconds,
-          executeAtMs: localExecuteAt,
-        };
-        // A late play command must choose its correction against the same
-        // advancing position used to detect convergence.
-        const targetPositionSeconds =
-          command.action === "play"
-            ? roomCatchupExpectedPosition(catchupTarget, Date.now())
-            : command.position_seconds;
-        const decision = decideRoomCatchup({
-          action: command.action,
-          targetPositionSeconds,
-          localPositionSeconds: currentTimeRef.current,
-          targetLocallySeekable:
-            canSeekAnywhere ||
-            isNativePositionSeekable(
-              video.seekable,
-              toPlayerTime(targetPositionSeconds, timelineOffsetRef.current),
-            ),
-        });
-
-        if (decision.kind === "seek") {
-          performPlayerSeekRef.current(targetPositionSeconds);
-        } else if (decision.kind === "rate") {
-          video.playbackRate = decision.rate;
-          // The room keeps advancing at 1x from the command's execution, so
-          // convergence tracks that moving position, not the static one.
-          roomCatchupTargetRef.current = catchupTarget;
-        } else {
-          // Already at the room position; drop any stale convergence nudge.
-          resetRoomCatchupRate();
-        }
+        applyRoomPosition(video);
 
         if (command.action === "pause" || command.action === "seek") {
           video.pause();
@@ -2651,17 +2659,36 @@ export function VideoPlayer({
           try {
             await video.play();
           } catch {
+            if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
+              return;
+            resetRoomCatchupRate();
             showWatchTogetherNotice(
               "Your browser blocked automatic playback. Click to join playback.",
               "warning",
               () => {
-                if (lastRoomCommandIdRef.current !== command.command_id) return;
+                if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
+                  return;
                 const currentVideo = videoRef.current;
                 if (!currentVideo) return;
+                const targetPositionSeconds = applyRoomPosition(currentVideo);
                 void currentVideo
                   .play()
-                  .then(() => reportRoomReadyRef.current(command.position_seconds, false))
-                  .catch(() => {});
+                  .then(() => {
+                    if (
+                      !isMountedRef.current ||
+                      lastRoomCommandIdRef.current !== command.command_id
+                    )
+                      return;
+                    reportRoomReadyRef.current(targetPositionSeconds, false);
+                  })
+                  .catch(() => {
+                    if (
+                      !isMountedRef.current ||
+                      lastRoomCommandIdRef.current !== command.command_id
+                    )
+                      return;
+                    resetRoomCatchupRate();
+                  });
               },
             );
           }
@@ -2705,6 +2732,9 @@ export function VideoPlayer({
       watchTogether.connectionState !== "connected"
     ) {
       resetRoomCatchupRate();
+      setPendingSeekTime(null);
+      const video = videoRef.current;
+      if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
     }
   }, [
     watchTogetherRoomId,

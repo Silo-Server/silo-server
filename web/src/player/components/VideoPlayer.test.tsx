@@ -424,6 +424,86 @@ describe("VideoPlayer room catch-up", () => {
     expect(onReanchorSeek).toHaveBeenCalledWith(104);
   });
 
+  it.each([2000, 5000])(
+    "recalculates catch-up after autoplay is blocked for %sms",
+    async (delayMs) => {
+      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(101);
+      vi.mocked(video.play).mockRejectedValueOnce(new Error("Autoplay blocked"));
+      rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      expect(video.playbackRate).toBe(1);
+      vi.setSystemTime(Date.now() + delayMs);
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Join playback" })));
+
+      if (delayMs === 2000) {
+        expect(video.playbackRate).toBeGreaterThan(1);
+        expect(onReanchorSeek).not.toHaveBeenCalled();
+      } else {
+        expect(onReanchorSeek).toHaveBeenCalledWith(105);
+        expect(video.playbackRate).toBe(1);
+      }
+    },
+  );
+
+  it("resets catch-up when the manual autoplay retry also fails", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(101);
+    vi.mocked(video.play).mockRejectedValue(new Error("Autoplay blocked"));
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    vi.setSystemTime(Date.now() + 2000);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Join playback" })));
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it("keeps the autoplay retry usable after a clock offset update", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(101);
+    vi.mocked(video.play).mockRejectedValueOnce(new Error("Autoplay blocked"));
+    const commandedConnection = { ...connection, transportCommand: command };
+    rerenderPlayer({ watchTogetherConnection: commandedConnection });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    rerenderPlayer({
+      watchTogetherConnection: { ...commandedConnection, serverTimeOffsetMs: 10 },
+    });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Join playback" })));
+    expect(video.play).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["disconnected", "closed"])(
+    "abandons an optimistic seek when the room is %s",
+    async (state) => {
+      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(100);
+      connection.room = { ...connection.room!, self_can_manage_room: true };
+      rerenderPlayer({ watchTogetherConnection: connection });
+      act(() => controls.current!.onSeek(1500));
+      expect(controls.current!.currentTime).toBe(1500);
+      const commandedConnection = {
+        ...connection,
+        transportCommand: {
+          ...command,
+          action: "seek" as const,
+          position_seconds: 1500,
+          execute_at: new Date(Date.now() + 500).toISOString(),
+        },
+      };
+      rerenderPlayer({ watchTogetherConnection: commandedConnection });
+      rerenderPlayer({
+        watchTogetherConnection: {
+          ...commandedConnection,
+          ...(state === "disconnected"
+            ? { connectionState: "disconnected" as const }
+            : { closedReason: "host_left" }),
+        },
+      });
+      expect(controls.current!.currentTime).toBe(100);
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+      video.currentTime = 101;
+      fireEvent.timeUpdate(video);
+      expect(controls.current!.currentTime).toBe(101);
+    },
+  );
+
   it.each(["play", "pause", "seek"] as const)(
     "keeps a seekable late %s command in the current stream",
     async (action) => {
