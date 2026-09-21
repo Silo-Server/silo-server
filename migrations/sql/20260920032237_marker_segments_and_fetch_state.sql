@@ -41,11 +41,23 @@ WHERE key IN ('markers.mode', 'markers.lazy_playback') AND NOT EXISTS (SELECT 1 
 -- intro/credits bounds without a source, nothing can re-derive them, and the
 -- scanner's first pass after an import stamps file_modified_at for the first
 -- time, which is an identity change this trigger sees. Reading "no source" as
--- derived deleted those markers permanently on that first rescan. The 'manual'
--- COALESCE fallbacks below are what encode the rule, so they have to stay in
--- step with each other.
+-- derived deleted those markers permanently on that first rescan. The DECLARE
+-- block below encodes the rule: the shared markers_source speaks for every kind
+-- only on a row where no kind carries its own source.
 -- +goose StatementBegin
 CREATE FUNCTION invalidate_file_markers() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    -- Per-kind provenance, with the shared column standing in only for rows that
+    -- carry no per-kind provenance anywhere. Rows written before the per-kind
+    -- columns existed have one source for every kind, so the shared value is
+    -- theirs. On a row where at least one kind has its own source, a kind with
+    -- none has unknown provenance instead: a catalog import writes bounds with no
+    -- source, and those ranges can be neither fetched nor detected again.
+    shared_source text;
+    intro_source text;
+    credits_source text;
+    recap_source text;
+    preview_source text;
 BEGIN
     IF ROW(COALESCE(NEW.file_hash, ''), COALESCE(NEW.file_size, 0), NEW.file_modified_at,
            COALESCE(NEW.duration, 0), COALESCE(NEW.content_id, ''), COALESCE(NEW.episode_id, ''),
@@ -57,17 +69,28 @@ BEGIN
         RETURN NEW;
     END IF;
 
+    IF NEW.intro_markers_source IS NULL AND NEW.credits_markers_source IS NULL
+       AND NEW.recap_markers_source IS NULL AND NEW.preview_markers_source IS NULL THEN
+        shared_source := COALESCE(NEW.markers_source, 'manual');
+    ELSE
+        shared_source := 'manual';
+    END IF;
+    intro_source := COALESCE(NEW.intro_markers_source, shared_source);
+    credits_source := COALESCE(NEW.credits_markers_source, shared_source);
+    recap_source := COALESCE(NEW.recap_markers_source, shared_source);
+    preview_source := COALESCE(NEW.preview_markers_source, shared_source);
+
     SELECT COALESCE(jsonb_agg(segment), '[]'::jsonb) INTO NEW.marker_segments
     FROM jsonb_array_elements(NEW.marker_segments) AS segment
     WHERE CASE segment->>'kind'
-        WHEN 'intro' THEN COALESCE(NEW.intro_markers_source, NEW.markers_source, 'manual') = 'manual'
-        WHEN 'credits' THEN COALESCE(NEW.credits_markers_source, NEW.markers_source, 'manual') = 'manual'
-        WHEN 'recap' THEN COALESCE(NEW.recap_markers_source, NEW.markers_source, 'manual') = 'manual'
-        WHEN 'preview' THEN COALESCE(NEW.preview_markers_source, NEW.markers_source, 'manual') = 'manual'
+        WHEN 'intro' THEN intro_source = 'manual'
+        WHEN 'credits' THEN credits_source = 'manual'
+        WHEN 'recap' THEN recap_source = 'manual'
+        WHEN 'preview' THEN preview_source = 'manual'
         ELSE false
     END;
 
-    IF COALESCE(NEW.intro_markers_source, NEW.markers_source, 'manual') <> 'manual' THEN
+    IF intro_source <> 'manual' THEN
         NEW.intro_start := NULL;
         NEW.intro_end := NULL;
         NEW.intro_markers_source := NULL;
@@ -77,7 +100,7 @@ BEGIN
         NEW.intro_markers_detected_at := NULL;
     END IF;
 
-    IF COALESCE(NEW.credits_markers_source, NEW.markers_source, 'manual') <> 'manual' THEN
+    IF credits_source <> 'manual' THEN
         NEW.credits_start := NULL;
         NEW.credits_end := NULL;
         NEW.credits_markers_source := NULL;
@@ -87,7 +110,7 @@ BEGIN
         NEW.credits_markers_detected_at := NULL;
     END IF;
 
-    IF COALESCE(NEW.recap_markers_source, NEW.markers_source, 'manual') <> 'manual' THEN
+    IF recap_source <> 'manual' THEN
         NEW.recap_start := NULL;
         NEW.recap_end := NULL;
         NEW.recap_markers_source := NULL;
@@ -97,7 +120,7 @@ BEGIN
         NEW.recap_markers_detected_at := NULL;
     END IF;
 
-    IF COALESCE(NEW.preview_markers_source, NEW.markers_source, 'manual') <> 'manual' THEN
+    IF preview_source <> 'manual' THEN
         NEW.preview_start := NULL;
         NEW.preview_end := NULL;
         NEW.preview_markers_source := NULL;

@@ -134,6 +134,59 @@ func TestMarkerInvalidationPreservesProvenanceFreeRangesPostgres(t *testing.T) {
 			t.Errorf("markers_confidence = %v, want 0.6 from the surviving manual range", reportedConfidence)
 		}
 	})
+
+	t.Run("a kind without its own source survives a mixed-provenance row", func(t *testing.T) {
+		// Catalog import wrote the intro bounds; a provider later marked the
+		// credits, which also sets the shared markers_source. The intro has no
+		// provenance of its own, so the shared value must not be read as its
+		// source, or the import is deleted the moment the file identity changes.
+		fileID := markerInvalidationFile(t, pool, folderID, "mixed", `
+			INSERT INTO media_files (media_folder_id, file_path, duration, file_hash, file_size,
+				intro_start, intro_end, credits_start, credits_end, markers_source, marker_segments,
+				credits_markers_source)
+			VALUES ($1, $2, 2000, 'mixed-cut', 2000, 15, 65, 1800, 1950, 'online',
+				'[{"kind":"intro","start_seconds":15,"end_seconds":65},
+				  {"kind":"credits","start_seconds":1800,"end_seconds":1950}]'::jsonb,
+				'online')
+			RETURNING id`)
+		markerInvalidationRescan(t, pool, fileID)
+
+		var introStart, creditsStart *float64
+		var segments int
+		if err := pool.QueryRow(ctx, `SELECT intro_start, credits_start,
+			jsonb_array_length(marker_segments) FROM media_files WHERE id = $1`, fileID).Scan(
+			&introStart, &creditsStart, &segments); err != nil {
+			t.Fatal(err)
+		}
+		if introStart == nil || *introStart != 15 {
+			t.Errorf("imported intro = %v, want 15 to survive a mixed-provenance rescan", introStart)
+		}
+		if creditsStart != nil {
+			t.Errorf("online credits = %v, want cleared on an identity change", creditsStart)
+		}
+		if segments != 1 {
+			t.Errorf("occurrence count = %d, want 1 (source-less intro only)", segments)
+		}
+	})
+
+	t.Run("a row with only the shared source still clears", func(t *testing.T) {
+		// Rows written before the per-kind columns existed carry one source for
+		// every kind, so the shared value is theirs and their ranges are derived.
+		fileID := markerInvalidationFile(t, pool, folderID, "legacy-shape", `
+			INSERT INTO media_files (media_folder_id, file_path, duration, file_hash, file_size,
+				intro_start, intro_end, markers_source)
+			VALUES ($1, $2, 2000, 'legacy-shape-cut', 2000, 15, 65, 'online')
+			RETURNING id`)
+		markerInvalidationRescan(t, pool, fileID)
+
+		var introStart *float64
+		if err := pool.QueryRow(ctx, `SELECT intro_start FROM media_files WHERE id = $1`, fileID).Scan(&introStart); err != nil {
+			t.Fatal(err)
+		}
+		if introStart != nil {
+			t.Errorf("shared-source intro = %v, want cleared on an identity change", introStart)
+		}
+	})
 }
 
 func markerInvalidationPool(t *testing.T) *pgxpool.Pool {
