@@ -397,6 +397,17 @@ func TestMDBListDiscovery(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections/import/mdblist/top", "", nil), TypeAuthenticationRequired)
 }
 
+func TestCollectionProblemPreservesUnsupportedSource(t *testing.T) {
+	p := collectionProblem(&handlers.APIError{
+		Status:  http.StatusGone,
+		Code:    "unsupported_source",
+		Message: "new Trakt collections are not supported",
+	})
+	if p.Status != http.StatusGone || p.Type != TypeUnsupportedSource.URI() || p.Title != TypeUnsupportedSource.Title {
+		t.Fatalf("problem = %#v", p)
+	}
+}
+
 func (f *fakePersonalCollections) PersonalCollectionEditor(_ context.Context, _ int, _ string, id string) (handlers.PersonalCollectionEditorView, error) {
 	return handlers.PersonalCollectionEditorView{Collection: fixtureCollectionView(), Revision: 1}, f.err
 }

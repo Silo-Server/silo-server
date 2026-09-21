@@ -109,14 +109,19 @@ func TestResolverRejectsMissingSubtreeAtLibraryRoot(t *testing.T) {
 	}
 }
 
-func TestResolverResolvesVanishedMediaFileAsExactFile(t *testing.T) {
+func TestResolverResolvesVanishedMediaFile(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		libraryType string
+		wantMode    string
+		wantDir     bool
 	}{
-		{name: "Movie.mkv", libraryType: "movies"},
-		{name: "Book.epub", libraryType: "ebooks"},
-		{name: "Audiobook.m4b", libraryType: "audiobooks"},
+		// A replaced video reconciles through its directory so the upgrade's
+		// other changes (deleted version, rewritten sidecars) land too.
+		{name: "Movie.mkv", libraryType: "movies", wantMode: ModeSubtree, wantDir: true},
+		{name: "Episode.mkv", libraryType: "tv", wantMode: ModeSubtree, wantDir: true},
+		{name: "Book.epub", libraryType: "ebooks", wantMode: ModeFile},
+		{name: "Audiobook.m4b", libraryType: "audiobooks", wantMode: ModeFile},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -137,10 +142,74 @@ func TestResolverResolvesVanishedMediaFileAsExactFile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveVanishedPath returned error: %v", err)
 			}
-			if target.Folder == nil || target.Folder.ID != 20 || target.Mode != ModeFile || target.Path != vanished {
+			wantPath := vanished
+			if tc.wantDir {
+				wantPath = mediaDir
+			}
+			if target.Folder == nil || target.Folder.ID != 20 || target.Mode != tc.wantMode || target.Path != wantPath {
 				t.Fatalf("unexpected target: %#v", target)
 			}
 		})
+	}
+}
+
+func TestResolverRejectsVideoFileWhoseDirectoryCannotBeInspected(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "Locked")
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	movieDir := filepath.Join(locked, "Movie (2026)")
+	if err := os.Mkdir(movieDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	vanished := filepath.Join(movieDir, "Movie (2026).mkv")
+	// Removing search permission on the parent makes stat of the movie
+	// directory fail with EACCES rather than ENOENT.
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      24,
+		Name:    "Movies",
+		Type:    "movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Reason != ReasonPathPermissionDenied && reqErr.Reason != ReasonPathNotInspectable {
+		t.Fatalf("unexpected reason: %#v", reqErr)
+	}
+}
+
+func TestResolverResolvesVanishedVideoInVanishedDirAsExactFile(t *testing.T) {
+	root := t.TempDir()
+	// The whole movie folder is gone; a subtree scan of it could not see
+	// anything, so the file itself stays the reconciling target.
+	vanished := filepath.Join(root, "Removed Movie (2026)", "Removed Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      23,
+		Name:    "Movies",
+		Type:    "movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	target, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+	if err != nil {
+		t.Fatalf("ResolveVanishedPath returned error: %v", err)
+	}
+	if target.Folder == nil || target.Folder.ID != 23 || target.Mode != ModeFile || target.Path != vanished {
+		t.Fatalf("unexpected target: %#v", target)
 	}
 }
 
@@ -274,8 +343,37 @@ func TestResolverRejectsVanishedPathThatStillExists(t *testing.T) {
 	}
 }
 
+func TestResolverScansVideoFileInSubdirAsItsDirectory(t *testing.T) {
+	root := t.TempDir()
+	movieDir := filepath.Join(root, "Movie (2024)")
+	if err := os.Mkdir(movieDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(movieDir, "Movie (2024).mkv")
+	if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      10,
+		Name:    "Movies",
+		Type:    "movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	target, err := NewResolver(repo).Resolve(context.Background(), Request{Path: filePath})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if target.Folder == nil || target.Folder.ID != 10 || target.Mode != ModeSubtree || target.Path != movieDir {
+		t.Fatalf("unexpected target: %#v", target)
+	}
+}
+
 func TestResolverClassifiesVideoFile(t *testing.T) {
 	root := t.TempDir()
+	// Directly under the library root: widening to the directory would mean
+	// a full library scan, so the exact file stays the target.
 	filePath := filepath.Join(root, "Movie (2024).mkv")
 	if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
 		t.Fatal(err)
@@ -307,7 +405,12 @@ func TestResolverClassifiesAudioAndEbookFiles(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			filePath := filepath.Join(root, tc.name)
+			// Book kinds keep exact-file scans even inside a subdirectory.
+			bookDir := filepath.Join(root, "Title")
+			if err := os.Mkdir(bookDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			filePath := filepath.Join(bookDir, tc.name)
 			if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
 				t.Fatal(err)
 			}

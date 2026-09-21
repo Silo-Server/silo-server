@@ -159,8 +159,11 @@ interface VideoPlayerProps {
    * what tells the server to stop the session instead.
    */
   onPlanInvalidated?: (planId: string, reason: string, currentPosition: number) => Promise<boolean>;
-  /** `seek_reanchor` replan when a seek target falls outside the seekable window. */
-  onReanchorSeek?: (positionSeconds: number) => void;
+  /**
+   * `seek_reanchor` replan when a seek target falls outside the seekable window.
+   * Reports whether the replan landed a plan at the requested position.
+   */
+  onReanchorSeek?: (positionSeconds: number) => boolean | Promise<boolean>;
   preferredSubtitleLanguage?: string | null;
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
@@ -352,7 +355,7 @@ export function VideoPlayer({
   // The advancing room position a playbackRate catch-up is converging toward,
   // when one is active. Non-null means playbackRate is intentionally not 1.
   const roomCatchupTargetRef = useRef<RoomCatchupTarget | null>(null);
-  const performPlayerSeekRef = useRef<(seconds: number) => boolean>(() => false);
+  const performPlayerSeekRef = useRef<(seconds: number) => boolean | Promise<boolean>>(() => false);
   const reportRoomReadyRef = useRef<
     (positionSeconds?: number, isPaused?: boolean) => { ok: boolean }
   >(() => ({ ok: false }));
@@ -832,7 +835,7 @@ export function VideoPlayer({
   // affordance for it (the intro prompt) need in order to know whether the
   // affordance did anything.
   const performPlayerSeek = useCallback(
-    (seconds: number): boolean => {
+    (seconds: number): boolean | Promise<boolean> => {
       const video = videoRef.current;
       if (!video) return false;
 
@@ -849,16 +852,16 @@ export function VideoPlayer({
 
       // Outside the server-anchored window: this is a timeline operation, not
       // a failure, so it asks for a reanchor rather than reporting a failure.
-      // A wired handler replans and lands the position, so that counts as
-      // accepted; with no handler the seek is simply dropped.
-      onReanchorSeek?.(seconds);
-      return onReanchorSeek !== undefined;
+      // The replan decides whether the seek took: a refused or failed replan
+      // leaves playback where it was. With no handler the seek is dropped.
+      if (!onReanchorSeek) return false;
+      return onReanchorSeek(seconds);
     },
     [canSeekAnywhere, handleSeek, isHlsStream, onReanchorSeek, resetRoomCatchupRate],
   );
 
   const handlePlayerSeek = useCallback(
-    (seconds: number): boolean => {
+    (seconds: number): boolean | Promise<boolean> => {
       if (
         watchTogetherRoomId &&
         !watchTogether.closedReason &&

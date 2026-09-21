@@ -656,7 +656,7 @@ export function SourceTypeSelector({
       type: "templates",
       icon: Sparkles,
       label: "Browse Templates",
-      subtitle: "Start from a curated TMDB, Trakt, or MDBList preset",
+      subtitle: "Start from a curated TMDB or MDBList preset",
       highlight: true,
     });
   }
@@ -665,12 +665,6 @@ export function SourceTypeSelector({
     { type: "manual", icon: ListPlus, label: "Manual", subtitle: "Curate items by hand" },
     { type: "mdblist", icon: Download, label: "MDBList", subtitle: "Sync from an MDBList URL" },
     { type: "tmdb", icon: TrendingUp, label: "TMDB", subtitle: "Auto-populate from TMDB presets" },
-    {
-      type: "trakt",
-      icon: TrendingUp,
-      label: "Trakt",
-      subtitle: "Sync trending, popular, and profile recommendations",
-    },
   );
 
   return (

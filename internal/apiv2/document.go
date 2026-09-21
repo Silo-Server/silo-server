@@ -698,6 +698,7 @@ func registerAll(reg *Registry) {
 	registerWebhookReceiver(reg)
 	registerOnboarding(reg)
 	registerSystem(reg)
+	registerServerIdentity(reg)
 	registerWatchlist(reg)
 	registerWatch(reg)
 	registerOpenAPIDocument(reg)

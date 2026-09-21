@@ -188,10 +188,10 @@ func normalizeTrigger(trigger string) string {
 // ResolveVanishedPath resolves a change for a path that no longer exists on
 // disk (a file deleted by an upgrade/replacement, or a removed directory) to a
 // reconciling scan target. Paths with a supported extension for their library
-// map to an exact file scan; paths with a media extension the library type
-// does not support are rejected; remaining paths map to a subtree scan of the
-// path itself. The scoped scan marks vanished files missing so stale versions
-// stop being offered for playback.
+// map to a media-file scan (see mediaFileTarget); paths with a media extension
+// the library type does not support are rejected; remaining paths map to a
+// subtree scan of the path itself. The scoped scan marks vanished files
+// missing so stale versions stop being offered for playback.
 //
 // Two guards keep this from turning transient storage loss into cleanup:
 // the path must actually be gone (a still-existing path is rejected — use
@@ -222,7 +222,11 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 	trigger = normalizeTrigger(trigger)
 
 	if supportsLibraryMediaFile(cleanPath, folder.Type) {
-		return &Target{Folder: folder, Mode: ModeFile, Path: cleanPath, Trigger: trigger}, nil
+		mode, targetPath, err := mediaFileTarget(cleanPath, matchedRoot, folder.Type)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Folder: folder, Mode: mode, Path: targetPath, Trigger: trigger}, nil
 	}
 	if supportsMediaFile(cleanPath) {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgUnsupportedExt, Reason: ReasonUnsupportedExtension}
@@ -307,10 +311,68 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	}
 
 	targetPath := cleanPath
-	if mode == ModeLibrary {
+	switch mode {
+	case ModeLibrary:
 		targetPath = ""
+	case ModeFile:
+		mode, targetPath, err = mediaFileTarget(cleanPath, matchedRoot, folder.Type)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &Target{Folder: folder, Mode: mode, Path: targetPath, Trigger: trigger}, nil
+}
+
+// mediaFileTarget widens a video file request to a subtree scan of the file's
+// directory. Automation (Sonarr, Radarr, watchers) reports the one path it
+// knows about, but a release lands as a directory's worth of changes: the
+// replaced version is deleted, sidecars (.nfo, posters, subtitles) are
+// rewritten, and change publishers batch per directory so not every event
+// arrives. Scanning the directory picks all of that up; scanning the exact
+// file leaves the replaced version in the catalog until the next full scan.
+//
+// The widening stops at the library root: a file directly under the root
+// keeps its exact-file scan so a flat library never turns one file event into
+// a full library scan. Audiobook, ebook, and manga files also keep the
+// exact-file scan; their kinds group files differently and the video
+// replacement pattern does not apply to them.
+//
+// The directory may already be gone (a removed movie folder reported through
+// its file). A subtree scan of a missing directory cannot see anything and
+// protects its rows instead of marking them missing, so the exact-file scan,
+// which reconciles a vanished file by path, stays the target in that case.
+// Any other failure to inspect the directory is reported rather than quietly
+// narrowed to the file: a permission error would otherwise skip the directory
+// scan and leave the replaced version and sidecars unreconciled.
+func mediaFileTarget(cleanPath, matchedRoot, folderType string) (string, string, error) {
+	if !scansVideoFiles(folderType) {
+		return ModeFile, cleanPath, nil
+	}
+	dir := filepath.Dir(cleanPath)
+	if filepath.Clean(dir) == filepath.Clean(matchedRoot) {
+		return ModeFile, cleanPath, nil
+	}
+	info, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return ModeFile, cleanPath, nil
+	case errors.Is(err, os.ErrPermission):
+		return "", "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Permission denied for path", Reason: ReasonPathPermissionDenied}
+	case err != nil:
+		return "", "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathNotInspectable, Reason: ReasonPathNotInspectable}
+	case !info.IsDir():
+		return "", "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path must be a file or directory", Reason: ReasonPathNotFileOrDir}
+	}
+	return ModeSubtree, dir, nil
+}
+
+// scansVideoFiles reports whether a library kind is served by the video
+// scanner; it mirrors the default branch of supportsLibraryMediaFile.
+func scansVideoFiles(folderType string) bool {
+	return !librarykind.IsAudiobook(folderType) &&
+		!librarykind.IsEbook(folderType) &&
+		!librarykind.IsManga(folderType) &&
+		!librarykind.IsPodcast(folderType)
 }
 
 func EnqueueAll(ctx context.Context, queue Queuer, targets []Target) error {

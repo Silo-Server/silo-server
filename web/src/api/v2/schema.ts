@@ -9348,6 +9348,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/system/connections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the addresses this deployment offers to clients: the configured public URL and each installed network access provider with its overlay origin when connected on the API host. available whenever the server identity is readable; a missing public URL is an absent endpoint, never a manufactured one. Node backend addresses, enrollment URLs and admin status are not included. */
+    get: operations["getServerConnections"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/system/identity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the deployment's stable server identity before login, so a client can tell whether two addresses lead to the same server. Self-asserted: pairing and credentials still go through device-login approval. */
+    get: operations["getServerIdentity"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/system/info": {
     parameters: {
       query?: never;
@@ -23424,6 +23458,22 @@ export interface components {
        */
       updated_at: string;
     };
+    ServerAccessPathDefault: {
+      /**
+       * @description The public URL, LAN or a reverse proxy
+       * @enum {string}
+       */
+      kind: "default";
+    };
+    ServerAccessPathProvider: {
+      /**
+       * @description An overlay origin
+       * @enum {string}
+       */
+      kind: "provider";
+      /** @description Provider slug the request came through */
+      provider: string;
+    };
     ServerCollectionLibrary: {
       collections: components["schemas"]["LibraryCollectionCard"][];
       /**
@@ -23437,6 +23487,68 @@ export interface components {
     };
     ServerCollectionsOutputBody: {
       libraries: components["schemas"]["ServerCollectionLibrary"][];
+    };
+    ServerConnectionsDocument: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description How this request reached the server */
+      current:
+        | components["schemas"]["ServerAccessPathDefault"]
+        | components["schemas"]["ServerAccessPathProvider"];
+      /** @description Addresses the deployment offers, public first then providers in slug order; empty when no public URL is configured and no provider is installed. Reachability is the client's to test. */
+      endpoints: (
+        | components["schemas"]["ServerEndpointPublic"]
+        | components["schemas"]["ServerEndpointProvider"]
+      )[];
+      /** @description Opaque revision of this document */
+      revision: string;
+      /** @description The same identity getServerIdentity reports */
+      server_id: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    ServerEndpointProvider: {
+      /** @description Provider display name from its manifest, for setup help on the receiving device */
+      display_name: string;
+      /**
+       * @description A network access provider's overlay origin on the API host
+       * @enum {string}
+       */
+      kind: "provider";
+      /** @description Provider slug (e.g. tailscale) */
+      provider: string;
+      /**
+       * @description Provider state on the API host; only connected carries a url
+       * @enum {string}
+       */
+      state:
+        | "disconnected"
+        | "awaiting_authorization"
+        | "connecting"
+        | "connected"
+        | "error"
+        | "unavailable";
+      /** @description scheme://host[:port] clients reach the API at over the overlay; present only while connected */
+      url?: string;
+    };
+    ServerEndpointPublic: {
+      /**
+       * @description server.public_url as configured
+       * @enum {string}
+       */
+      kind: "public";
+      /** @description scheme://host[:port] clients reach the API at */
+      url: string;
+    };
+    ServerIdentity: {
+      /**
+       * @description Stable identity of this deployment, the same at every address and on every API process; minted once and kept across restarts, hostname changes and database restores. Public and self-asserted: never authorize on it alone.
+       * @example 3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35
+       */
+      server_id: string;
     };
     SettingConstraint: {
       /**
@@ -24220,6 +24332,11 @@ export interface components {
        * @example /api/v2/capabilities
        */
       capabilities: string;
+      /**
+       * @description Path of the public server identity document (getServerIdentity)
+       * @example /api/v2/system/identity
+       */
+      identity: string;
       /**
        * @description Path of the committed OpenAPI artifact
        * @example /api/v2/openapi.json
@@ -109797,6 +109914,182 @@ export interface operations {
       };
       /** @description Too Many Requests */
       429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getServerConnections: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServerConnectionsDocument"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getServerIdentity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServerIdentity"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };

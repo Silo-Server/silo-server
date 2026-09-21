@@ -413,6 +413,8 @@ export const v2Operations = {
   "GET /api/v2/subtitles/{media_file_id}": "listStoredSubtitles",
   "GET /api/v2/sync/progress/capabilities": "getProgressBootstrapCapabilities",
   "GET /api/v2/sync/progress/snapshots/{snapshot_id}": "getProgressBootstrapSnapshot",
+  "GET /api/v2/system/connections": "getServerConnections",
+  "GET /api/v2/system/identity": "getServerIdentity",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
   "GET /api/v2/theme/admin-css": "getThemeOverrides",

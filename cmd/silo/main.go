@@ -2553,7 +2553,7 @@ func main() {
 		// and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
 		// propagated onto deps.TrendingRefresher later in router.go.
 		trendingRefresher = sections.NewTrendingRefresher(
-			sectionRepo,
+			sections.NewTrendingDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider),
 			sections.NewTrendingSnapshotRepository(pool),
 			catalog.NewItemRepository(deps.DB),
 			collectionService.TMDBCollections,

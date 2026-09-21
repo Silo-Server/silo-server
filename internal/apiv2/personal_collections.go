@@ -434,6 +434,8 @@ func collectionProblem(err error) *Problem {
 	case apiErr.Status == http.StatusBadRequest:
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
+	case apiErr.Status == http.StatusGone && apiErr.Code == codeUnsupportedSource:
+		return NewProblem(TypeUnsupportedSource, apiErr.Message)
 	case apiErr.Status == http.StatusNotImplemented:
 		return NewProblem(TypeCapabilityUnsupported, apiErr.Message)
 	case apiErr.Status == http.StatusServiceUnavailable:

@@ -818,6 +818,12 @@ Clients use capability documents to decide whether a feature exists. The server 
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
 messages; they are not substitutes for feature detection.
 
+`links.identity` points at `GET /api/v2/system/identity`, the one public per-deployment value:
+a stable `server_id` every API process answers at every address. It is self-asserted and
+authorizes nothing; the signed-in `GET /api/v2/system/connections` capability document lists the
+addresses the deployment offers. Both are specified in
+[server-identity.md](server-identity.md).
+
 Every stable operation remains registered regardless of runtime provider wiring. Route presence
 means that the operation belongs to the stable contract, not that the current server is configured,
 authorized, and healthy enough to perform it. Each optional domain exposes a typed capability

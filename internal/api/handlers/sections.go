@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -26,7 +27,10 @@ import (
 
 // SectionHandler handles section management and batch section endpoints.
 type SectionHandler struct {
-	repo                  *sections.Repository
+	repo          *sections.Repository
+	sectionReader interface {
+		GetByID(context.Context, string) (*sections.PageSection, error)
+	}
 	fetcher               *sections.Fetcher
 	previewFetcher        sectionPreviewFetcher // set to fetcher at construction; separate for test injection
 	episodeFetcher        sectionEpisodeFetcher
@@ -41,11 +45,14 @@ type SectionHandler struct {
 	CollectionRepo        *catalog.LibraryCollectionRepository
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
 	EbookProgress         EbookReaderProgressLister
+	TrendingRefresher     interface {
+		RefreshConfig(context.Context, json.RawMessage)
+	}
 }
 
 // NewSectionHandler creates a new SectionHandler.
 func NewSectionHandler(repo *sections.Repository, fetcher *sections.Fetcher) *SectionHandler {
-	return &SectionHandler{repo: repo, fetcher: fetcher, previewFetcher: fetcher, episodeFetcher: fetcher, playableTargets: fetcher}
+	return &SectionHandler{repo: repo, sectionReader: repo, fetcher: fetcher, previewFetcher: fetcher, episodeFetcher: fetcher, playableTargets: fetcher}
 }
 
 type sectionEpisodeFetcher interface {
@@ -752,13 +759,75 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 	}
 	isAdmin := apimw.IsAdmin(ctx)
 
-	for _, o := range writes {
-		// The resolver treats any override with empty SectionID as user-added,
-		// regardless of the IsUserAdded flag. Match that here so a client cannot
-		// bypass the recipe gate by omitting is_user_added and sending the legacy
-		// shape (section_id:"", section_type:"admin_curated_list", config:{…}).
-		isUserAdded := o.IsUserAdded || o.SectionID == ""
+	type trendingCandidate struct {
+		id     string
+		config json.RawMessage
+	}
+	type traktWrite struct {
+		sectionID string
+		kind      string
+		config    json.RawMessage
+		active    bool
+	}
+	refreshCandidates := make([]trendingCandidate, 0, len(writes))
+	sourceWrites := make(map[string]traktWrite)
+	seenIDs := make(map[string]struct{}, len(writes))
+	retainedSectionIDs := make(map[string]string, len(writes))
+	baseSections := make(map[string]*sections.PageSection)
+	loadBaseSection := func(sectionID string) (*sections.PageSection, bool, error) {
+		if sectionID == "" || h.sectionReader == nil {
+			return nil, false, nil
+		}
+		if section, ok := baseSections[sectionID]; ok {
+			return section, true, nil
+		}
+		section, err := h.sectionReader.GetByID(ctx, sectionID)
+		if errors.Is(err, sections.ErrSectionNotFound) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
+		}
+		baseSections[sectionID] = section
+		return section, true, nil
+	}
+	for i := range writes {
+		o := &writes[i]
+		if o.ID != "" {
+			if _, exists := seenIDs[o.ID]; exists {
+				return apiError(http.StatusBadRequest, "duplicate_override", "section override IDs must be unique")
+			}
+			seenIDs[o.ID] = struct{}{}
+			retainedSectionIDs[o.ID] = o.SectionID
+		}
+		// SectionID is the authoritative shape discriminator used by the resolver
+		// and scheduled-demand scan. Canonicalize IsUserAdded to match it so a
+		// contradictory payload cannot validate one config and execute another.
+		isUserAdded := o.SectionID == ""
+		o.IsUserAdded = isUserAdded
 		if !isUserAdded {
+			cfg := o.Config
+			base, hasBase, err := loadBaseSection(o.SectionID)
+			if err != nil {
+				return err
+			}
+			if !hasSectionConfig(cfg) && hasBase {
+				cfg = base.Config
+			}
+			kind := traktSectionKind(cfg)
+			if kind != "" && o.ID == "" {
+				return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt-backed sections are not supported")
+			}
+			if o.ID != "" {
+				sourceWrites[o.ID] = traktWrite{sectionID: o.SectionID, kind: kind, config: append(json.RawMessage(nil), cfg...), active: !o.Hidden && !o.Removed}
+			}
+			if !o.Hidden && !o.Removed {
+				if hasBase && base.Enabled && base.SectionType == sections.SectionTrendingDiscover {
+					if !isTraktBackedSection(string(base.SectionType), cfg) {
+						refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
+					}
+				}
+			}
 			continue
 		}
 
@@ -783,15 +852,98 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 		if err := rec.Validate(cfg); err != nil {
 			return apiError(http.StatusBadRequest, "invalid_config", err.Error())
 		}
+		kind := traktSectionKind(cfg)
+		if kind != "" && o.ID == "" {
+			return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt-backed sections are not supported")
+		}
+		if o.ID != "" {
+			sourceWrites[o.ID] = traktWrite{sectionID: o.SectionID, kind: kind, config: append(json.RawMessage(nil), cfg...), active: !o.Hidden && !o.Removed}
+		}
+		if recipeType == string(sections.SectionTrendingDiscover) && !o.Hidden && !o.Removed && !isTraktBackedSection(recipeType, cfg) {
+			refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
+		}
 	}
 
 	if h.StoreProvider == nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "User store not available")
 	}
-
 	store, err := h.StoreProvider.ForUser(ctx, q.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	existing, err := store.ListSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load overrides")
+	}
+	existingByID := make(map[string]userstore.SectionOverride, len(existing))
+	for _, override := range existing {
+		existingByID[override.ID] = override
+	}
+	if err := h.rejectLegacyTraktReactivationByRemoval(ctx, existing, retainedSectionIDs); err != nil {
+		return err
+	}
+	for id, write := range sourceWrites {
+		old, ok := existingByID[id]
+		if !ok && write.kind != "" && (write.sectionID == "" || write.active) {
+			return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt-backed sections are not supported")
+		}
+		if !ok {
+			continue
+		}
+		oldConfig := json.RawMessage(old.Config)
+		if old.SectionID != "" {
+			base, found, err := loadBaseSection(old.SectionID)
+			if err != nil {
+				return err
+			}
+			if found && !hasSectionConfig(oldConfig) {
+				oldConfig = base.Config
+			}
+		} else if old.UserConfig != "" {
+			oldConfig = json.RawMessage(old.UserConfig)
+		}
+		oldKind := traktSectionKind(oldConfig)
+		if oldKind == "" && write.kind == "" {
+			continue
+		}
+		oldActive := !old.Hidden && !old.Removed
+		if oldKind == "" || oldKind != write.kind || old.SectionID != write.sectionID || !jsonConfigEqual(oldConfig, write.config) || (!oldActive && write.active) {
+			return apiError(http.StatusBadRequest, "legacy_source_immutable", "legacy Trakt section sources cannot be changed or reactivated")
+		}
+	}
+
+	refreshConfigsByKey := make(map[string]json.RawMessage, len(refreshCandidates))
+	for _, candidate := range refreshCandidates {
+		key := sections.CanonicalTrendingConfigKey(candidate.config)
+		old, exists := existingByID[candidate.id]
+		if exists {
+			oldType := old.SectionType
+			oldConfig := json.RawMessage(old.Config)
+			if old.SectionID != "" {
+				base, ok, err := loadBaseSection(old.SectionID)
+				if err != nil {
+					return err
+				}
+				if ok {
+					oldType = string(base.SectionType)
+					oldConfig = base.Config
+					if hasSectionConfig(json.RawMessage(old.Config)) {
+						oldConfig = json.RawMessage(old.Config)
+					}
+				}
+			} else if old.IsUserAdded || old.SectionID == "" {
+				if old.UserSectionType != "" {
+					oldType = old.UserSectionType
+				}
+				if old.UserConfig != "" {
+					oldConfig = json.RawMessage(old.UserConfig)
+				}
+			}
+			if oldType == string(sections.SectionTrendingDiscover) && !old.Hidden && !old.Removed && sections.CanonicalTrendingConfigKey(oldConfig) == key {
+				continue
+			}
+		}
+		refreshConfigsByKey[key] = candidate.config
 	}
 
 	overrides := make([]userstore.SectionOverride, len(writes))
@@ -823,6 +975,56 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 
 	if err := store.SaveSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID, overrides); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to save overrides")
+	}
+	if h.TrendingRefresher != nil {
+		for _, config := range refreshConfigsByKey {
+			config := config
+			go func() {
+				refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+				defer cancel()
+				h.TrendingRefresher.RefreshConfig(refreshCtx, config)
+			}()
+		}
+	}
+	return nil
+}
+
+// rejectLegacyTraktReactivationByRemoval checks linked overrides that a full
+// replacement (or reset) would delete. Removing an override is allowed unless
+// it would newly expose an enabled legacy Trakt base section.
+func (h *SectionHandler) rejectLegacyTraktReactivationByRemoval(ctx context.Context, existing []userstore.SectionOverride, retainedSectionIDs map[string]string) error {
+	if h.sectionReader == nil {
+		return nil
+	}
+	for _, old := range existing {
+		if retainedSectionIDs != nil {
+			if sectionID, retained := retainedSectionIDs[old.ID]; retained && sectionID == old.SectionID {
+				continue
+			}
+		}
+		if old.SectionID == "" {
+			continue
+		}
+		base, err := h.sectionReader.GetByID(ctx, old.SectionID)
+		if errors.Is(err, sections.ErrSectionNotFound) {
+			continue
+		}
+		if err != nil {
+			return apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
+		}
+		if !base.Enabled || !isTraktBackedSection(string(base.SectionType), base.Config) {
+			continue
+		}
+
+		oldConfig := json.RawMessage(old.Config)
+		if !hasSectionConfig(oldConfig) {
+			oldConfig = base.Config
+		}
+		oldActive := !old.Hidden && !old.Removed
+		if oldActive && traktSectionKind(oldConfig) != "" && jsonConfigEqual(oldConfig, base.Config) {
+			continue
+		}
+		return apiError(http.StatusBadRequest, "legacy_source_immutable", "legacy Trakt section sources cannot be changed or reactivated")
 	}
 	return nil
 }
@@ -859,6 +1061,13 @@ func (h *SectionHandler) ResetProfileOverrides(ctx context.Context, q SectionOve
 	store, err := h.StoreProvider.ForUser(ctx, q.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	existing, err := store.ListSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load overrides")
+	}
+	if err := h.rejectLegacyTraktReactivationByRemoval(ctx, existing, nil); err != nil {
+		return err
 	}
 	if err := store.ResetSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to reset overrides")

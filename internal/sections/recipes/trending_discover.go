@@ -51,7 +51,6 @@ func (trendingDiscoverRecipe) Definition() RecipeDefinition {
 		Presets: []GalleryPreset{
 			{Key: "tdisc_tmdb_day", DisplayName: "TMDB Trending Today", Icon: "🔥", DescriptionShort: "Today's trending movies & shows from TMDB, matched to your library.", DefaultParams: json.RawMessage(`{"source":"tmdb","window":"day"}`)},
 			{Key: "tdisc_tmdb_week", DisplayName: "TMDB Trending This Week", Icon: "🔥", DescriptionShort: "This week's trending movies & shows from TMDB, matched to your library.", DefaultParams: json.RawMessage(`{"source":"tmdb","window":"week"}`)},
-			{Key: "tdisc_trakt", DisplayName: "Trakt Trending", Icon: "📈", DescriptionShort: "Trending movies & shows on Trakt, matched to your library.", DefaultParams: json.RawMessage(`{"source":"trakt","window":"week"}`)},
 		},
 	}
 }

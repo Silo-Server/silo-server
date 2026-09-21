@@ -121,6 +121,48 @@ describe("useIntroSkipPrompt", () => {
     expect(onSeek).toHaveBeenCalledTimes(1);
   });
 
+  it("does not skip again when the stream reloads before the undo expires", async () => {
+    // A reanchor replan answers asynchronously, once the new plan is adopted.
+    let landReanchor: ((accepted: boolean) => void) | null = null;
+    onSeek.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          landReanchor = resolve;
+        }),
+    );
+    const { result, rerender } = renderPrompt({ mode: "always" });
+    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(result.current.prompt?.label).toBe("Watch Intro");
+
+    // The reload disables the prompt before the replan reports back, then
+    // lands a little before the intro end.
+    rerender({ mode: "always", currentTime: 20, playing: false, enabled: false });
+    expect(result.current.prompt).toBeNull();
+    await act(async () => landReanchor?.(true));
+    rerender({ mode: "always", currentTime: 18, playing: true, enabled: true });
+    rerender({ mode: "always", currentTime: 19, playing: true, enabled: true });
+
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(result.current.prompt).toBeNull();
+  });
+
+  it("retries the automatic skip when the reanchor replan is refused", async () => {
+    onSeek.mockImplementation(() => Promise.resolve(false));
+    const { result, rerender } = renderPrompt({ mode: "always" });
+    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+
+    // The reload disables the prompt; the refusal then lands before it
+    // re-enables, leaving playback inside the intro with nothing skipped.
+    rerender({ mode: "always", currentTime: 12, playing: false, enabled: false });
+    await act(async () => Promise.resolve());
+    expect(result.current.prompt).toBeNull();
+
+    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
+    expect(onSeek).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores a short false edge and freezes after the pause grace", () => {
     const { result, rerender } = renderPrompt();
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });

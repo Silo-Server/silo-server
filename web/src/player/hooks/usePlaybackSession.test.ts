@@ -921,7 +921,9 @@ describe("usePlaybackSession output capability changes", () => {
     act(() => result.current.refreshSubtitles(120));
     await waitFor(() => expect(replanBodies).toHaveLength(1));
     act(() => setHDR(false));
-    act(() => result.current.reanchorSeek(555));
+    act(() => {
+      void result.current.reanchorSeek(555);
+    });
     expect(replanBodies).toHaveLength(1);
 
     await act(async () => {
@@ -1484,9 +1486,9 @@ describe("usePlaybackSession replans", () => {
     await waitFor(() => expect(replanBodies).toHaveLength(1));
 
     act(() => {
-      result.current.reanchorSeek(300);
+      void result.current.reanchorSeek(300);
       result.current.recoverFromFailure({ classification: "decoder_error" }, 450);
-      result.current.reanchorSeek(600);
+      void result.current.reanchorSeek(600);
     });
     expect(replanBodies).toHaveLength(1);
 
@@ -1575,8 +1577,8 @@ describe("usePlaybackSession replans", () => {
     await waitFor(() => expect(replanBodies).toHaveLength(1));
 
     act(() => {
-      result.current.reanchorSeek(300);
-      result.current.reanchorSeek(450);
+      void result.current.reanchorSeek(300);
+      void result.current.reanchorSeek(450);
     });
     expect(replanBodies).toHaveLength(1);
 

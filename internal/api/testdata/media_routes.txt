@@ -713,6 +713,8 @@ POST /api/v2/sync/progress	non-media
 GET /api/v2/sync/progress/capabilities	non-media
 POST /api/v2/sync/progress/snapshots	non-media
 GET /api/v2/sync/progress/snapshots/{snapshot_id}	non-media
+GET /api/v2/system/connections	non-media
+GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media
@@ -1851,6 +1853,8 @@ POST /api/v2/sync/progress	non-media
 GET /api/v2/sync/progress/capabilities	non-media
 POST /api/v2/sync/progress/snapshots	non-media
 GET /api/v2/sync/progress/snapshots/{snapshot_id}	non-media
+GET /api/v2/system/connections	non-media
+GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media

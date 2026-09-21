@@ -524,28 +524,47 @@ func (s *Service) failRun(runID string, runErr error) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, err := s.repo.Fail(ctx, runID, errString(runErr))
+	run, followUp, err := s.repo.FailWithFollowUp(ctx, runID, errString(runErr))
 	if err != nil {
 		slog.Warn("scan queue: failed to mark failed", "scan_id", runID, "error", err)
 		return scanRunUnknown
 	}
 	s.publish(context.Background(), "scan.failed", run)
+	s.publishFollowUp(run, followUp)
 	if run == nil {
 		return scanRunUnknown
 	}
 	return run.Status
 }
 
+// publishFollowUp announces the follow-up scan a finished run enqueued for a
+// request that was coalesced into it while it was running.
+func (s *Service) publishFollowUp(finished, followUp *models.ScanRun) {
+	if followUp == nil {
+		return
+	}
+	slog.Info("scan queue: enqueued follow-up scan for request coalesced into running scan",
+		"scan_id", followUp.ID,
+		"finished_scan_id", finished.ID,
+		"library_id", followUp.MediaFolderID,
+		"mode", followUp.Mode,
+		"path", followUp.Path,
+		"trigger", followUp.Trigger,
+	)
+	s.publish(context.Background(), "scan.accepted", followUp)
+}
+
 func (s *Service) completeRun(runID string, result *libraryingest.Result) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, err := s.repo.Complete(ctx, runID, scanResultFromIngest(result))
+	run, followUp, err := s.repo.CompleteWithFollowUp(ctx, runID, scanResultFromIngest(result))
 	if err != nil {
 		slog.Warn("scan queue: failed to mark completed", "scan_id", runID, "error", err)
 		return scanRunUnknown
 	}
 	s.publish(context.Background(), "scan.completed", run)
+	s.publishFollowUp(run, followUp)
 	if run == nil {
 		return scanRunUnknown
 	}

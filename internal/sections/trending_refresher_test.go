@@ -32,20 +32,35 @@ type attemptRec struct {
 }
 
 type fakeSnapshotStore struct {
-	saved    map[string]savedSnap
-	attempts map[string]attemptRec
+	saved      map[string]savedSnap
+	attempts   map[string]attemptRec
+	claimed    bool
+	claimErr   error
+	claimAt    time.Time
+	saveErr    error
+	attemptErr error
 }
 
 func newFakeSnapshotStore() *fakeSnapshotStore {
-	return &fakeSnapshotStore{saved: map[string]savedSnap{}, attempts: map[string]attemptRec{}}
+	return &fakeSnapshotStore{saved: map[string]savedSnap{}, attempts: map[string]attemptRec{}, claimed: true, claimAt: time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)}
 }
 
-func (f *fakeSnapshotStore) SaveSuccess(_ context.Context, source, window string, contentIDs []string, entryCount int, status string, _ time.Time) error {
+func (f *fakeSnapshotStore) TryClaimRefresh(context.Context, string, string, time.Duration) (time.Time, bool, error) {
+	return f.claimAt, f.claimed, f.claimErr
+}
+
+func (f *fakeSnapshotStore) SaveSuccess(_ context.Context, source, window string, contentIDs []string, entryCount int, status string, _, _ time.Time) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	f.saved[source+"|"+window] = savedSnap{contentIDs: contentIDs, entryCount: entryCount, status: status}
 	return nil
 }
 
 func (f *fakeSnapshotStore) RecordAttempt(_ context.Context, source, window, status, message string, _ time.Time) error {
+	if f.attemptErr != nil {
+		return f.attemptErr
+	}
 	f.attempts[source+"|"+window] = attemptRec{status: status, message: message}
 	return nil
 }
@@ -53,9 +68,13 @@ func (f *fakeSnapshotStore) RecordAttempt(_ context.Context, source, window, sta
 type fakeTMDB struct {
 	entries []catalog.TMDBCollectionEntry
 	err     error
+	calls   *int
 }
 
 func (f fakeTMDB) GetCollectionPreset(context.Context, string, string, string, int) ([]catalog.TMDBCollectionEntry, error) {
+	if f.calls != nil {
+		*f.calls = *f.calls + 1
+	}
 	return f.entries, f.err
 }
 
@@ -131,6 +150,96 @@ func TestRefresherSavesOrderedContentIDs(t *testing.T) {
 	}
 	if got.status != "ok" || got.entryCount != 2 {
 		t.Fatalf("saved snap = %+v; want status ok, entryCount 2", got)
+	}
+}
+
+func TestRefresherSkipsFetchWhenLeaseIsHeld(t *testing.T) {
+	store := newFakeSnapshotStore()
+	store.claimed = false
+	r := &TrendingRefresher{
+		Sections:     fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "tmdb", "week")}},
+		Snapshots:    store,
+		Resolver:     fakeResolver{},
+		TMDBTrending: fakeTMDB{err: errors.New("must not fetch")},
+		Clock:        recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+	}
+
+	data, err := r.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	var result TrendingRefreshResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v; want one skipped refresh", result)
+	}
+}
+
+func TestRefresherClaimErrorDoesNotFetch(t *testing.T) {
+	store := newFakeSnapshotStore()
+	store.claimErr = errors.New("database unavailable")
+	calls := 0
+	r := &TrendingRefresher{
+		Sections:     fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "tmdb", "week")}},
+		Snapshots:    store,
+		Resolver:     fakeResolver{},
+		TMDBTrending: fakeTMDB{calls: &calls},
+	}
+	data, err := r.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	var result TrendingRefreshResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Failed != 1 || calls != 0 {
+		t.Fatalf("result=%+v calls=%d, want one failure and no fetch", result, calls)
+	}
+}
+
+func TestRefresherTreatsLeaseLossAsSkipped(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		configure func(*fakeSnapshotStore)
+		tmdb      fakeTMDB
+	}{
+		{
+			name:      "saving success",
+			configure: func(store *fakeSnapshotStore) { store.saveErr = ErrTrendingRefreshLeaseLost },
+			tmdb:      fakeTMDB{entries: []catalog.TMDBCollectionEntry{{ID: 10, MediaType: "movie"}}},
+		},
+		{
+			name:      "recording failure",
+			configure: func(store *fakeSnapshotStore) { store.attemptErr = ErrTrendingRefreshLeaseLost },
+			tmdb:      fakeTMDB{err: errors.New("upstream unavailable")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeSnapshotStore()
+			tc.configure(store)
+			r := &TrendingRefresher{
+				Sections:  fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "tmdb", "week")}},
+				Snapshots: store,
+				Resolver: fakeResolver{byType: map[string]*catalog.ExternalIDLookup{
+					"movie": {ByTMDB: map[string]string{"10": "content-10"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
+				}},
+				TMDBTrending: tc.tmdb,
+			}
+			data, err := r.RunOnce(context.Background())
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			var result TrendingRefreshResult
+			if err := json.Unmarshal(data, &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Skipped != 1 || result.Failed != 0 {
+				t.Fatalf("result=%+v, want one skipped refresh", result)
+			}
+		})
 	}
 }
 

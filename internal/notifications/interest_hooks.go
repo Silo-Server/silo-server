@@ -53,6 +53,16 @@ type interestTrackingProvider struct {
 	system *System
 }
 
+// ListAllSectionOverrides preserves the optional account-wide enumeration
+// capability of the wrapped store.
+func (s *interestTrackingStore) ListAllSectionOverrides(ctx context.Context) ([]userstore.SectionOverride, error) {
+	enumerator, ok := s.UserStore.(userstore.SectionOverrideEnumerator)
+	if !ok {
+		return nil, errors.New("section override enumeration is not supported")
+	}
+	return enumerator.ListAllSectionOverrides(ctx)
+}
+
 func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
 	store, err := p.inner.ForUser(ctx, userID)
 	if err != nil || store == nil {

@@ -193,6 +193,9 @@ func (h *UserCollectionImportHandler) ImportTMDB(ctx context.Context, userID int
 // first sync.
 func (h *UserCollectionImportHandler) ImportTrakt(ctx context.Context, userID int, profileID string, req UserImportTraktRequest) (UserImportView, error) {
 	var none UserImportView
+	return none, apiError(http.StatusGone, "unsupported_source", "new Trakt collections are not supported")
+	/* Legacy implementation retained below so existing Trakt collections can
+	continue to sync while creation is disabled.
 	if strings.TrimSpace(req.Title) == "" {
 		return none, fieldError("title", "title is required")
 	}
@@ -213,6 +216,7 @@ func (h *UserCollectionImportHandler) ImportTrakt(ctx context.Context, userID in
 		LibraryIDs: req.LibraryIDs,
 	}
 	return h.createImportedCollection(ctx, userID, profileID, "trakt", cfg, req.UserImportSharedFields)
+	*/
 }
 
 func (h *UserCollectionImportHandler) createImportedCollection(

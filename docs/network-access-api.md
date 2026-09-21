@@ -35,6 +35,37 @@ modes where the plugin service is not wired). Provider health is not state;
 read it from the admin status below. `providers` is always an array. The
 document carries an `ETag` and answers `If-None-Match` with 304.
 
+## `GET /api/v2/system/connections`
+
+Authenticated account; no profile required. The client-facing view of the
+same providers, for a phone handing a TV an address it can reach:
+
+```json
+{
+  "revision": "…",
+  "state": "available",
+  "allowed": true,
+  "server_id": "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35",
+  "current": { "kind": "default" },
+  "endpoints": [
+    { "kind": "public", "url": "https://silo.example.test" },
+    { "kind": "provider", "provider": "tailscale", "display_name": "Tailscale",
+      "state": "connected", "url": "https://silo.overlay.example.test" }
+  ]
+}
+```
+
+`server_id` is the deployment identity the public
+`GET /api/v2/system/identity` also answers. `current` is the access path this
+request arrived on (`provider` with the slug when it came through an overlay
+listener). `endpoints` lists `server.public_url` as `kind: public` when it is
+configured, then every installed provider in slug order with its state on the
+API host; `url` is present only while that provider is connected there. Node
+addresses, `auth_url` and error text stay on the admin status below. The
+identity is self-asserted: clients pair through device login before trusting
+an address. Design and client flow:
+[docs/architecture/server-identity.md](architecture/server-identity.md).
+
 ## `GET /api/v2/admin/network-access/{provider}/status`
 
 Acting admin. Asks the provider's plugin instance on every host that runs it

@@ -11434,6 +11434,44 @@
       "body_file": "search_catalog_facet_ok.json"
     },
     {
+      "name": "server_connections_ok",
+      "operation_id": "getServerConnections",
+      "scenario": "A signed-in client reads the addresses the deployment offers: the public URL, a connected provider with its overlay origin, and an installed provider whose plugin is not running.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/system/connections",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"251d40c6578ba4f568f974b66faed17c5fd6ea82251fdc08ebc30e12c2be477f\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ServerConnectionsDocument",
+      "body_file": "server_connections_ok.json"
+    },
+    {
+      "name": "server_identity_ok",
+      "operation_id": "getServerIdentity",
+      "scenario": "Discovery before login: the deployment's stable server identity, the same at every address.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/system/identity"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ServerIdentity",
+      "body_file": "server_identity_ok.json"
+    },
+    {
       "name": "set_file_markers_ok",
       "operation_id": "setFileMarkers",
       "scenario": "Synthetic marker projection; supplied segments update or clear while omitted segments remain unchanged.",

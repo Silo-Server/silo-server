@@ -259,7 +259,7 @@ describe("VideoPlayer room catch-up", () => {
 
   function setup(localPosition: number, timelineOffset = 0) {
     const connection = roomConnection();
-    const onReanchorSeek = vi.fn();
+    const onReanchorSeek = vi.fn(() => true);
     const rendered = renderPlayer({
       plan: fixturePlanV3({
         ...directPlan,

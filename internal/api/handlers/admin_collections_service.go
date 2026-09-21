@@ -109,6 +109,9 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 
 func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, req AdminCollectionCreate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
+	if req.CollectionType == adminCollectionTrakt || isTraktCollectionSourceConfig(req.SourceConfig) {
+		return none, apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
+	}
 	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
 		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
 	}
@@ -201,6 +204,13 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
+	existing, err := h.repo.GetByID(ctx, collectionID)
+	if err != nil {
+		return none, adminCollectionLookupAPIError(err)
+	}
+	if err := validateAdminCollectionSourceUpdate(existing, req); err != nil {
+		return none, err
+	}
 	queryDefinition := req.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
 		var err error
@@ -286,6 +296,59 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, updated), nil
+}
+
+func adminCollectionLookupAPIError(err error) error {
+	if errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
+		return apiError(http.StatusNotFound, "not_found", "Collection not found")
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
+}
+
+func validateAdminCollectionSourceUpdate(existing *models.LibraryCollection, req AdminCollectionUpdate) error {
+	proposedType := existing.CollectionType
+	if req.CollectionType != nil {
+		proposedType = *req.CollectionType
+	}
+	proposedConfig := existing.SourceConfig
+	if len(req.SourceConfig) > 0 {
+		proposedConfig = req.SourceConfig
+	}
+	proposedURL := existing.SourceURL
+	if req.SourceURL != nil {
+		proposedURL = *req.SourceURL
+	}
+	wasTrakt := existing.CollectionType == adminCollectionTrakt || isTraktCollectionSourceConfig(existing.SourceConfig)
+	willBeTrakt := proposedType == adminCollectionTrakt || isTraktCollectionSourceConfig(proposedConfig)
+	if !wasTrakt && willBeTrakt {
+		return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
+	}
+	if wasTrakt {
+		activatesSchedule := req.SyncSchedule != nil && strings.TrimSpace(*req.SyncSchedule) != "" && (existing.SyncSchedule == nil || strings.TrimSpace(*existing.SyncSchedule) == "")
+		changesLibraries := req.LibraryIDs != nil && !samePositiveIntSet(existing.LibraryIDs, *req.LibraryIDs)
+		if proposedType != existing.CollectionType || !jsonConfigEqual(existing.SourceConfig, proposedConfig) || proposedURL != existing.SourceURL || activatesSchedule || changesLibraries {
+			return apiError(http.StatusBadRequest, "legacy_source_immutable", "legacy Trakt collection sources cannot be changed or reactivated")
+		}
+	}
+	return nil
+}
+
+func samePositiveIntSet(left, right []int) bool {
+	left = uniquePositiveInts(left)
+	right = uniquePositiveInts(right)
+	if len(left) != len(right) {
+		return false
+	}
+	rightSet := make(map[int]struct{}, len(right))
+	for _, id := range right {
+		rightSet[id] = struct{}{}
+	}
+	for _, id := range left {
+		if _, ok := rightSet[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 func (h *LibraryCollectionHandler) UpdateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate) (AdminCollection, error) {
 	if req.PosterSourceURL != nil || req.BackdropSourceURL != nil {
@@ -411,108 +474,7 @@ func (h *LibraryCollectionHandler) ImportAdminTMDB(ctx context.Context, req Admi
 
 func (h *LibraryCollectionHandler) importAdminTrakt(ctx context.Context, req AdminCollectionImportTrakt, artwork adminCollectionArtwork) (AdminCollectionImportResult, error) {
 	var none AdminCollectionImportResult
-	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
-		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
-	}
-	listURL := strings.TrimSpace(req.ListURL)
-	var preset, mediaType, profileID string
-	if listURL != "" {
-		if _, _, err := catalog.ParseTraktListURL(listURL); err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-		}
-	} else {
-		var err error
-		preset, mediaType, profileID, err = normalizeTraktPresetRequest(req.Preset, req.MediaType, req.ProfileID)
-		if err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-		}
-	}
-	if req.Limit != nil && *req.Limit <= 0 {
-		return none, apiError(http.StatusBadRequest, "bad_request", "limit must be greater than 0")
-	}
-
-	var syncSchedule *string
-	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
-		if err := catalog.ParseCronExpression(s); err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-		}
-		syncSchedule = &s
-	}
-
-	var sourceConfig json.RawMessage
-	var sourceURL string
-	var err error
-	if listURL != "" {
-		sourceConfig, err = buildTraktListSourceConfig(listURL, req.Limit)
-		sourceURL = listURL
-	} else {
-		sourceConfig, err = buildTraktSourceConfig(preset, mediaType, profileID, req.Limit)
-		sourceURL = buildTraktSourceURL(preset, mediaType, profileID)
-	}
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to build source config")
-	}
-	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
-	if err != nil {
-		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-	}
-
-	traktSortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, false)
-	if err != nil {
-		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-	}
-
-	collection, err := h.repo.Create(ctx, catalog.CreateLibraryCollectionInput{
-		LibraryID:        req.LibraryID,
-		LibraryIDs:       req.LibraryIDs,
-		Slug:             slugifyCollectionName(req.Title),
-		Title:            req.Title,
-		Description:      req.Description,
-		CollectionType:   adminCollectionTrakt,
-		SortConfig:       json.RawMessage(traktSortConfig),
-		Visibility:       adminCollectionVisible,
-		Featured:         req.Featured,
-		PosterURL:        req.PosterURL,
-		SourceURL:        sourceURL,
-		SourceConfig:     sourceConfig,
-		ManagementMode:   managementMode,
-		ManagementSource: managementSource,
-		ManagementKey:    managementKey,
-		SyncSchedule:     syncSchedule,
-	})
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
-	}
-
-	if _, _, _, err := h.storeBundledTemplatePoster(ctx, collection.ID, req.PosterURL, false); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
-	}
-	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
-	}
-
-	run, err := h.service.SyncCollection(ctx, collection.ID)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to sync imported Trakt collection", "component", "api",
-			"collection_id", collection.ID,
-			"library_id", req.LibraryID,
-			"title", req.Title,
-			"preset", preset,
-			"media_type", mediaType,
-			"error", err,
-		)
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to sync Trakt collection")
-	}
-
-	refreshed, err := h.repo.GetByID(ctx, collection.ID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
-	}
-
-	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
-		SyncRun:    run,
-	}, nil
+	return none, apiError(http.StatusGone, "unsupported_source", "new Trakt collections are not supported")
 }
 func (h *LibraryCollectionHandler) ImportAdminTrakt(ctx context.Context, req AdminCollectionImportTrakt) (AdminCollectionImportResult, error) {
 	return h.importAdminTrakt(ctx, req, h.adminArtworkSources(ctx))

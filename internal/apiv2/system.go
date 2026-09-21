@@ -28,6 +28,7 @@ type SystemInfo struct {
 type SystemInfoLinks struct {
 	OpenAPI      string `json:"openapi" doc:"Path of the committed OpenAPI artifact" example:"/api/v2/openapi.json"`
 	Capabilities string `json:"capabilities" doc:"Path prefix of the per-domain capability documents" example:"/api/v2/capabilities"`
+	Identity     string `json:"identity" doc:"Path of the public server identity document (getServerIdentity)" example:"/api/v2/system/identity"`
 }
 
 // SystemInfoOutput is the getSystemInfo response.
@@ -110,6 +111,7 @@ func getSystemInfo(_ context.Context, _ *struct{}) (*SystemInfoOutput, error) {
 			Links: SystemInfoLinks{
 				OpenAPI:      Prefix + "/openapi.json",
 				Capabilities: Prefix + "/capabilities",
+				Identity:     Prefix + "/system/identity",
 			},
 		},
 	}, nil

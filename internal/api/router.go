@@ -72,6 +72,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -1658,6 +1659,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		sections.InstallRecipeDelegate(sectionFetcher)
 		sectionHandler = handlers.NewSectionHandler(sectionRepo, sectionFetcher)
+		if deps.TrendingRefresher != nil {
+			sectionHandler.TrendingRefresher = deps.TrendingRefresher
+		}
 		sectionHandler.CollectionRepo = sectionFetcher.CollectionRepo
 		sectionHandler.FolderRepo = deps.FolderRepo
 		if deps.UserStoreProvider != nil {
@@ -2050,6 +2054,20 @@ func newChiRouter(deps Dependencies) chi.Router {
 	)
 	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
 	v2deps.CompatConnectInfo = compatConnectInfoHandler
+	// Server identity is public discovery data, so it reads through the raw
+	// settings repo: a SECRET_KEY rotation must not change who the server is.
+	if deps.DB != nil {
+		v2deps.ServerIdentity = serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
+	}
+	v2deps.ServerConnections = apiv2.ServerConnections{PublicURL: func() string {
+		if cfg := deps.CurrentConfig(); cfg != nil {
+			return cfg.Server.PublicURL
+		}
+		return ""
+	}}
+	if deps.NetworkAccess != nil {
+		v2deps.ServerConnections.Providers = deps.NetworkAccess.Status
+	}
 	if deps.OpsLogRepo != nil {
 		v2deps.AdminOperationalLogs = deps.OpsLogRepo
 	}

@@ -99,8 +99,11 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
    * is now playing; the caller reports that back as the command's result.
    */
   invalidatePlan: (planId: string, reason: string, currentPosition: number) => Promise<boolean>;
-  /** `seek_reanchor` replan when the target lies outside the seekable window. */
-  reanchorSeek: (positionSeconds: number) => void;
+  /**
+   * `seek_reanchor` replan when the target lies outside the seekable window.
+   * Resolves with whether a plan at the new position was adopted.
+   */
+  reanchorSeek: (positionSeconds: number) => Promise<boolean>;
   /** Re-reads the subtitle inventory by replanning with the selection unchanged. */
   refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
@@ -1214,11 +1217,11 @@ export function usePlaybackSession(
   );
 
   const reanchorSeek = useCallback(
-    (positionSeconds: number) => {
+    (positionSeconds: number): Promise<boolean> => {
       playbackPositionRef.current = positionSeconds;
       awaitingInitialPlayerPositionRef.current = false;
       reportEvent("seek_reanchor_requested");
-      void replan({ operation: "seek_reanchor", positionSeconds });
+      return replan({ operation: "seek_reanchor", positionSeconds });
     },
     [replan, reportEvent],
   );

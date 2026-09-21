@@ -153,6 +153,8 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"disconnectNetworkAccess":        {http.StatusAccepted: true, http.StatusOK: false, http.StatusNotFound: true, http.StatusRequestTimeout: true},
 		"getSetupStatus":                 {http.StatusServiceUnavailable: true},
 		"getSystemInfo":                  {http.StatusServiceUnavailable: false},
+		"getServerIdentity":              {http.StatusOK: true, http.StatusServiceUnavailable: true},
+		"getServerConnections":           {http.StatusOK: true, http.StatusServiceUnavailable: true},
 		"getOpenAPIDocument":             {http.StatusServiceUnavailable: false},
 		"getCurrentUser":                 {http.StatusNotFound: false},
 		"listProgress":                   {http.StatusNotFound: true},

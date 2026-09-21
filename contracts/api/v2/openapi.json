@@ -35500,6 +35500,43 @@
         ],
         "type": "object"
       },
+      "ServerAccessPathDefault": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "The public URL, LAN or a reverse proxy",
+            "enum": [
+              "default"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ServerAccessPathProvider": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "An overlay origin",
+            "enum": [
+              "provider"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "description": "Provider slug the request came through",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "provider"
+        ],
+        "type": "object"
+      },
       "ServerCollectionLibrary": {
         "additionalProperties": false,
         "properties": {
@@ -35545,6 +35582,147 @@
         },
         "required": [
           "libraries"
+        ],
+        "type": "object"
+      },
+      "ServerConnectionsDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "current": {
+            "description": "How this request reached the server",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ServerAccessPathDefault"
+              },
+              {
+                "$ref": "#/components/schemas/ServerAccessPathProvider"
+              }
+            ]
+          },
+          "endpoints": {
+            "description": "Addresses the deployment offers, public first then providers in slug order; empty when no public URL is configured and no provider is installed. Reachability is the client's to test.",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ServerEndpointPublic"
+                },
+                {
+                  "$ref": "#/components/schemas/ServerEndpointProvider"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "server_id": {
+            "description": "The same identity getServerIdentity reports",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id",
+          "current",
+          "endpoints",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "ServerEndpointProvider": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "description": "Provider display name from its manifest, for setup help on the receiving device",
+            "type": "string"
+          },
+          "kind": {
+            "description": "A network access provider's overlay origin on the API host",
+            "enum": [
+              "provider"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "description": "Provider slug (e.g. tailscale)",
+            "type": "string"
+          },
+          "state": {
+            "description": "Provider state on the API host; only connected carries a url",
+            "enum": [
+              "disconnected",
+              "awaiting_authorization",
+              "connecting",
+              "connected",
+              "error",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "description": "scheme://host[:port] clients reach the API at over the overlay; present only while connected",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "provider",
+          "display_name",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ServerEndpointPublic": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "server.public_url as configured",
+            "enum": [
+              "public"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "description": "scheme://host[:port] clients reach the API at",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url"
+        ],
+        "type": "object"
+      },
+      "ServerIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "description": "Stable identity of this deployment, the same at every address and on every API process; minted once and kept across restarts, hostname changes and database restores. Public and self-asserted: never authorize on it alone.",
+            "examples": [
+              "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id"
         ],
         "type": "object"
       },
@@ -37423,6 +37601,13 @@
             ],
             "type": "string"
           },
+          "identity": {
+            "description": "Path of the public server identity document (getServerIdentity)",
+            "examples": [
+              "/api/v2/system/identity"
+            ],
+            "type": "string"
+          },
           "openapi": {
             "description": "Path of the committed OpenAPI artifact",
             "examples": [
@@ -37433,7 +37618,8 @@
         },
         "required": [
           "openapi",
-          "capabilities"
+          "capabilities",
+          "identity"
         ],
         "type": "object"
       },
@@ -168043,6 +168229,244 @@
           "progress"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/system/connections": {
+      "get": {
+        "operationId": "getServerConnections",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerConnectionsDocument"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the addresses this deployment offers to clients: the configured public URL and each installed network access provider with its overlay origin when connected on the API host. available whenever the server identity is readable; a missing public URL is an absent endpoint, never a manufactured one. Node backend addresses, enrollment URLs and admin status are not included.",
+        "tags": [
+          "system"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/system/identity": {
+      "get": {
+        "operationId": "getServerIdentity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerIdentity"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Read the deployment's stable server identity before login, so a client can tell whether two addresses lead to the same server. Self-asserted: pairing and credentials still go through device-login approval.",
+        "tags": [
+          "system"
+        ],
+        "x-silo-class": "public",
         "x-silo-service-backed": true
       }
     },
