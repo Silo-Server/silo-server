@@ -110,9 +110,15 @@ BEGIN
     IF NEW.intro_start IS NOT NULL OR NEW.credits_start IS NOT NULL
        OR NEW.recap_start IS NOT NULL OR NEW.preview_start IS NOT NULL THEN
         NEW.markers_source := 'manual';
+        -- Only the surviving per-kind confidences count. Folding the previous
+        -- shared value in kept a confidence belonging to a range this trigger
+        -- just deleted (GREATEST ignores NULLs, so the old value survived every
+        -- identity change even when nothing left carried one). This mirrors
+        -- recomputeSharedMarkerAttribution in internal/scanner/file_repo.go,
+        -- which derives the same columns from surviving segments only and leaves
+        -- them NULL when none reports one.
         NEW.markers_confidence := GREATEST(NEW.intro_markers_confidence, NEW.credits_markers_confidence,
-                                          NEW.recap_markers_confidence, NEW.preview_markers_confidence,
-                                          NEW.markers_confidence);
+                                          NEW.recap_markers_confidence, NEW.preview_markers_confidence);
     ELSE
         NEW.markers_source := NULL;
         NEW.markers_confidence := NULL;

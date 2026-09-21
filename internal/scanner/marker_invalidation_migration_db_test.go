@@ -34,7 +34,7 @@ func TestMarkerInvalidationPreservesProvenanceFreeRangesPostgres(t *testing.T) {
 				intro_start, intro_end, credits_start, credits_end, marker_segments)
 			VALUES ($1, $2, 2000, 'imported-cut', 2000, 15, 65, 1800, 1950,
 				'[{"kind":"intro","start_seconds":15,"end_seconds":65}]'::jsonb)
-			RETURNING id`, "imported")
+			RETURNING id`)
 
 		// The scanner's first pass writes the columns the import left NULL.
 		markerInvalidationRescan(t, pool, fileID)
@@ -60,13 +60,13 @@ func TestMarkerInvalidationPreservesProvenanceFreeRangesPostgres(t *testing.T) {
 	t.Run("derived ranges are cleared and manual ones kept", func(t *testing.T) {
 		fileID := markerInvalidationFile(t, pool, folderID, "derived", `
 			INSERT INTO media_files (media_folder_id, file_path, duration, file_hash, file_size,
-				intro_start, intro_end, markers_source, marker_segments,
+				intro_start, intro_end, credits_start, credits_end, markers_source, marker_segments,
 				intro_markers_source, intro_markers_confidence, credits_markers_source)
-			VALUES ($1, $2, 2000, 'derived-cut', 2000, 10, 50, 'online',
+			VALUES ($1, $2, 2000, 'derived-cut', 2000, 10, 50, 1800, 1950, 'online',
 				'[{"kind":"intro","start_seconds":10,"end_seconds":50},
 				  {"kind":"credits","start_seconds":1800,"end_seconds":1950}]'::jsonb,
 				'online', 0.9, 'manual')
-			RETURNING id`, "derived")
+			RETURNING id`)
 
 		markerInvalidationRescan(t, pool, fileID)
 
@@ -86,6 +86,52 @@ func TestMarkerInvalidationPreservesProvenanceFreeRangesPostgres(t *testing.T) {
 		}
 		if segments != 1 {
 			t.Errorf("occurrence count = %d, want 1 (manual credits only)", segments)
+		}
+	})
+
+	t.Run("shared confidence follows the surviving ranges", func(t *testing.T) {
+		// The surviving range here is a manual credits marker with no confidence,
+		// while the shared column still carries the dropped online intro's
+		// confidence. Folding the previous shared value back into GREATEST left
+		// the row advertising a confidence no surviving range reports.
+		staleID := markerInvalidationFile(t, pool, folderID, "stale-confidence", `
+			INSERT INTO media_files (media_folder_id, file_path, duration, file_hash, file_size,
+				intro_start, intro_end, credits_start, credits_end, markers_source, markers_confidence,
+				intro_markers_source, intro_markers_confidence, credits_markers_source)
+			VALUES ($1, $2, 2000, 'stale-cut', 2000, 10, 50, 1800, 1950, 'online', 0.95,
+				'online', 0.95, 'manual')
+			RETURNING id`)
+		markerInvalidationRescan(t, pool, staleID)
+
+		var staleSource, staleConfidence *string
+		if err := pool.QueryRow(ctx, `SELECT markers_source, markers_confidence::text
+			FROM media_files WHERE id = $1`, staleID).Scan(&staleSource, &staleConfidence); err != nil {
+			t.Fatal(err)
+		}
+		if staleSource == nil || *staleSource != "manual" {
+			t.Errorf("markers_source = %v, want manual", staleSource)
+		}
+		if staleConfidence != nil {
+			t.Errorf("markers_confidence = %v, want NULL: no surviving range reports one", *staleConfidence)
+		}
+
+		// A surviving range that does report a confidence still publishes it, so
+		// the assertion above cannot pass by always clearing the column.
+		reportedID := markerInvalidationFile(t, pool, folderID, "reported-confidence", `
+			INSERT INTO media_files (media_folder_id, file_path, duration, file_hash, file_size,
+				intro_start, intro_end, credits_start, credits_end, markers_source, markers_confidence,
+				intro_markers_source, intro_markers_confidence, credits_markers_source, credits_markers_confidence)
+			VALUES ($1, $2, 2000, 'reported-cut', 2000, 10, 50, 1800, 1950, 'online', 0.95,
+				'online', 0.95, 'manual', 0.6)
+			RETURNING id`)
+		markerInvalidationRescan(t, pool, reportedID)
+
+		var reportedConfidence *string
+		if err := pool.QueryRow(ctx, `SELECT markers_confidence::text FROM media_files WHERE id = $1`, reportedID).Scan(&reportedConfidence); err != nil {
+			t.Fatal(err)
+		}
+		if reportedConfidence == nil || *reportedConfidence != "0.6" {
+			t.Errorf("markers_confidence = %v, want 0.6 from the surviving manual range", reportedConfidence)
 		}
 	})
 }
