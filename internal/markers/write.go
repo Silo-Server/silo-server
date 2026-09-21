@@ -77,48 +77,54 @@ const markerRangeTolerance = 0.5
 
 // sameMarkerRanges reports whether two payloads describe the same occurrences.
 // A kind can occur several times, so an equal-confidence update is only
-// redundant when every range matches: comparing just the first occurrence (the
-// pre-multi-occurrence behavior, where the singular bounds were the whole
-// answer) discards corrections to any later range and rejects the withdrawal of
-// a range that no longer starts first.
+// redundant when every occurrence on one side has a counterpart on the other.
+// Comparing just the first occurrence (the pre-multi-occurrence behavior, where
+// the singular bounds were the whole answer) discarded corrections to any later
+// range; comparing positionally after an exact-value sort paired the wrong
+// occurrences whenever sub-tolerance noise reordered two starts, which reported
+// a change for an equivalent set and could flip the legacy projection onto the
+// other occurrence.
 //
-// A payload that carries only singular bounds is compared as one range, which
-// keeps rows and callers written before multi-occurrence support comparable.
+// Matching is greedy and tolerance-aware in both bounds, so it does not depend on
+// input order at all. Greedy can report a difference where another pairing would
+// have matched, which errs toward writing the row rather than skipping a real
+// change.
 func sameMarkerRanges(existing, incoming SegmentPayload) bool {
-	existingRanges := canonicalMarkerRanges(existing)
-	incomingRanges := canonicalMarkerRanges(incoming)
+	existingRanges := markerRanges(existing)
+	incomingRanges := markerRanges(incoming)
 	if len(existingRanges) != len(incomingRanges) {
 		return false
 	}
-	for index := range existingRanges {
-		if math.Abs(existingRanges[index].StartSeconds-incomingRanges[index].StartSeconds) > markerRangeTolerance ||
-			math.Abs(existingRanges[index].EndSeconds-incomingRanges[index].EndSeconds) > markerRangeTolerance {
+	matched := make([]bool, len(incomingRanges))
+	for _, want := range existingRanges {
+		found := false
+		for index, have := range incomingRanges {
+			if matched[index] {
+				continue
+			}
+			if math.Abs(want.StartSeconds-have.StartSeconds) > markerRangeTolerance ||
+				math.Abs(want.EndSeconds-have.EndSeconds) > markerRangeTolerance {
+				continue
+			}
+			matched[index] = true
+			found = true
+			break
+		}
+		if !found {
 			return false
 		}
 	}
 	return true
 }
 
-// canonicalMarkerRanges orders a payload's occurrences the way
-// models.EffectiveMarkerSegments canonicalizes them, so two payloads describing
-// the same set compare equal whatever order the caller supplied. Start time
-// alone is not enough: range validation permits two occurrences with the same
-// start and different ends, and a stable sort leaves those in arrival order,
-// which reads as a change and re-writes the row.
-func canonicalMarkerRanges(payload SegmentPayload) []models.MarkerSegment {
+// markerRanges returns a payload's occurrences, treating singular bounds as a
+// single occurrence so rows and callers written before multi-occurrence support
+// stay comparable.
+func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 	ranges := slices.Clone(payload.Ranges)
 	if len(ranges) == 0 && payload.Start != nil && payload.End != nil {
 		ranges = []models.MarkerSegment{{StartSeconds: *payload.Start, EndSeconds: *payload.End}}
 	}
-	sort.SliceStable(ranges, func(i, j int) bool {
-		if ranges[i].StartSeconds != ranges[j].StartSeconds {
-			return ranges[i].StartSeconds < ranges[j].StartSeconds
-		}
-		if ranges[i].EndSeconds != ranges[j].EndSeconds {
-			return ranges[i].EndSeconds < ranges[j].EndSeconds
-		}
-		return ranges[i].Kind < ranges[j].Kind
-	})
 	return ranges
 }
 

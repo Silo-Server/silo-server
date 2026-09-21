@@ -197,52 +197,53 @@ func TestCanWriteMarkerUpdateComparesEveryOccurrence(t *testing.T) {
 	}
 }
 
-// Ranges are compared in source order, so a payload whose ranges arrive
-// unsorted must not read as a change against the same set in order.
-func TestCanWriteMarkerUpdateSortsRangesBeforeComparing(t *testing.T) {
+// Ranges are compared as a set, so a payload whose ranges arrive unsorted must
+// not read as a change, and two occurrences close enough to be within tolerance
+// must pair up whichever way round they arrive.
+func TestCanWriteMarkerUpdateMatchesRangesWithTolerance(t *testing.T) {
 	confidence := new(0.7)
-	existing := SegmentPayload{
-		Start: new(10.0), End: new(40.0), Source: models.MarkerSourceS3, Confidence: confidence,
-		Ranges: []models.MarkerSegment{
-			{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
-			{Kind: models.MarkerSegmentCredits, StartSeconds: 900, EndSeconds: 950},
-		},
-	}
-	unsorted := existing
-	unsorted.Ranges = []models.MarkerSegment{
-		{Kind: models.MarkerSegmentCredits, StartSeconds: 900, EndSeconds: 950},
-		{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
-	}
-	if CanWriteMarkerUpdate(existing, unsorted) {
-		t.Error("the same occurrence set in a different order should stay a no-op")
+	payload := func(bounds ...[2]float64) SegmentPayload {
+		ranges := make([]models.MarkerSegment, 0, len(bounds))
+		for _, bound := range bounds {
+			ranges = append(ranges, models.MarkerSegment{Kind: models.MarkerSegmentCredits, StartSeconds: bound[0], EndSeconds: bound[1]})
+		}
+		first := ranges[0]
+		return SegmentPayload{Start: new(first.StartSeconds), End: new(first.EndSeconds), Ranges: ranges,
+			Source: models.MarkerSourceS3, Confidence: confidence}
 	}
 
-	// Equal confidence on an unranked source: only a real range change applies.
-	changed := unsorted
-	changed.Ranges = []models.MarkerSegment{
-		{Kind: models.MarkerSegmentCredits, StartSeconds: 900, EndSeconds: 950},
-	}
-	if !CanWriteMarkerUpdate(existing, changed) {
-		t.Error("an equal-confidence ranged source could not withdraw an occurrence")
+	existing := payload([2]float64{10, 40}, [2]float64{900, 950})
+	unsorted := payload([2]float64{900, 950}, [2]float64{10, 40})
+	if CanWriteMarkerUpdate(existing, unsorted) {
+		t.Error("the same occurrence set in a different order should stay a no-op")
 	}
 
 	// Range validation permits two occurrences with the same start and different
 	// ends, so ordering them by start alone leaves them in arrival order and the
 	// same set reads as a change.
-	tied := SegmentPayload{
-		Start: new(10.0), End: new(20.0), Source: models.MarkerSourceS3, Confidence: confidence,
-		Ranges: []models.MarkerSegment{
-			{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 20},
-			{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
-		},
-	}
-	tiedReordered := tied
-	tiedReordered.Start, tiedReordered.End = new(10.0), new(40.0)
-	tiedReordered.Ranges = []models.MarkerSegment{
-		{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
-		{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 20},
-	}
+	tied := payload([2]float64{10, 20}, [2]float64{10, 40})
+	tiedReordered := payload([2]float64{10, 40}, [2]float64{10, 20})
 	if CanWriteMarkerUpdate(tied, tiedReordered) {
 		t.Error("two occurrences sharing a start compared as a change when only their order differed")
+	}
+
+	// Two starts within tolerance of each other: sorting by exact value pairs the
+	// short occurrence with the long one and reports a change for the same set.
+	closeStarts := payload([2]float64{10.0, 20.0}, [2]float64{10.4, 40.0})
+	closeStartsNoisy := payload([2]float64{10.4, 20.4}, [2]float64{10.0, 40.4})
+	if CanWriteMarkerUpdate(closeStarts, closeStartsNoisy) {
+		t.Error("occurrences within tolerance compared as a change when noise reordered their starts")
+	}
+
+	// A genuine change still writes: the second occurrence ends elsewhere.
+	movedEnd := payload([2]float64{10, 40}, [2]float64{900, 1200})
+	if !CanWriteMarkerUpdate(existing, movedEnd) {
+		t.Error("a moved end should still count as a change")
+	}
+
+	// Equal confidence on an unranked source: only a real range change applies.
+	withdrawn := payload([2]float64{900, 950})
+	if !CanWriteMarkerUpdate(existing, withdrawn) {
+		t.Error("an equal-confidence ranged source could not withdraw an occurrence")
 	}
 }
