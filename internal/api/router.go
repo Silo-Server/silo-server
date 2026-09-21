@@ -52,6 +52,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -164,13 +165,18 @@ type Dependencies struct {
 	CatalogSearchVectorizer   catalog.CatalogSearchQueryVectorizer
 	// CatalogSearchSettings is the process-lifetime startup snapshot shared by
 	// every native/jellycompat provider and the index maintenance worker.
-	CatalogSearchSettings     *catalog.CatalogSearchSettings
-	RatingsRepo               *catalog.RatingsRepo
-	PersonRepo                *catalog.PersonRepository
-	PersonRefreshQueue        handlers.PersonRefreshQueue
-	PersonRefresher           handlers.PersonRefresher
-	RateLimitMW               *ratelimit.Middleware
-	ClientIPResolver          *clientip.Resolver
+	CatalogSearchSettings *catalog.CatalogSearchSettings
+	RatingsRepo           *catalog.RatingsRepo
+	PersonRepo            *catalog.PersonRepository
+	PersonRefreshQueue    handlers.PersonRefreshQueue
+	PersonRefresher       handlers.PersonRefresher
+	RateLimitMW           *ratelimit.Middleware
+	ClientIPResolver      *clientip.Resolver
+	// NetworkAccess is the ingress-token registry and provider status cache
+	// for network access provider plugins on this host. The token middleware
+	// runs on every native request and connected overlay origins are accepted
+	// by WebSocket handshakes. Nil disables both (tests, worker modes).
+	NetworkAccess             *netaccess.Broker
 	NodeID                    string
 	LogStreamHub              *logstream.Hub
 	RealtimeHub               *notifications.Hub
@@ -328,6 +334,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 
 	useBaseMiddleware(r, deps)
+	if overlay := deps.overlayOrigins(); overlay != nil {
+		handlers.SetWebSocketOverlayOrigins(overlay)
+	}
 
 	// Build the readiness handler with optional S3 check.
 	var s3Checker handlers.S3HealthChecker
@@ -2034,6 +2043,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
 		}
+		if overlay := deps.overlayOrigins(); overlay != nil {
+			socket.SetOverlayOrigins(overlay)
+		}
 	}
 	if autoscanHandler != nil {
 		v2deps.AutoscanDelivery = autoscanHandler
@@ -2136,6 +2148,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
 			}
+			if overlay := deps.overlayOrigins(); overlay != nil {
+				socket.SetOverlayOrigins(overlay)
+			}
 		}
 		// Raw v2 delivery shares the byte-protocol handlers; fonts use the typed
 		// service. Both retain token-carried reconstruction and deny markers.
@@ -2218,6 +2233,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
 			}
+			if overlay := deps.overlayOrigins(); overlay != nil {
+				socket.SetOverlayOrigins(overlay)
+			}
 		}
 	}
 	if deps.EventsHub != nil {
@@ -2229,6 +2247,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			v2deps.EventsSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
+			}
+			if overlay := deps.overlayOrigins(); overlay != nil {
+				socket.SetOverlayOrigins(overlay)
 			}
 		}
 	}
@@ -2326,6 +2347,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminNodesRead = nodeHandler
 		v2deps.AdminNodeCommands = nodeHandler
 		v2deps.AdminNodeReload = nodeHandler
+		// Network access admin operations fan out to every enabled proxy node
+		// over its bearer routes, the same way force-reload does.
+		if deps.PluginService != nil {
+			deps.PluginService.SetNetworkAccessNodes(nodeHandler)
+		}
 		if deps.DB != nil {
 			nodeHandler.SetConfigurationStore(nodepool.NewAdminConfigurationStore(deps.DB))
 			v2deps.AdminNodeConfiguration = nodeHandler
@@ -2389,6 +2415,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPluginConfiguration = v2PluginHandler
 		v2deps.AdminPluginLifecycle = v2PluginHandler
 		v2deps.AdminPluginUploads = v2PluginHandler
+	}
+	if deps.PluginService != nil {
+		v2deps.NetworkAccess = deps.PluginService
 	}
 	if deps.TaskManager != nil && deps.DB != nil {
 		v2deps.AdminTasks = deps.TaskManager
@@ -4128,6 +4157,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	return r
 }
 
+// overlayOrigins returns the source of connected overlay origins the
+// WebSocket handshakes accept, or nil when network access is not wired.
+func (d Dependencies) overlayOrigins() handlers.OverlayOriginSource {
+	if d.NetworkAccess == nil || d.NetworkAccess.Status == nil {
+		return nil
+	}
+	return d.NetworkAccess.Status.ConnectedOrigins
+}
+
 // useBaseMiddleware mounts the middleware chain every native request passes
 // through, in order. It is factored out of NewRouter so a test can drive the
 // real chain over a real socket: re-declaring the stack in a test would let the
@@ -4140,6 +4178,13 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	// Client IP resolution must run before request logging.
 	if deps.ClientIPResolver != nil {
 		r.Use(clientip.Middleware(deps.ClientIPResolver))
+	}
+
+	// Ingress token from network access provider plugins: validated and
+	// stripped before anything can log or forward it; an unknown token is
+	// refused outright. Requests without it stay on the default access path.
+	if deps.NetworkAccess != nil {
+		r.Use(netaccess.Middleware(deps.NetworkAccess.Registry))
 	}
 
 	r.Use(apimw.RequestLogger(deps.NodeID))

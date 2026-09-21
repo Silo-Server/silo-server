@@ -38,9 +38,10 @@ type AdminLogsSocketV2 struct {
 	Tickets  *evt.SocketTicketStore
 	Validate EventsSocketValidator
 	// PublicOrigin is the configured external origin, never a forwarded header.
-	PublicOrigin  string
-	publicOrigin  atomic.Pointer[string]
-	checkInterval time.Duration
+	PublicOrigin   string
+	publicOrigin   atomic.Pointer[string]
+	overlayOrigins atomic.Pointer[OverlayOriginSource]
+	checkInterval  time.Duration
 }
 
 // NewAdminLogsSocketV2 reuses the events socket's ticket store shape and the
@@ -90,7 +91,7 @@ func (h *AdminLogsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid handshake", http.StatusBadRequest)
 		return
 	}
-	if !socketOriginAllowed(r, h.currentPublicOrigin()) {
+	if !socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load())) {
 		http.Error(w, "origin refused", http.StatusForbidden)
 		return
 	}
@@ -155,7 +156,9 @@ func (h *AdminLogsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	h.Logs.serveLogStream(w, r.WithContext(ctx), websocket.Upgrader{Subprotocols: []string{AdminLogsSocketProtocol}, CheckOrigin: func(r *http.Request) bool { return socketOriginAllowed(r, h.currentPublicOrigin()) }})
+	h.Logs.serveLogStream(w, r.WithContext(ctx), websocket.Upgrader{Subprotocols: []string{AdminLogsSocketProtocol}, CheckOrigin: func(r *http.Request) bool {
+		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
+	}})
 }
 
 func (h *AdminLogsSocketV2) currentPublicOrigin() string {
@@ -168,4 +171,10 @@ func (h *AdminLogsSocketV2) currentPublicOrigin() string {
 func (h *AdminLogsSocketV2) SetPublicOrigin(origin string) {
 	normalized := strings.TrimRight(origin, "/")
 	h.publicOrigin.Store(&normalized)
+}
+
+// SetOverlayOrigins installs the source of overlay origins accepted next to
+// the public origin.
+func (h *AdminLogsSocketV2) SetOverlayOrigins(source OverlayOriginSource) {
+	h.overlayOrigins.Store(&source)
 }

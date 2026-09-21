@@ -1214,6 +1214,9 @@ var mutationWithoutLegacyRow = map[string]string{
 	"uploadAdminCollectionPoster":       "V2 separates administrator poster upload from legacy multipart definition create and update; those legacy operations retain their own mappings.",
 	"uploadAdminCollectionBackdrop":     "V2 separates administrator backdrop upload from legacy multipart definition create and update; those legacy operations retain their own mappings.",
 	"uploadCollectionPoster":            "V2 separates poster upload from legacy multipart collection create and update; their legacy rows remain mapped separately.",
+	"restartAdminPluginInstallation":    "V2-only resident plugin restart: v1 had no supervised plugin processes, so no legacy route stops and relaunches one. Repeating the restart converges on one running process.",
+	"connectNetworkAccess":              "V2-only network access provider command: v1 had no overlay network providers. Repeating the connect converges on one connected instance per host.",
+	"disconnectNetworkAccess":           "V2-only network access provider command: v1 had no overlay network providers. Repeating the disconnect converges on disconnected.",
 }
 
 // retrySafetyMismatches compares every operation the v2 registry declares

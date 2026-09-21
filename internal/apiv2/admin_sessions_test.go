@@ -23,7 +23,7 @@ func (f *fakeAdminPlaybackSessions) ReadAdminPlaybackSessions(_ context.Context,
 	f.lastLimit = limit
 	at := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.FixedZone("offset", 3600))
 	rows := []handlers.AdminPlaybackSessionView{
-		{SessionID: "b", UserID: 7, ProfileID: "child", MediaFileID: 42, RequestedMediaFileID: 41, StartedAt: at, UpdatedAt: at, RoutingExecutionNodeID: new(9), TargetAudioChannels: new(2), SourceAudioChannels: new(8), EffectivePlayMethod: "transcode", IsJellyfinClient: true, HasPlaybackControl: true},
+		{SessionID: "b", UserID: 7, ProfileID: "child", MediaFileID: 42, RequestedMediaFileID: 41, StartedAt: at, UpdatedAt: at, RoutingExecutionNodeID: new(9), RoutingNetworkProvider: new("tailscale"), TargetAudioChannels: new(2), SourceAudioChannels: new(8), EffectivePlayMethod: "transcode", IsJellyfinClient: true, HasPlaybackControl: true},
 		{SessionID: "a", UserID: 7, ProfileID: "primary", MediaFileID: 44, RequestedMediaFileID: 44, StartedAt: at, UpdatedAt: at},
 	}
 	slices.SortFunc(rows, func(a, b handlers.AdminPlaybackSessionView) int { return cmp.Compare(a.SessionID, b.SessionID) })
@@ -81,7 +81,7 @@ func TestAdminPlaybackSessionReadProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := page.Items[0]
-	if rec.Code != 200 || row.SessionID != "b" || row.ProfileID != "child" || row.MediaFileID != "42" || row.RequestedMediaFileID != "41" || row.RoutingExecutionNodeID == nil || *row.RoutingExecutionNodeID != "9" || *row.TargetAudioChannels != 2 || *row.SourceAudioChannels != 8 || !row.IsJellyfinClient || !row.HasPlaybackControl || page.Page.HasMore {
+	if rec.Code != 200 || row.SessionID != "b" || row.RoutingNetworkProvider == nil || *row.RoutingNetworkProvider != "tailscale" || row.ProfileID != "child" || row.MediaFileID != "42" || row.RequestedMediaFileID != "41" || row.RoutingExecutionNodeID == nil || *row.RoutingExecutionNodeID != "9" || *row.TargetAudioChannels != 2 || *row.SourceAudioChannels != 8 || !row.IsJellyfinClient || !row.HasPlaybackControl || page.Page.HasMore {
 		t.Fatal(rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"started_at":"2026-01-02T02:04:05.123Z"`) {
@@ -161,5 +161,36 @@ func TestAdminPlaybackSessionsAcceptDeclaredMaximumLimit(t *testing.T) {
 func adminSessionFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "admin_playback_sessions", operationID: "listAdminPlaybackSessions", method: "GET", path: Prefix + "/admin/sessions", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/CollectionAdminPlaybackSession", assertHeaders: []string{"Content-Type"}, scenario: "Diagnostic rows retain account/profile and chosen/requested file distinctions with canonical string IDs and instants."},
+	}
+}
+
+func TestAdminSessionNetworkProviderProjection(t *testing.T) {
+	for _, provider := range []*string{nil, new(""), new("tailscale")} {
+		view := handlers.AdminPlaybackSessionView{RoutingNetworkProvider: provider, StartedAt: time.Now(), UpdatedAt: time.Now()}
+		wire, err := json.Marshal(adminPlaybackSessionOf(view))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(wire, &fields); err != nil {
+			t.Fatal(err)
+		}
+		raw, present := fields["routing_network_provider"]
+		if present != (provider != nil) {
+			t.Fatalf("wrong field presence: %s", wire)
+		}
+		if present {
+			var got string
+			if err := json.Unmarshal(raw, &got); err != nil || got != *provider {
+				t.Fatalf("provider = %s", raw)
+			}
+		}
+		legacy, err := json.Marshal(view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(legacy), "routing_network_provider") {
+			t.Fatal("v2 field leaked into v1")
+		}
 	}
 }

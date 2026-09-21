@@ -179,6 +179,50 @@ func TestRecipeCardPreservesRoutingNodeIDs(t *testing.T) {
 	}
 }
 
+func TestRecipeCardNetworkRouteSurvivesRecovery(t *testing.T) {
+	for _, provider := range []*string{nil, new(""), new("tailscale")} {
+		card := NewDirectRecipeCard("network-route", 42, "profile-1", 77)
+		card.RoutingNetworkProvider = provider
+		card.RoutingWorkload = "remux"
+		card.RoutingExecution = "transcode"
+		card.RoutingExecutionNodeID = 7
+		card.RoutingEgress = "proxy"
+		card.RoutingEgressNodeID = 11
+		for _, token := range []bool{false, true} {
+			var recovered RecipeCard
+			if token {
+				wire, err := json.Marshal(card.ToClaims())
+				if err != nil {
+					t.Fatal(err)
+				}
+				var claims streamtoken.Claims
+				if err := json.Unmarshal(wire, &claims); err != nil {
+					t.Fatal(err)
+				}
+				recovered = RecipeCardFromClaims(&claims)
+			} else {
+				wire, err := json.Marshal(card)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(wire, &recovered); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tm := NewTranscodeManager()
+			tm.Sessions = NewSessionManager(0, 0)
+			session := tm.ReconstructSession(t.Context(), card.SessionID, card.UserID, recovered)
+			if session == nil || session.RoutingExecutionNodeID != 7 || session.RoutingEgressNodeID != 11 {
+				t.Fatalf("recovered route: %#v", session)
+			}
+			got := session.RoutingNetworkProvider
+			if (got == nil) != (provider == nil) || (got != nil && *got != *provider) {
+				t.Fatalf("network provider changed through recovery: got %v want %v", got, provider)
+			}
+		}
+	}
+}
+
 func ptr[T any](value T) *T { return &value }
 
 func TestRecipeCardPlayMethodConstructors(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -488,7 +489,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if proxyNode := decision.Plan.ProxyNode; proxyNode != nil {
-		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, session, playSession.CreatedAt, "", seekSeconds, proxyNode); redirectErr == nil {
+		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, session, playSession.CreatedAt, "", seekSeconds, proxyNode, netaccess.PathFromContext(r.Context())); redirectErr == nil {
 			assignment := playback.NodeRoutingAssignment{
 				Workload: string(decision.Shape.Workload), Execution: string(decision.Shape.Execution),
 				Egress: string(decision.Shape.Egress), EgressNodeID: proxyNode.ID, EgressNodeURL: proxyNode.URL,
@@ -792,7 +793,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		executionNodeID := h.compatTranscodeNodeID(remoteNodeURL, tcNode)
 
 		if decision.Shape.Egress == noderouting.EgressProxy {
-			redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, string(playback.PlayTranscode), file, *source, session, playSession.CreatedAt, remoteNodeURL, 0, plan.ProxyNode)
+			redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, string(playback.PlayTranscode), file, *source, session, playSession.CreatedAt, remoteNodeURL, 0, plan.ProxyNode, netaccess.PathFromContext(r.Context()))
 			if redirectErr == nil {
 				if err := h.recordNodeRoutingAssignment(r.Context(), playSession.ID, playSession.UpstreamSessionID, playback.NodeRoutingAssignment{
 					Workload: string(decision.Shape.Workload), Execution: string(noderouting.ExecutionTranscode),
@@ -1036,9 +1037,12 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	// Recover the playback session and local runtime as one transaction. If a
 	// frozen tone-map recipe cannot be rebuilt, the manager rolls back the exact
 	// provisional playback session before this handler returns an error.
+	// The master binds its route after persisting the executable recipe, so
+	// overlay that durable assignment before reconstructing from a child request.
+	card := h.upstreamRecipeCard(playSession, session, *source, playSession.UpstreamPlayMethod)
 	_, transcodeSession, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(
 		r.Context(), h.sessionMgr.GetSession, playSession.UpstreamSessionID,
-		session.StreamAppUserID, requestedSegment, playSession.Recipe,
+		session.StreamAppUserID, requestedSegment, &card,
 	)
 	switch status {
 	case playback.SessionMissing:
@@ -2232,6 +2236,8 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 		card.OriginalStartedAt = ps.CreatedAt
 	}
 	if ps != nil && ps.RoutingAssignment != nil {
+		card.RoutingNetworkProvider = ps.RoutingAssignment.NetworkProvider
+		card.RoutingExecutionNodeID = ps.RoutingAssignment.ExecutionNodeID
 		card.RoutingWorkload = ps.RoutingAssignment.Workload
 		card.RoutingExecution = ps.RoutingAssignment.Execution
 		card.RoutingEgress = ps.RoutingAssignment.Egress

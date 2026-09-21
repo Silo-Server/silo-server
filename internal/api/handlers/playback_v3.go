@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -1375,13 +1376,19 @@ func (h *PlaybackHandler) resolveHLSRouteWithPolicyV3(
 		return noderouting.Decision{Outcome: noderouting.OutcomePolicyUnsatisfied}
 	}
 	eligible := h.transcodeEligibilityV3(ctx, result, excludedNodes)
+	// A client that arrived through a network access provider can only use a
+	// proxy that has a connected origin on that same overlay; on the default
+	// path this is nil and every healthy proxy stays eligible. Filtering here
+	// rather than at the URL builder keeps the resolver's fallbacks (API
+	// egress, API relay to the transcode node) in charge of what happens next.
+	proxyEligible := nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), nil)
 	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery, Policy: policy, ProxyAllowed: proxyAllowed,
 		},
 		SessionID: session.ID, CurrentTranscodeURL: session.TranscodeNodeURL,
 		EstimatedBitrateKbps: result.TargetBitrateKbps,
-		TranscodeEligible:    eligible, ExcludedShapeIDs: excludedShapes,
+		TranscodeEligible:    eligible, ProxyEligible: proxyEligible, ExcludedShapeIDs: excludedShapes,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "compile playback node route", "component", "noderouting", "error", err)
@@ -2580,6 +2587,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	// proxy's row or internal URL leak into an API-served replacement route.
 	routeSession.RoutingEgressNodeID = 0
 	routeSession.RoutingEgressNodeURL = ""
+	routeSession.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
 	routeSession.RoutingWorkload = string(routingWorkloadV3(result))
 	routeSession.RoutingExecution = string(decision.Shape.Execution)
 	routeSession.RoutingEgress = string(decision.Shape.Egress)
@@ -2621,11 +2629,12 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	// back: rolling back to the restored old plan leaves that plan's published
 	// proxy URL live, and a deleted grant would 404 it.
 	var priorGrant *playback.RecipeCard
+	accessPath := netaccess.PathFromContext(r.Context())
 	switch {
 	case !mode.headerAuth:
-		streamURL, servedByProxy = h.identityStreamURLV3(&routeSession, file, proxyNode)
+		streamURL, servedByProxy = h.identityStreamURLV3(&routeSession, file, proxyNode, accessPath)
 	case mode.proxyEgress:
-		streamURL, servedByProxy, priorGrant = h.identityGrantStreamURLV3(r.Context(), &routeSession, file, proxyNode)
+		streamURL, servedByProxy, priorGrant = h.identityGrantStreamURLV3(r.Context(), &routeSession, file, proxyNode, accessPath)
 	}
 	reservationReleased := false
 	if proxyNode != nil && !servedByProxy {
@@ -2804,8 +2813,15 @@ func (h *PlaybackHandler) revokeStaleProxyGrantOnCommitV3(ctx context.Context, s
 // which is exactly the behavior of a header-authenticated attempt that
 // negotiated no origins at all. The third value is the grant this write
 // displaced, for the caller's rollback.
-func (h *PlaybackHandler) identityGrantStreamURLV3(ctx context.Context, s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node) (string, bool, *playback.RecipeCard) {
+//
+// path is the client's access path: a proxy with no origin on it is treated
+// like no proxy at all, before any grant is written, so the API relays.
+func (h *PlaybackHandler) identityGrantStreamURLV3(ctx context.Context, s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node, path netaccess.Path) (string, bool, *playback.RecipeCard) {
 	if proxyNode == nil || file == nil || s == nil {
+		return h.playbackStreamURL(s), false, nil
+	}
+	base := proxyNode.ClientURLFor(path)
+	if base == "" {
 		return h.playbackStreamURL(s), false, nil
 	}
 	card := identityRecipeCard(s)
@@ -2817,7 +2833,7 @@ func (h *PlaybackHandler) identityGrantStreamURLV3(ctx context.Context, s *playb
 	if !stored {
 		return h.playbackStreamURL(s), false, nil
 	}
-	return strings.TrimRight(proxyNode.ClientURL(), "/") + "/stream/v3/" + s.ID, true, prior
+	return base + "/stream/v3/" + s.ID, true, prior
 }
 
 // putProxyGrantV3 stores the recipe a designated proxy origin serves this
@@ -2988,14 +3004,19 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 	if delivery == noderouting.DeliveryProgressiveRemux {
 		relayEligible = h.identityProxyRelayEligibilityV3(r.Context())
 	}
+	// Both proxy predicates are narrowed to proxies the client can actually
+	// reach on its access path (see resolveHLSRouteWithPolicyV3). With no
+	// reachable proxy the resolver falls through to the API-egress shapes, or
+	// reports capacity unavailable under a proxy_only policy.
+	accessPath := netaccess.PathFromContext(r.Context())
 	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery,
 			Policy: policy, ProxyAllowed: proxyAllowed,
 		},
 		SessionID: sessionID, EstimatedBitrateKbps: identityStreamBitrateKbpsV3(result),
-		TranscodeEligible: h.transcodeEligibilityV3(r.Context(), result, nil), ProxyEligible: relayEligible,
-		ProxyExecutionEligible: h.identityProxyEligibilityV3(r.Context(), result), ExcludedShapeIDs: excludedShapes,
+		TranscodeEligible: h.transcodeEligibilityV3(r.Context(), result, nil), ProxyEligible: nodepool.ClientReachableVia(accessPath, relayEligible),
+		ProxyExecutionEligible: nodepool.ClientReachableVia(accessPath, h.identityProxyEligibilityV3(r.Context(), result)), ExcludedShapeIDs: excludedShapes,
 	})
 	if err != nil {
 		return noderouting.Decision{}, &transportErrorV3{reason: string(noderouting.OutcomePolicyUnsatisfied), message: "The playback routing policy is invalid.", retryable: false, cause: err}
@@ -3254,8 +3275,15 @@ func identityStreamBitrateKbpsV3(result playback.PlannerResultV3) int {
 // serves from the signed token alone, which is exactly the credential that mode
 // keeps out of client-visible URLs. It falls back to the API-local path, whose
 // builder omits the token for the same reason.
-func (h *PlaybackHandler) identityStreamURLV3(s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node) (string, bool) {
+//
+// path is the client's access path; a proxy with no origin on it falls back
+// the same way, and the caller releases the reservation.
+func (h *PlaybackHandler) identityStreamURLV3(s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node, path netaccess.Path) (string, bool) {
 	if proxyNode == nil || file == nil || (s != nil && s.RequireMediaAuthorization) {
+		return h.playbackStreamURL(s), false
+	}
+	base := proxyNode.ClientURLFor(path)
+	if base == "" {
 		return h.playbackStreamURL(s), false
 	}
 	card := identityRecipeCard(s)
@@ -3268,7 +3296,6 @@ func (h *PlaybackHandler) identityStreamURLV3(s *playback.Session, file *models.
 	if token == "" {
 		return h.playbackStreamURL(s), false
 	}
-	base := strings.TrimRight(proxyNode.ClientURL(), "/")
 	if s.PlayMethod == playback.PlayRemux {
 		if claims.PlayMethod == streamtoken.PlayMethodAudioDownmixRemux {
 			return base + "/stream/remux/audio-v2/" + token, true
@@ -3676,6 +3703,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	if !mode.headerAuth {
 		card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
 		card.OriginalStartedAt = session.StartedAt
+		card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
 		card.RoutingWorkload = string(routingWorkloadV3(result))
 		card.RoutingExecution = string(noderouting.ExecutionAPI)
 		card.RoutingEgress = string(noderouting.EgressAPI)
@@ -3869,6 +3897,8 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}
 	card := remoteTranscodeRecipeCardV3(session, file, node.URL, transportID, req, nodeResp, toneMapFilter)
 	card.RoutingWorkload = string(routingWorkloadV3(result))
+	card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
+	card.RoutingExecutionNodeID = node.ID
 	card.RoutingExecution = string(noderouting.ExecutionTranscode)
 	card.RoutingEgress = string(noderouting.EgressAPI)
 	if nodePlan.ProxyNode != nil {
@@ -3885,12 +3915,13 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	// See prepareIdentityTransportV3: the displaced grant is what a failed
 	// replan of an already-proxy-served session has to put back.
 	var priorGrant *playback.RecipeCard
+	accessPath := netaccess.PathFromContext(r.Context())
 	switch {
 	case !mode.headerAuth:
-		url = h.buildProxyManifestURL(card, nodePlan.ProxyNode, mode.headerAuth)
+		url = h.buildProxyManifestURL(card, nodePlan.ProxyNode, mode.headerAuth, accessPath)
 		servedByProxy = nodePlan.ProxyNode != nil && strings.HasPrefix(url, "http")
 	case mode.proxyEgress:
-		url, servedByProxy, priorGrant = h.grantManifestURLV3(r.Context(), card, nodePlan.ProxyNode)
+		url, servedByProxy, priorGrant = h.grantManifestURLV3(r.Context(), card, nodePlan.ProxyNode, accessPath)
 	}
 	if mode.headerAuth {
 		// No client-visible URL carries a stream token in this mode, so neither the
@@ -4010,12 +4041,17 @@ func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFi
 // credential-free manifest URL on that origin. Segment URIs stay relative to
 // the manifest, so the same /stream/v3/{session_id}/... family serves both.
 //
-// Without a planned proxy — or when the grant cannot be stored — the client
-// fetches the manifest from this server, which relays the same node. The third
-// value is the grant this write displaced, for the caller's rollback.
-func (h *PlaybackHandler) grantManifestURLV3(ctx context.Context, card playback.RecipeCard, proxyNode *nodepool.Node) (string, bool, *playback.RecipeCard) {
+// Without a planned proxy — or a proxy the client cannot reach on its access
+// path, or when the grant cannot be stored — the client fetches the manifest
+// from this server, which relays the same node. The third value is the grant
+// this write displaced, for the caller's rollback.
+func (h *PlaybackHandler) grantManifestURLV3(ctx context.Context, card playback.RecipeCard, proxyNode *nodepool.Node, path netaccess.Path) (string, bool, *playback.RecipeCard) {
 	localURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", card.SessionID)
 	if proxyNode == nil {
+		return localURL, false, nil
+	}
+	base := proxyNode.ClientURLFor(path)
+	if base == "" {
 		return localURL, false, nil
 	}
 	card.RoutingEgressNodeID = proxyNode.ID
@@ -4023,7 +4059,7 @@ func (h *PlaybackHandler) grantManifestURLV3(ctx context.Context, card playback.
 	if !stored {
 		return localURL, false, nil
 	}
-	return strings.TrimRight(proxyNode.ClientURL(), "/") + "/stream/v3/" + card.SessionID + "/master.m3u8", true, prior
+	return base + "/stream/v3/" + card.SessionID + "/master.m3u8", true, prior
 }
 
 // sourceExecutionMetadataV3 freezes the source facts used by a remote executor.
@@ -4094,6 +4130,7 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		TranscodeNodeURL:          transport.nodeURL,
 		TranscodeTransportID:      transport.transportID,
 		TranscodeRouteSet:         true,
+		RoutingNetworkProvider:    new(netaccess.PathFromContext(ctx).Provider),
 		RoutingWorkload:           string(transport.routingWorkload),
 		RoutingExecution:          string(transport.routingExecution),
 		RoutingExecutionNodeID:    transport.routingExecutorID,

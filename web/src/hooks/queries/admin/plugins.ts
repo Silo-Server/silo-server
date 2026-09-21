@@ -734,6 +734,50 @@ export function useApplyPluginUpdate() {
   };
 }
 
+export function useRestartPluginInstallation() {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    retry: false,
+    mutationFn: async ({ id, profileContext }: PluginLifecycleIntent) => {
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const row = await v2("POST /api/v2/admin/plugins/installations/{id}/restart", {
+        path: { id: String(id) },
+        profileContext,
+        retryAuthentication: false,
+      });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return pluginInstallationOfV2(row);
+    },
+    onSuccess: (_result, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      toast.success("Plugin restart requested");
+      invalidatePluginQueries(queryClient);
+      void queryClient.invalidateQueries({ queryKey: adminKeys.networkAccessStatusRoot() });
+    },
+    onError: (error, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      toast.error(
+        lifecycleFailure(
+          error,
+          "Plugin restart could not be confirmed. Refresh installations before trying again.",
+        ),
+      );
+    },
+  });
+  return {
+    ...mutation,
+    mutate: (id: number) => {
+      try {
+        mutation.mutate(captureInstallation(id));
+      } catch {
+        toast.error("Select an administrator profile before restarting a plugin.");
+      }
+    },
+  };
+}
+
 export function useDeletePluginInstallation() {
   const queryClient = useQueryClient();
   const mutation = useMutation({

@@ -21,12 +21,13 @@ type roomSocketTickets interface {
 	Consume(context.Context, string, string) (watchtogether.RoomSocketCredential, error)
 }
 type WatchTogetherSocketV2 struct {
-	Room          *WatchTogetherHandler
-	Tickets       roomSocketTickets
-	Validate      EventsSocketValidator
-	PublicOrigin  string
-	publicOrigin  atomic.Pointer[string]
-	checkInterval time.Duration
+	Room           *WatchTogetherHandler
+	Tickets        roomSocketTickets
+	Validate       EventsSocketValidator
+	PublicOrigin   string
+	publicOrigin   atomic.Pointer[string]
+	overlayOrigins atomic.Pointer[OverlayOriginSource]
+	checkInterval  time.Duration
 }
 
 func NewWatchTogetherSocketV2(room *WatchTogetherHandler, tickets *watchtogether.RoomSocketCredentialStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *WatchTogetherSocketV2 {
@@ -82,7 +83,7 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid handshake", http.StatusBadRequest)
 		return
 	}
-	if !socketOriginAllowed(r, h.currentPublicOrigin()) {
+	if !socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load())) {
 		http.Error(w, "origin refused", http.StatusForbidden)
 		return
 	}
@@ -126,7 +127,9 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	ctx, cancel := context.WithDeadline(validated, deadline)
 	defer cancel()
-	upgrader := websocket.Upgrader{Subprotocols: []string{watchtogether.RoomSocketProtocol}, CheckOrigin: func(r *http.Request) bool { return socketOriginAllowed(r, h.currentPublicOrigin()) }}
+	upgrader := websocket.Upgrader{Subprotocols: []string{watchtogether.RoomSocketProtocol}, CheckOrigin: func(r *http.Request) bool {
+		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
+	}}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -172,4 +175,10 @@ func (h *WatchTogetherSocketV2) currentPublicOrigin() string {
 func (h *WatchTogetherSocketV2) SetPublicOrigin(origin string) {
 	normalized := strings.TrimRight(origin, "/")
 	h.publicOrigin.Store(&normalized)
+}
+
+// SetOverlayOrigins installs the source of overlay origins accepted next to
+// the public origin.
+func (h *WatchTogetherSocketV2) SetOverlayOrigins(source OverlayOriginSource) {
+	h.overlayOrigins.Store(&source)
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -183,6 +184,7 @@ type nodeRoutingAssignmentSetter interface {
 // Child HLS requests trust the durable compat marker, so its write is fatal;
 // the native mirror remains best-effort as it was before route markers existed.
 func (h *PlaybackHandler) recordNodeRoutingAssignment(ctx context.Context, playSessionID, sessionID string, assignment playback.NodeRoutingAssignment) error {
+	assignment.NetworkProvider = new(netaccess.PathFromContext(ctx).Provider)
 	if h.playbackStore != nil {
 		if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 			committed := assignment
@@ -626,7 +628,10 @@ func (h *PlaybackHandler) resolveCompatIdentityRouteWithPolicy(
 		workload = noderouting.WorkloadRemux
 		delivery = noderouting.DeliveryProgressiveRemux
 	}
-	proxyEligible := h.compatProxyEligibility(ctx, requiresAudioBoost)
+	// Narrowed to proxies the client can reach on its access path: a client
+	// that arrived through a network access provider never receives a LAN
+	// origin, and with no reachable proxy the API-egress shapes apply.
+	proxyEligible := nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), h.compatProxyEligibility(ctx, requiresAudioBoost))
 	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery,
@@ -982,7 +987,11 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 		},
 		SessionID: session.ID, CurrentTranscodeURL: currentTranscodeURL,
 		EstimatedBitrateKbps: source.Version.Bitrate,
-		TranscodeEligible:    eligible, ExcludedShapeIDs: excludedShapes,
+		TranscodeEligible:    eligible,
+		// Proxy egress only through a proxy the client can reach on its access
+		// path; nil on the default path, so every healthy proxy stays eligible.
+		ProxyEligible:    nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), nil),
+		ExcludedShapeIDs: excludedShapes,
 	})
 }
 
@@ -1203,7 +1212,10 @@ func (h *PlaybackHandler) CleanupOrphanedTranscodes() (int, error) {
 }
 
 // buildProxyRedirectURL signs a stream token and builds the redirect URL for
-// the given proxy node (the planner's pick for this session).
+// the given proxy node (the planner's pick for this session) on the client's
+// access path. A proxy with no origin on that path is an error, which every
+// caller treats like an unavailable proxy transport: the reservation is
+// released and the stream is served from this server.
 func (h *PlaybackHandler) buildProxyRedirectURL(
 	playSessionID string,
 	upstreamSessionID string,
@@ -1215,9 +1227,14 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 	transcodeNodeURL string,
 	seekSeconds float64,
 	proxyNode *nodepool.Node,
+	path netaccess.Path,
 ) (string, error) {
 	if proxyNode == nil || h.JWTSecret == "" {
 		return "", fmt.Errorf("proxy transport unavailable")
+	}
+	base := proxyNode.ClientURLFor(path)
+	if base == "" {
+		return "", fmt.Errorf("proxy %d has no client origin on access path %q", proxyNode.ID, path.Provider)
 	}
 
 	audioTrackIndex := 0
@@ -1236,31 +1253,34 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		targetAudioCodec = compatCopyCodec
 	}
 	claims := streamtoken.Claims{
-		SessionID:           upstreamSessionID,
-		MediaPath:           file.FilePath,
-		PlayMethod:          method,
-		TranscodeAudio:      source.TranscodeAudio,
-		TargetCodecAudio:    targetAudioCodec,
-		AudioTrackIndex:     audioTrackIndex,
-		SourceAudioChannels: sourceAudioChannels,
-		AudioOnly:           file.IsAudioOnly(),
-		TranscodeNode:       transcodeNodeURL,
-		DVProfile:           file.PrimaryDVProfile(),
-		RoutingWorkload:     string(noderouting.WorkloadDirectPlay),
-		RoutingExecution:    string(noderouting.ExecutionNone),
-		RoutingEgress:       string(noderouting.EgressProxy),
-		RoutingEgressNodeID: proxyNode.ID,
+		SessionID:              upstreamSessionID,
+		MediaPath:              file.FilePath,
+		PlayMethod:             method,
+		TranscodeAudio:         source.TranscodeAudio,
+		TargetCodecAudio:       targetAudioCodec,
+		AudioTrackIndex:        audioTrackIndex,
+		SourceAudioChannels:    sourceAudioChannels,
+		AudioOnly:              file.IsAudioOnly(),
+		TranscodeNode:          transcodeNodeURL,
+		DVProfile:              file.PrimaryDVProfile(),
+		RoutingWorkload:        string(noderouting.WorkloadDirectPlay),
+		RoutingExecution:       string(noderouting.ExecutionNone),
+		RoutingEgress:          string(noderouting.EgressProxy),
+		RoutingEgressNodeID:    proxyNode.ID,
+		RoutingNetworkProvider: new(path.Provider),
 	}
 	switch method {
 	case string(playback.PlayRemux):
 		claims.RoutingWorkload = string(noderouting.WorkloadRemux)
 		claims.RoutingExecution = string(noderouting.ExecutionProxy)
+		claims.RoutingExecutionNodeID = proxyNode.ID
 	case string(playback.PlayTranscode):
 		claims.RoutingWorkload = string(noderouting.WorkloadVideoTranscode)
 		if compatHLSCopiesVideo(source) {
 			claims.RoutingWorkload = string(noderouting.WorkloadRemux)
 		}
 		claims.RoutingExecution = string(noderouting.ExecutionTranscode)
+		claims.RoutingExecutionNodeID = h.compatTranscodeNodeID(transcodeNodeURL, nil)
 	}
 	if playback.IsAudioToAACStereoDownmixV3(claims.SourceAudioChannels, claims.TargetCodecAudio, claims.TargetAudioChannels) {
 		// Compatibility AAC output is stereo by default. Freeze that effective
@@ -1304,19 +1324,19 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 
 	switch method {
 	case string(playback.PlayDirect):
-		return nodepool.NodeEndpoint(proxyNode.ClientURL(), "/stream/direct/"+token), nil
+		return nodepool.NodeEndpoint(base, "/stream/direct/"+token), nil
 	case string(playback.PlayRemux):
 		remuxPath := "/stream/remux/"
 		if claims.PlayMethod == streamtoken.PlayMethodAudioDownmixRemux {
 			remuxPath = "/stream/remux/audio-v2/"
 		}
-		redirectURL := nodepool.NodeEndpoint(proxyNode.ClientURL(), remuxPath+token)
+		redirectURL := nodepool.NodeEndpoint(base, remuxPath+token)
 		if seekSeconds > 0 {
 			redirectURL += "?seek=" + strconv.FormatFloat(seekSeconds, 'f', -1, 64)
 		}
 		return redirectURL, nil
 	case string(playback.PlayTranscode):
-		return nodepool.NodeEndpoint(proxyNode.ClientURL(),
+		return nodepool.NodeEndpoint(base,
 			"/stream/transcode/"+token+"/master.m3u8?"+playback.SourceTimelineQueryParam+"=1"), nil
 	default:
 		return "", fmt.Errorf("unsupported proxy method %q", method)
@@ -1810,6 +1830,8 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 			if playSession != nil {
 				card.OriginalStartedAt = playSession.CreatedAt
 				if assignment := playSession.RoutingAssignment; assignment != nil {
+					card.RoutingNetworkProvider = assignment.NetworkProvider
+					card.RoutingExecutionNodeID = assignment.ExecutionNodeID
 					card.RoutingWorkload = assignment.Workload
 					card.RoutingExecution = assignment.Execution
 					card.RoutingEgress = assignment.Egress

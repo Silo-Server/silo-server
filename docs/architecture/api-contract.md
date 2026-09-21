@@ -1142,6 +1142,11 @@ cutover, explain how to regenerate it, and provide a post-upgrade verification c
 server must not redirect old URLs containing tokens or secrets.
 
 Jellyfin compatibility and Audiobookshelf compatibility remain entirely outside this contract.
+For release scope, Jellyfin compatibility remains in 1.0; Audiobookshelf
+compatibility stays available as a beta feature, outside 1.0 certification,
+until the consolidated Books effort replaces it.
+See [the scope decision](v1-scope.md#library-scope-books-deferred). This does
+not remove the existing implementation or change its wire protocol.
 They implement other projects' wire protocols. Playback v3's normative JSON Schemas and domain
 semantics remain authoritative for v2 playback payloads. The existing HTTP conformance matrix,
 including its legacy/draft-body `426` case, remains a bridge/v1-adapter test; v2 gets a separate

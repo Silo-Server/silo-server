@@ -1,5 +1,10 @@
 # Ebook reader API
 
+> Release scope: the ebook reader is a **beta** feature. It stays available
+> as-is in 1.0, outside the support promise, until a consolidated Books effort
+> replaces it (no assigned release date). See the
+> [scope decision](architecture/v1-scope.md#library-scope-books-deferred).
+
 The v2 reader progress operations share the existing reader stores and media
 authorization with the frozen v1 bridge. They require account authentication and
 a verified `X-Profile-Id`. Current item access is checked on reads; writes also

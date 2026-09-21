@@ -7458,6 +7458,13 @@
           "name": {
             "type": "string"
           },
+          "network_access": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AdminNodeNetworkAccess"
+            },
+            "description": "Last network access provider status the node reported on its health check, keyed by provider slug. Omitted when the node reports no providers.",
+            "type": "object"
+          },
           "physical_gpu_keys": {
             "items": {
               "type": "string"
@@ -7576,6 +7583,34 @@
           "active_jobs",
           "egress_kbps",
           "health_persisted"
+        ],
+        "type": "object"
+      },
+      "AdminNodeNetworkAccess": {
+        "additionalProperties": false,
+        "properties": {
+          "hostname": {
+            "description": "Overlay DNS name of the node.",
+            "type": "string"
+          },
+          "origin": {
+            "description": "scheme://host[:port] clients on the provider's overlay use to reach this node. Only used while state is connected.",
+            "type": "string"
+          },
+          "state": {
+            "description": "disconnected | awaiting_authorization | connecting | connected | error",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the node last heard from the provider, on the node's clock.",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
         ],
         "type": "object"
       },
@@ -8544,6 +8579,10 @@
           "routing_execution_node_name": {
             "type": "string"
           },
+          "routing_network_provider": {
+            "description": "Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier.",
+            "type": "string"
+          },
           "routing_workload": {
             "type": "string"
           },
@@ -8711,6 +8750,9 @@
           "is_jellyfin_client": {
             "type": "boolean"
           },
+          "network_access_route": {
+            "type": "boolean"
+          },
           "node_observations": {
             "type": "boolean"
           },
@@ -8767,6 +8809,7 @@
           "client_build",
           "client_channel",
           "target_audio_channels",
+          "network_access_route",
           "node_routing",
           "revision",
           "state",
@@ -9634,6 +9677,9 @@
             },
             "type": "array"
           },
+          "runtime": {
+            "$ref": "#/components/schemas/AdminPluginRuntime"
+          },
           "source_kind": {
             "enum": [
               "silo",
@@ -9690,6 +9736,7 @@
           "global_configs",
           "auth_bindings",
           "task_bindings",
+          "runtime",
           "created_at",
           "updated_at"
         ],
@@ -9858,6 +9905,55 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "AdminPluginRuntime": {
+        "additionalProperties": false,
+        "properties": {
+          "last_error": {
+            "description": "Why the process last stopped or failed to start",
+            "type": "string"
+          },
+          "last_started_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "next_restart_at": {
+            "description": "Scheduled automatic restart while in backoff",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "resident": {
+            "description": "True when the server supervises this plugin's process",
+            "type": "boolean"
+          },
+          "restart_count": {
+            "description": "Automatic restarts since the plugin last ran stably or was restarted by an administrator",
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "description": "Process state; backoff and failed occur only for resident plugins",
+            "enum": [
+              "stopped",
+              "starting",
+              "running",
+              "backoff",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "resident",
+          "state",
+          "restart_count"
+        ],
         "type": "object"
       },
       "AdminPluginTaskBinding": {
@@ -27158,6 +27254,189 @@
         "required": [
           "item",
           "present"
+        ],
+        "type": "object"
+      },
+      "NetworkAccessCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/NetworkAccessProviderSummary"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "providers",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "NetworkAccessCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "description": "Host ids to act on (api, node:\u003cid\u003e); omitted means every host",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 256,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "NetworkAccessHostRef": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "api for the API server; node:\u003cid\u003e for a proxy node",
+            "type": "string"
+          },
+          "name": {
+            "description": "Server name for the API host; node name for a proxy",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "api",
+              "proxy"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "name"
+        ],
+        "type": "object"
+      },
+      "NetworkAccessHostStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "description": "Overlay IP addresses",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "auth_url": {
+            "description": "Interactive enrollment URL, only while awaiting_authorization; admin-only, never logged",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "host": {
+            "$ref": "#/components/schemas/NetworkAccessHostRef"
+          },
+          "hostname": {
+            "description": "Overlay DNS name",
+            "type": "string"
+          },
+          "origin": {
+            "description": "scheme://host[:port] clients reach the API listener at over the overlay",
+            "type": "string"
+          },
+          "provider_version": {
+            "type": "string"
+          },
+          "raw_state": {
+            "description": "the provider's own state string when it is not one of the published states",
+            "type": "string"
+          },
+          "state": {
+            "description": "Published host state; provider states outside this vocabulary map to error",
+            "enum": [
+              "disconnected",
+              "awaiting_authorization",
+              "connecting",
+              "connected",
+              "error",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the host last heard from the provider; absent while unavailable",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "state",
+          "addresses"
+        ],
+        "type": "object"
+      },
+      "NetworkAccessProviderSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "installation_id": {
+            "description": "Plugin installation declaring network_access_provider.v1",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "description": "Stable provider slug used in the admin routes, e.g. tailscale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "display_name",
+          "installation_id"
+        ],
+        "type": "object"
+      },
+      "NetworkAccessStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/NetworkAccessHostStatus"
+            },
+            "type": "array"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "hosts"
         ],
         "type": "object"
       },
@@ -71734,6 +72013,547 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/network-access/{provider}/connect": {
+      "post": {
+        "operationId": "connectNetworkAccess",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkAccessCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkAccessStatus"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ask the provider on the named hosts (every host when hosts is omitted) to bring its overlay identity up and start proxying. Answers 202 with the state each host reached within ten seconds; enrollment may continue in the background (awaiting_authorization carries the auth_url), so poll status for the final state. Repeating the request converges on one connected instance per host. Hosts not named answer their current status; an unknown host id is 422.",
+        "tags": [
+          "network-access"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/network-access/{provider}/disconnect": {
+      "post": {
+        "operationId": "disconnectNetworkAccess",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkAccessCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkAccessStatus"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ask the provider on the named hosts (every host when hosts is omitted) to tear its overlay listener down and clear its desired-connected intent. Answers 202 with the state each host reached within ten seconds. Repeating the request converges on disconnected. Hosts not named answer their current status; an unknown host id is 422.",
+        "tags": [
+          "network-access"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/network-access/{provider}/status": {
+      "get": {
+        "operationId": "getAdminNetworkAccessStatus",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkAccessStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the provider's live state on every host that runs it, asking each plugin instance directly with a ten-second timeout. A host whose plugin process is not running answers state unavailable with the supervisor's last error. An unknown provider slug is 404.",
+        "tags": [
+          "network-access"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/node-sessions": {
       "get": {
         "operationId": "listAdminNodeSessions",
@@ -78027,6 +78847,175 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/plugins/installations/{id}/restart": {
+      "post": {
+        "operationId": "restartAdminPluginInstallation",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPluginInstallation"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stop the installation's process and, for a resident plugin (one the server supervises, such as a network access provider), start it again with a fresh failure budget; the response's runtime reports the outcome, including a launch that failed. A non-resident plugin is only stopped and launches on its next use. A disabled installation is 409. Repeating the request converges on one running process.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -138974,6 +139963,164 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/network-access/capabilities": {
+      "get": {
+        "operationId": "getNetworkAccessCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkAccessCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the installed network access providers (overlay networks such as Tailscale that reach this server without port forwarding). available when an enabled plugin declares one; not_configured otherwise. Read from plugin manifests; no plugin is launched and no health is implied.",
+        "tags": [
+          "network-access"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/notifications": {
       "get": {
         "operationId": "listNotifications",
@@ -180224,6 +181371,271 @@
             }
           }
         }
+      },
+      {
+        "description": "Live status of every network access provider plugin instance running on this proxy, read from the plugin with a ten-second timeout each. Carries auth_url and error because the caller holds the node bearer. 503 when the proxy hosts no plugins.",
+        "listener": "proxy",
+        "method": "GET",
+        "path": "/network-access/status",
+        "handler": "(*internal/proxy.Server).handleNetworkAccessStatus",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/netaccess_HostStatusReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "description": "Provider slug declared by the plugin manifest, e.g. tailscale.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Live status of the named network access provider on this proxy, with a ten-second timeout. Reads only this provider, so another provider's timeout does not hide its status. 404 for a provider no enabled installation declares; 503 when the proxy hosts no plugins.",
+        "listener": "proxy",
+        "method": "GET",
+        "path": "/network-access/{provider}/status",
+        "handler": "(*internal/proxy.Server).handleNetworkAccessProviderStatus",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/netaccess_Status"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "description": "Provider slug declared by the plugin manifest, e.g. tailscale.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Ask the provider on this proxy to bring its overlay identity up; answers the state reached within ten seconds. Repeating converges on one connected instance. 404 for a provider no enabled installation declares.",
+        "retry_safety": "natural_idempotent",
+        "listener": "proxy",
+        "method": "POST",
+        "path": "/network-access/{provider}/connect",
+        "handler": "(*internal/proxy.Server).handleNetworkAccessConnect",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/netaccess_Status"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "description": "Provider slug declared by the plugin manifest, e.g. tailscale.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Ask the provider on this proxy to tear its overlay listener down; answers the state reached within ten seconds. Repeating converges on disconnected. 404 for a provider no enabled installation declares.",
+        "retry_safety": "natural_idempotent",
+        "listener": "proxy",
+        "method": "POST",
+        "path": "/network-access/{provider}/disconnect",
+        "handler": "(*internal/proxy.Server).handleNetworkAccessDisconnect",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/netaccess_Status"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
       }
     ],
     "schemas": {
@@ -180386,6 +181798,92 @@
         "required": [
           "artifact_id",
           "file_size"
+        ],
+        "type": "object"
+      },
+      "netaccess_HostStatusReport": {
+        "additionalProperties": false,
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/netaccess_Status"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "type": "object"
+      },
+      "netaccess_Listener": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "netaccess_Status": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "auth_url": {
+            "type": "string"
+          },
+          "desired_connected": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "installation_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/netaccess_Listener"
+            },
+            "type": "array"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "provider",
+          "state"
         ],
         "type": "object"
       },

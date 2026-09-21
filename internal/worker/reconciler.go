@@ -46,6 +46,7 @@ type SessionSync struct {
 	TargetBitrateKbps       int
 	TranscodeHWAccel        string
 	ToneMapMode             string
+	RoutingNetworkProvider  *string
 	RoutingWorkload         string
 	RoutingExecution        string
 	RoutingExecutionNodeID  int
@@ -199,8 +200,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 transcode_hw_accel, tone_map_mode,
 				 routing_workload, routing_execution, routing_execution_node_id, routing_execution_node_url,
 				 routing_egress, routing_egress_node_id, routing_egress_node_url,
-				 position_seconds, is_paused, has_websocket, compat_origin)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+				 position_seconds, is_paused, has_websocket, compat_origin, routing_network_provider)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -238,6 +239,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				is_paused           = EXCLUDED.is_paused,
 				has_websocket       = EXCLUDED.has_websocket,
 				compat_origin       = EXCLUDED.compat_origin,
+				routing_network_provider = EXCLUDED.routing_network_provider,
 				last_sync_at        = NOW()
 		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
 			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
@@ -250,7 +252,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 			nullableString(s.TranscodeHWAccel), nullableString(s.ToneMapMode),
 			nullableString(s.RoutingWorkload), nullableString(s.RoutingExecution), nullableInt(s.RoutingExecutionNodeID), nullableString(s.RoutingExecutionNodeURL),
 			nullableString(s.RoutingEgress), nullableInt(s.RoutingEgressNodeID), nullableString(s.RoutingEgressNodeURL), normalizePositionSeconds(s.PositionSeconds),
-			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat)
+			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider)
 		if err != nil {
 			return fmt.Errorf("upserting session %s: %w", s.SessionID, err)
 		}
@@ -345,7 +347,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(position_seconds, 0),
 			COALESCE(is_paused, FALSE),
 			COALESCE(has_websocket, FALSE),
-			COALESCE(compat_origin, FALSE)
+			COALESCE(compat_origin, FALSE),
+			routing_network_provider
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -396,6 +399,7 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.IsPaused,
 			&s.HasWebSocket,
 			&s.IsJellyfinCompat,
+			&s.RoutingNetworkProvider,
 		); err != nil {
 			return nil, err
 		}
@@ -452,6 +456,7 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			left[i].TargetBitrateKbps != right[i].TargetBitrateKbps ||
 			left[i].TranscodeHWAccel != right[i].TranscodeHWAccel ||
 			left[i].ToneMapMode != right[i].ToneMapMode ||
+			!equalOptionalString(left[i].RoutingNetworkProvider, right[i].RoutingNetworkProvider) ||
 			left[i].RoutingWorkload != right[i].RoutingWorkload ||
 			left[i].RoutingExecution != right[i].RoutingExecution ||
 			left[i].RoutingExecutionNodeID != right[i].RoutingExecutionNodeID ||
@@ -620,4 +625,11 @@ func (r *Reconciler) syncOnce(ctx context.Context) error {
 // Stop signals the reconciliation loop to stop.
 func (r *Reconciler) Stop() {
 	close(r.stop)
+}
+
+func equalOptionalString(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

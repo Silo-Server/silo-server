@@ -72,6 +72,7 @@ type AdminPlaybackSession struct {
 	AudioDecision            string  `json:"audio_decision,omitempty"`
 	EffectivePlayMethod      string  `json:"effective_play_method,omitempty"`
 	IsJellyfinClient         bool    `json:"is_jellyfin_client,omitzero"`
+	RoutingNetworkProvider   *string `json:"routing_network_provider,omitempty" doc:"Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier."`
 	RoutingWorkload          string  `json:"routing_workload,omitempty"`
 	RoutingExecution         string  `json:"routing_execution,omitempty"`
 	RoutingExecutionNodeID   *ID     `json:"routing_execution_node_id,omitempty"`
@@ -146,6 +147,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		AudioDecision:            v.AudioDecision,
 		EffectivePlayMethod:      v.EffectivePlayMethod,
 		IsJellyfinClient:         v.IsJellyfinClient,
+		RoutingNetworkProvider:   v.RoutingNetworkProvider,
 		RoutingWorkload:          v.RoutingWorkload,
 		RoutingExecution:         v.RoutingExecution,
 		RoutingExecutionNodeID:   adminSessionNodeID(v.RoutingExecutionNodeID),
@@ -186,6 +188,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	ClientBuild               bool     `json:"client_build"`
 	ClientChannel             bool     `json:"client_channel"`
 	TargetAudioChannels       bool     `json:"target_audio_channels"`
+	NetworkAccessRoute        bool     `json:"network_access_route"`
 	NodeRouting               bool     `json:"node_routing"`
 }
 
@@ -213,6 +216,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.ClientChannel = f.ClientChannel
 		out.Body.TargetAudioChannels = f.TargetAudioChannels
 		out.Body.NodeRouting = f.NodeRouting
+		out.Body.NetworkAccessRoute = true
 		return out, nil
 	})
 	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {

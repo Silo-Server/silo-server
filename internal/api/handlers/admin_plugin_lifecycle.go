@@ -145,6 +145,36 @@ func (h *PluginHandler) ApplyAdminPluginUpdate(ctx context.Context, id int) (Plu
 	return h.buildInstallationResponse(ctx, installation, nil)
 }
 
+// RestartAdminPluginInstallation stops the installation's process and, for a
+// resident plugin, starts it again with a fresh failure budget, so an
+// administrator can bring back a resident the supervisor parked as failed. A
+// non-resident plugin is only stopped; its next call launches it. A launch
+// failure is reported through the returned view's runtime state rather than
+// as an error. Errors: plugins.ErrInstallationNotFound,
+// plugins.ErrInstallationDisabled, ErrPluginBuiltinInstallation.
+func (h *PluginHandler) RestartAdminPluginInstallation(ctx context.Context, id int) (PluginInstallationView, error) {
+	if err := h.pluginLifecycleReady(); err != nil {
+		return PluginInstallationView{}, err
+	}
+	current, err := h.installations.GetByID(ctx, id)
+	if err != nil {
+		return PluginInstallationView{}, err
+	}
+	if current.IsBuiltin() {
+		return PluginInstallationView{}, ErrPluginBuiltinInstallation
+	}
+	if err := h.service.RestartInstallation(ctx, id); err != nil {
+		return PluginInstallationView{}, err
+	}
+	// The restart advanced runtime_generation and updated_at on the row; the
+	// receipt reflects the row as it is now, not the pre-restart snapshot.
+	restarted, err := h.installations.GetByID(ctx, id)
+	if err != nil {
+		return PluginInstallationView{}, err
+	}
+	return h.buildInstallationResponse(ctx, restarted, nil)
+}
+
 // DeleteAdminPluginInstallation stops the plugin, deletes its row (dependent
 // rows cascade) and removes its files. The row delete and the file removal are
 // not one transaction, and a repeat finds no row: a lost response is not a

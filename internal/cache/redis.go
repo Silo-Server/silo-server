@@ -53,6 +53,11 @@ const (
 	EventOperationalLogAppended      = "operational_log_appended"
 	EventAuditLogAppended            = "audit_log_appended"
 	EventEventsNotification          = "events_notification"
+	// EventPluginsChanged is published on ChannelAdmin by the API server after
+	// every plugin lifecycle change (install, enable, disable, config save,
+	// auto-update, uninstall) so proxy nodes running resident plugins from the
+	// same installations reconcile at once instead of on their next poll.
+	EventPluginsChanged = "plugins_changed"
 )
 
 // ---------------------------------------------------------------------------

@@ -226,7 +226,7 @@ func TestRepositoryUpdateClearsWorkerStateWhenTheURLMoves(t *testing.T) {
 	if err := repo.UpdateCapabilities(ctx, node.ID, node.URL, payload, "sha256:old", time.Now(), &note, []byte(`{"backends":["qsv"]}`), nil); err != nil {
 		t.Fatalf("store capabilities: %v", err)
 	}
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 2, 0, []byte(`{"system":{"cpu_pct":41}}`)); err != nil {
+	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 2, 0, []byte(`{"system":{"cpu_pct":41}}`), nil); err != nil {
 		t.Fatalf("store health: %v", err)
 	}
 

@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -33,6 +34,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(middleware.RequestID)
 	if deps.ClientIPResolver != nil {
 		r.Use(clientip.Middleware(deps.ClientIPResolver))
+	}
+	if deps.IngressTokens != nil {
+		r.Use(netaccess.Middleware(deps.IngressTokens))
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},

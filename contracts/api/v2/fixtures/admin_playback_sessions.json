@@ -50,6 +50,7 @@
       "source_audio_channels": 8,
       "effective_play_method": "transcode",
       "is_jellyfin_client": true,
+      "routing_network_provider": "tailscale",
       "routing_execution_node_id": "9"
     }
   ],

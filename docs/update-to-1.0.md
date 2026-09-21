@@ -58,6 +58,19 @@ retains `GET /api/v1/health` and `GET /api/v1/ready` on the API listener and `GE
 on the proxy and transcode-node listeners exactly as they answer today; no root `/health` or
 `/ready` route is added. Existing probe configuration keeps working.
 
+## Beta Books functionality
+
+Silo 1.0 supports Movies and Series. Audiobooks, ebooks, and Audiobookshelf
+compatibility remain available on 1.0 builds exactly as they work today, labeled
+**beta** and outside the 1.0 support promise. A consolidated Books effort will
+replace them later, with no assigned release date. See the
+[scope decision](architecture/v1-scope.md#library-scope-books-deferred).
+
+Upgrading to 1.0 does not change, gate, or remove these libraries, their
+progress, or the Audiobookshelf endpoint. No data migration is required for
+them. Release notes must state that they are beta, not that they are
+unavailable.
+
 ## Before updating
 
 - [ ] Read the release-specific notes and confirm that the server, database, Redis, object
